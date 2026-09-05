@@ -2,9 +2,9 @@
   "name": "sp-schedule",
   "version": "1.0.0",
   "description": "Расписание студии — веб-приложение с хранением данных в Timeweb S3",
-  "main": "server.js",
+  "main": "index.js",
   "scripts": {
-    "start": "node server.js"
+    "start": "node index.js"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.583.0",
