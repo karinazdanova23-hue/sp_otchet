@@ -978,12 +978,12 @@
   function escapeHtml(s){ return (s||'').replace(/[&<>"']/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
 
   const DATA_VERSION = '3';
-  const ROLES = ['hostess','master','manager','assistant','admin','owner'];
-  const ROLE_LABELS = { hostess:'Администратор', master:'Мастер', manager:'Менеджер', assistant:'Ассистент', admin:'Старший администратор', owner:'Руководитель' };
-  const DEFAULT_ROLE_CODES = { hostess:'1111', master:'2222', manager:'3333', assistant:'4444', admin:'5555', owner:'0000' };
-  // права: кто видит "Для менеджеров"/"Книгу" (менеджер и выше), кто видит "Аналитику" (ассистент/админ и выше), кто видит "Чистую прибыль" (только руководитель)
-  function roleCanAccessManagersTab(role){ return ['manager','assistant','admin','owner'].includes(role); }
-  function roleCanAccessBook(role){ return ['manager','assistant','admin','owner'].includes(role); }
+  const ROLES = ['hostess','master','manager','marketer','assistant','admin','owner'];
+  const ROLE_LABELS = { hostess:'Администратор', master:'Мастер', manager:'Менеджер', marketer:'Маркетолог', assistant:'Ассистент', admin:'Старший администратор', owner:'Руководитель' };
+  const DEFAULT_ROLE_CODES = { hostess:'1111', master:'2222', manager:'3333', marketer:'6666', assistant:'4444', admin:'5555', owner:'0000' };
+  // права: кто видит "Для менеджеров"/"Книгу" (менеджер, маркетолог и выше), кто видит "Аналитику" (ассистент/админ и выше), кто видит "Чистую прибыль" (только руководитель)
+  function roleCanAccessManagersTab(role){ return ['manager','marketer','assistant','admin','owner'].includes(role); }
+  function roleCanAccessBook(role){ return ['manager','marketer','assistant','admin','owner'].includes(role); }
   function roleCanAccessAnalytics(role){ return ['assistant','admin','owner'].includes(role); }
   function canAccessView(view){
     if(view==='calendar' || view==='host' || view==='today') return true;
@@ -994,30 +994,33 @@
   }
 
   async function loadData(){
-    let version = null;
+    let spacesLoaded = false;
     try{
-      const v = await window.storage.get('meta-version', true);
-      version = v ? v.value : null;
-    }catch(e){ version = null; }
+      const sp = await window.storage.get('spaces-config', true);
+      if(sp){ state.spaces = JSON.parse(sp.value); spacesLoaded = true; }
+    }catch(e){ /* данных ещё нет */ }
 
-    const needsReseed = version !== DATA_VERSION;
+    let eventsLoaded = false;
+    try{
+      const ev = await window.storage.get('events', true);
+      if(ev){ state.events = JSON.parse(ev.value); eventsLoaded = true; }
+    }catch(e){ /* данных ещё нет */ }
 
-    if(needsReseed){
+    // "Пространства" — реальная структура студии, нужна с первого запуска, чтобы календарь вообще работал.
+    // "Мероприятия" — НИКОГДА не подставляются автоматически: если их ещё не сохраняли, список просто пуст.
+    // Важно: раньше здесь была проверка версии (DATA_VERSION), которая при любом обновлении файла
+    // приложения ЗАТИРАЛА сохранённые пространства и мероприятия демо-данными — это было безопасно только
+    // на этапе разработки. Теперь решение принимается по тому, есть ли уже сохранённые данные, а не по версии,
+    // поэтому будущие обновления файла никогда не сотрут то, что реально накопила студия.
+    if(!spacesLoaded){
       state.spaces = DEFAULT_SPACES;
-      state.events = buildDefaultEvents();
       await saveSpaces();
-      await saveEvents();
-      await storageSetWithRetry('meta-version', DATA_VERSION);
-    } else {
-      try{
-        const sp = await window.storage.get('spaces-config', true);
-        state.spaces = sp ? JSON.parse(sp.value) : DEFAULT_SPACES;
-      }catch(e){ state.spaces = DEFAULT_SPACES; }
-      try{
-        const ev = await window.storage.get('events', true);
-        state.events = ev ? JSON.parse(ev.value) : [];
-      }catch(e){ state.events = []; }
     }
+    if(!eventsLoaded){
+      state.events = [];
+      await saveEvents();
+    }
+    try{ await storageSetWithRetry('meta-version', DATA_VERSION); }catch(e){ /* не критично */ }
 
     try{
       const rc = await window.storage.get('role-codes', true);
@@ -1117,9 +1120,10 @@
       state.hostessShifts = hs ? JSON.parse(hs.value) : {};
     }catch(e){ state.hostessShifts = {}; }
 
-    await seedDemo30Once();
-    await seedDemoExpensesOnce();
-    await seedAugustExtrasOnce();
+    // демо-данные для тестирования отключены — реальный запуск начинается с чистой базы
+    // await seedDemo30Once();
+    // await seedDemoExpensesOnce();
+    // await seedAugustExtrasOnce();
     await migrateOffsiteSpaceOnce();
     await autoDeductCanvasesForPastPaintingEvents();
     await autoApplyMaterialRulesForPastEvents();
@@ -4975,7 +4979,7 @@
   function renderCodeSettingsModal(){
     const isOwnerRole = state.currentRole === 'owner';
     // ассистент/админ видят и меняют только пароли ролей ниже своей (хостес/мастер/менеджер) — не могут поднять себе или друг другу уровень
-    const editableRoles = isOwnerRole ? ROLES : ['hostess','master','manager'];
+    const editableRoles = isOwnerRole ? ROLES : ['hostess','master','manager','marketer'];
     return `
       <div class="modal" style="max-width:420px;">
         <div class="modal-head">
