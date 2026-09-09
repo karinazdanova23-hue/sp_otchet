@@ -8128,8 +8128,10 @@
     const s = state.hostessShifts[dateStr];
     if(!s) return '';
     const parts = [];
-    if(s.shift1) parts.push(s.shift1);
-    if(s.shift2) parts.push(s.shift2);
+    SHIFT_DEFS.forEach(def=>{
+      const entry = normalizeShiftEntry(s[def.key], def);
+      if(entry && entry.name) parts.push(entry.name);
+    });
     return parts.join(' → ');
   }
 
