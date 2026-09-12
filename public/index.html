@@ -457,6 +457,48 @@
     font-family: var(--font-body); white-space:nowrap;
   }
   .mi-source-opt.active{ background: var(--ink); color: var(--white); }
+
+  .toast-notification{
+    position: fixed;
+    bottom: 24px;
+    left: 50%;
+    transform: translateX(-50%) translateY(16px);
+    background: var(--ink);
+    color: var(--paper);
+    padding: 12px 22px;
+    border-radius: var(--radius);
+    font-size: 13.5px;
+    font-family: var(--font-mono);
+    box-shadow: 0 6px 20px rgba(0,0,0,0.25);
+    z-index: 10000;
+    opacity: 0;
+    transition: opacity 0.22s ease, transform 0.22s ease;
+    pointer-events: none;
+    display: flex;
+    align-items: center;
+    gap: 9px;
+    max-width: min(90vw, 420px);
+  }
+  .toast-notification.show{ opacity: 1; transform: translateX(-50%) translateY(0); }
+  .toast-notification.toast-error{ background: var(--danger); }
+
+  .login-gate{
+    min-height: 100vh;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: var(--paper);
+    padding: 20px;
+  }
+  .login-gate-card{
+    background: var(--white);
+    border-radius: var(--radius);
+    padding: 36px 32px;
+    max-width: 360px;
+    width: 100%;
+    box-shadow: 0 8px 30px rgba(0,0,0,0.08);
+    border: 1px solid var(--line);
+  }
   .mi-del{
     border: 1px solid var(--line-strong); background: var(--white); border-radius: var(--radius);
     color: var(--danger); cursor:pointer; height:100%;
@@ -932,6 +974,8 @@
     monthlyPlans: null,
     netProfitManual: null,
     yearSummaryManual: null,
+    auditLog: null,
+    closedMonths: null,
   };
 
   function pad(n){ return n<10 ? '0'+n : ''+n; }
@@ -986,6 +1030,7 @@
   function roleCanAccessBook(role){ return ['manager','marketer','assistant','admin','owner'].includes(role); }
   function roleCanAccessAnalytics(role){ return ['assistant','admin','owner'].includes(role); }
   function canAccessView(view){
+    if(!state.currentRole) return false; // без входа теперь не видно вообще ничего
     if(view==='calendar' || view==='host' || view==='today') return true;
     if(view==='certificates') return roleCanAccessManagersTab(state.currentRole);
     if(view==='book') return roleCanAccessBook(state.currentRole);
@@ -1087,6 +1132,16 @@
       const ysm = await window.storage.get('year-summary-manual', true);
       state.yearSummaryManual = ysm ? JSON.parse(ysm.value) : {};
     }catch(e){ state.yearSummaryManual = {}; }
+
+    try{
+      const al = await window.storage.get('audit-log', true);
+      state.auditLog = al ? JSON.parse(al.value) : [];
+    }catch(e){ state.auditLog = []; }
+
+    try{
+      const cm = await window.storage.get('closed-months', true);
+      state.closedMonths = cm ? JSON.parse(cm.value) : [];
+    }catch(e){ state.closedMonths = []; }
 
     await seedCodesOverrideOnce();
 
@@ -1630,6 +1685,25 @@
   async function saveYearSummaryManual(){
     return storageSetWithRetry('year-summary-manual', JSON.stringify(state.yearSummaryManual));
   }
+  async function saveAuditLog(){
+    return storageSetWithRetry('audit-log', JSON.stringify(state.auditLog));
+  }
+  async function saveClosedMonths(){
+    return storageSetWithRetry('closed-months', JSON.stringify(state.closedMonths));
+  }
+  function recordAction(message, detail){
+    showToast(message);
+    if(!state.auditLog) state.auditLog = [];
+    state.auditLog.push({
+      ts: new Date().toISOString(),
+      role: state.currentRole,
+      roleLabel: ROLE_LABELS[state.currentRole] || state.currentRole || '—',
+      action: message,
+      detail: detail || '',
+    });
+    if(state.auditLog.length > 1000) state.auditLog = state.auditLog.slice(-1000);
+    saveAuditLog(); // не ждём — не критично для основного действия пользователя
+  }
   async function saveCertificates(){
     return storageSetWithRetry('certificates', JSON.stringify(state.certificates));
   }
@@ -1647,6 +1721,24 @@
   }
   async function saveHostessShifts(){
     return storageSetWithRetry('hostess-shifts', JSON.stringify(state.hostessShifts));
+  }
+
+  let toastHideTimer = null;
+  function showToast(message, type){
+    let el = document.getElementById('toast-notification');
+    if(!el){
+      el = document.createElement('div');
+      el.id = 'toast-notification';
+      el.className = 'toast-notification';
+      document.body.appendChild(el);
+    }
+    const isError = type === 'error';
+    el.className = 'toast-notification' + (isError ? ' toast-error' : '');
+    el.innerHTML = `<span>${isError ? '⚠' : '✓'}</span><span>${escapeHtml(message)}</span>`;
+    void el.offsetWidth; // форсируем перерисовку, чтобы анимация сработала и при повторном показе подряд
+    el.classList.add('show');
+    if(toastHideTimer) clearTimeout(toastHideTimer);
+    toastHideTimer = setTimeout(()=>{ el.classList.remove('show'); }, 2200);
   }
 
   function requireUnlock(action){
@@ -1792,9 +1884,55 @@
   }
 
   // -------------------- render --------------------
+  function renderLoginGate(){
+    return `
+      <div class="login-gate">
+        <div class="login-gate-card">
+          <h1 class="app-title" style="margin-bottom:2px;">Расписание студии</h1>
+          <div class="app-sub" style="margin-bottom:22px;">Введите свой пароль, чтобы продолжить</div>
+          <div class="field">
+            <label>Пароль</label>
+            <input type="password" id="gate-code" placeholder="••••" autofocus>
+          </div>
+          <div id="gate-error" style="color:var(--danger); font-size:12.5px; display:none; margin-top:6px;">Неверный пароль, попробуйте ещё раз</div>
+          <button class="btn btn-primary" id="gate-submit" style="width:100%;margin-top:14px;">Войти</button>
+        </div>
+      </div>
+    `;
+  }
+
+  function attachLoginGateEvents(){
+    const input = document.getElementById('gate-code');
+    const errorEl = document.getElementById('gate-error');
+    const submit = ()=>{
+      const val = input.value.trim();
+      const matchedRole = ROLES.find(r => val && val === state.roleCodes[r]);
+      if(matchedRole){
+        state.currentRole = matchedRole;
+        state.unlocked = true;
+        state.unlockedAdmin = ['assistant','admin','owner'].includes(matchedRole);
+        state.unlockedOwner = (matchedRole === 'owner');
+        render();
+      } else {
+        errorEl.style.display = 'block';
+        input.style.borderColor = 'var(--danger)';
+        input.value = '';
+        input.focus();
+      }
+    };
+    document.getElementById('gate-submit').onclick = submit;
+    input.onkeydown = (e)=>{ if(e.key==='Enter') submit(); };
+  }
+
   function render(){
     const app = document.getElementById('app');
     if(!state.loaded){ app.innerHTML = '<div class="loading-note">Загружаю расписание…</div>'; return; }
+
+    if(!state.currentRole){
+      app.innerHTML = renderLoginGate();
+      attachLoginGateEvents();
+      return;
+    }
 
     if(!canAccessView(state.view)){
       state.view = 'calendar';
@@ -2346,6 +2484,7 @@
         item.status = 'picked_up';
         item.pickupDate = todayStr();
         await saveEvents();
+        recordAction('Отмечено как выдано');
         render();
       };
     });
@@ -2943,6 +3082,7 @@
       const idx = state.leads.findIndex(x=>x.id===updated.id);
       if(idx >= 0) state.leads[idx] = updated; else state.leads.push(updated);
       await saveLeads();
+      recordAction("Заявка сохранена");
       state.modal = null; overlay.remove(); render();
     };
   }
@@ -3004,6 +3144,13 @@
 
     const delBtn = overlay.querySelector('#btn-del-itemsale');
     if(delBtn) delBtn.onclick = ()=>{
+      if(state.currentRole !== 'owner'){
+        const ym = state.modal.itemSale.date ? state.modal.itemSale.date.slice(0,7) : null;
+        if(ym && state.closedMonths && state.closedMonths.includes(ym)){
+          showGapWarningBanner(`Месяц ${ym} закрыт для редактирования. Обратитесь к руководителю.`);
+          return;
+        }
+      }
       showConfirmDeletePopup('Удалить эту продажу изделия? Действие необратимо.', async ()=>{
         state.itemSales = state.itemSales.filter(x=>x.id !== state.modal.itemSale.id);
         await saveItemSales();
@@ -3012,6 +3159,16 @@
     };
 
     overlay.querySelector('#btn-save-itemsale').onclick = async ()=>{
+      if(state.currentRole !== 'owner'){
+        const dateCheck = overlay.querySelector('#is-date').value;
+        const ymCheck = dateCheck ? dateCheck.slice(0,7) : null;
+        const origYm = (state.modal.itemSale && state.modal.itemSale.date) ? state.modal.itemSale.date.slice(0,7) : null;
+        const blockedYm = [ymCheck, origYm].find(ym => ym && state.closedMonths && state.closedMonths.includes(ym));
+        if(blockedYm){
+          showGapWarningBanner(`Месяц ${blockedYm} закрыт для редактирования. Обратитесь к руководителю.`);
+          return;
+        }
+      }
       ['is-date','is-master','is-revenue'].forEach(id=>{
         const el = overlay.querySelector('#'+id);
         if(el) el.style.borderColor = '';
@@ -3028,9 +3185,9 @@
       };
       if(!dateVal) markInvalid('is-date');
       if(!masterVal) markInvalid('is-master');
-      if(revenueRaw === '') markInvalid('is-revenue');
-      if(!dateVal || !masterVal || revenueRaw===''){
-        showGapWarningBanner('Заполните все поля перед сохранением продажи.');
+      if(revenueRaw === '' || Number(revenueRaw) < 0) markInvalid('is-revenue');
+      if(!dateVal || !masterVal || revenueRaw==='' || Number(revenueRaw)<0){
+        showGapWarningBanner('Заполните все поля перед сохранением продажи. Сумма не может быть отрицательной.');
         if(firstInvalid && firstInvalid.scrollIntoView) firstInvalid.scrollIntoView({block:'center', behavior:'smooth'});
         return;
       }
@@ -3045,6 +3202,7 @@
       const idx = state.itemSales.findIndex(x=>x.id===updated.id);
       if(idx >= 0) state.itemSales[idx] = updated; else state.itemSales.push(updated);
       await saveItemSales();
+      recordAction("Продажа изделия сохранена");
       state.modal = null; overlay.remove(); render();
     };
   }
@@ -3118,6 +3276,13 @@
 
     const delBtn = overlay.querySelector('#btn-del-order');
     if(delBtn) delBtn.onclick = ()=>{
+      if(state.currentRole !== 'owner'){
+        const ym = state.modal.order.date ? state.modal.order.date.slice(0,7) : null;
+        if(ym && state.closedMonths && state.closedMonths.includes(ym)){
+          showGapWarningBanner(`Месяц ${ym} закрыт для редактирования. Обратитесь к руководителю.`);
+          return;
+        }
+      }
       showConfirmDeletePopup('Удалить этот заказ? Действие необратимо.', async ()=>{
         state.orders = state.orders.filter(x=>x.id !== state.modal.order.id);
         await saveOrders();
@@ -3126,6 +3291,16 @@
     };
 
     overlay.querySelector('#btn-save-order').onclick = async ()=>{
+      if(state.currentRole !== 'owner'){
+        const dateCheck = overlay.querySelector('#or-date').value;
+        const ymCheck = dateCheck ? dateCheck.slice(0,7) : null;
+        const origYm = (state.modal.order && state.modal.order.date) ? state.modal.order.date.slice(0,7) : null;
+        const blockedYm = [ymCheck, origYm].find(ym => ym && state.closedMonths && state.closedMonths.includes(ym));
+        if(blockedYm){
+          showGapWarningBanner(`Месяц ${blockedYm} закрыт для редактирования. Обратитесь к руководителю.`);
+          return;
+        }
+      }
       ['or-date','or-master','or-revenue','or-master-share'].forEach(id=>{
         const el = overlay.querySelector('#'+id);
         if(el) el.style.borderColor = '';
@@ -3143,10 +3318,10 @@
       };
       if(!dateVal) markInvalid('or-date');
       if(!masterVal) markInvalid('or-master');
-      if(revenueRaw === '') markInvalid('or-revenue');
-      if(masterShareRaw === '') markInvalid('or-master-share');
-      if(!dateVal || !masterVal || revenueRaw==='' || masterShareRaw===''){
-        showGapWarningBanner('Заполните все поля перед сохранением заказа — включая сумму ЗП мастера (её нужно вписать вручную).');
+      if(revenueRaw === '' || Number(revenueRaw) < 0) markInvalid('or-revenue');
+      if(masterShareRaw === '' || Number(masterShareRaw) < 0) markInvalid('or-master-share');
+      if(!dateVal || !masterVal || revenueRaw==='' || Number(revenueRaw)<0 || masterShareRaw==='' || Number(masterShareRaw)<0){
+        showGapWarningBanner('Заполните все поля перед сохранением заказа — включая сумму ЗП мастера (её нужно вписать вручную). Суммы не могут быть отрицательными.');
         if(firstInvalid && firstInvalid.scrollIntoView) firstInvalid.scrollIntoView({block:'center', behavior:'smooth'});
         return;
       }
@@ -3162,6 +3337,7 @@
       const idx = state.orders.findIndex(x=>x.id===updated.id);
       if(idx >= 0) state.orders[idx] = updated; else state.orders.push(updated);
       await saveOrders();
+      recordAction("Заказ сохранён");
       state.modal = null; overlay.remove(); render();
     };
   }
@@ -3250,6 +3426,13 @@
 
     const delBtn = overlay.querySelector('#btn-del-adj');
     if(delBtn) delBtn.onclick = ()=>{
+      if(state.currentRole !== 'owner'){
+        const ym = state.modal.adj.date ? state.modal.adj.date.slice(0,7) : null;
+        if(ym && state.closedMonths && state.closedMonths.includes(ym)){
+          showGapWarningBanner(`Месяц ${ym} закрыт для редактирования. Обратитесь к руководителю.`);
+          return;
+        }
+      }
       const hasLink = !!state.modal.adj.eventId;
       showConfirmDeletePopup(`Удалить эту корректировку ЗП?${hasLink ? ' Она также уберётся из себестоимости привязанного мероприятия.' : ' Действие необратимо.'}`, async ()=>{
       const adjToDelete = state.modal.adj;
@@ -3269,6 +3452,16 @@
     };
 
     overlay.querySelector('#btn-save-adj').onclick = async ()=>{
+      if(state.currentRole !== 'owner'){
+        const dateCheck = overlay.querySelector('#adj-date').value;
+        const ymCheck = dateCheck ? dateCheck.slice(0,7) : null;
+        const origYm = (state.modal.adj && state.modal.adj.date) ? state.modal.adj.date.slice(0,7) : null;
+        const blockedYm = [ymCheck, origYm].find(ym => ym && state.closedMonths && state.closedMonths.includes(ym));
+        if(blockedYm){
+          showGapWarningBanner(`Месяц ${blockedYm} закрыт для редактирования. Обратитесь к руководителю.`);
+          return;
+        }
+      }
       ['adj-date','adj-master','adj-amount','adj-comment'].forEach(id=>{
         const el = overlay.querySelector('#'+id);
         if(el) el.style.borderColor = '';
@@ -3324,6 +3517,7 @@
       const idx = state.salaryAdjustments.findIndex(x=>x.id===updated.id);
       if(idx >= 0) state.salaryAdjustments[idx] = updated; else state.salaryAdjustments.push(updated);
       await saveSalaryAdjustments();
+      recordAction("Корректировка ЗП сохранена");
       state.modal = null; overlay.remove(); render();
     };
   }
@@ -3700,6 +3894,13 @@
 
     const delBtn = overlay.querySelector('#btn-del-income');
     if(delBtn) delBtn.onclick = ()=>{
+      if(state.currentRole !== 'owner'){
+        const ym = state.modal.income.date ? state.modal.income.date.slice(0,7) : null;
+        if(ym && state.closedMonths && state.closedMonths.includes(ym)){
+          showGapWarningBanner(`Месяц ${ym} закрыт для редактирования. Обратитесь к руководителю.`);
+          return;
+        }
+      }
       const cascades = state.modal.income.itemSaleId || state.modal.income.orderId;
       showConfirmDeletePopup(`Удалить этот доход?${cascades ? ' Связанная запись в «Изделиях»/«Заказе» также удалится.' : ' Действие необратимо.'}`, async ()=>{
       state.incomes = state.incomes.filter(x=>x.id !== state.modal.income.id);
@@ -3727,6 +3928,16 @@
     }
 
     overlay.querySelector('#btn-save-income').onclick = async ()=>{
+      if(state.currentRole !== 'owner'){
+        const dateCheck = overlay.querySelector('#i-date').value;
+        const ymCheck = dateCheck ? dateCheck.slice(0,7) : null;
+        const origYm = (state.modal.income && state.modal.income.date) ? state.modal.income.date.slice(0,7) : null;
+        const blockedYm = [ymCheck, origYm].find(ym => ym && state.closedMonths && state.closedMonths.includes(ym));
+        if(blockedYm){
+          showGapWarningBanner(`Месяц ${blockedYm} закрыт для редактирования. Обратитесь к руководителю.`);
+          return;
+        }
+      }
       ['i-date','i-amount','i-comment','i-master','i-order-master','i-order-share'].forEach(id=>{
         const el = overlay.querySelector('#'+id);
         if(el) el.style.borderColor = '';
@@ -3747,7 +3958,7 @@
         if(el){ el.style.borderColor = 'var(--danger)'; if(!firstInvalid) firstInvalid = el; }
       };
       if(!dateVal) markInvalid('i-date');
-      if(amountRaw === '') markInvalid('i-amount');
+      if(amountRaw === '' || Number(amountRaw) < 0) markInvalid('i-amount');
       if(!commentVal) markInvalid('i-comment');
       const masterMissing = (productVal === 'Изделие' && !masterVal);
       if(masterMissing) markInvalid('i-master');
@@ -3755,8 +3966,8 @@
       if(orderMasterMissing) markInvalid('i-order-master');
       const orderShareMissing = (productVal === 'Заказ' && orderShareRaw === '');
       if(orderShareMissing) markInvalid('i-order-share');
-      if(!dateVal || amountRaw==='' || !commentVal || masterMissing || orderMasterMissing || orderShareMissing){
-        let msg = 'Заполните все поля перед сохранением дохода.';
+      if(!dateVal || amountRaw==='' || Number(amountRaw)<0 || !commentVal || masterMissing || orderMasterMissing || orderShareMissing){
+        let msg = 'Заполните все поля перед сохранением дохода. Сумма не может быть отрицательной.';
         if(masterMissing) msg = 'Продукт «Изделие» — укажите мастера, который его изготовил.';
         else if(orderMasterMissing || orderShareMissing) msg = 'Продукт «Заказ» — укажите мастера и договорённую сумму ЗП мастера.';
         showGapWarningBanner(msg);
@@ -3808,6 +4019,7 @@
       const idx = state.incomes.findIndex(x=>x.id===updated.id);
       if(idx >= 0) state.incomes[idx] = updated; else state.incomes.push(updated);
       await saveIncomes();
+      recordAction("Доход сохранён");
       state.modal = null; overlay.remove(); render();
     };
   }
@@ -3919,6 +4131,13 @@
 
     const delBtn = overlay.querySelector('#btn-del-expense');
     if(delBtn) delBtn.onclick = ()=>{
+      if(state.currentRole !== 'owner'){
+        const ym = state.modal.expense.date ? state.modal.expense.date.slice(0,7) : null;
+        if(ym && state.closedMonths && state.closedMonths.includes(ym)){
+          showGapWarningBanner(`Месяц ${ym} закрыт для редактирования. Обратитесь к руководителю.`);
+          return;
+        }
+      }
       const hasLink = !!state.modal.expense.eventId;
       showConfirmDeletePopup(`Удалить этот расход?${hasLink ? ' Он также уберётся из себестоимости привязанного мероприятия.' : ' Действие необратимо.'}`, async ()=>{
         const expToDelete = state.modal.expense;
@@ -3937,6 +4156,16 @@
     };
 
     overlay.querySelector('#btn-save-expense').onclick = async ()=>{
+      if(state.currentRole !== 'owner'){
+        const dateCheck = overlay.querySelector('#ex-date').value;
+        const ymCheck = dateCheck ? dateCheck.slice(0,7) : null;
+        const origYm = (state.modal.expense && state.modal.expense.date) ? state.modal.expense.date.slice(0,7) : null;
+        const blockedYm = [ymCheck, origYm].find(ym => ym && state.closedMonths && state.closedMonths.includes(ym));
+        if(blockedYm){
+          showGapWarningBanner(`Месяц ${blockedYm} закрыт для редактирования. Обратитесь к руководителю.`);
+          return;
+        }
+      }
       ['ex-date','ex-amount','ex-responsible','ex-comment','ex-direction-search'].forEach(id=>{
         const el = overlay.querySelector('#'+id);
         if(el) el.style.borderColor = '';
@@ -3956,7 +4185,7 @@
         if(el){ el.style.borderColor = 'var(--danger)'; if(!firstInvalid) firstInvalid = el; }
       };
       if(!dateVal) markInvalid('ex-date');
-      if(amountRaw === '') markInvalid('ex-amount');
+      if(amountRaw === '' || Number(amountRaw) < 0) markInvalid('ex-amount');
       if(!responsibleVal) markInvalid('ex-responsible');
       if(!commentVal) markInvalid('ex-comment');
       let directionMissing = false;
@@ -3964,8 +4193,8 @@
       let masterMissing = false;
       if(categoryVal === 'Зарплата' && !masterVal){ masterMissing = true; markInvalid('ex-master-search'); }
 
-      if(!dateVal || amountRaw==='' || !responsibleVal || !commentVal || directionMissing || masterMissing){
-        showGapWarningBanner('Заполните все поля перед сохранением расхода.');
+      if(!dateVal || amountRaw==='' || Number(amountRaw)<0 || !responsibleVal || !commentVal || directionMissing || masterMissing){
+        showGapWarningBanner('Заполните все поля перед сохранением расхода. Сумма не может быть отрицательной.');
         if(firstInvalid && firstInvalid.scrollIntoView) firstInvalid.scrollIntoView({block:'center', behavior:'smooth'});
         return;
       }
@@ -4005,6 +4234,7 @@
       const idx = state.expenses.findIndex(x=>x.id===updated.id);
       if(idx >= 0) state.expenses[idx] = updated; else state.expenses.push(updated);
       await saveExpenses();
+      recordAction("Расход сохранён");
       state.modal = null; overlay.remove(); render();
     };
   }
@@ -4224,6 +4454,13 @@
 
     const delBtn = overlay.querySelector('#btn-del-cert');
     if(delBtn) delBtn.onclick = ()=>{
+      if(state.currentRole !== 'owner'){
+        const ym = state.modal.cert.saleDate ? state.modal.cert.saleDate.slice(0,7) : null;
+        if(ym && state.closedMonths && state.closedMonths.includes(ym)){
+          showGapWarningBanner(`Месяц ${ym} закрыт для редактирования. Обратитесь к руководителю.`);
+          return;
+        }
+      }
       const cascades = state.modal.cert.incomeId || (state.modal.cert.redemptions && state.modal.cert.redemptions.length);
       showConfirmDeletePopup(`Удалить этот сертификат?${cascades ? ' Связанный доход в «Книге» и платежи в привязанных мероприятиях тоже удалятся.' : ' Действие необратимо.'}`, async ()=>{
       const certToDelete = state.modal.cert;
@@ -4254,6 +4491,16 @@
     };
 
     overlay.querySelector('#btn-save-cert').onclick = async ()=>{
+      if(state.currentRole !== 'owner'){
+        const dateCheck = overlay.querySelector('#c-date').value;
+        const ymCheck = dateCheck ? dateCheck.slice(0,7) : null;
+        const origYm = (state.modal.cert && state.modal.cert.saleDate) ? state.modal.cert.saleDate.slice(0,7) : null;
+        const blockedYm = [ymCheck, origYm].find(ym => ym && state.closedMonths && state.closedMonths.includes(ym));
+        if(blockedYm){
+          showGapWarningBanner(`Месяц ${blockedYm} закрыт для редактирования. Обратитесь к руководителю.`);
+          return;
+        }
+      }
       ['c-number','c-date','c-amount','c-comment','c-specific-mk','c-owner-name','c-owner-contact'].forEach(id=>{
         const el = overlay.querySelector('#'+id);
         if(el) el.style.borderColor = '';
@@ -4278,10 +4525,12 @@
         if(el){ el.style.borderColor = 'var(--danger)'; if(!firstInvalid) firstInvalid = el; }
       };
       if(numberRaw === '') markInvalid('c-number');
+      const duplicateNumber = numberRaw !== '' && state.certificates.some(c=> String(c.number)===String(numberRaw).trim() && c.id !== state.modal.cert.id);
+      if(duplicateNumber) markInvalid('c-number');
       if(!channelVal) markInvalid('c-channel');
       if(!certTypeVal) markInvalid('c-type');
       if(!dateVal) markInvalid('c-date');
-      if(amountRaw === '') markInvalid('c-amount');
+      if(amountRaw === '' || Number(amountRaw) < 0) markInvalid('c-amount');
       if(!ownerNameVal) markInvalid('c-owner-name');
       if(!ownerContactVal) markInvalid('c-owner-contact');
       if(!commentVal) markInvalid('c-comment');
@@ -4312,8 +4561,9 @@
         if(remainingEl && !firstInvalid) firstInvalid = remainingEl;
       }
 
-      if(numberRaw==='' || !channelVal || !certTypeVal || !dateVal || amountRaw==='' || !ownerNameVal || !ownerContactVal || !commentVal || specificMissing || redemptionsMissing || redemptionsIncomplete || overspent){
-        let msg = 'Заполните все поля перед сохранением сертификата.';
+      if(numberRaw==='' || duplicateNumber || !channelVal || !certTypeVal || !dateVal || amountRaw==='' || Number(amountRaw)<0 || !ownerNameVal || !ownerContactVal || !commentVal || specificMissing || redemptionsMissing || redemptionsIncomplete || overspent){
+        let msg = 'Заполните все поля перед сохранением сертификата. Сумма не может быть отрицательной.';
+        if(duplicateNumber) msg = `Сертификат с номером «${numberRaw}» уже существует — впишите другой номер.`;
         if(redemptionsMissing) msg = 'Статус «Использован»/«Частично использован» — добавьте хотя бы одно списание.';
         else if(redemptionsIncomplete) msg = 'Заполните мероприятие, дату и сумму в каждой строке списания.';
         else if(overspent) msg = `Списано больше, чем номинал сертификата (списано ${formatMoney(spentTotal)} из ${formatMoney(totalAmountNum)}).`;
@@ -4413,6 +4663,7 @@
       const idx = state.certificates.findIndex(x=>x.id===updated.id);
       if(idx >= 0) state.certificates[idx] = updated; else state.certificates.push(updated);
       await saveCertificates();
+      recordAction("Сертификат сохранён");
       state.modal = null; overlay.remove(); render();
     };
   }
@@ -4532,6 +4783,13 @@
 
     const delBtn = overlay.querySelector('#btn-del-refund');
     if(delBtn) delBtn.onclick = ()=>{
+      if(state.currentRole !== 'owner'){
+        const ym = state.modal.refund.requestDate ? state.modal.refund.requestDate.slice(0,7) : null;
+        if(ym && state.closedMonths && state.closedMonths.includes(ym)){
+          showGapWarningBanner(`Месяц ${ym} закрыт для редактирования. Обратитесь к руководителю.`);
+          return;
+        }
+      }
       const hasLink = !!state.modal.refund.eventId;
       showConfirmDeletePopup(`Удалить эту запись о возврате?${hasLink ? ' Выручка привязанного мероприятия также вернётся к прежней сумме.' : ' Действие необратимо.'}`, async ()=>{
         const refundToDelete = state.modal.refund;
@@ -4556,6 +4814,16 @@
     };
 
     overlay.querySelector('#btn-save-refund').onclick = async ()=>{
+      if(state.currentRole !== 'owner'){
+        const dateCheck = overlay.querySelector('#r-request-date').value;
+        const ymCheck = dateCheck ? dateCheck.slice(0,7) : null;
+        const origYm = (state.modal.refund && state.modal.refund.requestDate) ? state.modal.refund.requestDate.slice(0,7) : null;
+        const blockedYm = [ymCheck, origYm].find(ym => ym && state.closedMonths && state.closedMonths.includes(ym));
+        if(blockedYm){
+          showGapWarningBanner(`Месяц ${blockedYm} закрыт для редактирования. Обратитесь к руководителю.`);
+          return;
+        }
+      }
       ['r-request-date','r-amount','r-payment-date','r-reason','r-fullname','r-account','r-bank','r-bik'].forEach(id=>{
         const el = overlay.querySelector('#'+id);
         if(el) el.style.borderColor = '';
@@ -4578,7 +4846,7 @@
         if(el){ el.style.borderColor = 'var(--danger)'; if(!firstInvalid) firstInvalid = el; }
       };
       if(!requestDateVal) markInvalid('r-request-date');
-      if(amountRaw === '') markInvalid('r-amount');
+      if(amountRaw === '' || Number(amountRaw) < 0) markInvalid('r-amount');
       if(!paymentDateVal) markInvalid('r-payment-date');
       if(!reasonVal) markInvalid('r-reason');
       let tochkaMissing = false;
@@ -4589,8 +4857,27 @@
         if(!bikVal){ tochkaMissing = true; markInvalid('r-bik'); }
       }
 
-      if(!requestDateVal || amountRaw==='' || !paymentDateVal || !reasonVal || tochkaMissing){
-        showGapWarningBanner('Заполните все поля перед сохранением возврата.');
+      // возврат не может быть больше, чем реально получено на привязанном мероприятии
+      const linkedEventIdForCheck = overlay.querySelector('#r-event').value || '';
+      let refundExceedsReceived = false;
+      if(linkedEventIdForCheck && amountRaw !== ''){
+        const linkedEv = state.events.find(e=>e.id===linkedEventIdForCheck);
+        if(linkedEv){
+          const alreadyRefundedElsewhere = state.refunds
+            .filter(r=> r.eventId===linkedEventIdForCheck && r.id!==state.modal.refund.id && r.status==='refunded')
+            .reduce((s,r)=> s + (Number(r.amount)||0), 0);
+          const receivedAvailable = (Number(linkedEv.price)||0) + alreadyRefundedElsewhere; // до уже проведённых по этому мероприятию возвратов
+          if(Number(amountRaw) > receivedAvailable){
+            refundExceedsReceived = true;
+            markInvalid('r-amount');
+          }
+        }
+      }
+
+      if(!requestDateVal || amountRaw==='' || Number(amountRaw)<0 || !paymentDateVal || !reasonVal || tochkaMissing || refundExceedsReceived){
+        showGapWarningBanner(refundExceedsReceived
+          ? `Сумма возврата больше, чем реально получено на этом мероприятии (доступно к возврату: ${(state.events.find(e=>e.id===linkedEventIdForCheck)?.price||0) + state.refunds.filter(r=> r.eventId===linkedEventIdForCheck && r.id!==state.modal.refund.id && r.status==='refunded').reduce((s,r)=> s + (Number(r.amount)||0), 0)} ₽).`
+          : 'Заполните все поля перед сохранением возврата. Сумма не может быть отрицательной.');
         if(firstInvalid && firstInvalid.scrollIntoView) firstInvalid.scrollIntoView({block:'center', behavior:'smooth'});
         return;
       }
@@ -4635,6 +4922,7 @@
       const idx = state.refunds.findIndex(x=>x.id===updated.id);
       if(idx >= 0) state.refunds[idx] = updated; else state.refunds.push(updated);
       await saveRefunds();
+      recordAction("Возврат сохранён");
       state.modal = null; overlay.remove(); render();
     };
   }
@@ -5026,6 +5314,7 @@
       if(anyEmpty) return;
       state.roleCodes = newCodes;
       await storageSetWithRetry('role-codes', JSON.stringify(state.roleCodes));
+      recordAction("Пароли сохранены");
       state.modal = null;
       overlay.remove();
       render();
@@ -5526,6 +5815,16 @@
       return sum + monthSpent;
     }, 0);
 
+    // непогашенный остаток по всем сертификатам за всё время (не только за месяц) — реальное обязательство студии
+    const certOutstandingSale = state.certificates
+      .filter(c=> (c.purpose||'sale')==='sale' && certRemaining(c) > 0)
+      .reduce((s,c)=> s + certRemaining(c), 0);
+    const certOutstandingSaleCount = state.certificates.filter(c=> (c.purpose||'sale')==='sale' && certRemaining(c) > 0).length;
+    const certOutstandingMarketing = state.certificates
+      .filter(c=> c.purpose==='marketing' && certRemaining(c) > 0)
+      .reduce((s,c)=> s + certRemaining(c), 0);
+    const certOutstandingMarketingCount = state.certificates.filter(c=> c.purpose==='marketing' && certRemaining(c) > 0).length;
+
     const PLAN_STATUS_LABEL = { ahead:'✅ в темпе', behind:'⚠ отстаём', notstarted:'—' };
     const forwardForecastHtml = `
       <div class="analytics-section" style="border-top:1px solid var(--line);padding-top:16px;margin-top:4px;">
@@ -5716,6 +6015,25 @@
       </div>
     `;
 
+    const auditLogSorted = (state.auditLog || []).slice().reverse().slice(0, 300);
+    const analyticsPanel_auditlog = `
+      <div class="analytics-section">
+        <div style="font-size:12px;color:var(--ink-soft);margin-bottom:10px;">Кто и что сохранял или удалял в приложении — последние ${auditLogSorted.length} записей, самые новые сверху.</div>
+        ${auditLogSorted.length === 0 ? '<div style="color:var(--ink-soft);font-size:13px;">Пока пусто.</div>' : auditLogSorted.map(entry=>{
+          const d = new Date(entry.ts);
+          const dateLabel = isNaN(d.getTime()) ? entry.ts : d.toLocaleString('ru-RU', {day:'2-digit', month:'2-digit', year:'numeric', hour:'2-digit', minute:'2-digit'});
+          return `
+          <div class="stat-row" style="align-items:flex-start;">
+            <div style="width:130px;flex-shrink:0;font-family:var(--font-mono);font-size:11.5px;color:var(--ink-soft);">${escapeHtml(dateLabel)}</div>
+            <div style="flex:1;font-size:13px;">
+              <span style="font-weight:600;">${escapeHtml(entry.roleLabel || '—')}</span> — ${escapeHtml(entry.action || '')}
+              ${entry.detail ? `<div style="color:var(--ink-soft);font-size:12px;margin-top:2px;">${escapeHtml(entry.detail)}</div>` : ''}
+            </div>
+          </div>
+        `;}).join('')}
+      </div>
+    `;
+
     if(total === 0){
       const analyticsPanel_netprofit_empty = `
         <div class="analytics-section">
@@ -5740,7 +6058,7 @@
           </div>
         </div>
       `;
-      state.analyticsPanels = { plan: analyticsPanel_plan, netprofit: analyticsPanel_netprofit_empty, yearsummary: analyticsPanel_yearsummary };
+      state.analyticsPanels = { plan: analyticsPanel_plan, netprofit: analyticsPanel_netprofit_empty, yearsummary: analyticsPanel_yearsummary, auditlog: analyticsPanel_auditlog };
       let emptyCompareHtml = '';
       if(state.compareMode){
         const prevCursor = new Date(cursor.getFullYear(), cursor.getMonth()-1, 1);
@@ -5758,6 +6076,7 @@
         <div class="cal-nav">
           <div class="month-label">${monthLabel}</div>
           <div class="cal-nav-btns">
+            ${state.currentRole==='owner' ? `<button class="today-btn" id="an-toggle-lock" style="${state.closedMonths.includes(monthYm)?'border-color:var(--danger);color:var(--danger);':''}">${state.closedMonths.includes(monthYm) ? '🔒 Месяц закрыт — открыть' : '🔓 Закрыть месяц'}</button>` : (state.closedMonths.includes(monthYm) ? `<span class="today-btn" style="border-color:var(--danger);color:var(--danger);pointer-events:none;">🔒 Месяц закрыт</span>` : '')}
             <button class="today-btn" id="an-compare">${state.compareMode ? '✕ Скрыть сравнение' : '🔁 Сравнить с прошлым месяцем'}</button>
             <button class="today-btn" id="an-today">текущий месяц</button>
             <button class="nav-btn" id="an-prev">‹</button>
@@ -5771,8 +6090,15 @@
             <button class="btn btn-ghost" id="btn-edit-plan">✏ Задать план</button>
             <button class="btn btn-ghost owner-panel-btn" data-panel="netprofit" style="border-color:#6B4A1E;color:#6B4A1E;">🔒 Чистая прибыль</button>
             <button class="btn btn-ghost analytics-panel-btn" data-panel="yearsummary">📆 Сводка по годам</button>
+            <button class="btn btn-ghost analytics-panel-btn" data-panel="auditlog">📜 Журнал действий</button>
           </div>
         </div>
+        ${(certOutstandingSaleCount>0 || certOutstandingMarketingCount>0) ? `
+        <div class="analytics-section">
+          <div class="stat-row"><div class="stat-label" style="color:var(--status-red);">Непогашено по проданным сертификатам</div><div style="flex:1;font-family:var(--font-mono);font-size:13px;color:var(--status-red);">${formatMoney(certOutstandingSale)} <span style="font-size:11px;">— ${certOutstandingSaleCount} шт., это студия ещё должна отдать услугами</span></div></div>
+          ${certOutstandingMarketingCount>0?`<div class="stat-row"><div class="stat-label" style="color:var(--ink-soft);">Непогашено по маркетинговым сертификатам</div><div style="flex:1;font-family:var(--font-mono);font-size:13px;color:var(--ink-soft);">${formatMoney(certOutstandingMarketing)} <span style="font-size:11px;">— ${certOutstandingMarketingCount} шт.</span></div></div>`:''}
+        </div>
+        ` : ''}
         <div class="analytics-section">
           <h4>Заполняемость</h4>
           <div class="stat-row">
@@ -6612,12 +6938,13 @@
         </div>
       </div>
     `;
-    state.analyticsPanels = { plan: analyticsPanel_plan, occupancy: analyticsPanel_occupancy, days: analyticsPanel_days, ceramics: analyticsPanel_ceramics, guests: analyticsPanel_guests, legal: analyticsPanel_legal, reports: analyticsPanel_reports, netprofit: analyticsPanel_netprofit, yearsummary: analyticsPanel_yearsummary };
+    state.analyticsPanels = { plan: analyticsPanel_plan, occupancy: analyticsPanel_occupancy, days: analyticsPanel_days, ceramics: analyticsPanel_ceramics, guests: analyticsPanel_guests, legal: analyticsPanel_legal, reports: analyticsPanel_reports, netprofit: analyticsPanel_netprofit, yearsummary: analyticsPanel_yearsummary, auditlog: analyticsPanel_auditlog };
 
     return `
       <div class="cal-nav">
         <div class="month-label">${monthLabel}</div>
         <div class="cal-nav-btns">
+          ${state.currentRole==='owner' ? `<button class="today-btn" id="an-toggle-lock" style="${state.closedMonths.includes(monthYm)?'border-color:var(--danger);color:var(--danger);':''}">${state.closedMonths.includes(monthYm) ? '🔒 Месяц закрыт — открыть' : '🔓 Закрыть месяц'}</button>` : (state.closedMonths.includes(monthYm) ? `<span class="today-btn" style="border-color:var(--danger);color:var(--danger);pointer-events:none;">🔒 Месяц закрыт</span>` : '')}
           <button class="today-btn" id="an-compare">${state.compareMode ? '✕ Скрыть сравнение' : '🔁 Сравнить с прошлым месяцем'}</button>
           <button class="today-btn" id="an-today">текущий месяц</button>
           <button class="nav-btn" id="an-prev">‹</button>
@@ -6647,6 +6974,8 @@
         <div class="stat-row"><div class="stat-label">Сертификаты (продажа, факт)</div><div style="flex:1;font-family:var(--font-mono);font-size:13px;">${formatMoney(certMonthSales)}</div></div>
         <div class="stat-row"><div class="stat-label">Книга (Доходы, факт)</div><div style="flex:1;font-family:var(--font-mono);font-size:13px;">${formatMoney(incomesMonthTotal)}</div></div>
         <div class="stat-row"><div class="stat-label" style="color:var(--ink-soft);">Сертификаты — погашено в этом месяце</div><div style="flex:1;font-family:var(--font-mono);font-size:13px;color:var(--ink-soft);">${formatMoney(certUsedThisMonth)} <span style="font-size:11px;">— не входит в итог, деньги уже учтены при продаже</span></div></div>
+        <div class="stat-row"><div class="stat-label" style="color:var(--status-red);">Непогашено по проданным сертификатам</div><div style="flex:1;font-family:var(--font-mono);font-size:13px;color:var(--status-red);">${formatMoney(certOutstandingSale)} <span style="font-size:11px;">— ${certOutstandingSaleCount} шт., это студия ещё должна отдать услугами</span></div></div>
+        ${certOutstandingMarketingCount>0?`<div class="stat-row"><div class="stat-label" style="color:var(--ink-soft);">Непогашено по маркетинговым сертификатам</div><div style="flex:1;font-family:var(--font-mono);font-size:13px;color:var(--ink-soft);">${formatMoney(certOutstandingMarketing)} <span style="font-size:11px;">— ${certOutstandingMarketingCount} шт., деньги не платились, но услуга ещё не оказана</span></div></div>`:''}
         <div class="stat-row"><div class="stat-label" style="color:${refundsUnlinkedAmount>0?'var(--status-red)':'var(--ink-soft)'};">Возвраты за месяц</div><div style="flex:1;font-family:var(--font-mono);font-size:13px;color:${refundsUnlinkedAmount>0?'var(--status-red)':'var(--ink-soft)'};">−${formatMoney(refundsTotalAmount)} <span style="font-size:11px;">${refundsLinkedAmount>0?'(из них '+formatMoney(refundsLinkedAmount)+' уже учтено в выручке мероприятий)':''}${refundsUnlinkedAmount>0?' ⚠ '+formatMoney(refundsUnlinkedAmount)+' — без привязки к мероприятию, нигде больше не вычтено':''}</span></div></div>
       </div>
 
@@ -6663,6 +6992,7 @@
           <button class="btn btn-ghost analytics-panel-btn" data-panel="legal">📄 Документы юрлиц</button>
           <button class="btn btn-ghost analytics-panel-btn" data-panel="reports">📝 Отчёты мастеров</button>
           <button class="btn btn-ghost analytics-panel-btn" data-panel="yearsummary">📆 Сводка по годам</button>
+            <button class="btn btn-ghost analytics-panel-btn" data-panel="auditlog">📜 Журнал действий</button>
           <button class="btn btn-ghost owner-panel-btn" data-panel="netprofit" style="border-color:#6B4A1E;color:#6B4A1E;">🔒 Чистая прибыль</button>
         </div>
       </div>
@@ -6681,6 +7011,22 @@
     if(today) today.onclick = ()=>{ state.analyticsCursor = new Date(new Date().getFullYear(), new Date().getMonth(), 1); render(); };
     const compareBtn = document.getElementById('an-compare');
     if(compareBtn) compareBtn.onclick = ()=>{ state.compareMode = !state.compareMode; render(); };
+    const toggleLockBtn = document.getElementById('an-toggle-lock');
+    if(toggleLockBtn) toggleLockBtn.onclick = async ()=>{
+      const ym = state.analyticsCursor.getFullYear()+'-'+pad(state.analyticsCursor.getMonth()+1);
+      if(!state.closedMonths) state.closedMonths = [];
+      const idx = state.closedMonths.indexOf(ym);
+      if(idx>=0){
+        state.closedMonths.splice(idx,1);
+        await saveClosedMonths();
+        recordAction('Месяц открыт для редактирования', ym);
+      } else {
+        state.closedMonths.push(ym);
+        await saveClosedMonths();
+        recordAction('Месяц закрыт для редактирования', ym);
+      }
+      render();
+    };
 
     document.querySelectorAll('.stat-row.clickable').forEach(row=>{
       row.onclick = ()=>{
@@ -6884,6 +7230,7 @@
         if(pendingImportData.masterPayOverrides){ state.masterPayOverrides = pendingImportData.masterPayOverrides; await saveMasterPayOverrides(); }
         if(pendingImportData.monthlyPlans){ state.monthlyPlans = pendingImportData.monthlyPlans; await saveMonthlyPlans(); }
         pendingImportData = null;
+        recordAction('Данные восстановлены');
         state.modal = null;
         render();
       });
@@ -6980,6 +7327,7 @@
         delete state.hostessShifts[shiftDate][shiftKey];
       }
       await saveHostessShifts();
+      recordAction('Смена сохранена');
       overlay.remove();
       state.modal = {type:'day', date: shiftDate};
       render();
@@ -7118,6 +7466,7 @@
         state.events[idx] = {...state.events[idx], masterReport: report};
         await saveEvents();
       }
+      recordAction("Отчёт мастера сохранён");
       state.modal = null; overlay.remove(); render();
     };
   }
@@ -7155,6 +7504,7 @@
         state.events[idx] = {...state.events[idx], host: hostVal};
         await saveEvents();
       }
+      recordAction("Ведущий изменён");
       state.modal = null; overlay.remove(); render();
     };
     overlay.querySelector('#qh-save').onclick = save;
@@ -7343,6 +7693,7 @@
         if(catalogChanged) await saveMaterialsCatalog();
 
         draftEventTypes = null;
+        recordAction("Виды мероприятий сохранены");
         state.modal = null;
         render();
       });
@@ -7456,6 +7807,7 @@
         state.materialsCatalog = cleaned;
         await saveMaterialsCatalog();
         draftMaterialsCatalog = null;
+        recordAction("Себес сохранён");
         state.modal = null;
         render();
       });
@@ -7614,6 +7966,7 @@
         await saveMasterPayRates();
         draftHostsList = null;
         draftPayRates = null;
+        recordAction("Список мастеров сохранён");
         state.modal = null;
         render();
       });
@@ -7630,6 +7983,7 @@
     reports: '📝 Отчёты мастеров',
     netprofit: '🔒 Чистая прибыль',
     yearsummary: '📆 Сводка по годам',
+    auditlog: '📜 Журнал действий',
   };
   function renderAnalyticsPanelModal(panel){
     const content = (state.analyticsPanels && state.analyticsPanels[panel]) || '<div style="color:var(--ink-soft);font-size:13px;">Нет данных.</div>';
@@ -7735,6 +8089,7 @@
         }
       });
       await saveYearSummaryManual();
+      recordAction("Данные сохранены");
       state.modal = null;
       overlay.remove();
       render();
@@ -7855,6 +8210,7 @@
       const hasAny = newManual.managerSalary!==null || newManual.rent!==null || cleanedStaff.length>0 || cleanedCustom.length>0;
       if(hasAny) state.netProfitManual[ym] = newManual; else delete state.netProfitManual[ym];
       await saveNetProfitManual();
+      recordAction("Данные сохранены");
       state.modal = null;
       overlay.remove();
       render();
@@ -7991,6 +8347,7 @@
         const hasAny = Object.values(newPlan).some(v=> v!==null && !(Array.isArray(v) && v.length===0));
         if(hasAny) state.monthlyPlans[ym] = newPlan; else delete state.monthlyPlans[ym];
         await saveMonthlyPlans();
+        recordAction('План сохранён');
         state.modal = null;
         render();
       });
@@ -8088,6 +8445,7 @@
         await saveMasterPayOverrides();
 
         state.modal = {type:'hosts-list'};
+        recordAction("Тариф мастера сохранён");
         render();
       });
     };
@@ -9006,6 +9364,13 @@
 
     const delBtn = overlay.querySelector('#btn-del');
     if(delBtn) delBtn.onclick = ()=>{
+      if(state.currentRole !== 'owner'){
+        const ym = state.modal.event.date ? state.modal.event.date.slice(0,7) : null;
+        if(ym && state.closedMonths && state.closedMonths.includes(ym)){
+          showGapWarningBanner(`Месяц ${ym} закрыт для редактирования. Обратитесь к руководителю.`);
+          return;
+        }
+      }
       showConfirmDeletePopup(`Удалить мероприятие «${escapeHtml(state.modal.event.title||'без названия')}»? Это уберёт и все связанные данные (платежи, себестоимость, привязанные сертификаты). Действие необратимо.`, async ()=>{
       const eventToDelete = state.modal.event;
       state.events = state.events.filter(x=>x.id !== eventToDelete.id);
@@ -9067,6 +9432,17 @@
 
     const saveBtn = overlay.querySelector('#btn-save');
     saveBtn.onclick = async ()=>{
+      // защита закрытых периодов: нельзя менять/создавать мероприятия в закрытом месяце, если ты не руководитель
+      if(state.currentRole !== 'owner'){
+        const origDateYm = state.modal.event.date ? state.modal.event.date.slice(0,7) : null;
+        const newDateVal = overlay.querySelector('#f-date').value;
+        const newDateYm = newDateVal ? newDateVal.slice(0,7) : null;
+        const blockedYm = [origDateYm, newDateYm].find(ym => ym && state.closedMonths && state.closedMonths.includes(ym));
+        if(blockedYm){
+          showGapWarningBanner(`Месяц ${blockedYm} закрыт для редактирования. Обратитесь к руководителю.`);
+          return;
+        }
+      }
       // сброс подсветки ошибок с прошлой попытки
       ['f-title','f-product','f-host','f-date','f-time','f-duration','f-guests','f-price','f-notes'].forEach(id=>{
         const el = overlay.querySelector('#'+id);
@@ -9116,10 +9492,21 @@
         if(!timeVal) markInvalid('f-time');
         if(!durationVal || durationVal<=0) markInvalid('f-duration');
         if(guestsRaw === '') markInvalid('f-guests');
-        if(priceRaw === '') markInvalid('f-price');
+        if(priceRaw === '' || Number(priceRaw) < 0) markInvalid('f-price');
+        const agreedPriceRawCheck = overlay.querySelector('#f-agreed-price').value;
+        const agreedPriceNegative = agreedPriceRawCheck !== '' && Number(agreedPriceRawCheck) < 0;
+        if(agreedPriceNegative) markInvalid('f-agreed-price');
         if(!notesVal) markInvalid('f-notes');
         if(!guestNameVal) markInvalid('f-guest-name');
+        const masterPayRawCheck = overlay.querySelector('#f-master-pay').value;
+        const masterPayNegative = masterPayRawCheck !== '' && Number(masterPayRawCheck) < 0;
+        if(masterPayNegative) markInvalid('f-master-pay');
+        const materialsNegative = cleanedMaterialsItems.some(m=> m.cost < 0);
         if(materialsMissing){
+          const materialsListEl = overlay.querySelector('#materials-items-list');
+          if(materialsListEl){ materialsListEl.style.boxShadow = 'inset 0 0 0 1.5px var(--danger)'; materialsListEl.style.borderRadius = 'var(--radius)'; if(!firstInvalid) firstInvalid = materialsListEl; }
+        }
+        if(materialsNegative){
           const materialsListEl = overlay.querySelector('#materials-items-list');
           if(materialsListEl){ materialsListEl.style.boxShadow = 'inset 0 0 0 1.5px var(--danger)'; materialsListEl.style.borderRadius = 'var(--radius)'; if(!firstInvalid) firstInvalid = materialsListEl; }
         }
@@ -9128,8 +9515,8 @@
           if(!dishesVal){ dishesMissing = true; if(dishesFieldEl) dishesFieldEl.style.boxShadow = 'inset 0 0 0 1.5px var(--danger)'; if(!firstInvalid) firstInvalid = dishesFieldEl; }
           if(rentalBeforeRaw === '' || rentalAfterRaw === ''){ rentalMissing = true; if(rentalFieldEl) rentalFieldEl.style.boxShadow = 'inset 0 0 0 1.5px var(--danger)'; if(!firstInvalid) firstInvalid = rentalFieldEl; }
         }
-        if(!title || !hostVal || !dateVal || !timeVal || !durationVal || durationVal<=0 || guestsRaw==='' || priceRaw==='' || !notesVal || !guestNameVal || materialsMissing || dishesMissing || rentalMissing){
-          showGapWarningBanner('Заполните все поля перед сохранением (для статуса «Слот» это необязательно). Себестоимость: добавьте хотя бы один материал с названием и суммой.');
+        if(!title || !hostVal || !dateVal || !timeVal || !durationVal || durationVal<=0 || guestsRaw==='' || priceRaw==='' || Number(priceRaw)<0 || agreedPriceNegative || masterPayNegative || materialsNegative || !notesVal || !guestNameVal || materialsMissing || dishesMissing || rentalMissing){
+          showGapWarningBanner('Заполните все поля перед сохранением (для статуса «Слот» это необязательно). Себестоимость: добавьте хотя бы один материал с названием и суммой. Суммы (выручка, ЗП мастеру, себестоимость) не могут быть отрицательными.');
           if(firstInvalid && firstInvalid.scrollIntoView) firstInvalid.scrollIntoView({block:'center', behavior:'smooth'});
           return;
         }
@@ -9252,6 +9639,7 @@
       await saveEvents();
       const dayEvts = state.events.filter(e=>e.date===updated.date && e.spaceId===updated.spaceId);
       const warns = computeGapWarnings(dayEvts);
+      recordAction('Мероприятие сохранено');
       state.modal = null; overlay.remove(); render();
       if(warns[updated.id]){
         const w = warns[updated.id];
@@ -9279,7 +9667,7 @@
       </div>
     `;
     document.body.appendChild(wrap);
-    wrap.querySelector('#confirm-del-yes').onclick = ()=>{ wrap.remove(); onConfirm(); };
+    wrap.querySelector('#confirm-del-yes').onclick = ()=>{ wrap.remove(); recordAction('Удалено'); onConfirm(); };
     wrap.querySelector('#confirm-del-no').onclick = ()=> wrap.remove();
     wrap.addEventListener('click', (e)=>{ if(e.target===wrap) wrap.remove(); });
   }
