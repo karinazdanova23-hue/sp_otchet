@@ -8584,9 +8584,13 @@
       reader.onload = ()=>{
         try{
           const data = JSON.parse(reader.result);
-          if(!Array.isArray(data.spaces) || !Array.isArray(data.events)) throw new Error('bad shape');
+          const KNOWN_FIELDS = ['spaces','events','certificates','refunds','leads','incomes','expenses','eventTypes','hostsList','materialsCatalog','itemSales','orders','salaryAdjustments','masterPayRates','masterPayOverrides','monthlyPlans','hostessShifts','netProfitManual','yearSummaryManual','auditLog','closedMonths','marketingSpend','marketingPlans','contentPosts'];
+          const hasAnyKnownField = KNOWN_FIELDS.some(f => data[f] !== undefined);
+          if(!hasAnyKnownField) throw new Error('bad shape');
           pendingImportData = data;
-          const parts = [`${data.spaces.length} пространств`, `${data.events.length} мероприятий`];
+          const parts = [];
+          if(Array.isArray(data.spaces)) parts.push(`${data.spaces.length} пространств`);
+          if(Array.isArray(data.events)) parts.push(`${data.events.length} мероприятий`);
           if(Array.isArray(data.certificates)) parts.push(`${data.certificates.length} сертификатов`);
           if(Array.isArray(data.refunds)) parts.push(`${data.refunds.length} возвратов`);
           if(Array.isArray(data.leads)) parts.push(`${data.leads.length} заявок`);
@@ -8613,10 +8617,8 @@
     importBtn.onclick = ()=>{
       if(!pendingImportData) return;
       requireAdminUnlock(async ()=>{
-        state.spaces = pendingImportData.spaces;
-        state.events = pendingImportData.events;
-        await saveSpaces();
-        await saveEvents();
+        if(Array.isArray(pendingImportData.spaces)){ state.spaces = pendingImportData.spaces; await saveSpaces(); }
+        if(Array.isArray(pendingImportData.events)){ state.events = pendingImportData.events; await saveEvents(); }
         if(Array.isArray(pendingImportData.certificates)){ state.certificates = pendingImportData.certificates; await saveCertificates(); }
         if(Array.isArray(pendingImportData.refunds)){ state.refunds = pendingImportData.refunds; await saveRefunds(); }
         if(Array.isArray(pendingImportData.leads)){ state.leads = pendingImportData.leads; await saveLeads(); }
