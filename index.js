@@ -6,6 +6,7 @@
 const path = require('path');
 const crypto = require('crypto');
 const express = require('express');
+const webpush = require('web-push');
 const {
   S3Client,
   GetObjectCommand,
@@ -18,6 +19,14 @@ const PORT = process.env.PORT || 3000;
 const BUCKET = process.env.S3_BUCKET;
 const REGION = process.env.S3_REGION || 'ru-1';
 const ENDPOINT = process.env.S3_ENDPOINT; // например https://s3.timeweb.cloud
+
+const VAPID_PUBLIC_KEY = process.env.VAPID_PUBLIC_KEY;
+const VAPID_PRIVATE_KEY = process.env.VAPID_PRIVATE_KEY;
+if (VAPID_PUBLIC_KEY && VAPID_PRIVATE_KEY) {
+  webpush.setVapidDetails('mailto:admin@example.com', VAPID_PUBLIC_KEY, VAPID_PRIVATE_KEY);
+} else {
+  console.warn('[push] ВНИМАНИЕ: не заданы VAPID_PUBLIC_KEY / VAPID_PRIVATE_KEY — push-уведомления работать не будут, пока их не задать в переменных окружения.');
+}
 
 if (!BUCKET || !ENDPOINT) {
   console.warn('[storage] ВНИМАНИЕ: не заданы S3_BUCKET / S3_ENDPOINT — хранилище работать не будет, пока их не задать в переменных окружения.');
@@ -128,6 +137,97 @@ app.get('/api/storage', async (req, res) => {
 
 // проверка живости — полезно для Timeweb App Platform
 app.get('/health', (req, res) => res.json({ ok: true }));
+
+// --- Push-уведомления ---
+
+const PUSH_SUBS_KEY = 'push-subscriptions'; // shared/push-subscriptions.json — список подписок устройств
+
+async function readPushSubs() {
+  try {
+    const result = await s3.send(new GetObjectCommand({ Bucket: BUCKET, Key: objectPath(PUSH_SUBS_KEY, true) }));
+    const body = await streamToString(result.Body);
+    return JSON.parse(body);
+  } catch (err) {
+    return [];
+  }
+}
+
+async function writePushSubs(subs) {
+  await s3.send(new PutObjectCommand({
+    Bucket: BUCKET,
+    Key: objectPath(PUSH_SUBS_KEY, true),
+    Body: JSON.stringify(subs),
+    ContentType: 'application/json; charset=utf-8',
+  }));
+}
+
+app.get('/api/push/vapid-public-key', (req, res) => {
+  res.json({ publicKey: VAPID_PUBLIC_KEY || '' });
+});
+
+// body: { subscription: <PushSubscription JSON>, role: 'owner'|'admin'|... }
+app.post('/api/push/subscribe', async (req, res) => {
+  try {
+    const { subscription, role } = req.body || {};
+    if (!subscription || !subscription.endpoint) return res.status(400).json({ error: 'subscription_required' });
+    const subs = await readPushSubs();
+    const idx = subs.findIndex((s) => s.subscription.endpoint === subscription.endpoint);
+    const entry = { subscription, role: role || '', savedAt: new Date().toISOString() };
+    if (idx >= 0) subs[idx] = entry; else subs.push(entry);
+    await writePushSubs(subs);
+    res.json({ ok: true });
+  } catch (err) {
+    console.error('POST /api/push/subscribe error:', err);
+    res.status(500).json({ error: 'subscribe_failed' });
+  }
+});
+
+// body: { endpoint }
+app.post('/api/push/unsubscribe', async (req, res) => {
+  try {
+    const { endpoint } = req.body || {};
+    const subs = await readPushSubs();
+    const filtered = subs.filter((s) => s.subscription.endpoint !== endpoint);
+    await writePushSubs(filtered);
+    res.json({ ok: true });
+  } catch (err) {
+    console.error('POST /api/push/unsubscribe error:', err);
+    res.status(500).json({ error: 'unsubscribe_failed' });
+  }
+});
+
+// body: { title, body, targetRoles: ['owner', ...] } — targetRoles пусто/отсутствует = всем подписанным
+app.post('/api/push/send', async (req, res) => {
+  try {
+    if (!VAPID_PUBLIC_KEY || !VAPID_PRIVATE_KEY) return res.status(503).json({ error: 'push_not_configured' });
+    const { title, body, targetRoles } = req.body || {};
+    if (!title) return res.status(400).json({ error: 'title_required' });
+    const subs = await readPushSubs();
+    const targets = (Array.isArray(targetRoles) && targetRoles.length > 0)
+      ? subs.filter((s) => targetRoles.includes(s.role))
+      : subs;
+    const payload = JSON.stringify({ title, body: body || '' });
+    const results = await Promise.allSettled(
+      targets.map((s) => webpush.sendNotification(s.subscription, payload))
+    );
+    // чистим подписки, которые браузер уже отозвал (410/404)
+    const deadEndpoints = new Set();
+    results.forEach((r, i) => {
+      if (r.status === 'rejected' && (r.reason?.statusCode === 410 || r.reason?.statusCode === 404)) {
+        deadEndpoints.add(targets[i].subscription.endpoint);
+      }
+    });
+    if (deadEndpoints.size > 0) {
+      const cleaned = subs.filter((s) => !deadEndpoints.has(s.subscription.endpoint));
+      await writePushSubs(cleaned);
+    }
+    const sentCount = results.filter((r) => r.status === 'fulfilled').length;
+    res.json({ ok: true, sent: sentCount, total: targets.length });
+  } catch (err) {
+    console.error('POST /api/push/send error:', err);
+    res.status(500).json({ error: 'send_failed' });
+  }
+});
 
 // статический фронтенд
 app.use(express.static(path.join(__dirname, 'public')));
