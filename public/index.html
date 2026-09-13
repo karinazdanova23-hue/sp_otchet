@@ -1,3 +1,17 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
+<title>Расписание студии</title>
+<link rel="manifest" href="/manifest.json">
+<meta name="theme-color" content="#2A2520">
+<link rel="icon" href="/icon-192.png">
+<link rel="apple-touch-icon" href="/icon-192.png">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Расписание СП">
+<meta name="mobile-web-app-capable" content="yes">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,500;9..144,600;9..144,700&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
@@ -76,7 +90,7 @@
   }
 
   .view-switch{
-    display:flex; gap: 2px; background: var(--paper-2);
+    display:flex; flex-wrap: wrap; gap: 2px; background: var(--paper-2);
     border: 1px solid var(--line-strong); border-radius: var(--radius); padding: 3px;
   }
   .view-switch button{
@@ -234,13 +248,13 @@
   }
   .status-opt .dot{ width:10px; height:10px; border-radius:50%; }
   .status-opt.active{ border-color: var(--ink); background: var(--white); font-weight:500; }
-  .dishes-opt{
+  .dishes-opt, .dishes-payment-opt{
     flex: 1 1 calc(50% - 5px); border:1px solid var(--line-strong); border-radius: var(--radius);
     padding: 9px 10px; display:flex; align-items:center; gap:8px; cursor:pointer;
     font-size: 13.5px; background: var(--paper);
   }
-  .dishes-opt .dot{ width:10px; height:10px; border-radius:50%; }
-  .dishes-opt.active{ border-color: var(--ink); background: var(--white); font-weight:500; }
+  .dishes-opt .dot, .dishes-payment-opt .dot{ width:10px; height:10px; border-radius:50%; }
+  .dishes-opt.active, .dishes-payment-opt.active{ border-color: var(--ink); background: var(--white); font-weight:500; }
   .payer-opt{
     flex: 1 1 calc(50% - 5px); border:1px solid var(--line-strong); border-radius: var(--radius);
     padding: 9px 10px; display:flex; align-items:center; gap:8px; cursor:pointer;
@@ -615,11 +629,8 @@
     .today-page{ padding: 16px 12px 40px; }
   }
 </style>
-
-<div class="app" id="app">
-  <div class="loading-note">Загружаю расписание…</div>
-</div>
-
+</head>
+<body>
 <script>
   // Замена Claude-артефактного window.storage на обращения к собственному серверу.
   // Интерфейс (get/set/delete/list, флаг shared) полностью совпадает — остальной код ниже не менялся.
@@ -673,6 +684,13 @@
     };
   })();
 </script>
+
+
+
+<div class="app" id="app">
+  <div class="loading-note">Загружаю расписание…</div>
+</div>
+
 <script>
 (function(){
   const DOW = ['Пн','Вт','Ср','Чт','Пт','Сб','Вс'];
@@ -727,7 +745,7 @@
   const REFUND_STATUS_LABEL = { in_progress: 'В процессе', refunded: 'Возвращено' };
 
   const INCOME_OPERATIONS = ['Оплата','Предоплата','Остаток оплаты'];
-  const INCOME_PRODUCTS = ['Расписание','День рождения','Сертификат','Изделие','Заказ','Девичник','Корпоратив','Свидание','Детский','Другое'];
+  const INCOME_PRODUCTS = [...PRODUCTS, 'Сертификат', 'Изделие', 'Заказ', 'Другое'];
   const INCOME_ACCOUNTS = ['Точка','Наличные','Юклиент','ЮрСчет'];
 
   const EXPENSE_CATEGORIES = ['Материалы','Инвентарь','Маркетинг','Зарплата','Подарки','Операции','Декор','Логистика','Продукты','Типография','Косяки'];
@@ -739,10 +757,59 @@
   // ЗП мастера по заказам не считается по фиксированному %, а договаривается индивидуально —
   // сумма вводится вручную по каждому заказу (в отличие от "Изделия", где действует общий процент)
 
-  const LEAD_SOURCES = ['ВК','Инста','ТГ','Макс','Авито','Звонок','Сайт','Лично'];
+  const LEAD_SOURCES = ['ВК','Инста','ТГ','Макс','Одноклассники','Дзен','TikTok','YouTube','Авито','Звонок','Сайт','Лично','Листовки','Гео','Офлайн маркетинг','Бартер','Розыгрыши'];
+  const MARKETING_DIRECTIONS = ['Офлайн маркетинг','Блогеры','Листовки','Розыгрыши','Рассылки','Гео-сервисы','Бартер'];
+  const MARKETING_SOCIAL_NETWORKS = ['ТГ','ВК','Инста','Макс','Сайт','Гео','Авито'];
 
   const HOSTESS_LIST = ['Ира','Оксана','Соня','Сара'];
+  function renderBarChart(data, opts){
+    opts = opts || {};
+    const height = opts.height || 160;
+    const width = opts.width || 600;
+    const n = Math.max(1, data.length);
+    const labelH = 18;
+    const chartH = height - labelH;
+    const barSlot = width / n;
+    const maxVal = Math.max(1, ...data.map(d=>Math.abs(d.value)));
+    const bars = data.map((d,i)=>{
+      const barH = Math.max(1, Math.round((Math.abs(d.value)/maxVal) * (chartH-8)));
+      const x = i * barSlot;
+      const barW = barSlot * 0.7;
+      const barX = x + (barSlot - barW)/2;
+      const y = chartH - barH;
+      const color = d.color || (d.value < 0 ? 'var(--status-red)' : 'var(--accent)');
+      const displayVal = d.valueLabel !== undefined ? d.valueLabel : d.value;
+      return `
+        <g>
+          <rect x="${barX.toFixed(1)}" y="${y}" width="${barW.toFixed(1)}" height="${barH}" fill="${color}" rx="2">
+            <title>${escapeHtml(String(d.label))}: ${escapeHtml(String(displayVal))}</title>
+          </rect>
+          <text x="${(x+barSlot/2).toFixed(1)}" y="${chartH+13}" text-anchor="middle" font-size="10.5" fill="var(--ink-soft)" font-family="var(--font-mono)">${escapeHtml(String(d.label))}</text>
+        </g>
+      `;
+    }).join('');
+    return `<svg viewBox="0 0 ${width} ${height}" preserveAspectRatio="none" style="width:100%;height:${height}px;">${bars}</svg>`;
+  }
+
   const HOSTESS_WEEKDAY_RATE = 1300;
+  const HOSTESS_DISHES_BONUS = 150;
+  function hostessDishesBonusesForDate(dateStr, dayShifts){
+    // 150₽ той хостес, чья смена по времени покрывает мероприятие с платной посудой (300₽) в этот день
+    const bonuses = {};
+    if(!dayShifts) return bonuses;
+    const dayEvents = state.events.filter(e=> e.date===dateStr && e.dishes==='needed' && e.dishesPayment==='paid');
+    if(dayEvents.length === 0) return bonuses;
+    dayEvents.forEach(ev=>{
+      SHIFT_DEFS.forEach(s=>{
+        const entry = normalizeShiftEntry(dayShifts[s.key], s);
+        if(!entry || !entry.name) return;
+        if(ev.time && ev.time >= entry.start && ev.time < entry.end){
+          bonuses[entry.name] = (bonuses[entry.name]||0) + HOSTESS_DISHES_BONUS;
+        }
+      });
+    });
+    return bonuses;
+  }
   const HOSTESS_WEEKEND_RATE = 1500;
   const HOSTESS_EXTRA_HOUR_RATE = 260;
   const SHIFT_DEFS = [
@@ -976,6 +1043,15 @@
     yearSummaryManual: null,
     auditLog: null,
     closedMonths: null,
+    marketingSpend: null,
+    marketingPlans: null,
+    marketingView: 'spend',
+    contentPosts: null,
+    autoBackupMeta: null,
+    pushEnabled: false,
+    pushRefundThreshold: 10000,
+    marketingSpendCursor: new Date(),
+    marketingSpendShowAll: false,
   };
 
   function pad(n){ return n<10 ? '0'+n : ''+n; }
@@ -1033,6 +1109,7 @@
     if(!state.currentRole) return false; // без входа теперь не видно вообще ничего
     if(view==='calendar' || view==='host' || view==='today') return true;
     if(view==='certificates') return roleCanAccessManagersTab(state.currentRole);
+    if(view==='marketing') return roleCanAccessManagersTab(state.currentRole);
     if(view==='book') return roleCanAccessBook(state.currentRole);
     if(view==='analytics') return roleCanAccessAnalytics(state.currentRole);
     return false;
@@ -1143,6 +1220,21 @@
       state.closedMonths = cm ? JSON.parse(cm.value) : [];
     }catch(e){ state.closedMonths = []; }
 
+    try{
+      const ms = await window.storage.get('marketing-spend', true);
+      state.marketingSpend = ms ? JSON.parse(ms.value) : [];
+    }catch(e){ state.marketingSpend = []; }
+
+    try{
+      const mp = await window.storage.get('marketing-plans', true);
+      state.marketingPlans = mp ? JSON.parse(mp.value) : {};
+    }catch(e){ state.marketingPlans = {}; }
+
+    try{
+      const cp = await window.storage.get('content-posts', true);
+      state.contentPosts = cp ? JSON.parse(cp.value) : [];
+    }catch(e){ state.contentPosts = []; }
+
     await seedCodesOverrideOnce();
 
     try{
@@ -1183,6 +1275,19 @@
     await autoDeductCanvasesForPastPaintingEvents();
     await autoApplyMaterialRulesForPastEvents();
     await migrateLeadProductNamesOnce();
+    await migrateIncomeProductNamesOnce();
+    try{
+      const abm = await window.storage.get('auto-backup-meta', true);
+      state.autoBackupMeta = abm ? JSON.parse(abm.value) : {};
+    }catch(e){ state.autoBackupMeta = {}; }
+    await autoBackupCheckAndRun();
+    await checkAndSendDailyPushReminders();
+
+    try{
+      const prt = await window.storage.get('push-refund-threshold', true);
+      state.pushRefundThreshold = prt ? Number(prt.value) : 10000;
+    }catch(e){ state.pushRefundThreshold = 10000; }
+    await pushHostessShiftReminderCheckAndRun();
 
     try{
       const t = await window.storage.get('sync-token', true);
@@ -1366,6 +1471,43 @@
     await storageSetWithRetry(MARKER, new Date().toISOString());
   }
 
+  const RECONCILE_STATUSES = ['tentative', 'offsite'];
+  async function syncEventIncomeIfNeeded(event){
+    // автоматическая синхронизация с "Книга → Доходы" для "Частник" и "Выезд" — тех же статусов,
+    // что и сверка "Календарь vs Книга". "По расписанию" сюда не попадает — для него доход ведётся иначе.
+    const eligible = RECONCILE_STATUSES.includes(event.status) && Number(event.price) > 0;
+    const existingAutoIncome = state.incomes.find(i=> i.eventId===event.id && i.autoFromEvent);
+    if(eligible){
+      const incomeEntry = {
+        id: existingAutoIncome ? existingAutoIncome.id : uid(),
+        date: event.date, operation: 'Оплата', product: event.product || 'Мастер-класс',
+        account: 'Точка', eventId: event.id, amount: Number(event.price), masterName: '', itemSaleId: '', orderId: '',
+        comment: `Мероприятие: ${event.title || 'без названия'}`, autoFromEvent: true,
+      };
+      const idx = state.incomes.findIndex(x=>x.id===incomeEntry.id);
+      if(idx>=0) state.incomes[idx] = incomeEntry; else state.incomes.push(incomeEntry);
+      await saveIncomes();
+    } else if(existingAutoIncome){
+      state.incomes = state.incomes.filter(x=>x.id !== existingAutoIncome.id);
+      await saveIncomes();
+    }
+  }
+  async function migrateIncomeProductNamesOnce(){
+    const MARKER = 'migrate-income-products-v1';
+    try{
+      const done = await window.storage.get(MARKER, true);
+      if(done) return;
+    }catch(e){ /* маркера нет — выполняем миграцию */ }
+
+    const RENAME_MAP = { 'Расписание': 'Мастер-класс', 'Детский': 'Детский МК' };
+    let changed = false;
+    state.incomes.forEach(i=>{
+      if(RENAME_MAP[i.product]){ i.product = RENAME_MAP[i.product]; changed = true; }
+    });
+    if(changed) await saveIncomes();
+    await storageSetWithRetry(MARKER, new Date().toISOString());
+  }
+
   async function autoDeductCanvasesForPastPaintingEvents(){
     // 1 гость = 1 холст, только для уже прошедших мероприятий по рисованию — будущие не трогаем.
     // Пере-проверяется при каждой загрузке (не разовая миграция), т.к. мероприятия со временем "переходят" из будущих в прошедшие.
@@ -1528,6 +1670,26 @@
     return '\uFEFF' + lines.join('\r\n');
   }
 
+  function buildMarketingSpendCsv(){
+    const header = ['Дата','Направление','Соцсеть','Ник блогера','Охват','Сумма (₽)','Привязано к мероприятию','Комментарий'];
+    const rows = [...state.marketingSpend].sort((a,b)=>(b.date||'').localeCompare(a.date||'')).map(m=>[
+      m.date||'', m.direction||'', m.socialNetwork||'', m.bloggerHandle||'', m.reach!==undefined&&m.reach!==null?m.reach:'',
+      m.amount!==undefined&&m.amount!==null?m.amount:'', m.eventId ? linkedEventLabel(m.eventId) : '', m.comment||''
+    ]);
+    const lines = [header, ...rows].map(r=>r.map(csvEscape).join(';'));
+    return '\uFEFF' + lines.join('\r\n');
+  }
+
+  function buildContentPostsCsv(){
+    const header = ['Дата','День недели','Соцсети','Продукт','Направление','О чём пост','Ссылка','Заявок за 30 дней после'];
+    const rows = [...state.contentPosts].sort((a,b)=>(b.date||'').localeCompare(a.date||'')).map(p=>[
+      p.date||'', weekdayFromDate(p.date), (p.socialNetworks||[]).join(', '), p.product||'', p.direction||'Все',
+      p.description||'', p.link||'', leadsAfterPost(p).count
+    ]);
+    const lines = [header, ...rows].map(r=>r.map(csvEscape).join(';'));
+    return '\uFEFF' + lines.join('\r\n');
+  }
+
   function buildIncomesCsv(){
     const header = ['Дата','Операция','Продукт','Счёт','Сумма (₽)','Мероприятие','Комментарий'];
     const rows = [...state.incomes].sort((a,b)=>(b.date||'').localeCompare(a.date||'')).map(i=>[
@@ -1567,8 +1729,63 @@
       masterPayRates: state.masterPayRates,
       masterPayOverrides: state.masterPayOverrides,
       monthlyPlans: state.monthlyPlans,
+      hostessShifts: state.hostessShifts,
+      netProfitManual: state.netProfitManual,
+      yearSummaryManual: state.yearSummaryManual,
+      auditLog: state.auditLog,
+      closedMonths: state.closedMonths,
+      marketingSpend: state.marketingSpend,
+      marketingPlans: state.marketingPlans,
+      contentPosts: state.contentPosts,
     }, null, 2);
   }
+
+  // автоматический бэкап — раз в сутки, без участия человека. Хранится 7 копий по дням недели
+  // (auto-backup-0 .. auto-backup-6), так что место не растёт бесконечно, а глубина — неделя.
+  async function autoBackupCheckAndRun(){
+    try{
+      const lastRun = await window.storage.get('auto-backup-last-run', true);
+      const lastRunAt = lastRun ? new Date(lastRun.value) : null;
+      const now = new Date();
+      if(lastRunAt && !isNaN(lastRunAt.getTime()) && (now - lastRunAt) < 24*60*60*1000) return;
+      const dow = now.getDay();
+      await storageSetWithRetry(`auto-backup-${dow}`, buildJsonExport());
+      await storageSetWithRetry('auto-backup-last-run', now.toISOString());
+      if(!state.autoBackupMeta) state.autoBackupMeta = {};
+      state.autoBackupMeta[dow] = now.toISOString();
+      await storageSetWithRetry('auto-backup-meta', JSON.stringify(state.autoBackupMeta));
+    }catch(e){ /* автобэкап не критичен — не мешаем работе приложения при сбое */ }
+  }
+
+  // ежедневные push-напоминания: смены хостес на сегодня + закончившиеся отслеживаемые материалы.
+  // Не чаще раза в ~20 часов — сработает у того, кто первым откроет приложение в этот день.
+  async function checkAndSendDailyPushReminders(){
+    try{
+      const lastRun = await window.storage.get('daily-push-reminders-last-run', true);
+      const lastRunAt = lastRun ? new Date(lastRun.value) : null;
+      const now = new Date();
+      if(lastRunAt && !isNaN(lastRunAt.getTime()) && (now - lastRunAt) < 20*60*60*1000) return;
+      await storageSetWithRetry('daily-push-reminders-last-run', now.toISOString());
+
+      const todayShifts = state.hostessShifts[todayStr()];
+      if(todayShifts){
+        const names = [];
+        SHIFT_DEFS.forEach(s=>{
+          const entry = normalizeShiftEntry(todayShifts[s.key], s);
+          if(entry && entry.name) names.push(`${entry.name} (${entry.start}–${entry.end})`);
+        });
+        if(names.length > 0){
+          await sendPushNotification('Смены хостес сегодня', names.join(', '), ['hostess']);
+        }
+      }
+
+      const outOfStock = state.materialsCatalog.filter(m=>m.trackStock && (m.stock===undefined||m.stock===null||m.stock<=0));
+      if(outOfStock.length > 0){
+        await sendPushNotification('Закончился материал', outOfStock.map(m=>m.name).join(', '), ['admin','owner']);
+      }
+    }catch(e){ /* напоминания не критичны — не мешаем работе приложения при сбое */ }
+  }
+
 
   async function storageSetWithRetry(key, value, attempts=3){
     let lastErr = null;
@@ -1691,6 +1908,33 @@
   async function saveClosedMonths(){
     return storageSetWithRetry('closed-months', JSON.stringify(state.closedMonths));
   }
+  async function saveMarketingSpend(){
+    return storageSetWithRetry('marketing-spend', JSON.stringify(state.marketingSpend));
+  }
+  async function saveMarketingPlans(){
+    return storageSetWithRetry('marketing-plans', JSON.stringify(state.marketingPlans));
+  }
+  async function saveContentPosts(){
+    return storageSetWithRetry('content-posts', JSON.stringify(state.contentPosts));
+  }
+  async function syncMarketingSpendExpense(spend){
+    // каждая трата в разделе "Маркетинг" отражается расходом в "Книге" (категория "Маркетинг"),
+    // чтобы общая прибыль и расходы студии реально учитывали эти деньги, а не только сам раздел
+    const label = spend.direction === 'Блогеры' && spend.bloggerHandle
+      ? `Маркетинг: ${spend.direction} — ${spend.bloggerHandle}`
+      : `Маркетинг: ${spend.direction}${spend.socialNetwork ? ' ('+spend.socialNetwork+')' : ''}`;
+    const expenseEntry = {
+      id: spend.expenseId || uid(),
+      date: spend.date, category: 'Маркетинг', direction: '', master: '',
+      source: 'Точка', amount: Number(spend.amount)||0, responsible: '',
+      eventId: '', comment: spend.comment ? `${label} — ${spend.comment}` : label,
+    };
+    const idx = state.expenses.findIndex(x=>x.id===expenseEntry.id);
+    if(idx>=0) state.expenses[idx] = expenseEntry; else state.expenses.push(expenseEntry);
+    await saveExpenses();
+    return expenseEntry.id;
+  }
+
   function recordAction(message, detail){
     showToast(message);
     if(!state.auditLog) state.auditLog = [];
@@ -1913,6 +2157,7 @@
         state.unlockedAdmin = ['assistant','admin','owner'].includes(matchedRole);
         state.unlockedOwner = (matchedRole === 'owner');
         render();
+        checkPushSubscriptionStatus().then(enabled=>{ state.pushEnabled = enabled; render(); });
       } else {
         errorEl.style.display = 'block';
         input.style.borderColor = 'var(--danger)';
@@ -1956,6 +2201,8 @@
       html += renderAnalytics();
     } else if(state.view === 'certificates'){
       html += renderCertificatesView();
+    } else if(state.view === 'marketing'){
+      html += renderMarketingView();
     } else if(state.view === 'book'){
       html += renderBookView();
     }
@@ -1965,6 +2212,7 @@
     else if(state.view === 'host'){ attachHostEvents(); }
     else if(state.view === 'analytics'){ attachAnalyticsEvents(); }
     else if(state.view === 'certificates'){ attachCertificatesEvents(); }
+    else if(state.view === 'marketing'){ attachMarketingEvents(); }
     else if(state.view === 'book'){ attachBookEvents(); }
 
     if(state.modal){ renderModal(); }
@@ -2058,6 +2306,163 @@
     return alerts;
   }
 
+  function performGlobalSearch(query){
+    const q = query.trim().toLowerCase();
+    if(q.length < 2) return [];
+    const results = [];
+    state.events.forEach(e=>{
+      const haystack = [e.title, e.host, e.guestName, e.notes].filter(Boolean).join(' ').toLowerCase();
+      if(haystack.includes(q)){
+        results.push({
+          type: 'event', id: e.id,
+          label: `📅 ${e.title||'Без названия'}`,
+          sub: `${e.date?formatDateText(e.date):''} · ${e.host||'без ведущего'}${e.guestName?' · '+e.guestName:''}`,
+        });
+      }
+    });
+    if(roleCanAccessManagersTab(state.currentRole)){
+      state.leads.forEach(l=>{
+        if((l.contact||'').toLowerCase().includes(q)){
+          results.push({
+            type: 'lead', id: l.id,
+            label: `📝 Заявка: ${l.contact}`,
+            sub: `${l.requestDate?formatDateText(l.requestDate):''} · ${l.source||''} · ${l.product||''}`,
+          });
+        }
+      });
+      state.certificates.forEach(c=>{
+        const haystack = [String(c.number||''), c.ownerName, c.ownerContact].filter(Boolean).join(' ').toLowerCase();
+        if(haystack.includes(q)){
+          results.push({
+            type: 'certificate', id: c.id,
+            label: `🎁 Сертификат №${c.number} · ${c.ownerName||''}`,
+            sub: `${c.saleDate?formatDateText(c.saleDate):''} · ${formatMoney(c.amount||0)}`,
+          });
+        }
+      });
+    }
+    return results.slice(0, 20);
+  }
+
+  function renderGlobalSearchResults(results, query){
+    if(query.trim().length < 2) return '';
+    if(results.length === 0){
+      return `<div style="padding:14px;font-size:13px;color:var(--ink-soft);">Ничего не нашлось</div>`;
+    }
+    return results.map(r=>`
+      <div class="global-search-result" data-restype="${r.type}" data-resid="${r.id}" style="padding:10px 14px;border-bottom:1px solid var(--line);cursor:pointer;">
+        <div style="font-size:13px;">${escapeHtml(r.label)}</div>
+        <div style="font-size:11.5px;color:var(--ink-soft);margin-top:2px;">${escapeHtml(r.sub)}</div>
+      </div>
+    `).join('');
+  }
+
+  function urlBase64ToUint8Array(base64String){
+    const padding = '='.repeat((4 - base64String.length % 4) % 4);
+    const base64 = (base64String + padding).replace(/-/g, '+').replace(/_/g, '/');
+    const rawData = atob(base64);
+    return Uint8Array.from([...rawData].map(c => c.charCodeAt(0)));
+  }
+
+  async function checkPushSubscriptionStatus(){
+    try{
+      if(!('serviceWorker' in navigator) || !('PushManager' in window)) return false;
+      const reg = await navigator.serviceWorker.ready;
+      const sub = await reg.pushManager.getSubscription();
+      if(!sub) return false;
+      // подписка на этом устройстве уже есть — обновляем роль на сервере на случай,
+      // если с этого же устройства (например, общий планшет на ресепшене) теперь зашёл кто-то другой
+      try{
+        await fetch('/api/push/subscribe', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ subscription: sub.toJSON(), role: state.currentRole }),
+        });
+      }catch(e){ /* не критично — хотя бы локальный статус знаем */ }
+      return true;
+    }catch(e){ return false; }
+  }
+
+  async function subscribeToPush(){
+    if(!('serviceWorker' in navigator) || !('PushManager' in window)){
+      showToast('Браузер не поддерживает уведомления', 'error');
+      return false;
+    }
+    try{
+      const permission = await Notification.requestPermission();
+      if(permission !== 'granted'){
+        showToast('Уведомления не разрешены в браузере', 'error');
+        return false;
+      }
+      const keyRes = await fetch('/api/push/vapid-public-key');
+      const { publicKey } = await keyRes.json();
+      if(!publicKey){
+        showToast('Push пока не настроен на сервере', 'error');
+        return false;
+      }
+      const reg = await navigator.serviceWorker.ready;
+      const sub = await reg.pushManager.subscribe({
+        userVisibleOnly: true,
+        applicationServerKey: urlBase64ToUint8Array(publicKey),
+      });
+      await fetch('/api/push/subscribe', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ subscription: sub.toJSON(), role: state.currentRole }),
+      });
+      return true;
+    }catch(e){
+      showToast('Не получилось включить уведомления', 'error');
+      return false;
+    }
+  }
+
+  async function unsubscribeFromPush(){
+    try{
+      const reg = await navigator.serviceWorker.ready;
+      const sub = await reg.pushManager.getSubscription();
+      if(sub){
+        await fetch('/api/push/unsubscribe', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ endpoint: sub.endpoint }),
+        });
+        await sub.unsubscribe();
+      }
+    }catch(e){ /* не критично */ }
+  }
+
+  async function sendPushNotification(title, body, targetRoles){
+    try{
+      await fetch('/api/push/send', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ title, body, targetRoles }),
+      });
+    }catch(e){ /* push не критичен для основного действия пользователя */ }
+  }
+
+  // напоминание хостес про смену — раз в день, максимум одно уведомление на сегодняшний день,
+  // независимо от того, сколько раз за день кто-то откроет приложение
+  async function pushHostessShiftReminderCheckAndRun(){
+    try{
+      const today = todayStr();
+      const lastSent = await window.storage.get('push-hostess-reminder-last-sent', true);
+      if(lastSent && lastSent.value === today) return;
+      const dayShifts = state.hostessShifts[today];
+      if(dayShifts){
+        const names = SHIFT_DEFS.map(s=>{
+          const entry = normalizeShiftEntry(dayShifts[s.key], s);
+          return (entry && entry.name) ? `${entry.name} (${entry.start}–${entry.end})` : null;
+        }).filter(Boolean);
+        if(names.length > 0){
+          await sendPushNotification('Смены сегодня', names.join(', '), ['hostess']);
+        }
+      }
+      await storageSetWithRetry('push-hostess-reminder-last-sent', today);
+    }catch(e){ /* напоминание не критично для работы приложения */ }
+  }
+
   function renderHeader(){
     const alerts = computeDailyAlerts();
     const role = state.currentRole;
@@ -2069,14 +2474,20 @@
           <div class="app-sub">4 пространства · мероприятия и ведущие</div>
         </div>
         <div style="display:flex; align-items:center; gap:10px; flex-wrap:wrap;">
+          <div class="global-search-wrap" style="position:relative;">
+            <input type="text" id="global-search-input" placeholder="🔍 Поиск: мероприятие, гость, сертификат…" style="width:260px; padding:9px 12px; border:1px solid var(--line-strong); border-radius:var(--radius); font-size:12.5px; font-family:var(--font-body); background:var(--white);">
+            <div id="global-search-results" style="display:none; position:absolute; top:calc(100% + 4px); left:0; right:0; background:var(--white); border:1px solid var(--line-strong); border-radius:var(--radius); box-shadow:0 8px 24px rgba(0,0,0,0.12); max-height:360px; overflow-y:auto; z-index:500;"></div>
+          </div>
           <div class="view-switch">
             <button data-view="calendar" class="${state.view==='calendar'?'active':''}">По пространствам</button>
             <button data-view="host" class="${state.view==='host'?'active':''}">По ведущим</button>
             ${roleCanAccessAnalytics(role) ? `<button data-view="analytics" class="${state.view==='analytics'?'active':''}">Аналитика</button>` : ''}
             ${roleCanAccessManagersTab(role) ? `<button data-view="certificates" class="${state.view==='certificates'?'active':''}">Для менеджеров</button>` : ''}
+            ${roleCanAccessManagersTab(role) ? `<button data-view="marketing" class="${state.view==='marketing'?'active':''}">Маркетинг</button>` : ''}
             ${roleCanAccessBook(role) ? `<button data-view="book" class="${state.view==='book'?'active':''}">Книга</button>` : ''}
           </div>
           <button class="lock-btn no-print" id="btn-today-view">📋 Сегодня</button>
+          <button class="lock-btn no-print" id="btn-push-toggle">${state.pushEnabled ? '🔔 Уведомления включены' : '🔕 Включить уведомления'}</button>
           <button class="lock-btn ${role?'unlocked':''}" id="btn-lock">
             ${role ? '👤 '+ROLE_LABELS[role]+' — выйти' : '🔒 Войти'}
           </button>
@@ -2232,6 +2643,822 @@
   function nextCertNumber(){
     const nums = state.certificates.map(c=>Number(c.number)||0);
     return nums.length ? Math.max(...nums) + 1 : 1;
+  }
+
+  function renderMarketingView(){
+    const subTabsHtml = `
+      <div class="cert-subtabs">
+        <button data-marketingview="spend" class="${state.marketingView==='spend'?'active':''}">Траты</button>
+        <button data-marketingview="stats" class="${state.marketingView==='stats'?'active':''}">Статистика</button>
+        <button data-marketingview="content" class="${state.marketingView==='content'?'active':''}">Контент-план</button>
+        <button data-marketingview="plan" class="${state.marketingView==='plan'?'active':''}">План/факт</button>
+      </div>
+    `;
+    if(state.marketingView === 'stats') return subTabsHtml + renderMarketingStatsView();
+    if(state.marketingView === 'plan') return subTabsHtml + renderMarketingPlanView();
+    if(state.marketingView === 'content') return subTabsHtml + renderContentPlanView();
+    return subTabsHtml + renderMarketingSpendListView();
+  }
+
+  function renderMarketingSpendListView(){
+    const cursor = state.marketingSpendCursor;
+    const ym = cursor.getFullYear()+'-'+pad(cursor.getMonth()+1);
+    const monthLabel = `${MONTHS[cursor.getMonth()]} ${cursor.getFullYear()}`;
+    const allSorted = [...state.marketingSpend].sort((a,b)=> (b.date||'').localeCompare(a.date||''));
+    const items = state.marketingSpendShowAll ? allSorted : allSorted.filter(m=> m.date && m.date.startsWith(ym));
+    const totalAmount = items.reduce((s,m)=> s + (Number(m.amount)||0), 0);
+    return `
+      <div class="cal-nav">
+        <div class="month-label">${state.marketingSpendShowAll ? 'Все записи' : monthLabel}</div>
+        <div class="cal-nav-btns">
+          <button class="today-btn" id="ms-toggle-all">${state.marketingSpendShowAll ? '📅 По месяцам' : '📋 Показать все'}</button>
+          ${!state.marketingSpendShowAll ? `
+            <button class="today-btn" id="ms-today">текущий месяц</button>
+            <button class="nav-btn" id="ms-prev">‹</button>
+            <button class="nav-btn" id="ms-next">›</button>
+          ` : ''}
+        </div>
+      </div>
+      <div class="cert-toolbar">
+        <div style="font-size:12px;color:var(--ink-soft);font-family:var(--font-mono);">Записей: ${items.length} · Сумма: ${formatMoney(totalAmount)}</div>
+        <button class="btn btn-primary" id="btn-add-marketing-spend">+ Добавить трату</button>
+      </div>
+      ${items.length === 0 ? `<div class="host-empty">${state.marketingSpendShowAll ? 'Трат пока нет' : 'В этом месяце трат нет'}</div>` : `
+        <div class="cert-list">
+          ${items.map(m=>`
+            <div class="refund-row" data-mid="${m.id}">
+              <div class="cell">${m.date ? formatDateText(m.date) : '—'}</div>
+              <div class="amount">${formatMoney(m.amount||0)}</div>
+              <div class="cell"><span class="cert-badge in_progress">${escapeHtml(m.direction||'')}</span></div>
+              <div class="cell">${m.direction==='Блогеры' ? escapeHtml(m.bloggerHandle||'') + (m.reach ? ' · охват '+m.reach : '') : escapeHtml(m.socialNetwork||'')}</div>
+              <div class="reason">${escapeHtml(m.comment||'')}</div>
+            </div>
+          `).join('')}
+        </div>
+      `}
+    `;
+  }
+
+  function renderMarketingStatsView(){
+    const statsYear = String(new Date().getFullYear());
+    const spendThisYear = state.marketingSpend.filter(m=> m.date && m.date.startsWith(statsYear));
+    const leadsThisYear = state.leads.filter(l=> l.requestDate && l.requestDate.startsWith(statsYear));
+
+    const totalSpendYear = spendThisYear.reduce((s,m)=>s+(Number(m.amount)||0), 0);
+    const totalRevenueYear = state.events
+      .filter(e=> e.date && e.date.startsWith(statsYear))
+      .reduce((s,e)=> s + eventRevenueForecast(e), 0);
+    const spendPctOfRevenue = totalRevenueYear>0 ? (totalSpendYear/totalRevenueYear*100) : null;
+
+    const marketingCertsThisYear = state.certificates.filter(c=> c.purpose==='marketing' && c.saleDate && c.saleDate.startsWith(statsYear));
+    const marketingCertsValue = marketingCertsThisYear.reduce((s,c)=> s + (Number(c.amount)||0), 0);
+
+    // сколько раз реально ПРИШЛИ и воспользовались маркетинговым сертификатом за год — считаем по всем
+    // маркетинговым сертификатам (не только выпущенным в этом году), но сами списания смотрим за этот год
+    const marketingRedemptionsThisYear = [];
+    state.certificates.filter(c=>c.purpose==='marketing').forEach(c=>{
+      (c.redemptions||[]).forEach(r=>{
+        if(r.date && r.date.startsWith(statsYear)) marketingRedemptionsThisYear.push(r);
+      });
+    });
+    const redemptionsByMonth = Array(12).fill(0);
+    marketingRedemptionsThisYear.forEach(r=>{
+      const monthIdx = parseInt(r.date.slice(5,7),10) - 1;
+      if(monthIdx>=0 && monthIdx<12) redemptionsByMonth[monthIdx]++;
+    });
+
+    const byDirection = {};
+    spendThisYear.forEach(m=>{
+      byDirection[m.direction] = (byDirection[m.direction]||0) + (Number(m.amount)||0);
+    });
+    const maxDir = Math.max(1, ...Object.values(byDirection));
+
+    // канал = соцсеть, если указана; иначе — само направление (для офлайн-направлений типа "Листовки")
+    const channelOf = (m)=> m.socialNetwork || m.direction;
+    const spendByChannel = {};
+    spendThisYear.forEach(m=>{
+      const ch = channelOf(m);
+      spendByChannel[ch] = (spendByChannel[ch]||0) + (Number(m.amount)||0);
+    });
+    const leadsByChannel = {};
+    const soldByChannel = {};
+    const soldRevenueByChannel = {};
+    leadsThisYear.forEach(l=>{
+      leadsByChannel[l.source] = (leadsByChannel[l.source]||0) + 1;
+      if(l.sold){
+        soldByChannel[l.source] = (soldByChannel[l.source]||0) + 1;
+        soldRevenueByChannel[l.source] = (soldRevenueByChannel[l.source]||0) + (Number(l.revenue)||0);
+      }
+    });
+    const allChannels = [...new Set([...Object.keys(spendByChannel), ...Object.keys(leadsByChannel)])];
+
+    // динамика по месяцам текущего года
+    const monthlyTotals = Array(12).fill(0);
+    spendThisYear.forEach(m=>{
+      const monthIdx = parseInt(m.date.slice(5,7),10) - 1;
+      if(monthIdx>=0 && monthIdx<12) monthlyTotals[monthIdx] += Number(m.amount)||0;
+    });
+    const maxMonthly = Math.max(1, ...monthlyTotals);
+
+    // блогеры — рейтинг по цене охвата (дешевле охват — выше в списке)
+    const bloggerRows = spendThisYear.filter(m=>m.direction==='Блогеры').map(m=>{
+      const linkedEvent = m.eventId ? state.events.find(e=>e.id===m.eventId) : null;
+      const linkedRevenue = linkedEvent ? eventRevenueForecast(linkedEvent) : null;
+      const realRoi = (linkedRevenue!==null && Number(m.amount)>0) ? Math.round((linkedRevenue/Number(m.amount))*100) : null;
+      return {
+        ...m,
+        perReach: (m.reach && Number(m.reach)>0) ? (Number(m.amount)/Number(m.reach)) : null,
+        linkedEvent, linkedRevenue, realRoi,
+      };
+    }).sort((a,b)=>{
+      // сначала те, у кого есть настоящая окупаемость по выручке (от большей к меньшей),
+      // затем остальные — по цене охвата (от дешёвого к дорогому)
+      if(a.realRoi!==null && b.realRoi===null) return -1;
+      if(a.realRoi===null && b.realRoi!==null) return 1;
+      if(a.realRoi!==null && b.realRoi!==null) return b.realRoi - a.realRoi;
+      if(a.perReach===null) return 1;
+      if(b.perReach===null) return -1;
+      return a.perReach - b.perReach;
+    });
+
+    return `
+      <div class="analytics-section">
+        <h4>Общая картина — ${statsYear} год</h4>
+        <div class="stat-row"><div class="stat-label">Потрачено на маркетинг</div><div style="flex:1;font-family:var(--font-mono);font-size:13px;">${formatMoney(totalSpendYear)}</div></div>
+        <div class="stat-row"><div class="stat-label">Доля от выручки студии</div><div style="flex:1;font-family:var(--font-mono);font-size:13px;">${spendPctOfRevenue!==null ? spendPctOfRevenue.toFixed(1)+'%' : '— (выручки за год пока нет)'}</div></div>
+        ${marketingCertsValue>0 ? `<div class="stat-row"><div class="stat-label">+ маркетинговые сертификаты (услугами)</div><div style="flex:1;font-family:var(--font-mono);font-size:13px;color:var(--ink-soft);">${formatMoney(marketingCertsValue)} · ${marketingCertsThisYear.length} шт. — деньги не платились, но это тоже часть промо-бюджета</div></div>` : ''}
+        <div class="stat-row"><div class="stat-label">Пришли по маркетинговому сертификату</div><div style="flex:1;font-family:var(--font-mono);font-size:13px;">${marketingRedemptionsThisYear.length>0 ? marketingRedemptionsThisYear.length+' раз' : '— (пока никто не воспользовался)'}</div></div>
+      </div>
+
+      ${marketingRedemptionsThisYear.length>0 ? `
+      <div class="analytics-section">
+        <h4>Погашения маркетинговых сертификатов по месяцам — ${statsYear} год</h4>
+        ${MONTHS.map((name,i)=> redemptionsByMonth[i]>0 ? `
+          <div class="stat-row">
+            <div class="stat-label">${escapeHtml(name)}</div>
+            <div style="flex:1;font-family:var(--font-mono);font-size:13px;">${redemptionsByMonth[i]} раз</div>
+          </div>
+        ` : '').join('')}
+      </div>
+      ` : ''}
+
+      <div class="analytics-section">
+        <h4>Динамика по месяцам — ${statsYear} год</h4>
+        ${renderBarChart(MONTHS.map((name,i)=>({ label: name.slice(0,3), value: monthlyTotals[i], valueLabel: formatMoney(monthlyTotals[i]) })))}
+      </div>
+
+      <div class="analytics-section">
+        <h4>Траты по направлениям — ${statsYear} год</h4>
+        ${Object.keys(byDirection).length===0 ? '<div style="color:var(--ink-soft);font-size:13px;">Пока нет данных за этот год.</div>' : Object.entries(byDirection).sort((a,b)=>b[1]-a[1]).map(([dir,amt])=>`
+          <div class="stat-row">
+            <div class="stat-label">${escapeHtml(dir)}</div>
+            <div class="stat-bar-track"><div class="stat-bar-fill" style="width:${Math.round(amt/maxDir*100)}%;"></div></div>
+            <div class="stat-count" style="width:auto;font-size:12px;">${formatMoney(amt)}</div>
+          </div>
+        `).join('')}
+      </div>
+
+      <div class="analytics-section">
+        <h4>По каналам: цена заявки, конверсия, окупаемость — ${statsYear} год</h4>
+        <div style="font-size:12px;color:var(--ink-soft);margin-bottom:10px;">Канал — соцсеть (если указана в трате) либо само направление для офлайна (листовки, гео-сервисы и т.п.). Сверяется с «Конверсией» по такому же источнику заявки.</div>
+        ${allChannels.length===0 ? '<div style="color:var(--ink-soft);font-size:13px;">Пока нет ни трат, ни заявок в этом году.</div>' : allChannels.sort((a,b)=>(spendByChannel[b]||0)-(spendByChannel[a]||0)).map(ch=>{
+          const spend = spendByChannel[ch]||0;
+          const leadsCount = leadsByChannel[ch]||0;
+          const soldCount = soldByChannel[ch]||0;
+          const perLead = leadsCount>0 ? Math.round(spend/leadsCount) : null;
+          const convPct = leadsCount>0 ? Math.round(soldCount/leadsCount*100) : null;
+          const soldRevenue = soldRevenueByChannel[ch]||0;
+          const roi = spend>0 ? Math.round((soldRevenue/spend)*100) : null;
+          return `
+          <div class="stat-row">
+            <div class="stat-label">${escapeHtml(ch)}</div>
+            <div style="flex:1;font-family:var(--font-mono);font-size:13px;">
+              ${spend>0?formatMoney(spend)+' потрачено · ':''}${leadsCount} заявок${perLead!==null?' · '+formatMoney(perLead)+' за заявку':''}${convPct!==null?' · конверсия '+convPct+'% ('+soldCount+' купили)':''}
+              ${soldRevenue>0 ? `<div style="margin-top:2px;${roi!==null && roi<100 ? 'color:var(--status-red);' : (roi!==null ? 'color:var(--status-green);' : '')}">Выручка от купивших: ${formatMoney(soldRevenue)}${roi!==null?' · окупаемость '+roi+'%':''}</div>` : ''}
+            </div>
+          </div>
+        `;}).join('')}
+      </div>
+
+      <div class="analytics-section">
+        <h4>Блогеры — рейтинг по эффективности (${statsYear} год)</h4>
+        <div style="font-size:12px;color:var(--ink-soft);margin-bottom:10px;">Сверху — те, у кого есть настоящая окупаемость (привязано мероприятие с реальной выручкой), от самой высокой. Дальше — по цене охвата, от самого дешёвого. Снизу — без данных для сравнения.</div>
+        ${bloggerRows.length===0 ? '<div style="color:var(--ink-soft);font-size:13px;">В этом году трат на блогеров ещё не было.</div>' : bloggerRows.map(m=>`
+          <div class="stat-row">
+            <div class="stat-label">${escapeHtml(m.bloggerHandle||'без ника')} · ${m.date?formatDateText(m.date):''}</div>
+            <div style="flex:1;font-family:var(--font-mono);font-size:13px;">
+              ${formatMoney(m.amount||0)}${m.reach?' · охват '+m.reach:' · охват не указан'}${m.perReach!==null?' · '+m.perReach.toFixed(2)+'₽ за охват':''}
+              ${m.realRoi!==null ? `<div style="margin-top:2px;${m.realRoi<100?'color:var(--status-red);':'color:var(--status-green);'}">Привязано: «${escapeHtml(m.linkedEvent.title||'мероприятие')}» · выручка ${formatMoney(m.linkedRevenue)} · окупаемость ${m.realRoi}%</div>` : ''}
+            </div>
+          </div>
+        `).join('')}
+      </div>
+    `;
+  }
+
+  function renderMarketingPlanView(){
+    const ym = todayStr().slice(0,7);
+    const planForMonth = (state.marketingPlans && state.marketingPlans[ym]) || { directions:{}, bloggers:{} };
+    const factByDirection = {};
+    state.marketingSpend.filter(m=>m.date && m.date.startsWith(ym)).forEach(m=>{
+      factByDirection[m.direction] = (factByDirection[m.direction]||0) + (Number(m.amount)||0);
+    });
+    const factByBlogger = {};
+    state.marketingSpend.filter(m=>m.date && m.date.startsWith(ym) && m.direction==='Блогеры').forEach(m=>{
+      const key = m.bloggerHandle || 'без ника';
+      factByBlogger[key] = (factByBlogger[key]||0) + (Number(m.amount)||0);
+    });
+    const bloggerNames = new Set([...Object.keys(planForMonth.bloggers||{}), ...Object.keys(factByBlogger)]);
+
+    return `
+      <div class="analytics-section">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;">
+          <h4 style="margin:0;">План/факт по направлениям — ${escapeHtml(ym)}</h4>
+          <button class="btn btn-ghost" id="btn-edit-marketing-plan">✏ Задать план на месяц</button>
+        </div>
+        ${MARKETING_DIRECTIONS.map(dir=>{
+          const plan = (planForMonth.directions||{})[dir] || 0;
+          const fact = factByDirection[dir] || 0;
+          const diff = fact - plan;
+          return `
+          <div class="stat-row">
+            <div class="stat-label">${escapeHtml(dir)}</div>
+            <div style="flex:1;font-family:var(--font-mono);font-size:13px;">план ${formatMoney(plan)} · факт ${formatMoney(fact)}${plan>0?` · <span style="color:${diff>0?'var(--status-red)':'var(--status-green)'};">${diff>0?'+':''}${formatMoney(diff)}</span>`:''}</div>
+          </div>
+        `;}).join('')}
+      </div>
+
+      <div class="analytics-section">
+        <h4>План/факт по блогерам — ${escapeHtml(ym)}</h4>
+        ${bloggerNames.size===0 ? '<div style="color:var(--ink-soft);font-size:13px;">Пока нет ни плана, ни трат по блогерам в этом месяце.</div>' : [...bloggerNames].map(name=>{
+          const plan = (planForMonth.bloggers||{})[name] || 0;
+          const fact = factByBlogger[name] || 0;
+          const diff = fact - plan;
+          return `
+          <div class="stat-row">
+            <div class="stat-label">${escapeHtml(name)}</div>
+            <div style="flex:1;font-family:var(--font-mono);font-size:13px;">план ${formatMoney(plan)} · факт ${formatMoney(fact)}${plan>0?` · <span style="color:${diff>0?'var(--status-red)':'var(--status-green)'};">${diff>0?'+':''}${formatMoney(diff)}</span>`:''}</div>
+          </div>
+        `;}).join('')}
+      </div>
+    `;
+  }
+
+  function renderMarketingSpendModal(){
+    const isNew = state.modal.isNew;
+    const m = state.modal.marketingSpend;
+    const marketingEventOptions = m.direction === 'Блогеры'
+      ? eventSelectOptions()
+      : eventSelectOptions().filter(o=> state.events.find(e=>e.id===o.id && e.status==='marketing'));
+    return `
+      <div class="modal" style="max-width:480px;">
+        <div class="modal-head">
+          <h3>${isNew ? 'Новая трата на маркетинг' : 'Трата на маркетинг'}</h3>
+          <button class="modal-close">×</button>
+        </div>
+        <div class="modal-body">
+          <div class="field">
+            <label>Дата</label>
+            <input type="date" id="ms-date" value="${m.date||''}">
+          </div>
+          <div class="field">
+            <label>Направление</label>
+            <select id="ms-direction">
+              ${MARKETING_DIRECTIONS.map(d=>`<option value="${d}" ${m.direction===d?'selected':''}>${d}</option>`).join('')}
+            </select>
+          </div>
+          <div class="field">
+            <label>Соцсеть (если применимо)</label>
+            <select id="ms-social">
+              <option value="">—</option>
+              ${MARKETING_SOCIAL_NETWORKS.map(s=>`<option value="${s}" ${m.socialNetwork===s?'selected':''}>${s}</option>`).join('')}
+            </select>
+          </div>
+          <div class="field" id="ms-blogger-field" style="display:${m.direction==='Блогеры'?'block':'none'};">
+            <label>Ник блогера</label>
+            <input type="text" id="ms-blogger-handle" value="${escapeHtml(m.bloggerHandle||'')}" placeholder="@nickname">
+            <label style="margin-top:8px;">Охват</label>
+            <input type="number" id="ms-reach" value="${m.reach!==undefined&&m.reach!==null?m.reach:''}" min="0" step="100" placeholder="Например: 15000">
+          </div>
+          <div class="field">
+            <label>Сумма (₽)</label>
+            <input type="number" id="ms-amount" value="${m.amount!==undefined&&m.amount!==null?m.amount:''}" min="0" step="100" placeholder="Например: 3000">
+          </div>
+          <div class="field">
+            <label>Привязать к мероприятию (необязательно)</label>
+            <input type="text" id="ms-event-search" placeholder="Начните вводить дату или название…" list="ms-event-options" value="${escapeHtml(m.eventId ? (marketingEventOptions.find(o=>o.id===m.eventId)?.label || '') : '')}">
+            <datalist id="ms-event-options">${marketingEventOptions.map(o=>`<option value="${escapeHtml(o.label)}">`).join('')}</datalist>
+            <input type="hidden" id="ms-event" value="${m.eventId||''}">
+            <div style="font-size:11.5px;color:var(--ink-soft);margin-top:4px;" id="ms-event-hint">${m.direction==='Блогеры' ? 'Показаны все мероприятия — привяжите то, которое реально пришло по этому блогеру, тогда окупаемость посчитается по настоящей выручке.' : 'Показаны только мероприятия со статусом «Маркетинг» — например, съёмки или розыгрыши.'}</div>
+          </div>
+          <div class="field">
+            <label>Комментарий</label>
+            <textarea id="ms-comment" rows="2" placeholder="Необязательно">${escapeHtml(m.comment||'')}</textarea>
+          </div>
+        </div>
+        <div class="modal-actions">
+          <div>${!isNew ? `<button class="btn-danger" id="btn-del-marketing-spend">Удалить</button>` : '<span></span>'}</div>
+          <div style="display:flex;gap:8px;">
+            <button class="btn btn-ghost" id="btn-cancel-marketing-spend">Отмена</button>
+            <button class="btn btn-primary" id="btn-save-marketing-spend">Сохранить</button>
+          </div>
+        </div>
+      </div>
+    `;
+  }
+
+  function attachMarketingSpendModalEvents(overlay){
+    const directionSelect = overlay.querySelector('#ms-direction');
+    const bloggerField = overlay.querySelector('#ms-blogger-field');
+    const eventOptionsList = overlay.querySelector('#ms-event-options');
+    const eventHintEl = overlay.querySelector('#ms-event-hint');
+    const eventSearchInput = overlay.querySelector('#ms-event-search');
+    const eventHidden = overlay.querySelector('#ms-event');
+    let labelToId = {};
+
+    function refreshEventOptions(){
+      const isBlogger = directionSelect.value === 'Блогеры';
+      const options = isBlogger
+        ? eventSelectOptions()
+        : eventSelectOptions().filter(o=> state.events.find(e=>e.id===o.id && e.status==='marketing'));
+      labelToId = {};
+      options.forEach(o=>{ labelToId[o.label] = o.id; });
+      eventOptionsList.innerHTML = options.map(o=>`<option value="${escapeHtml(o.label)}">`).join('');
+      eventHintEl.textContent = isBlogger
+        ? 'Показаны все мероприятия — привяжите то, которое реально пришло по этому блогеру, тогда окупаемость посчитается по настоящей выручке.'
+        : 'Показаны только мероприятия со статусом «Маркетинг» — например, съёмки или розыгрыши.';
+      // если уже выбранное мероприятие больше не подходит под новый фильтр — сбрасываем выбор
+      const currentLabel = eventSearchInput.value.trim();
+      if(currentLabel && !labelToId[currentLabel]){
+        eventSearchInput.value = '';
+        eventHidden.value = '';
+      }
+    }
+    refreshEventOptions();
+
+    directionSelect.onchange = ()=>{
+      bloggerField.style.display = directionSelect.value === 'Блогеры' ? 'block' : 'none';
+      refreshEventOptions();
+    };
+
+    if(eventSearchInput && eventHidden){
+      eventSearchInput.addEventListener('input', ()=>{
+        const val = eventSearchInput.value.trim();
+        if(val === ''){ eventHidden.value = ''; return; }
+        if(labelToId[val]) eventHidden.value = labelToId[val];
+      });
+      eventSearchInput.addEventListener('blur', ()=>{
+        const val = eventSearchInput.value.trim();
+        if(val !== '' && !labelToId[val]){
+          eventSearchInput.value = '';
+          eventHidden.value = '';
+        }
+      });
+    }
+
+    overlay.querySelector('#btn-cancel-marketing-spend').onclick = ()=>{ state.modal = null; overlay.remove(); };
+
+    overlay.querySelector('#btn-save-marketing-spend').onclick = async ()=>{
+      const dateVal = overlay.querySelector('#ms-date').value;
+      const directionVal = overlay.querySelector('#ms-direction').value;
+      const socialVal = overlay.querySelector('#ms-social').value;
+      const bloggerHandleVal = overlay.querySelector('#ms-blogger-handle').value.trim();
+      const reachRaw = overlay.querySelector('#ms-reach').value;
+      const amountRaw = overlay.querySelector('#ms-amount').value;
+      const commentVal = overlay.querySelector('#ms-comment').value.trim();
+
+      if(state.currentRole !== 'owner'){
+        const ymCheck = dateVal ? dateVal.slice(0,7) : null;
+        const origYm = (state.modal.marketingSpend.date) ? state.modal.marketingSpend.date.slice(0,7) : null;
+        const blockedYm = [ymCheck, origYm].find(ym => ym && state.closedMonths && state.closedMonths.includes(ym));
+        if(blockedYm){
+          showGapWarningBanner(`Месяц ${blockedYm} закрыт для редактирования. Обратитесь к руководителю.`);
+          return;
+        }
+      }
+
+      let firstInvalid = null;
+      const markInvalid = (id)=>{
+        const el = overlay.querySelector('#'+id);
+        if(el){ el.style.borderColor = 'var(--danger)'; if(!firstInvalid) firstInvalid = el; }
+      };
+      overlay.querySelectorAll('#ms-date,#ms-blogger-handle,#ms-amount').forEach(el=>el.style.borderColor='');
+
+      if(!dateVal) markInvalid('ms-date');
+      const bloggerMissing = directionVal === 'Блогеры' && !bloggerHandleVal;
+      if(bloggerMissing) markInvalid('ms-blogger-handle');
+      if(amountRaw === '' || Number(amountRaw) < 0) markInvalid('ms-amount');
+
+      if(!dateVal || bloggerMissing || amountRaw==='' || Number(amountRaw)<0){
+        showGapWarningBanner(bloggerMissing ? 'Для направления «Блогеры» укажите ник блогера.' : 'Заполните дату и сумму. Сумма не может быть отрицательной.');
+        if(firstInvalid && firstInvalid.scrollIntoView) firstInvalid.scrollIntoView({block:'center', behavior:'smooth'});
+        return;
+      }
+
+      const updated = {
+        id: state.modal.marketingSpend.id,
+        date: dateVal,
+        direction: directionVal,
+        socialNetwork: socialVal,
+        bloggerHandle: directionVal==='Блогеры' ? bloggerHandleVal : '',
+        reach: (directionVal==='Блогеры' && reachRaw!=='') ? parseInt(reachRaw) : null,
+        amount: parseInt(amountRaw),
+        comment: commentVal,
+        expenseId: state.modal.marketingSpend.expenseId || '',
+        eventId: overlay.querySelector('#ms-event').value || '',
+      };
+      updated.expenseId = await syncMarketingSpendExpense(updated);
+
+      // если трата привязана к мероприятию — она же появляется в его себестоимости, чтобы карточка
+      // мероприятия и панель "📣 Маркетинг" в Аналитике тоже видели эту сумму
+      const prevEventId = state.modal.marketingSpend.eventId || '';
+      const affectedEventIds = new Set([prevEventId, updated.eventId].filter(Boolean));
+      let anyEventChanged = false;
+      affectedEventIds.forEach(eventId=>{
+        const ev = state.events.find(e=>e.id===eventId);
+        if(!ev) return;
+        if(!Array.isArray(ev.materialsItems)) ev.materialsItems = [];
+        const before = ev.materialsItems.length;
+        ev.materialsItems = ev.materialsItems.filter(mi=>mi.msRef !== updated.id);
+        if(eventId === updated.eventId){
+          const label = updated.direction==='Блогеры' && updated.bloggerHandle ? `Маркетинг: ${updated.bloggerHandle}` : `Маркетинг: ${updated.direction}`;
+          ev.materialsItems.push({ name: label, cost: updated.amount, source: 'studio', msRef: updated.id });
+        }
+        if(ev.materialsItems.length !== before || eventId === updated.eventId) anyEventChanged = true;
+      });
+      if(anyEventChanged) await saveEvents();
+
+      const idx = state.marketingSpend.findIndex(x=>x.id===updated.id);
+      if(idx>=0) state.marketingSpend[idx] = updated; else state.marketingSpend.push(updated);
+      await saveMarketingSpend();
+      recordAction('Трата на маркетинг сохранена');
+      state.modal = null; overlay.remove(); render();
+    };
+
+    const delBtn = overlay.querySelector('#btn-del-marketing-spend');
+    if(delBtn) delBtn.onclick = ()=>{
+      if(state.currentRole !== 'owner'){
+        const ym = state.modal.marketingSpend.date ? state.modal.marketingSpend.date.slice(0,7) : null;
+        if(ym && state.closedMonths && state.closedMonths.includes(ym)){
+          showGapWarningBanner(`Месяц ${ym} закрыт для редактирования. Обратитесь к руководителю.`);
+          return;
+        }
+      }
+      showConfirmDeletePopup('Удалить эту трату на маркетинг? Действие необратимо.', async ()=>{
+        const toDelete = state.modal.marketingSpend;
+        if(toDelete.expenseId){
+          state.expenses = state.expenses.filter(x=>x.id !== toDelete.expenseId);
+          await saveExpenses();
+        }
+        if(toDelete.eventId){
+          const ev = state.events.find(e=>e.id===toDelete.eventId);
+          if(ev && Array.isArray(ev.materialsItems)){
+            const before = ev.materialsItems.length;
+            ev.materialsItems = ev.materialsItems.filter(mi=>mi.msRef !== toDelete.id);
+            if(ev.materialsItems.length !== before) await saveEvents();
+          }
+        }
+        state.marketingSpend = state.marketingSpend.filter(x=>x.id !== toDelete.id);
+        await saveMarketingSpend();
+        state.modal = null; render();
+      });
+    };
+  }
+
+  function leadsAfterPost(post, windowDays=30){
+    if(!post.date) return { count: 0, leads: [] };
+    const start = post.date;
+    const endDate = new Date(post.date+'T00:00:00');
+    endDate.setDate(endDate.getDate() + windowDays);
+    const end = endDate.toISOString().slice(0,10);
+    const networks = post.socialNetworks || (post.socialNetwork ? [post.socialNetwork] : []);
+    const matched = state.leads.filter(l=>{
+      if(!networks.includes(l.source)) return false;
+      if(post.product && l.product !== post.product) return false;
+      return l.requestDate && l.requestDate >= start && l.requestDate <= end;
+    });
+    return { count: matched.length, leads: matched };
+  }
+
+  function renderContentPlanView(){
+    const items = [...state.contentPosts].sort((a,b)=> (b.date||'').localeCompare(a.date||''));
+    const withStats = items.map(p=>({ ...p, ...leadsAfterPost(p) }));
+    const topRanked = [...withStats].sort((a,b)=> b.count - a.count).slice(0, 10);
+
+    return `
+      <div class="cert-toolbar">
+        <div style="font-size:12px;color:var(--ink-soft);font-family:var(--font-mono);">Постов: ${items.length}</div>
+        <button class="btn btn-primary" id="btn-add-content-post">+ Добавить пост</button>
+      </div>
+
+      <div class="analytics-section">
+        <h4>Топ по заявкам после поста (следующие 30 дней)</h4>
+        <div style="font-size:12px;color:var(--ink-soft);margin-bottom:10px;">Заявки в той же соцсети (и по тому же продукту, если он указан у поста) за 30 дней после публикации — покупка обычно не сразу.</div>
+        ${topRanked.length===0 || topRanked.every(p=>p.count===0) ? '<div style="color:var(--ink-soft);font-size:13px;">Пока нет постов с заявками после них.</div>' : topRanked.filter(p=>p.count>0).map(p=>`
+          <div class="stat-row">
+            <div class="stat-label">${p.date?formatDateText(p.date)+' ('+weekdayFromDate(p.date)+')':''} · ${escapeHtml((p.socialNetworks||[]).join(', '))}${p.product?' · '+escapeHtml(p.product):''}${p.direction?' · '+escapeHtml(p.direction):''}</div>
+            <div style="flex:1;font-size:13px;">${escapeHtml(p.description||'без описания')} <span style="font-family:var(--font-mono);color:var(--status-green);">— ${p.count} ${p.count===1?'заявка':'заявок'}</span></div>
+          </div>
+        `).join('')}
+      </div>
+
+      <div class="analytics-section">
+        <h4>Все посты</h4>
+        ${items.length === 0 ? `<div style="color:var(--ink-soft);font-size:13px;">Постов пока нет</div>` : `
+          <div class="cert-list">
+            ${withStats.map(p=>`
+              <div class="refund-row" data-pid="${p.id}">
+                <div class="cell">${p.date ? formatDateText(p.date)+' ('+weekdayFromDate(p.date)+')' : '—'}</div>
+                <div class="cell"><span class="cert-badge in_progress">${escapeHtml((p.socialNetworks||[]).join(', '))}</span></div>
+                <div class="cell">${escapeHtml(p.product||'—')}</div>
+                <div class="cell">${escapeHtml(p.direction||'Все')}</div>
+                <div class="reason">${escapeHtml(p.description||'')}</div>
+                <div class="amount" style="color:${p.count>0?'var(--status-green)':'var(--ink-soft)'};">${p.count} ${p.count===1?'заявка':'заявок'}</div>
+              </div>
+            `).join('')}
+          </div>
+        `}
+      </div>
+    `;
+  }
+
+  function renderContentPostModal(){
+    const isNew = state.modal.isNew;
+    const p = state.modal.contentPost;
+    return `
+      <div class="modal" style="max-width:480px;">
+        <div class="modal-head">
+          <h3>${isNew ? 'Новый пост' : 'Пост'}</h3>
+          <button class="modal-close">×</button>
+        </div>
+        <div class="modal-body">
+          <div class="field">
+            <label>Дата публикации</label>
+            <input type="date" id="cp-date" value="${p.date||''}">
+            <div id="cp-weekday-hint" style="font-size:11.5px;color:var(--ink-soft);margin-top:4px;">${p.date ? weekdayFromDate(p.date) : ''}</div>
+          </div>
+          <div class="field">
+            <label>Соцсети (можно выбрать несколько — если пост выкладывали в нескольких местах)</label>
+            <div style="display:flex;flex-wrap:wrap;gap:6px;margin-top:4px;">
+              ${MARKETING_SOCIAL_NETWORKS.map(s=>`
+                <label style="display:flex;align-items:center;gap:5px;border:1px solid var(--line-strong);border-radius:var(--radius);padding:5px 10px;font-size:12.5px;cursor:pointer;">
+                  <input type="checkbox" class="cp-social-check" value="${s}" ${(p.socialNetworks||[]).includes(s)?'checked':''}> ${s}
+                </label>
+              `).join('')}
+            </div>
+          </div>
+          <div class="field">
+            <label>Продукт (если пост про конкретный продукт)</label>
+            <select id="cp-product">
+              <option value="">— любой —</option>
+              ${PRODUCTS.map(pr=>`<option value="${pr}" ${p.product===pr?'selected':''}>${pr}</option>`).join('')}
+            </select>
+          </div>
+          <div class="field">
+            <label>Направление (вид мероприятия — керамика, акрил и т.п.)</label>
+            <select id="cp-direction">
+              <option value="" ${!p.direction?'selected':''}>Все</option>
+              ${state.eventTypes.map(t=>`<option value="${escapeHtml(t.name)}" ${p.direction===t.name?'selected':''}>${escapeHtml(t.name)}</option>`).join('')}
+            </select>
+          </div>
+          <div class="field">
+            <label>О чём пост</label>
+            <textarea id="cp-description" rows="2" placeholder="Например: Reels с керамикой">${escapeHtml(p.description||'')}</textarea>
+          </div>
+          <div class="field">
+            <label>Ссылка (необязательно)</label>
+            <input type="text" id="cp-link" value="${escapeHtml(p.link||'')}" placeholder="https://...">
+          </div>
+        </div>
+        <div class="modal-actions">
+          <div>${!isNew ? `<button class="btn-danger" id="btn-del-content-post">Удалить</button>` : '<span></span>'}</div>
+          <div style="display:flex;gap:8px;">
+            <button class="btn btn-ghost" id="btn-cancel-content-post">Отмена</button>
+            <button class="btn btn-primary" id="btn-save-content-post">Сохранить</button>
+          </div>
+        </div>
+      </div>
+    `;
+  }
+
+  function attachContentPostModalEvents(overlay){
+    const dateInput = overlay.querySelector('#cp-date');
+    const weekdayHint = overlay.querySelector('#cp-weekday-hint');
+    if(dateInput && weekdayHint){
+      dateInput.addEventListener('input', ()=>{
+        weekdayHint.textContent = dateInput.value ? weekdayFromDate(dateInput.value) : '';
+      });
+    }
+
+    overlay.querySelector('#btn-cancel-content-post').onclick = ()=>{ state.modal = null; overlay.remove(); };
+
+    overlay.querySelector('#btn-save-content-post').onclick = async ()=>{
+      const dateVal = overlay.querySelector('#cp-date').value;
+      const socialVals = [...overlay.querySelectorAll('.cp-social-check:checked')].map(el=>el.value);
+      const productVal = overlay.querySelector('#cp-product').value;
+      const directionVal = overlay.querySelector('#cp-direction').value;
+      const descriptionVal = overlay.querySelector('#cp-description').value.trim();
+      const linkVal = overlay.querySelector('#cp-link').value.trim();
+
+      if(state.currentRole !== 'owner'){
+        const ymCheck = dateVal ? dateVal.slice(0,7) : null;
+        const origYm = (state.modal.contentPost.date) ? state.modal.contentPost.date.slice(0,7) : null;
+        const blockedYm = [ymCheck, origYm].find(ym => ym && state.closedMonths && state.closedMonths.includes(ym));
+        if(blockedYm){
+          showGapWarningBanner(`Месяц ${blockedYm} закрыт для редактирования. Обратитесь к руководителю.`);
+          return;
+        }
+      }
+
+      let firstInvalid = null;
+      const markInvalid = (id)=>{
+        const el = overlay.querySelector('#'+id);
+        if(el){ el.style.borderColor = 'var(--danger)'; if(!firstInvalid) firstInvalid = el; }
+      };
+      overlay.querySelectorAll('#cp-date,#cp-description').forEach(el=>el.style.borderColor='');
+      if(!dateVal) markInvalid('cp-date');
+      if(!descriptionVal) markInvalid('cp-description');
+      if(!dateVal || !descriptionVal || socialVals.length===0){
+        showGapWarningBanner(socialVals.length===0 ? 'Отметьте хотя бы одну соцсеть.' : 'Заполните дату и описание поста.');
+        if(firstInvalid && firstInvalid.scrollIntoView) firstInvalid.scrollIntoView({block:'center', behavior:'smooth'});
+        return;
+      }
+
+      const updated = {
+        id: state.modal.contentPost.id,
+        date: dateVal, socialNetworks: socialVals, product: productVal, direction: directionVal,
+        description: descriptionVal, link: linkVal,
+      };
+      const idx = state.contentPosts.findIndex(x=>x.id===updated.id);
+      if(idx>=0) state.contentPosts[idx] = updated; else state.contentPosts.push(updated);
+      await saveContentPosts();
+      recordAction('Пост в контент-плане сохранён');
+      state.modal = null; overlay.remove(); render();
+    };
+
+    const delBtn = overlay.querySelector('#btn-del-content-post');
+    if(delBtn) delBtn.onclick = ()=>{
+      if(state.currentRole !== 'owner'){
+        const ym = state.modal.contentPost.date ? state.modal.contentPost.date.slice(0,7) : null;
+        if(ym && state.closedMonths && state.closedMonths.includes(ym)){
+          showGapWarningBanner(`Месяц ${ym} закрыт для редактирования. Обратитесь к руководителю.`);
+          return;
+        }
+      }
+      showConfirmDeletePopup('Удалить этот пост из контент-плана? Действие необратимо.', async ()=>{
+        state.contentPosts = state.contentPosts.filter(x=>x.id !== state.modal.contentPost.id);
+        await saveContentPosts();
+        state.modal = null; render();
+      });
+    };
+  }
+
+  function renderMarketingPlanEditModal(){
+    const ym = todayStr().slice(0,7);
+    const planForMonth = (state.marketingPlans && state.marketingPlans[ym]) || { directions:{}, bloggers:{} };
+    const bloggerNamesKnown = new Set([
+      ...Object.keys(planForMonth.bloggers||{}),
+      ...state.marketingSpend.filter(m=>m.direction==='Блогеры' && m.bloggerHandle).map(m=>m.bloggerHandle),
+    ]);
+    return `
+      <div class="modal" style="max-width:480px;">
+        <div class="modal-head">
+          <h3>План на ${escapeHtml(ym)}</h3>
+          <button class="modal-close">×</button>
+        </div>
+        <div class="modal-body">
+          <div style="font-size:12.5px;color:var(--ink-soft);margin-bottom:10px;">По направлениям</div>
+          ${MARKETING_DIRECTIONS.map(dir=>`
+            <div class="field" style="margin-bottom:8px;">
+              <label>${escapeHtml(dir)}</label>
+              <input type="number" class="mp-dir-input" data-dir="${escapeHtml(dir)}" value="${(planForMonth.directions||{})[dir] || ''}" min="0" step="500" placeholder="0">
+            </div>
+          `).join('')}
+          <div style="font-size:12.5px;color:var(--ink-soft);margin:14px 0 10px;">По блогерам (по нику)</div>
+          <div id="mp-bloggers-list">
+            ${[...bloggerNamesKnown].map(name=>`
+              <div class="field" style="margin-bottom:8px;">
+                <label>${escapeHtml(name)}</label>
+                <input type="number" class="mp-blogger-input" data-name="${escapeHtml(name)}" value="${(planForMonth.bloggers||{})[name] || ''}" min="0" step="500" placeholder="0">
+              </div>
+            `).join('')}
+          </div>
+          <div style="display:flex;gap:8px;margin-top:6px;">
+            <input type="text" id="mp-new-blogger-name" placeholder="Новый ник блогера" style="flex:1;">
+            <button type="button" class="btn btn-ghost" id="btn-add-blogger-plan-row">+ Добавить</button>
+          </div>
+        </div>
+        <div class="modal-actions">
+          <div><span></span></div>
+          <div style="display:flex;gap:8px;">
+            <button class="btn btn-ghost" id="btn-cancel-marketing-plan">Отмена</button>
+            <button class="btn btn-primary" id="btn-save-marketing-plan">Сохранить</button>
+          </div>
+        </div>
+      </div>
+    `;
+  }
+
+  function attachMarketingPlanEditModalEvents(overlay){
+    overlay.querySelector('#btn-cancel-marketing-plan').onclick = ()=>{ state.modal = null; overlay.remove(); };
+
+    overlay.querySelector('#btn-add-blogger-plan-row').onclick = ()=>{
+      const nameInput = overlay.querySelector('#mp-new-blogger-name');
+      const name = nameInput.value.trim();
+      if(!name) return;
+      const list = overlay.querySelector('#mp-bloggers-list');
+      const row = document.createElement('div');
+      row.className = 'field';
+      row.style.marginBottom = '8px';
+      row.innerHTML = `<label>${escapeHtml(name)}</label><input type="number" class="mp-blogger-input" data-name="${escapeHtml(name)}" value="" min="0" step="500" placeholder="0">`;
+      list.appendChild(row);
+      nameInput.value = '';
+    };
+
+    overlay.querySelector('#btn-save-marketing-plan').onclick = async ()=>{
+      requireAdminUnlock(async ()=>{
+        const ym = todayStr().slice(0,7);
+        if(!state.marketingPlans) state.marketingPlans = {};
+        const directions = {};
+        overlay.querySelectorAll('.mp-dir-input').forEach(inp=>{
+          const v = inp.value !== '' ? Number(inp.value) : 0;
+          if(v > 0) directions[inp.dataset.dir] = v;
+        });
+        const bloggers = {};
+        overlay.querySelectorAll('.mp-blogger-input').forEach(inp=>{
+          const v = inp.value !== '' ? Number(inp.value) : 0;
+          if(v > 0) bloggers[inp.dataset.name] = v;
+        });
+        const hasAny = Object.keys(directions).length>0 || Object.keys(bloggers).length>0;
+        if(hasAny) state.marketingPlans[ym] = { directions, bloggers }; else delete state.marketingPlans[ym];
+        await saveMarketingPlans();
+        recordAction('План по маркетингу сохранён');
+        state.modal = null; render();
+      });
+    };
+  }
+
+  function attachMarketingEvents(){
+    document.querySelectorAll('[data-marketingview]').forEach(btn=>{
+      btn.onclick = ()=>{ state.marketingView = btn.dataset.marketingview; render(); };
+    });
+
+    const prevBtn = document.getElementById('ms-prev');
+    if(prevBtn) prevBtn.onclick = ()=>{ state.marketingSpendCursor = new Date(state.marketingSpendCursor.getFullYear(), state.marketingSpendCursor.getMonth()-1, 1); render(); };
+    const nextBtn = document.getElementById('ms-next');
+    if(nextBtn) nextBtn.onclick = ()=>{ state.marketingSpendCursor = new Date(state.marketingSpendCursor.getFullYear(), state.marketingSpendCursor.getMonth()+1, 1); render(); };
+    const todayBtn = document.getElementById('ms-today');
+    if(todayBtn) todayBtn.onclick = ()=>{ state.marketingSpendCursor = new Date(); render(); };
+    const toggleAllBtn = document.getElementById('ms-toggle-all');
+    if(toggleAllBtn) toggleAllBtn.onclick = ()=>{ state.marketingSpendShowAll = !state.marketingSpendShowAll; render(); };
+
+    const addBtn = document.getElementById('btn-add-marketing-spend');
+    if(addBtn) addBtn.onclick = ()=>{
+      requireUnlock(()=>{
+        state.modal = {type:'marketing-spend', isNew:true, marketingSpend:{
+          id: uid(), date: todayStr(), direction: MARKETING_DIRECTIONS[0], socialNetwork:'', bloggerHandle:'', reach: null, amount: null, comment:'',
+        }};
+        render();
+      });
+    };
+    document.querySelectorAll('.refund-row[data-mid]').forEach(row=>{
+      row.onclick = ()=>{
+        requireUnlock(()=>{
+          const item = state.marketingSpend.find(x=>x.id===row.dataset.mid);
+          if(!item) return;
+          state.modal = {type:'marketing-spend', isNew:false, marketingSpend:{...item}};
+          render();
+        });
+      };
+    });
+
+    const editPlanBtn = document.getElementById('btn-edit-marketing-plan');
+    if(editPlanBtn) editPlanBtn.onclick = ()=>{
+      requireAdminUnlock(()=>{
+        state.modal = {type:'marketing-plan-edit'};
+        render();
+      });
+    };
+
+    const addPostBtn = document.getElementById('btn-add-content-post');
+    if(addPostBtn) addPostBtn.onclick = ()=>{
+      requireUnlock(()=>{
+        state.modal = {type:'content-post', isNew:true, contentPost:{
+          id: uid(), date: todayStr(), socialNetworks: [], product:'', direction:'', description:'', link:'',
+        }};
+        render();
+      });
+    };
+    document.querySelectorAll('.refund-row[data-pid]').forEach(row=>{
+      row.onclick = ()=>{
+        requireUnlock(()=>{
+          const item = state.contentPosts.find(x=>x.id===row.dataset.pid);
+          if(!item) return;
+          state.modal = {type:'content-post', isNew:false, contentPost:{...item}};
+          render();
+        });
+      };
+    });
   }
 
   function renderCertificatesView(){
@@ -4539,6 +5766,7 @@
 
       syncRedemptionsFromInputs();
       const cleanedRedemptions = redemptionsDraft.filter(r=> r.eventId || r.date || (r.amount!==undefined&&r.amount!==null));
+      let redemptionBeforeSale = false;
       if(statusVal === 'used' || statusVal === 'partial'){
         if(cleanedRedemptions.length === 0){
           redemptionsMissing = true;
@@ -4550,6 +5778,7 @@
             if(!r.eventId){ redemptionsIncomplete = true; row.querySelector('.rd-event').style.borderColor = 'var(--danger)'; if(!firstInvalid) firstInvalid = row.querySelector('.rd-event'); }
             if(!r.date){ redemptionsIncomplete = true; row.querySelector('.rd-date').style.borderColor = 'var(--danger)'; if(!firstInvalid) firstInvalid = row.querySelector('.rd-date'); }
             if(r.amount===undefined||r.amount===null){ redemptionsIncomplete = true; row.querySelector('.rd-amount').style.borderColor = 'var(--danger)'; if(!firstInvalid) firstInvalid = row.querySelector('.rd-amount'); }
+            if(r.date && dateVal && r.date < dateVal){ redemptionBeforeSale = true; row.querySelector('.rd-date').style.borderColor = 'var(--danger)'; if(!firstInvalid) firstInvalid = row.querySelector('.rd-date'); }
           });
         }
       }
@@ -4561,9 +5790,10 @@
         if(remainingEl && !firstInvalid) firstInvalid = remainingEl;
       }
 
-      if(numberRaw==='' || duplicateNumber || !channelVal || !certTypeVal || !dateVal || amountRaw==='' || Number(amountRaw)<0 || !ownerNameVal || !ownerContactVal || !commentVal || specificMissing || redemptionsMissing || redemptionsIncomplete || overspent){
+      if(numberRaw==='' || duplicateNumber || !channelVal || !certTypeVal || !dateVal || amountRaw==='' || Number(amountRaw)<0 || !ownerNameVal || !ownerContactVal || !commentVal || specificMissing || redemptionsMissing || redemptionsIncomplete || redemptionBeforeSale || overspent){
         let msg = 'Заполните все поля перед сохранением сертификата. Сумма не может быть отрицательной.';
         if(duplicateNumber) msg = `Сертификат с номером «${numberRaw}» уже существует — впишите другой номер.`;
+        if(redemptionBeforeSale) msg = 'Дата списания не может быть раньше даты продажи сертификата.';
         if(redemptionsMissing) msg = 'Статус «Использован»/«Частично использован» — добавьте хотя бы одно списание.';
         else if(redemptionsIncomplete) msg = 'Заполните мероприятие, дату и сумму в каждой строке списания.';
         else if(overspent) msg = `Списано больше, чем номинал сертификата (списано ${formatMoney(spentTotal)} из ${formatMoney(totalAmountNum)}).`;
@@ -4923,6 +6153,9 @@
       if(idx >= 0) state.refunds[idx] = updated; else state.refunds.push(updated);
       await saveRefunds();
       recordAction("Возврат сохранён");
+      if(Number(updated.amount) >= (state.pushRefundThreshold || 10000)){
+        sendPushNotification('Крупный возврат', `${formatMoney(updated.amount)} — ${updated.reason||'без причины'}`, ['owner']);
+      }
       state.modal = null; overlay.remove(); render();
     };
   }
@@ -4936,12 +6169,73 @@
   }
 
   function attachHeaderEvents(){
+    const searchInput = document.getElementById('global-search-input');
+    const searchResultsEl = document.getElementById('global-search-results');
+    if(searchInput && searchResultsEl){
+      const runSearch = ()=>{
+        const q = searchInput.value;
+        const results = performGlobalSearch(q);
+        searchResultsEl.innerHTML = renderGlobalSearchResults(results, q);
+        searchResultsEl.style.display = q.trim().length >= 2 ? 'block' : 'none';
+        searchResultsEl.querySelectorAll('.global-search-result').forEach(row=>{
+          row.onclick = ()=>{
+            const type = row.dataset.restype;
+            const id = row.dataset.resid;
+            searchResultsEl.style.display = 'none';
+            searchInput.value = '';
+            if(type === 'event'){
+              const ev = state.events.find(e=>e.id===id);
+              if(!ev) return;
+              state.view = 'calendar';
+              if(ev.date){ const [y,m] = ev.date.split('-'); state.cursor = new Date(parseInt(y), parseInt(m)-1, 1); }
+              requireUnlock(()=>{ state.modal = {type:'event', event:{...ev}, isNew:false, keepAll:true}; render(); });
+            } else if(type === 'lead'){
+              const lead = state.leads.find(l=>l.id===id);
+              if(!lead) return;
+              state.view = 'certificates';
+              state.certView = 'conversion';
+              requireUnlock(()=>{ state.modal = {type:'lead', lead:{...lead}, isNew:false}; render(); });
+            } else if(type === 'certificate'){
+              const cert = state.certificates.find(c=>c.id===id);
+              if(!cert) return;
+              state.view = 'certificates';
+              state.certView = 'certificates';
+              requireUnlock(()=>{ state.modal = {type:'certificate', cert:{...cert}, isNew:false}; render(); });
+            }
+          };
+        });
+      };
+      searchInput.addEventListener('input', runSearch);
+      searchInput.addEventListener('focus', runSearch);
+      document.addEventListener('click', (ev)=>{
+        if(!ev.target.closest('.global-search-wrap')){
+          searchResultsEl.style.display = 'none';
+        }
+      });
+    }
+
     document.querySelectorAll('.view-switch button').forEach(b=>{
       b.onclick = ()=>{
         const targetView = b.dataset.view;
         state.view = targetView; render();
       };
     });
+
+    const pushToggleBtn = document.getElementById('btn-push-toggle');
+    if(pushToggleBtn) pushToggleBtn.onclick = async ()=>{
+      pushToggleBtn.disabled = true;
+      if(state.pushEnabled){
+        await unsubscribeFromPush();
+        state.pushEnabled = false;
+        recordAction('Уведомления выключены');
+      } else {
+        const ok = await subscribeToPush();
+        state.pushEnabled = ok;
+        if(ok) recordAction('Уведомления включены');
+      }
+      pushToggleBtn.disabled = false;
+      render();
+    };
 
     document.querySelectorAll('.daily-alert-item.clickable').forEach(item=>{
       item.onclick = ()=>{
@@ -5114,6 +6408,12 @@
       overlay.innerHTML = renderSalaryAdjModal(state.modal.adj, state.modal.isNew);
     } else if(state.modal.type === 'expense'){
       overlay.innerHTML = renderExpenseModal(state.modal.expense, state.modal.isNew);
+    } else if(state.modal.type === 'marketing-spend'){
+      overlay.innerHTML = renderMarketingSpendModal();
+    } else if(state.modal.type === 'marketing-plan-edit'){
+      overlay.innerHTML = renderMarketingPlanEditModal();
+    } else if(state.modal.type === 'content-post'){
+      overlay.innerHTML = renderContentPostModal();
     }
     document.body.appendChild(overlay);
 
@@ -5152,6 +6452,9 @@
     else if(state.modal.type === 'order'){ attachOrderModalEvents(overlay); }
     else if(state.modal.type === 'salary-adj'){ attachSalaryAdjModalEvents(overlay); }
     else if(state.modal.type === 'expense'){ attachExpenseModalEvents(overlay); }
+    else if(state.modal.type === 'marketing-spend'){ attachMarketingSpendModalEvents(overlay); }
+    else if(state.modal.type === 'marketing-plan-edit'){ attachMarketingPlanEditModalEvents(overlay); }
+    else if(state.modal.type === 'content-post'){ attachContentPostModalEvents(overlay); }
   }
 
   function renderRoleLoginModal(){
@@ -5620,6 +6923,7 @@
                 mHostessSalary += rate + extra*HOSTESS_EXTRA_HOUR_RATE;
               }
             });
+            mHostessSalary += Object.values(hostessDishesBonusesForDate(dateStr, dayShifts)).reduce((s,v)=>s+v,0);
           }
         }
         const mMarketingCost = state.expenses.filter(e=>e.date && e.date.startsWith(ym) && !e.eventId && e.category==='Маркетинг').reduce((s,e)=> s + ((e.amount!==undefined&&e.amount!==null&&!isNaN(e.amount))?Number(e.amount):0), 0);
@@ -5716,6 +7020,8 @@
             addStaffPay(entry.name, mIdx, rate + extra*HOSTESS_EXTRA_HOUR_RATE);
           }
         });
+        const dishesBonusesM2 = hostessDishesBonusesForDate(dateStr, dayShifts);
+        Object.entries(dishesBonusesM2).forEach(([name, bonus])=>{ addStaffPay(name, mIdx, bonus); });
       }
     }
     const yearStaffMatrix = Object.entries(staffMonthlyPay)
@@ -5794,6 +7100,7 @@
             npHostessSalary += rate + extra*HOSTESS_EXTRA_HOUR_RATE;
           }
         });
+        npHostessSalary += Object.values(hostessDishesBonusesForDate(dateStr, dayShifts)).reduce((s,v)=>s+v,0);
       }
     }
     const npManual = (state.netProfitManual && state.netProfitManual[monthYm]) || {};
@@ -5862,6 +7169,7 @@
         <h4 style="margin-top:0;">${summaryYear} год — по месяцам</h4>
         <div style="font-size:11.5px;color:var(--ink-soft);margin-bottom:6px;">Выручка (мероприятия + изделия + сертификаты + заказы) и прибыль — прогнозные. Рентабельность = прибыль / выручка. Заполняемость — от вместимости студии в месяц (без учёта «Выезда»). «Новые гости» вносятся вручную.</div>
         <div style="font-size:13px;margin-bottom:10px;">Выручка за год: <b>${formatMoney(yearTotals.revenue)}</b> ${yearTotals.growthPct!==null?`<span style="color:${yearTotals.growthPct>=0?'var(--status-green)':'var(--status-red)'};">(${yearTotals.growthPct>=0?'+':''}${yearTotals.growthPct}% к ${summaryYear-1} году)</span>`:`<span style="color:var(--ink-soft);">(нет данных за ${summaryYear-1} год для сравнения)</span>`}</div>
+        ${renderBarChart(MONTHS.map((name,i)=>({ label: name.slice(0,3), value: yearMonthsSummary[i].revenue, valueLabel: formatMoney(yearMonthsSummary[i].revenue) })))}
         <div style="margin-bottom:10px;">
           <button class="btn btn-ghost" id="btn-edit-yearsummary" style="font-size:12px;">✏ Внести «Новые гости» по месяцам</button>
         </div>
@@ -6015,6 +7323,24 @@
       </div>
     `;
 
+    const marketingEventsThisYear = state.events
+      .filter(e=> e.status==='marketing' && e.date && e.date.startsWith(String(summaryYear)))
+      .map(e=>({ ...e, _cost: eventMaterialsCost(e) }))
+      .sort((a,b)=> (b.date||'').localeCompare(a.date||''));
+    const marketingTotalSpend = marketingEventsThisYear.reduce((s,e)=>s+e._cost, 0);
+    const analyticsPanel_marketing = `
+      <div class="analytics-section">
+        <div style="font-size:22px;font-family:var(--font-display);font-weight:600;margin-bottom:4px;">${formatMoney(marketingTotalSpend)}</div>
+        <div style="font-size:12px;color:var(--ink-soft);margin-bottom:14px;">Всего потрачено на мероприятия со статусом «Маркетинг» за ${summaryYear} год. Расходы попадают сюда, когда в «Книге → Расходы» их привязывают к конкретному мероприятию.</div>
+        ${marketingEventsThisYear.length === 0 ? '<div style="color:var(--ink-soft);font-size:13px;">За этот год маркетинговых мероприятий не было.</div>' : marketingEventsThisYear.map(e=>`
+          <div class="stat-row">
+            <div class="stat-label">${escapeHtml(e.date ? e.date.slice(8,10)+'.'+e.date.slice(5,7) : '')} · ${escapeHtml(e.title||'без названия')}</div>
+            <div style="flex:1;font-family:var(--font-mono);font-size:13px;text-align:right;${e._cost===0?'color:var(--ink-soft);':''}">${e._cost>0?formatMoney(e._cost):'— (расход ещё не привязан)'}</div>
+          </div>
+        `).join('')}
+      </div>
+    `;
+
     const auditLogSorted = (state.auditLog || []).slice().reverse().slice(0, 300);
     const analyticsPanel_auditlog = `
       <div class="analytics-section">
@@ -6058,7 +7384,7 @@
           </div>
         </div>
       `;
-      state.analyticsPanels = { plan: analyticsPanel_plan, netprofit: analyticsPanel_netprofit_empty, yearsummary: analyticsPanel_yearsummary, auditlog: analyticsPanel_auditlog };
+      state.analyticsPanels = { plan: analyticsPanel_plan, netprofit: analyticsPanel_netprofit_empty, yearsummary: analyticsPanel_yearsummary, auditlog: analyticsPanel_auditlog, marketing: analyticsPanel_marketing };
       let emptyCompareHtml = '';
       if(state.compareMode){
         const prevCursor = new Date(cursor.getFullYear(), cursor.getMonth()-1, 1);
@@ -6091,6 +7417,7 @@
             <button class="btn btn-ghost owner-panel-btn" data-panel="netprofit" style="border-color:#6B4A1E;color:#6B4A1E;">🔒 Чистая прибыль</button>
             <button class="btn btn-ghost analytics-panel-btn" data-panel="yearsummary">📆 Сводка по годам</button>
             <button class="btn btn-ghost analytics-panel-btn" data-panel="auditlog">📜 Журнал действий</button>
+            <button class="btn btn-ghost analytics-panel-btn" data-panel="marketing">📣 Маркетинг</button>
           </div>
         </div>
         ${(certOutstandingSaleCount>0 || certOutstandingMarketingCount>0) ? `
@@ -6249,7 +7576,6 @@
 
     // расхождения: для Частника и Выезда выручка в мероприятии обязана сходиться с "Книгой"
     // (По расписанию, Маркетинг и Слот из этой сверки исключены)
-    const RECONCILE_STATUSES = ['tentative', 'offsite'];
     const discrepancies = evts
       .filter(e=> RECONCILE_STATUSES.includes(e.status))
       .map(e=>{
@@ -6417,6 +7743,13 @@
             if(d <= 15){ hostessSalaryH1[name] = (hostessSalaryH1[name]||0) + pay; totalHostessSalaryH1 += pay; }
             else { hostessSalaryH2[name] = (hostessSalaryH2[name]||0) + pay; totalHostessSalaryH2 += pay; }
           }
+        });
+        const dishesBonusesMain = hostessDishesBonusesForDate(dateStr, dayShifts);
+        Object.entries(dishesBonusesMain).forEach(([name, bonus])=>{
+          hostessSalary[name] = (hostessSalary[name]||0) + bonus;
+          totalHostessSalary += bonus;
+          if(d <= 15){ hostessSalaryH1[name] = (hostessSalaryH1[name]||0) + bonus; totalHostessSalaryH1 += bonus; }
+          else { hostessSalaryH2[name] = (hostessSalaryH2[name]||0) + bonus; totalHostessSalaryH2 += bonus; }
         });
       }
     }
@@ -6938,7 +8271,7 @@
         </div>
       </div>
     `;
-    state.analyticsPanels = { plan: analyticsPanel_plan, occupancy: analyticsPanel_occupancy, days: analyticsPanel_days, ceramics: analyticsPanel_ceramics, guests: analyticsPanel_guests, legal: analyticsPanel_legal, reports: analyticsPanel_reports, netprofit: analyticsPanel_netprofit, yearsummary: analyticsPanel_yearsummary, auditlog: analyticsPanel_auditlog };
+    state.analyticsPanels = { plan: analyticsPanel_plan, occupancy: analyticsPanel_occupancy, days: analyticsPanel_days, ceramics: analyticsPanel_ceramics, guests: analyticsPanel_guests, legal: analyticsPanel_legal, reports: analyticsPanel_reports, netprofit: analyticsPanel_netprofit, yearsummary: analyticsPanel_yearsummary, auditlog: analyticsPanel_auditlog, marketing: analyticsPanel_marketing };
 
     return `
       <div class="cal-nav">
@@ -6993,6 +8326,7 @@
           <button class="btn btn-ghost analytics-panel-btn" data-panel="reports">📝 Отчёты мастеров</button>
           <button class="btn btn-ghost analytics-panel-btn" data-panel="yearsummary">📆 Сводка по годам</button>
             <button class="btn btn-ghost analytics-panel-btn" data-panel="auditlog">📜 Журнал действий</button>
+            <button class="btn btn-ghost analytics-panel-btn" data-panel="marketing">📣 Маркетинг</button>
           <button class="btn btn-ghost owner-panel-btn" data-panel="netprofit" style="border-color:#6B4A1E;color:#6B4A1E;">🔒 Чистая прибыль</button>
         </div>
       </div>
@@ -7068,6 +8402,24 @@
     };
   }
 
+  const WEEKDAYS_SHORT = ['вс','пн','вт','ср','чт','пт','сб'];
+  function renderAutoBackupList(){
+    const meta = state.autoBackupMeta || {};
+    const today = new Date().getDay();
+    // показываем последние 7 дней по порядку от сегодня назад
+    const order = [];
+    for(let i=0;i<7;i++) order.push((today - i + 7) % 7);
+    const rows = order.map(dow=>{
+      const ts = meta[dow];
+      const label = WEEKDAYS_SHORT[dow];
+      if(!ts) return `<div class="stat-row"><div class="stat-label" style="color:var(--ink-soft);">${label}</div><div style="flex:1;font-size:12px;color:var(--ink-soft);">пока нет копии</div></div>`;
+      const d = new Date(ts);
+      const dateLabel = isNaN(d.getTime()) ? ts : d.toLocaleString('ru-RU', {day:'2-digit', month:'2-digit', hour:'2-digit', minute:'2-digit'});
+      return `<div class="stat-row"><div class="stat-label">${label} · ${escapeHtml(dateLabel)}</div><button type="button" class="btn btn-ghost btn-dl-auto-backup" data-dow="${dow}" style="font-size:11.5px;padding:4px 10px;">Скачать</button></div>`;
+    });
+    return rows.join('');
+  }
+
   function renderExportModal(){
     return `
       <div class="modal" style="max-width:440px;">
@@ -7082,12 +8434,31 @@
           <button class="btn btn-primary" id="btn-dl-json" style="width:100%;">⬇ Скачать JSON (полная копия всего)</button>
 
           <div style="border-top:1px solid var(--line); margin-top:6px; padding-top:14px;">
+            <label style="display:block; font-size:11.5px; font-family: var(--font-mono); color: var(--ink-soft); margin-bottom:8px;">Автоматический бэкап — раз в сутки, последние 7 дней</label>
+            <div style="font-size:12px;color:var(--ink-soft);margin-bottom:8px;">Приложение само сохраняет копию каждый день, пока кто-то заходит — вручную ничего делать не нужно. Ниже можно скачать любую из последних семи копий.</div>
+            <div id="auto-backup-list">${renderAutoBackupList()}</div>
+          </div>
+
+          ${state.currentRole === 'owner' ? `
+          <div style="border-top:1px solid var(--line); margin-top:6px; padding-top:14px;">
+            <label style="display:block; font-size:11.5px; font-family: var(--font-mono); color: var(--ink-soft); margin-bottom:8px;">Push-уведомления — порог крупного возврата</label>
+            <div style="font-size:12px;color:var(--ink-soft);margin-bottom:8px;">Руководителю придёт уведомление, если сумма возврата равна или больше этого значения.</div>
+            <div style="display:flex;gap:8px;">
+              <input type="number" id="push-threshold-input" value="${state.pushRefundThreshold}" min="0" step="1000" style="flex:1;">
+              <button class="btn btn-ghost" id="btn-save-push-threshold">Сохранить</button>
+            </div>
+          </div>
+          ` : ''}
+
+          <div style="border-top:1px solid var(--line); margin-top:6px; padding-top:14px;">
             <label style="display:block; font-size:11.5px; font-family: var(--font-mono); color: var(--ink-soft); margin-bottom:8px;">CSV по разделам</label>
             <div style="display:flex; gap:8px; flex-wrap:wrap;">
               <button class="btn btn-ghost" id="btn-dl-csv">Мероприятия</button>
               <button class="btn btn-ghost" id="btn-dl-csv-certs">Сертификаты</button>
               <button class="btn btn-ghost" id="btn-dl-csv-refunds">Возвраты</button>
               <button class="btn btn-ghost" id="btn-dl-csv-leads">Конверсия</button>
+              <button class="btn btn-ghost" id="btn-dl-csv-marketing">Маркетинг — траты</button>
+              <button class="btn btn-ghost" id="btn-dl-csv-content">Маркетинг — контент-план</button>
               <button class="btn btn-ghost" id="btn-dl-csv-incomes">Доходы</button>
               <button class="btn btn-ghost" id="btn-dl-csv-expenses">Расходы</button>
             </div>
@@ -7121,6 +8492,31 @@
     overlay.querySelector('#btn-dl-json').onclick = ()=>{
       downloadFile(`raspisanie-${todayStr()}.json`, buildJsonExport(), 'application/json');
     };
+    overlay.querySelectorAll('.btn-dl-auto-backup').forEach(btn=>{
+      btn.onclick = async ()=>{
+        const dow = btn.dataset.dow;
+        const originalText = btn.textContent;
+        btn.textContent = 'Загрузка…'; btn.disabled = true;
+        try{
+          const res = await window.storage.get(`auto-backup-${dow}`, true);
+          if(res && res.value){
+            downloadFile(`raspisanie-avtobekap-${WEEKDAYS_SHORT[dow]}.json`, res.value, 'application/json');
+          } else {
+            showGapWarningBanner('Копия за этот день ещё не сохранена.');
+          }
+        }catch(e){
+          showGapWarningBanner('Не получилось скачать копию — попробуйте ещё раз.');
+        }
+        btn.textContent = originalText; btn.disabled = false;
+      };
+    });
+    const pushThresholdBtn = overlay.querySelector('#btn-save-push-threshold');
+    if(pushThresholdBtn) pushThresholdBtn.onclick = async ()=>{
+      const val = Number(overlay.querySelector('#push-threshold-input').value) || 0;
+      state.pushRefundThreshold = val;
+      await storageSetWithRetry('push-refund-threshold', String(val));
+      recordAction('Порог push-уведомления о возврате изменён', `${formatMoney(val)}`);
+    };
     overlay.querySelector('#btn-dl-csv-certs').onclick = ()=>{
       downloadFile(`sertifikaty-${todayStr()}.csv`, buildCertsCsv(), 'text/csv;charset=utf-8');
     };
@@ -7129,6 +8525,12 @@
     };
     overlay.querySelector('#btn-dl-csv-leads').onclick = ()=>{
       downloadFile(`konversia-${todayStr()}.csv`, buildLeadsCsv(), 'text/csv;charset=utf-8');
+    };
+    overlay.querySelector('#btn-dl-csv-marketing').onclick = ()=>{
+      downloadFile(`marketing-traty-${todayStr()}.csv`, buildMarketingSpendCsv(), 'text/csv;charset=utf-8');
+    };
+    overlay.querySelector('#btn-dl-csv-content').onclick = ()=>{
+      downloadFile(`marketing-kontent-plan-${todayStr()}.csv`, buildContentPostsCsv(), 'text/csv;charset=utf-8');
     };
     overlay.querySelector('#btn-dl-csv-incomes').onclick = ()=>{
       downloadFile(`dohody-${todayStr()}.csv`, buildIncomesCsv(), 'text/csv;charset=utf-8');
@@ -7229,6 +8631,14 @@
         if(pendingImportData.masterPayRates){ state.masterPayRates = pendingImportData.masterPayRates; await saveMasterPayRates(); }
         if(pendingImportData.masterPayOverrides){ state.masterPayOverrides = pendingImportData.masterPayOverrides; await saveMasterPayOverrides(); }
         if(pendingImportData.monthlyPlans){ state.monthlyPlans = pendingImportData.monthlyPlans; await saveMonthlyPlans(); }
+        if(pendingImportData.hostessShifts){ state.hostessShifts = pendingImportData.hostessShifts; await saveHostessShifts(); }
+        if(pendingImportData.netProfitManual){ state.netProfitManual = pendingImportData.netProfitManual; await saveNetProfitManual(); }
+        if(pendingImportData.yearSummaryManual){ state.yearSummaryManual = pendingImportData.yearSummaryManual; await saveYearSummaryManual(); }
+        if(Array.isArray(pendingImportData.auditLog)){ state.auditLog = pendingImportData.auditLog; await saveAuditLog(); }
+        if(Array.isArray(pendingImportData.closedMonths)){ state.closedMonths = pendingImportData.closedMonths; await saveClosedMonths(); }
+        if(Array.isArray(pendingImportData.marketingSpend)){ state.marketingSpend = pendingImportData.marketingSpend; await saveMarketingSpend(); }
+        if(pendingImportData.marketingPlans){ state.marketingPlans = pendingImportData.marketingPlans; await saveMarketingPlans(); }
+        if(Array.isArray(pendingImportData.contentPosts)){ state.contentPosts = pendingImportData.contentPosts; await saveContentPosts(); }
         pendingImportData = null;
         recordAction('Данные восстановлены');
         state.modal = null;
@@ -7984,6 +9394,7 @@
     netprofit: '🔒 Чистая прибыль',
     yearsummary: '📆 Сводка по годам',
     auditlog: '📜 Журнал действий',
+    marketing: '📣 Маркетинг',
   };
   function renderAnalyticsPanelModal(panel){
     const content = (state.analyticsPanels && state.analyticsPanels[panel]) || '<div style="color:var(--ink-soft);font-size:13px;">Нет данных.</div>';
@@ -8707,6 +10118,18 @@
               </div>
             </div>
             <input type="hidden" id="f-dishes" value="${ev.dishes||''}">
+            <div id="dishes-payment-wrap" style="margin-top:8px;display:${ev.dishes==='needed'?'block':'none'};">
+              <div class="status-select-wrap">
+                <div class="dishes-payment-opt ${(ev.dishesPayment||'')==='paid'?'active':''}" data-dishespayment="paid">
+                  <span class="dot" style="background:var(--status-green)"></span>За 300 ₽
+                </div>
+                <div class="dishes-payment-opt ${(ev.dishesPayment||'')==='free'?'active':''}" data-dishespayment="free">
+                  <span class="dot" style="background:var(--ink-soft)"></span>Без оплаты
+                </div>
+              </div>
+              <div style="font-size:11px;color:var(--ink-soft);margin-top:4px;">Если «За 300 ₽» — хостес, работавшей в это время, автоматически начислится ${HOSTESS_DISHES_BONUS}₽.</div>
+            </div>
+            <input type="hidden" id="f-dishes-payment" value="${ev.dishesPayment||''}">
           </div>
           <div class="field" id="rental-field" style="display:${showsDishesAndRental(ev.status)?'block':'none'};">
             <label>Доп. аренда пространства (для частников и маркетинга)</label>
@@ -8788,6 +10211,7 @@
           <div class="field">
             <label>Выручка (₽) — сумма полученных оплат</label>
             <input type="number" id="f-price" value="${ev.price!==undefined && ev.price!==null ? ev.price : ''}" min="0" step="100" placeholder="Например: 8000">
+            <div id="price-journal-mismatch" style="display:none;color:var(--status-red);font-size:11.5px;margin-top:4px;"></div>
             <div class="row2" style="margin-top:8px;">
               <select id="payment-source">
                 <option value="Точка">Точка</option>
@@ -9260,6 +10684,23 @@
     const paymentsLogEl = overlay.querySelector('#payments-log');
     let paymentsArr = [];
     try{ paymentsArr = JSON.parse(paymentsHidden.value || '[]'); }catch(e){ paymentsArr = []; }
+    const priceInputForMismatch = overlay.querySelector('#f-price');
+    if(priceInputForMismatch) priceInputForMismatch.addEventListener('input', ()=> updatePriceJournalMismatchHint());
+
+    function updatePriceJournalMismatchHint(){
+      const hintEl = overlay.querySelector('#price-journal-mismatch');
+      if(!hintEl) return;
+      if(paymentsArr.length === 0){ hintEl.style.display = 'none'; return; }
+      const journalSum = paymentsArr.reduce((s,p)=> s + (Number(p.amount)||0), 0);
+      const priceInput = overlay.querySelector('#f-price');
+      const priceVal = priceInput.value === '' ? 0 : Number(priceInput.value);
+      if(priceVal !== journalSum){
+        hintEl.textContent = `⚠ Сумма в журнале платежей — ${formatMoney(journalSum)}, а в поле «Выручка» — ${formatMoney(priceVal)}. Проверьте, не разошлось ли.`;
+        hintEl.style.display = 'block';
+      } else {
+        hintEl.style.display = 'none';
+      }
+    }
 
     function renderPaymentsLog(){
       if(!paymentsLogEl) return;
@@ -9269,6 +10710,7 @@
           <button type="button" class="payment-del" data-idx="${i}" style="background:none;border:none;color:var(--danger);cursor:pointer;font-size:11px;font-family:var(--font-body);">убрать</button>
         </div>
       `).join('');
+      updatePriceJournalMismatchHint();
       paymentsLogEl.querySelectorAll('.payment-del').forEach(btn=>{
         btn.onclick = ()=>{
           const idx = parseInt(btn.dataset.idx);
@@ -9329,26 +10771,59 @@
       paymentAmountInput.onkeydown = (e)=>{ if(e.key==='Enter'){ e.preventDefault(); doAdd(); } };
     }
 
+    function setEventStatus(statusValue){
+      overlay.querySelectorAll('.status-opt').forEach(o=>{
+        o.classList.toggle('active', o.dataset.status === statusValue);
+      });
+      overlay.querySelector('#f-status').value = statusValue;
+      const dishesField = overlay.querySelector('#dishes-field');
+      if(dishesField) dishesField.style.display = showsDishesAndRental(statusValue) ? 'block' : 'none';
+      const rentalField = overlay.querySelector('#rental-field');
+      if(rentalField) rentalField.style.display = showsDishesAndRental(statusValue) ? 'block' : 'none';
+      if(statusValue === 'offsite' && spaceSelect && state.spaces.find(s=>s.id==='s5')){
+        spaceSelect.value = 's5'; // выездные мероприятия по умолчанию идут в пространство "Выезд"
+      }
+    }
+
     overlay.querySelectorAll('.status-opt').forEach(opt=>{
       opt.onclick = ()=>{
-        overlay.querySelectorAll('.status-opt').forEach(o=>o.classList.remove('active'));
-        opt.classList.add('active');
-        overlay.querySelector('#f-status').value = opt.dataset.status;
-        const dishesField = overlay.querySelector('#dishes-field');
-        if(dishesField) dishesField.style.display = showsDishesAndRental(opt.dataset.status) ? 'block' : 'none';
-        const rentalField = overlay.querySelector('#rental-field');
-        if(rentalField) rentalField.style.display = showsDishesAndRental(opt.dataset.status) ? 'block' : 'none';
-        if(opt.dataset.status === 'offsite' && spaceSelect && state.spaces.find(s=>s.id==='s5')){
-          spaceSelect.value = 's5'; // выездные мероприятия по умолчанию идут в пространство "Выезд"
-        }
+        setEventStatus(opt.dataset.status);
       };
     });
+
+    // продукты, которые всегда частные заказы, а не занятия по расписанию —
+    // при их выборе статус сам переключается на "Частник" (если сейчас "По расписанию" по умолчанию;
+    // уже выставленный вручную "Выезд"/"Маркетинг" не трогаем — это тоже частный формат, просто другой)
+    const PRIVATE_PRODUCTS = ['Свидание', 'День рождения', 'Корпоратив', 'Девичник', 'Детский МК'];
+    const productSelectForAuto = overlay.querySelector('#f-product');
+    if(productSelectForAuto){
+      productSelectForAuto.addEventListener('change', ()=>{
+        const currentStatus = overlay.querySelector('#f-status').value || 'confirmed';
+        if(PRIVATE_PRODUCTS.includes(productSelectForAuto.value) && currentStatus === 'confirmed'){
+          setEventStatus('tentative');
+        }
+      });
+    }
 
     overlay.querySelectorAll('.dishes-opt').forEach(opt=>{
       opt.onclick = ()=>{
         overlay.querySelectorAll('.dishes-opt').forEach(o=>o.classList.remove('active'));
         opt.classList.add('active');
         overlay.querySelector('#f-dishes').value = opt.dataset.dishes;
+        const paymentWrap = overlay.querySelector('#dishes-payment-wrap');
+        if(paymentWrap) paymentWrap.style.display = opt.dataset.dishes === 'needed' ? 'block' : 'none';
+        if(opt.dataset.dishes !== 'needed'){
+          overlay.querySelector('#f-dishes-payment').value = '';
+          overlay.querySelectorAll('.dishes-payment-opt').forEach(o=>o.classList.remove('active'));
+        }
+      };
+    });
+
+    overlay.querySelectorAll('.dishes-payment-opt').forEach(opt=>{
+      opt.onclick = ()=>{
+        overlay.querySelectorAll('.dishes-payment-opt').forEach(o=>o.classList.remove('active'));
+        opt.classList.add('active');
+        overlay.querySelector('#f-dishes-payment').value = opt.dataset.dishespayment;
       };
     });
 
@@ -9384,6 +10859,11 @@
         catalogChanged = true;
       });
       if(catalogChanged) await saveMaterialsCatalog();
+      const linkedAutoIncome = state.incomes.find(i=> i.eventId===eventToDelete.id && i.autoFromEvent);
+      if(linkedAutoIncome){
+        state.incomes = state.incomes.filter(x=>x.id !== linkedAutoIncome.id);
+        await saveIncomes();
+      }
       await saveEvents();
       state.modal = null; overlay.remove(); render();
       });
@@ -9463,6 +10943,7 @@
       const priceRaw = overlay.querySelector('#f-price').value;
       const statusVal = overlay.querySelector('#f-status').value || 'confirmed';
       const dishesVal = overlay.querySelector('#f-dishes').value;
+      const dishesPaymentVal = overlay.querySelector('#f-dishes-payment').value;
       const rentalBeforeRaw = overlay.querySelector('#f-rental-before').value;
       const rentalAfterRaw = overlay.querySelector('#f-rental-after').value;
       const notesVal = overlay.querySelector('#f-notes').value.trim();
@@ -9501,6 +10982,11 @@
         const masterPayRawCheck = overlay.querySelector('#f-master-pay').value;
         const masterPayNegative = masterPayRawCheck !== '' && Number(masterPayRawCheck) < 0;
         if(masterPayNegative) markInvalid('f-master-pay');
+        const additionalHostsNegative = [...overlay.querySelectorAll('.ah-pay')].some(inp=> inp.value !== '' && Number(inp.value) < 0);
+        if(additionalHostsNegative){
+          overlay.querySelectorAll('.ah-pay').forEach(inp=>{ if(Number(inp.value) < 0) inp.style.borderColor = 'var(--danger)'; });
+          if(!firstInvalid) firstInvalid = overlay.querySelector('.ah-pay');
+        }
         const materialsNegative = cleanedMaterialsItems.some(m=> m.cost < 0);
         if(materialsMissing){
           const materialsListEl = overlay.querySelector('#materials-items-list');
@@ -9513,10 +10999,11 @@
         let dishesMissing = false, rentalMissing = false;
         if(showsDishesAndRental(statusVal)){
           if(!dishesVal){ dishesMissing = true; if(dishesFieldEl) dishesFieldEl.style.boxShadow = 'inset 0 0 0 1.5px var(--danger)'; if(!firstInvalid) firstInvalid = dishesFieldEl; }
+          else if(dishesVal === 'needed' && !dishesPaymentVal){ dishesMissing = true; if(dishesFieldEl) dishesFieldEl.style.boxShadow = 'inset 0 0 0 1.5px var(--danger)'; if(!firstInvalid) firstInvalid = dishesFieldEl; }
           if(rentalBeforeRaw === '' || rentalAfterRaw === ''){ rentalMissing = true; if(rentalFieldEl) rentalFieldEl.style.boxShadow = 'inset 0 0 0 1.5px var(--danger)'; if(!firstInvalid) firstInvalid = rentalFieldEl; }
         }
-        if(!title || !hostVal || !dateVal || !timeVal || !durationVal || durationVal<=0 || guestsRaw==='' || priceRaw==='' || Number(priceRaw)<0 || agreedPriceNegative || masterPayNegative || materialsNegative || !notesVal || !guestNameVal || materialsMissing || dishesMissing || rentalMissing){
-          showGapWarningBanner('Заполните все поля перед сохранением (для статуса «Слот» это необязательно). Себестоимость: добавьте хотя бы один материал с названием и суммой. Суммы (выручка, ЗП мастеру, себестоимость) не могут быть отрицательными.');
+        if(!title || !hostVal || !dateVal || !timeVal || !durationVal || durationVal<=0 || guestsRaw==='' || priceRaw==='' || Number(priceRaw)<0 || agreedPriceNegative || masterPayNegative || additionalHostsNegative || materialsNegative || !notesVal || !guestNameVal || materialsMissing || dishesMissing || rentalMissing){
+          showGapWarningBanner('Заполните все поля перед сохранением (для статуса «Слот» это необязательно). Себестоимость: добавьте хотя бы один материал с названием и суммой. Суммы (выручка, ЗП мастеру и со-ведущим, себестоимость) не могут быть отрицательными.');
           if(firstInvalid && firstInvalid.scrollIntoView) firstInvalid.scrollIntoView({block:'center', behavior:'smooth'});
           return;
         }
@@ -9590,6 +11077,7 @@
         product: overlay.querySelector('#f-product').value || '',
         status: overlay.querySelector('#f-status').value || 'confirmed',
         dishes: overlay.querySelector('#f-dishes').value || '',
+        dishesPayment: overlay.querySelector('#f-dishes').value === 'needed' ? (overlay.querySelector('#f-dishes-payment').value || '') : '',
         rentalBefore: rentalBeforeVal || null,
         rentalAfter: rentalAfterVal || null,
         notes: overlay.querySelector('#f-notes').value.trim(),
@@ -9625,18 +11113,26 @@
       });
       const affectedMaterialKeys = new Set([...Object.keys(oldQtyByName), ...Object.keys(newQtyByName)]);
       let catalogChanged = false;
+      const justRanOutNames = [];
       affectedMaterialKeys.forEach(key=>{
         const catItem = state.materialsCatalog.find(m=>m.name.trim().toLowerCase()===key);
         if(!catItem || !catItem.trackStock) return; // материал не найден в справочнике или остатки по нему не отслеживаются (переменный расходник)
         const delta = (newQtyByName[key]||0) - (oldQtyByName[key]||0);
         if(delta !== 0){
-          catItem.stock = (catItem.stock!==undefined&&catItem.stock!==null&&!isNaN(catItem.stock)?Number(catItem.stock):0) - delta;
+          const stockBefore = (catItem.stock!==undefined&&catItem.stock!==null&&!isNaN(catItem.stock)?Number(catItem.stock):0);
+          const stockAfter = stockBefore - delta;
+          catItem.stock = stockAfter;
           catalogChanged = true;
+          if(stockBefore > 0 && stockAfter <= 0) justRanOutNames.push(catItem.name);
         }
       });
       if(catalogChanged) await saveMaterialsCatalog();
+      if(justRanOutNames.length > 0){
+        sendPushNotification('Закончился материал', justRanOutNames.join(', '), ['admin','owner']);
+      }
 
       await saveEvents();
+      await syncEventIncomeIfNeeded(updated);
       const dayEvts = state.events.filter(e=>e.date===updated.date && e.spaceId===updated.spaceId);
       const warns = computeGapWarnings(dayEvts);
       recordAction('Мероприятие сохранено');
@@ -9730,3 +11226,15 @@
   loadData();
 })();
 </script>
+
+
+<script>
+  if('serviceWorker' in navigator){
+    window.addEventListener('load', ()=>{
+      navigator.serviceWorker.register('/sw.js').catch(()=>{});
+    });
+  }
+</script>
+
+</body>
+</html>
