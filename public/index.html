@@ -1045,6 +1045,7 @@
     autoBackupMeta: null,
     pushEnabled: false,
     certExpandedGroups: new Set(),
+    certSummaryExpandedYears: null,
     pushRefundThreshold: 10000,
     marketingSpendCursor: new Date(),
     marketingSpendShowAll: false,
@@ -3505,19 +3506,41 @@
       else { salesTotals[ym] = (salesTotals[ym]||0) + amt; }
     });
     const allMonths = Array.from(new Set([...Object.keys(salesTotals), ...Object.keys(marketingTotals)])).sort((a,b)=> b.localeCompare(a));
+    const summaryByYear = {};
+    allMonths.forEach(ym=>{
+      const year = ym.slice(0,4);
+      summaryByYear[year] = summaryByYear[year] || [];
+      summaryByYear[year].push(ym);
+    });
+    const summaryYears = Object.keys(summaryByYear).sort((a,b)=> b.localeCompare(a));
+    if(!state.certSummaryExpandedYears) state.certSummaryExpandedYears = new Set([todayStr().slice(0,4)]);
     const monthlyHtml = allMonths.length ? `
       <div class="analytics-section" style="margin-bottom:20px;">
         <h4>Сумма сертификатов по месяцам</h4>
         <div style="font-size:11px;color:var(--ink-soft);font-family:var(--font-mono);margin-bottom:8px;">Сумма — только продажи; маркетинговые сертификаты в неё не входят и показаны отдельно.</div>
-        ${allMonths.map(ym=>{
-          const [y,m] = ym.split('-').map(Number);
-          const label = MONTHS[m-1] + ' ' + y;
-          const sales = salesTotals[ym] || 0;
-          const marketing = marketingTotals[ym] || 0;
-          return `<div class="stat-row">
-            <div class="stat-label" style="width:140px;text-transform:capitalize;">${label}</div>
-            <div style="flex:1;font-family:var(--font-mono);font-size:13px;">${formatMoney(sales)}${marketing>0?` <span style="color:var(--status-blue);">· маркетинг: ${formatMoney(marketing)}</span>`:''}</div>
-          </div>`;
+        ${summaryYears.map(year=>{
+          const yearMonths = summaryByYear[year];
+          const yearSales = yearMonths.reduce((s,ym)=> s + (salesTotals[ym]||0), 0);
+          const yearMarketing = yearMonths.reduce((s,ym)=> s + (marketingTotals[ym]||0), 0);
+          const expanded = state.certSummaryExpandedYears.has(year);
+          return `
+            <div class="cert-year-group">
+              <div class="cert-group-header" data-certsummaryyear="${escapeHtml(year)}">
+                <span>${expanded?'▾':'▸'} ${escapeHtml(year)}</span>
+                <span style="font-family:var(--font-mono);font-size:12px;color:var(--ink-soft);">${formatMoney(yearSales)}${yearMarketing>0?` · маркетинг: ${formatMoney(yearMarketing)}`:''}</span>
+              </div>
+              ${expanded ? yearMonths.map(ym=>{
+                const [y,m] = ym.split('-').map(Number);
+                const label = MONTHS[m-1];
+                const sales = salesTotals[ym] || 0;
+                const marketing = marketingTotals[ym] || 0;
+                return `<div class="stat-row" style="padding:10px 14px 10px 28px;border-top:1px solid var(--line);">
+                  <div class="stat-label" style="width:140px;text-transform:capitalize;">${label}</div>
+                  <div style="flex:1;font-family:var(--font-mono);font-size:13px;">${formatMoney(sales)}${marketing>0?` <span style="color:var(--status-blue);">· маркетинг: ${formatMoney(marketing)}</span>`:''}</div>
+                </div>`;
+              }).join('') : ''}
+            </div>
+          `;
         }).join('')}
       </div>
     ` : '';
@@ -3644,6 +3667,16 @@
         const key = header.dataset.certgroup;
         if(state.certExpandedGroups.has(key)) state.certExpandedGroups.delete(key);
         else state.certExpandedGroups.add(key);
+        render();
+      };
+    });
+
+    document.querySelectorAll('[data-certsummaryyear]').forEach(header=>{
+      header.onclick = ()=>{
+        const year = header.dataset.certsummaryyear;
+        if(!state.certSummaryExpandedYears) state.certSummaryExpandedYears = new Set();
+        if(state.certSummaryExpandedYears.has(year)) state.certSummaryExpandedYears.delete(year);
+        else state.certSummaryExpandedYears.add(year);
         render();
       };
     });
