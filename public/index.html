@@ -321,6 +321,15 @@
   .cert-row .cell{ font-size: 13px; }
   .cert-row .amount{ font-family: var(--font-mono); font-size: 13px; }
   .cert-row .comment{ font-size: 12px; color: var(--ink-soft); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .cert-year-group{ margin-bottom: 6px; border: 1px solid var(--line-strong); border-radius: var(--radius); overflow:hidden; }
+  .cert-group-header{
+    display:flex; justify-content:space-between; align-items:center;
+    padding: 12px 14px; background: var(--paper-2); cursor:pointer;
+    font-size: 14px; font-weight: 500; text-transform: capitalize;
+  }
+  .cert-group-header:hover{ background: var(--white); }
+  .cert-month-header{ background: var(--white); font-weight: 400; font-size: 13px; padding: 10px 14px 10px 28px; border-top: 1px solid var(--line); }
+  .cert-month-group:last-child .cert-list .cert-row:last-child{ border-bottom: none; }
   .cert-badge{
     display:inline-flex; align-items:center; justify-content:center; padding: 3px 8px;
     border-radius: 999px; font-size: 11px; font-family: var(--font-mono); font-weight:500;
@@ -632,8 +641,6 @@
 </head>
 <body>
 <script>
-  // Замена Claude-артефактного window.storage на обращения к собственному серверу.
-  // Интерфейс (get/set/delete/list, флаг shared) полностью совпадает — остальной код ниже не менялся.
   (function(){
     function getDeviceId(){
       try{
@@ -647,37 +654,25 @@
     }
     const DEVICE_ID = getDeviceId();
     const API_BASE = new URL('/api/storage', window.location.origin).toString();
-
     window.storage = {
       async get(key, shared){
-        const res = await fetch(`${API_BASE}/${encodeURIComponent(key)}?shared=${!!shared}`, {
-          headers: { 'X-Device-Id': DEVICE_ID }
-        });
+        const res = await fetch(`${API_BASE}/${encodeURIComponent(key)}?shared=${!!shared}`, { headers: { 'X-Device-Id': DEVICE_ID } });
         if(res.status === 404) return null;
         if(!res.ok) throw new Error('storage.get failed: ' + res.status);
         return res.json();
       },
       async set(key, value, shared){
-        const res = await fetch(`${API_BASE}/${encodeURIComponent(key)}`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json', 'X-Device-Id': DEVICE_ID },
-          body: JSON.stringify({ value, shared: !!shared })
-        });
+        const res = await fetch(`${API_BASE}/${encodeURIComponent(key)}`, { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Device-Id': DEVICE_ID }, body: JSON.stringify({ value, shared: !!shared }) });
         if(!res.ok) throw new Error('storage.set failed: ' + res.status);
         return res.json();
       },
       async delete(key, shared){
-        const res = await fetch(`${API_BASE}/${encodeURIComponent(key)}?shared=${!!shared}`, {
-          method: 'DELETE',
-          headers: { 'X-Device-Id': DEVICE_ID }
-        });
+        const res = await fetch(`${API_BASE}/${encodeURIComponent(key)}?shared=${!!shared}`, { method: 'DELETE', headers: { 'X-Device-Id': DEVICE_ID } });
         if(!res.ok) throw new Error('storage.delete failed: ' + res.status);
         return res.json();
       },
       async list(prefix, shared){
-        const res = await fetch(`${API_BASE}?prefix=${encodeURIComponent(prefix||'')}&shared=${!!shared}`, {
-          headers: { 'X-Device-Id': DEVICE_ID }
-        });
+        const res = await fetch(`${API_BASE}?prefix=${encodeURIComponent(prefix||'')}&shared=${!!shared}`, { headers: { 'X-Device-Id': DEVICE_ID } });
         if(!res.ok) throw new Error('storage.list failed: ' + res.status);
         return res.json();
       }
@@ -1049,6 +1044,7 @@
     contentPosts: null,
     autoBackupMeta: null,
     pushEnabled: false,
+    certExpandedGroups: new Set(),
     pushRefundThreshold: 10000,
     marketingSpendCursor: new Date(),
     marketingSpendShowAll: false,
@@ -3495,6 +3491,9 @@
   }
 
   function renderCertificatesListView(){
+    if(state.certExpandedGroups.size === 0 && state.certificates.length > 0){
+      state.certExpandedGroups.add('y:' + todayStr().slice(0,4));
+    }
     // сводка по месяцам (на основе даты продажи) — продажи и маркетинг считаются раздельно
     const salesTotals = {};
     const marketingTotals = {};
@@ -3532,6 +3531,71 @@
     const printedCount = state.certificates.filter(c=>c.certType==='Печатный').length;
     const electronicCount = state.certificates.filter(c=>c.certType==='Электронный').length;
 
+    function renderCertRow(c){
+      return `
+        <div class="cert-row" data-cid="${c.id}">
+          <div class="num">№${escapeHtml(String(c.number))}</div>
+          <div class="cell">${escapeHtml(c.channel||'')}</div>
+          <div class="cell">${escapeHtml(c.certType||'')}${c.ownerName?'<br><span style="color:var(--ink-soft);font-size:11px;">👤 '+escapeHtml(c.ownerName)+'</span>':''}</div>
+          <div class="cell">${c.saleDate ? formatDateText(c.saleDate) : ''}${(c.status==='used'||c.status==='partial')&&certSpentTotal(c)>0?'<br><span style="color:'+(certRemaining(c)>0?'var(--status-blue)':'var(--status-green)')+';font-size:11px;">ост. '+formatMoney(certRemaining(c))+'</span>':''}</div>
+          <div class="amount">${c.amount!==undefined&&c.amount!==null ? formatMoney(c.amount) : ''}</div>
+          <div><span class="cert-badge ${c.status||'in_progress'}">${CERT_STATUS_LABEL[c.status||'in_progress']}</span></div>
+          <div class="comment">${c.purpose==='marketing'?'<span style="color:var(--status-blue);">📣 Маркетинг</span> · ':''}${c.certKind==='specific'?'🎯 '+escapeHtml(c.specificEventType||'МК')+(c.comment?' · ':''):''}${escapeHtml(c.comment||'')}</div>
+        </div>
+      `;
+    }
+
+    let listHtml;
+    if(query){
+      // при поиске — плоский список, без группировки, чтобы результат было видно сразу
+      listHtml = certs.length === 0
+        ? `<div class="host-empty">Ничего не найдено по номеру «${escapeHtml(query)}»</div>`
+        : `<div class="cert-list">${certs.map(renderCertRow).join('')}</div>`;
+    } else if(certs.length === 0){
+      listHtml = `<div class="host-empty">Сертификатов пока нет</div>`;
+    } else {
+      // группировка по году -> месяцу, обе строки сворачиваемые
+      const byYear = {};
+      certs.forEach(c=>{
+        const year = c.saleDate ? c.saleDate.slice(0,4) : 'без даты';
+        const ym = c.saleDate ? c.saleDate.slice(0,7) : 'без даты';
+        byYear[year] = byYear[year] || {};
+        byYear[year][ym] = byYear[year][ym] || [];
+        byYear[year][ym].push(c);
+      });
+      const years = Object.keys(byYear).sort((a,b)=> b==='без даты'?1 : a==='без даты'?-1 : b.localeCompare(a));
+      listHtml = years.map(year=>{
+        const monthGroups = byYear[year];
+        const yearCerts = Object.values(monthGroups).flat();
+        const yearTotal = yearCerts.reduce((s,c)=> s + ((c.amount!==undefined&&c.amount!==null&&!isNaN(c.amount))?Number(c.amount):0), 0);
+        const yearExpanded = state.certExpandedGroups.has('y:'+year);
+        const months = Object.keys(monthGroups).sort((a,b)=> b==='без даты'?1 : a==='без даты'?-1 : b.localeCompare(a));
+        return `
+          <div class="cert-year-group">
+            <div class="cert-group-header" data-certgroup="y:${escapeHtml(year)}">
+              <span>${yearExpanded?'▾':'▸'} ${escapeHtml(year)}</span>
+              <span style="font-family:var(--font-mono);font-size:12px;color:var(--ink-soft);">${yearCerts.length} шт. · ${formatMoney(yearTotal)}</span>
+            </div>
+            ${yearExpanded ? months.map(ym=>{
+              const mCerts = monthGroups[ym];
+              const mTotal = mCerts.reduce((s,c)=> s + ((c.amount!==undefined&&c.amount!==null&&!isNaN(c.amount))?Number(c.amount):0), 0);
+              const mExpanded = state.certExpandedGroups.has('m:'+ym);
+              const mLabel = ym==='без даты' ? 'Без даты' : MONTHS[parseInt(ym.slice(5,7),10)-1];
+              return `
+                <div class="cert-month-group">
+                  <div class="cert-group-header cert-month-header" data-certgroup="m:${escapeHtml(ym)}">
+                    <span>${mExpanded?'▾':'▸'} ${escapeHtml(mLabel)}</span>
+                    <span style="font-family:var(--font-mono);font-size:12px;color:var(--ink-soft);">${mCerts.length} шт. · ${formatMoney(mTotal)}</span>
+                  </div>
+                  ${mExpanded ? `<div class="cert-list">${mCerts.map(renderCertRow).join('')}</div>` : ''}
+                </div>
+              `;
+            }).join('') : ''}
+          </div>
+        `;
+      }).join('');
+    }
+
     return `
       ${monthlyHtml}
       <div class="cert-toolbar">
@@ -3541,21 +3605,7 @@
       <div class="field" style="max-width:260px;margin-bottom:14px;">
         <input type="text" id="cert-search" value="${escapeHtml(query)}" placeholder="Поиск по номеру…" inputmode="numeric">
       </div>
-      ${certs.length === 0 ? `<div class="host-empty">${query ? 'Ничего не найдено по номеру «'+escapeHtml(query)+'»' : 'Сертификатов пока нет'}</div>` : `
-        <div class="cert-list">
-          ${certs.map(c=>`
-            <div class="cert-row" data-cid="${c.id}">
-              <div class="num">№${escapeHtml(String(c.number))}</div>
-              <div class="cell">${escapeHtml(c.channel||'')}</div>
-              <div class="cell">${escapeHtml(c.certType||'')}${c.ownerName?'<br><span style="color:var(--ink-soft);font-size:11px;">👤 '+escapeHtml(c.ownerName)+'</span>':''}</div>
-              <div class="cell">${c.saleDate ? formatDateText(c.saleDate) : ''}${(c.status==='used'||c.status==='partial')&&certSpentTotal(c)>0?'<br><span style="color:'+(certRemaining(c)>0?'var(--status-blue)':'var(--status-green)')+';font-size:11px;">ост. '+formatMoney(certRemaining(c))+'</span>':''}</div>
-              <div class="amount">${c.amount!==undefined&&c.amount!==null ? formatMoney(c.amount) : ''}</div>
-              <div><span class="cert-badge ${c.status||'in_progress'}">${CERT_STATUS_LABEL[c.status||'in_progress']}</span></div>
-              <div class="comment">${c.purpose==='marketing'?'<span style="color:var(--status-blue);">📣 Маркетинг</span> · ':''}${c.certKind==='specific'?'🎯 '+escapeHtml(c.specificEventType||'МК')+(c.comment?' · ':''):''}${escapeHtml(c.comment||'')}</div>
-            </div>
-          `).join('')}
-        </div>
-      `}
+      ${listHtml}
     `;
   }
 
@@ -3587,6 +3637,15 @@
   function attachCertificatesEvents(){
     document.querySelectorAll('[data-certview]').forEach(btn=>{
       btn.onclick = ()=>{ state.certView = btn.dataset.certview; render(); };
+    });
+
+    document.querySelectorAll('[data-certgroup]').forEach(header=>{
+      header.onclick = ()=>{
+        const key = header.dataset.certgroup;
+        if(state.certExpandedGroups.has(key)) state.certExpandedGroups.delete(key);
+        else state.certExpandedGroups.add(key);
+        render();
+      };
     });
 
     const addBtn = document.getElementById('btn-add-cert');
@@ -11232,9 +11291,7 @@
 
 <script>
   if('serviceWorker' in navigator){
-    window.addEventListener('load', ()=>{
-      navigator.serviceWorker.register('/sw.js').catch(()=>{});
-    });
+    window.addEventListener('load', ()=>{ navigator.serviceWorker.register('/sw.js').catch(()=>{}); });
   }
 </script>
 
