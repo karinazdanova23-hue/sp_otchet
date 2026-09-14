@@ -747,7 +747,7 @@
   const EXPENSE_SOURCES = ['Наличные','Точка','ВБ','Озон','Карина'];
   const EXPENSE_RESPONSIBLE = ['Карина','Ассистент','Менеджер'];
 
-  const ITEM_SALE_MASTER_PCT = 30; // % от выручки — мастеру, изготовившему изделие
+  const ITEM_SALE_MASTER_PCT = 70; // % от выручки — мастеру, изготовившему изделие
   const ITEM_SALE_STUDIO_PCT = 100 - ITEM_SALE_MASTER_PCT; // остальное — в прибыль студии
   // ЗП мастера по заказам не считается по фиксированному %, а договаривается индивидуально —
   // сумма вводится вручную по каждому заказу (в отличие от "Изделия", где действует общий процент)
@@ -10136,7 +10136,7 @@
       overlay.remove();
       requireUnlock(()=>{
         state.modal = {type:'event', isNew:true, keepAll, event:{
-          id: uid(), spaceId: defaultSpaceId, date: dateStr, time:'10:00', duration:60, guests:null, itemsCount:null, itemsCountAuto:true, masterPay:null, masterPayAuto:true, additionalHosts:[], guestName:'', price:null, agreedPrice:null, materialsItems:[], pickupItems:[], payments:[], title:'', product:'', host:'', dishes:'', rentalBefore:null, rentalAfter:null, payerType:'individual', companyName:'', documents:{contract:false,paymentOrder:false,act:false}, masterReport:null, notes:''
+          id: uid(), spaceId: defaultSpaceId, date: dateStr, time:'10:00', duration:60, guests:null, itemsCount:null, itemsCountAuto:true, masterPay:null, masterPayAuto:true, additionalHosts:[], guestName:'', price:null, agreedPrice:null, materialsItems:[], pickupItems:[], payments:[], title:'', product:'', host:'', dishes:'', rentalBefore:0, rentalAfter:0, payerType:'individual', companyName:'', documents:{contract:false,paymentOrder:false,act:false}, masterReport:null, notes:''
         }};
         render();
       });
@@ -10230,11 +10230,11 @@
             <div class="row2">
               <div>
                 <label style="font-size:11px;color:var(--ink-soft);margin-bottom:4px;display:block;">До мероприятия (мин)</label>
-                <input type="number" id="f-rental-before" value="${ev.rentalBefore||''}" min="0" step="15" placeholder="0">
+                <input type="number" id="f-rental-before" value="${ev.rentalBefore!==undefined&&ev.rentalBefore!==null?ev.rentalBefore:''}" min="0" step="15" placeholder="0">
               </div>
               <div>
                 <label style="font-size:11px;color:var(--ink-soft);margin-bottom:4px;display:block;">После мероприятия (мин)</label>
-                <input type="number" id="f-rental-after" value="${ev.rentalAfter||''}" min="0" step="15" placeholder="0">
+                <input type="number" id="f-rental-after" value="${ev.rentalAfter!==undefined&&ev.rentalAfter!==null?ev.rentalAfter:''}" min="0" step="15" placeholder="0">
               </div>
             </div>
           </div>
@@ -10992,8 +10992,8 @@
         product: src.product,
         status: src.status === 'slot' ? 'slot' : 'confirmed',
         dishes: '',
-        rentalBefore: null,
-        rentalAfter: null,
+        rentalBefore: 0,
+        rentalAfter: 0,
         payerType: 'individual',
         companyName: '',
         documents: {contract:false, paymentOrder:false, act:false},
@@ -11172,8 +11172,8 @@
         status: overlay.querySelector('#f-status').value || 'confirmed',
         dishes: overlay.querySelector('#f-dishes').value || '',
         dishesPayment: overlay.querySelector('#f-dishes').value === 'needed' ? (overlay.querySelector('#f-dishes-payment').value || '') : '',
-        rentalBefore: rentalBeforeVal || null,
-        rentalAfter: rentalAfterVal || null,
+        rentalBefore: rentalBeforeVal,
+        rentalAfter: rentalAfterVal,
         notes: overlay.querySelector('#f-notes').value.trim(),
         masterReport: (()=>{
           const source = overlay.querySelector('#f-report-source').value.trim();
