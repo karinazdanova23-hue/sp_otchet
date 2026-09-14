@@ -7,6 +7,7 @@ const path = require('path');
 const crypto = require('crypto');
 const express = require('express');
 const webpush = require('web-push');
+const nodemailer = require('nodemailer');
 const {
   S3Client,
   GetObjectCommand,
@@ -30,6 +31,26 @@ if (VAPID_PUBLIC_KEY && VAPID_PRIVATE_KEY) {
 
 if (!BUCKET || !ENDPOINT) {
   console.warn('[storage] ВНИМАНИЕ: не заданы S3_BUCKET / S3_ENDPOINT — хранилище работать не будет, пока их не задать в переменных окружения.');
+}
+
+// --- Ежедневный бэкап на почту ---
+const SMTP_HOST = process.env.SMTP_HOST;
+const SMTP_PORT = Number(process.env.SMTP_PORT || 465);
+const SMTP_USER = process.env.SMTP_USER;
+const SMTP_PASS = process.env.SMTP_PASS;
+const BACKUP_EMAIL_TO = process.env.BACKUP_EMAIL_TO;
+const BACKUP_SEND_HOUR = Number(process.env.BACKUP_SEND_HOUR || 4); // час по времени сервера (UTC), в который отправлять
+
+let mailTransport = null;
+if (SMTP_HOST && SMTP_USER && SMTP_PASS && BACKUP_EMAIL_TO) {
+  mailTransport = nodemailer.createTransport({
+    host: SMTP_HOST,
+    port: SMTP_PORT,
+    secure: SMTP_PORT === 465,
+    auth: { user: SMTP_USER, pass: SMTP_PASS },
+  });
+} else {
+  console.warn('[backup-email] Не заданы SMTP_HOST/SMTP_USER/SMTP_PASS/BACKUP_EMAIL_TO — ежедневная отправка бэкапа на почту работать не будет, пока их не задать в переменных окружения.');
 }
 
 const s3 = new S3Client({
@@ -234,6 +255,113 @@ app.use(express.static(path.join(__dirname, 'public')));
 app.get('*', (req, res) => {
   res.sendFile(path.join(__dirname, 'public', 'index.html'));
 });
+
+// --- Сборка и отправка полного бэкапа на почту раз в сутки ---
+
+// те же поля, что и в клиентском buildJsonExport() — только реальные данные,
+// без служебных ключей (пароли ролей, метки автобэкапа, порог push и т.п.)
+const BACKUP_KEY_MAP = {
+  spaces: 'spaces-config',
+  events: 'events',
+  certificates: 'certificates',
+  refunds: 'refunds',
+  leads: 'leads',
+  incomes: 'incomes',
+  expenses: 'expenses',
+  eventTypes: 'event-types',
+  hostsList: 'hosts-list',
+  materialsCatalog: 'materials-catalog',
+  itemSales: 'item-sales',
+  orders: 'orders',
+  salaryAdjustments: 'salary-adjustments',
+  masterPayRates: 'master-pay-rates',
+  masterPayOverrides: 'master-pay-overrides',
+  monthlyPlans: 'monthly-plans',
+  hostessShifts: 'hostess-shifts',
+  netProfitManual: 'net-profit-manual',
+  yearSummaryManual: 'year-summary-manual',
+  auditLog: 'audit-log',
+  closedMonths: 'closed-months',
+  marketingSpend: 'marketing-spend',
+  marketingPlans: 'marketing-plans',
+  contentPosts: 'content-posts',
+};
+
+async function readSharedKeyRaw(key) {
+  try {
+    const result = await s3.send(new GetObjectCommand({ Bucket: BUCKET, Key: objectPath(key, true) }));
+    return await streamToString(result.Body);
+  } catch (err) {
+    return null;
+  }
+}
+
+async function buildServerSideBackup() {
+  const out = { exportedAt: new Date().toISOString() };
+  for (const [field, key] of Object.entries(BACKUP_KEY_MAP)) {
+    const raw = await readSharedKeyRaw(key);
+    if (raw === null) continue;
+    try { out[field] = JSON.parse(raw); } catch (e) { /* пропускаем нечитаемое значение */ }
+  }
+  return out;
+}
+
+async function sendDailyBackupEmail() {
+  if (!mailTransport) return { ok: false, reason: 'not_configured' };
+  const backup = await buildServerSideBackup();
+  const dateLabel = new Date().toLocaleDateString('ru-RU', { day: '2-digit', month: '2-digit', year: 'numeric' });
+  const eventsCount = Array.isArray(backup.events) ? backup.events.length : 0;
+  const certsCount = Array.isArray(backup.certificates) ? backup.certificates.length : 0;
+  await mailTransport.sendMail({
+    from: SMTP_USER,
+    to: BACKUP_EMAIL_TO,
+    subject: `Расписание студии — резервная копия от ${dateLabel}`,
+    text: `Автоматическая ежедневная резервная копия базы данных.\n\nМероприятий: ${eventsCount}\nСертификатов: ${certsCount}\n\nФайл во вложении — обычный JSON, его же принимает "Восстановить из файла" в разделе Экспорт.`,
+    attachments: [{
+      filename: `raspisanie-backup-${new Date().toISOString().slice(0, 10)}.json`,
+      content: JSON.stringify(backup, null, 2),
+      contentType: 'application/json',
+    }],
+  });
+  return { ok: true };
+}
+
+// ручной запуск для проверки — не гейтится ролью намеренно (сервер не хранит пароли ролей),
+// но URL никому не сообщается и живёт на приватном хосте приложения
+app.post('/api/backup/send-now', async (req, res) => {
+  try {
+    const result = await sendDailyBackupEmail();
+    if (!result.ok) return res.status(503).json({ error: result.reason });
+    res.json({ ok: true });
+  } catch (err) {
+    console.error('POST /api/backup/send-now error:', err);
+    res.status(500).json({ error: 'send_failed' });
+  }
+});
+
+// раз в сутки, в заданный час — проверяем каждый час, отправляли ли уже сегодня
+const EMAIL_BACKUP_MARKER_KEY = 'email-backup-last-sent';
+async function checkAndSendScheduledBackup() {
+  if (!mailTransport) return;
+  const now = new Date();
+  if (now.getUTCHours() !== BACKUP_SEND_HOUR) return;
+  const lastSentRaw = await readSharedKeyRaw(EMAIL_BACKUP_MARKER_KEY);
+  const todayStr = now.toISOString().slice(0, 10);
+  if (lastSentRaw === todayStr) return; // уже отправляли сегодня
+  try {
+    await sendDailyBackupEmail();
+    await s3.send(new PutObjectCommand({
+      Bucket: BUCKET,
+      Key: objectPath(EMAIL_BACKUP_MARKER_KEY, true),
+      Body: todayStr,
+      ContentType: 'text/plain; charset=utf-8',
+    }));
+    console.log('[backup-email] Ежедневный бэкап отправлен на почту:', todayStr);
+  } catch (err) {
+    console.error('[backup-email] Не удалось отправить ежедневный бэкап:', err);
+  }
+}
+setInterval(checkAndSendScheduledBackup, 60 * 60 * 1000); // проверяем раз в час
 
 app.listen(PORT, () => {
   console.log(`Сервер запущен на порту ${PORT}`);
