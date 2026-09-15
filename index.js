@@ -251,8 +251,17 @@ app.post('/api/push/send', async (req, res) => {
 });
 
 // статический фронтенд
-app.use(express.static(path.join(__dirname, 'public')));
+app.use(express.static(path.join(__dirname, 'public'), {
+  setHeaders: (res, filePath) => {
+    // index.html — код всего приложения, он должен обновляться сразу же после каждого деплоя,
+    // а не браться из кэша браузера на телефонах сотрудников
+    if (filePath.endsWith('index.html') || filePath.endsWith('sw.js')) {
+      res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
+    }
+  },
+}));
 app.get('*', (req, res) => {
+  res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
   res.sendFile(path.join(__dirname, 'public', 'index.html'));
 });
 
