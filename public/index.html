@@ -2508,7 +2508,7 @@
           <button class="lock-btn no-print" id="btn-today-view">📋 Сегодня</button>
           <button class="lock-btn no-print" id="btn-push-toggle">${state.pushEnabled ? '🔔 Уведомления включены' : '🔕 Включить уведомления'}</button>
           <button class="lock-btn ${role?'unlocked':''}" id="btn-lock">
-            ${role ? '👤 '+ROLE_LABELS[role]+' — выйти' : '🔒 Войти'}
+            ${role ? '👤 '+(state.loggedInMasterName ? escapeHtml(state.loggedInMasterName) : ROLE_LABELS[role])+' — выйти' : '🔒 Войти'}
           </button>
           ${isAdminLevel ? `
           <button class="lock-btn" id="btn-role-settings">⚙ Настройки доступа</button>
@@ -8646,11 +8646,15 @@
 
   function renderPersonalMasterSalaryView(monthLabel, combinedMasterTotals, masterEventDetails, masterAdjustmentDetails, combinedGrandTotal){
     const myName = state.loggedInMasterName;
-    const mine = combinedMasterTotals.find(x=>x.name===myName);
-    const details = (masterEventDetails[myName]||[]).sort((a,b)=> a.date.localeCompare(b.date));
+    const norm = s => (s||'').trim().toLowerCase();
+    // сначала точное совпадение, потом — без учёта регистра и пробелов (имя в календаре могли напечатать чуть иначе)
+    let resolvedName = combinedMasterTotals.find(x=>x.name===myName)?.name;
+    if(!resolvedName) resolvedName = combinedMasterTotals.find(x=>norm(x.name)===norm(myName))?.name;
+    const mine = resolvedName ? combinedMasterTotals.find(x=>x.name===resolvedName) : null;
+    const details = resolvedName ? (masterEventDetails[resolvedName]||[]).sort((a,b)=> a.date.localeCompare(b.date)) : [];
     const h1EventTotal = details.filter(d=>d.half==='H1').reduce((s,d)=>s+d.total,0);
     const h2EventTotal = details.filter(d=>d.half==='H2').reduce((s,d)=>s+d.total,0);
-    const myAdjustments = (masterAdjustmentDetails[myName]||[]).sort((a,b)=>a.date.localeCompare(b.date));
+    const myAdjustments = resolvedName ? (masterAdjustmentDetails[resolvedName]||[]).sort((a,b)=>a.date.localeCompare(b.date)) : [];
     return `
       <div class="analytics-header">
         <h3 style="text-transform:capitalize;">${escapeHtml(monthLabel)}</h3>
@@ -8661,7 +8665,7 @@
       </div>
       <div class="analytics-section">
         <h4>Моя зарплата: ${formatMoney(mine ? mine.total : 0)}</h4>
-        ${!mine ? `<div style="color:var(--ink-soft);font-size:13px;">В этом месяце пока нет ни мероприятий, ни других начислений.</div>` : `
+        ${!mine ? `<div style="color:var(--ink-soft);font-size:13px;">${state.events.some(e=>norm(e.host)===norm(myName) || (e.additionalHosts||[]).some(h=>norm(h.name)===norm(myName))) ? 'В этом месяце пока нет ни мероприятий, ни других начислений.' : `Ваше имя «${escapeHtml(myName)}» пока ни разу не встречалось в расписании как ведущий. Возможно, в мероприятиях оно записано чуть иначе (например, с фамилией или сокращением) — сверьтесь с администратором.`}</div>` : `
           <div style="font-size:12px;color:var(--ink-soft);margin-bottom:10px;">
             За МК: ${formatMoney(mine.fromEvents)}${mine.fromMaterialsComp>0?' (себес материалов: '+formatMoney(mine.fromMaterialsComp)+')':''}${mine.fromItems>0?' · за изделия: '+formatMoney(mine.fromItems):''}${mine.fromOrders>0?' · за заказы: '+formatMoney(mine.fromOrders):''}${mine.fromAdjustments!==0?' · корректировки: '+(mine.fromAdjustments>0?'+':'')+formatMoney(mine.fromAdjustments):''}
           </div>
