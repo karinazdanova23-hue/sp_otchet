@@ -3818,6 +3818,13 @@
         render();
       });
     };
+    const bulkAdjBtn = document.getElementById('btn-bulk-salaryadj');
+    if(bulkAdjBtn) bulkAdjBtn.onclick = ()=>{
+      requireAdminUnlock(()=>{
+        state.modal = {type:'bulk-salary-adj'};
+        render();
+      });
+    };
     document.querySelectorAll('.refund-row[data-adjid]').forEach(row=>{
       row.onclick = ()=>{
         const a = state.salaryAdjustments.find(x=>x.id===row.dataset.adjid);
@@ -4191,7 +4198,10 @@
 
       <div class="cert-toolbar">
         <div style="font-size:12px;color:var(--ink-soft);font-family:var(--font-mono);">Например: мастер оплатил такси сам — доплата (+), студия вычла на общий сбор — удержание (−)</div>
-        <button class="btn btn-primary" id="btn-add-salaryadj">+ Добавить корректировку</button>
+        <div style="display:flex;gap:8px;">
+          <button class="btn btn-ghost" id="btn-bulk-salaryadj">👥 Массовая корректировка</button>
+          <button class="btn btn-primary" id="btn-add-salaryadj">+ Добавить корректировку</button>
+        </div>
       </div>
       ${items.length === 0 ? `<div class="host-empty">Корректировок пока нет</div>` : `
         <div class="cert-list">
@@ -4658,6 +4668,95 @@
       if(idx >= 0) state.orders[idx] = updated; else state.orders.push(updated);
       await saveOrders();
       recordAction("Заказ сохранён");
+      state.modal = null; overlay.remove(); render();
+    };
+  }
+
+  function renderBulkSalaryAdjModal(){
+    return `
+      <div class="modal" style="max-width:460px;">
+        <div class="modal-head">
+          <h3>Массовая корректировка</h3>
+          <button class="modal-close">×</button>
+        </div>
+        <div class="modal-body">
+          <div style="font-size:12.5px;color:var(--ink-soft);">Например: все скидываются на подарок коллеге — впишите сумму и отметьте, у кого именно её удержать.</div>
+          <div class="row2">
+            <div class="field">
+              <label>Дата</label>
+              <input type="date" id="bulk-adj-date" value="${todayStr()}">
+            </div>
+            <div class="field">
+              <label>Сумма с каждого (₽)</label>
+              <input type="number" id="bulk-adj-amount" min="0" step="50" placeholder="Например: 500">
+            </div>
+          </div>
+          <div class="field">
+            <label>Причина</label>
+            <input type="text" id="bulk-adj-comment" placeholder="Например: сбор на ДР Тани">
+          </div>
+          <div class="field">
+            <label>С кого удержать</label>
+            <label style="display:flex;align-items:center;gap:8px;cursor:pointer;font-weight:500;margin-bottom:8px;">
+              <input type="checkbox" id="bulk-adj-select-all" style="width:18px;height:18px;">Выбрать всех
+            </label>
+            <div id="bulk-adj-names" style="display:flex;flex-direction:column;gap:6px;max-height:240px;overflow-y:auto;padding-right:4px;">
+              ${state.hostsList.map(h=>`
+                <label style="display:flex;align-items:center;gap:8px;cursor:pointer;font-size:13.5px;">
+                  <input type="checkbox" class="bulk-adj-name-check" value="${escapeHtml(h)}" style="width:16px;height:16px;">${escapeHtml(h)}
+                </label>
+              `).join('')}
+            </div>
+          </div>
+          <div id="bulk-adj-hint" style="font-size:11px;color:var(--ink-soft);"></div>
+          <div class="modal-actions">
+            <div><span></span></div>
+            <div style="display:flex;gap:8px;">
+              <button class="btn btn-ghost" id="btn-cancel-bulk-adj">Отмена</button>
+              <button class="btn btn-primary" id="btn-save-bulk-adj">Создать удержания</button>
+            </div>
+          </div>
+        </div>
+      </div>
+    `;
+  }
+
+  function attachBulkSalaryAdjModalEvents(overlay){
+    overlay.querySelector('#btn-cancel-bulk-adj').onclick = ()=>{ state.modal = null; overlay.remove(); };
+
+    const selectAllCheckbox = overlay.querySelector('#bulk-adj-select-all');
+    const nameChecks = [...overlay.querySelectorAll('.bulk-adj-name-check')];
+    selectAllCheckbox.onchange = ()=>{
+      nameChecks.forEach(c=> c.checked = selectAllCheckbox.checked);
+    };
+    nameChecks.forEach(c=>{
+      c.onchange = ()=>{
+        if(!c.checked) selectAllCheckbox.checked = false;
+        else if(nameChecks.every(x=>x.checked)) selectAllCheckbox.checked = true;
+      };
+    });
+
+    overlay.querySelector('#btn-save-bulk-adj').onclick = async ()=>{
+      const dateVal = overlay.querySelector('#bulk-adj-date').value;
+      const amountRaw = overlay.querySelector('#bulk-adj-amount').value;
+      const commentVal = overlay.querySelector('#bulk-adj-comment').value.trim();
+      const selectedNames = nameChecks.filter(c=>c.checked).map(c=>c.value);
+      const hintEl = overlay.querySelector('#bulk-adj-hint');
+
+      const amount = parseInt(amountRaw) || 0;
+      if(!dateVal || amount <= 0 || !commentVal || selectedNames.length === 0){
+        hintEl.style.color = 'var(--status-red)';
+        hintEl.textContent = 'Заполните дату, сумму больше нуля, причину и отметьте хотя бы одного человека.';
+        return;
+      }
+
+      selectedNames.forEach(name=>{
+        state.salaryAdjustments.push({
+          id: uid(), date: dateVal, masterName: name, amount: -amount, eventId: '', comment: commentVal,
+        });
+      });
+      await saveSalaryAdjustments();
+      recordAction(`Массовое удержание: ${formatMoney(amount)} с ${selectedNames.length} чел.`, commentVal);
       state.modal = null; overlay.remove(); render();
     };
   }
@@ -6499,6 +6598,8 @@
       overlay.innerHTML = renderOrderModal(state.modal.order, state.modal.isNew);
     } else if(state.modal.type === 'salary-adj'){
       overlay.innerHTML = renderSalaryAdjModal(state.modal.adj, state.modal.isNew);
+    } else if(state.modal.type === 'bulk-salary-adj'){
+      overlay.innerHTML = renderBulkSalaryAdjModal();
     } else if(state.modal.type === 'expense'){
       overlay.innerHTML = renderExpenseModal(state.modal.expense, state.modal.isNew);
     } else if(state.modal.type === 'marketing-spend'){
@@ -6544,6 +6645,7 @@
     else if(state.modal.type === 'item-sale'){ attachItemSaleModalEvents(overlay); }
     else if(state.modal.type === 'order'){ attachOrderModalEvents(overlay); }
     else if(state.modal.type === 'salary-adj'){ attachSalaryAdjModalEvents(overlay); }
+    else if(state.modal.type === 'bulk-salary-adj'){ attachBulkSalaryAdjModalEvents(overlay); }
     else if(state.modal.type === 'expense'){ attachExpenseModalEvents(overlay); }
     else if(state.modal.type === 'marketing-spend'){ attachMarketingSpendModalEvents(overlay); }
     else if(state.modal.type === 'marketing-plan-edit'){ attachMarketingPlanEditModalEvents(overlay); }
@@ -7770,10 +7872,13 @@
     });
     // корректировки ЗП (доплаты/удержания) за этот же месяц
     const adjustmentsByMaster = {};
+    const masterAdjustmentDetails = {};
     state.salaryAdjustments.filter(x=> x.date && x.date.startsWith(monthYmForItemSales)).forEach(x=>{
       const name = (x.masterName||'').trim();
       if(!name) return;
       adjustmentsByMaster[name] = (adjustmentsByMaster[name]||0) + (Number(x.amount)||0);
+      if(!masterAdjustmentDetails[name]) masterAdjustmentDetails[name] = [];
+      masterAdjustmentDetails[name].push({ date: x.date, comment: x.comment||'', amount: Number(x.amount)||0 });
     });
     const combinedMasterNames = Array.from(new Set([...Object.keys(hostSalary), ...Object.keys(itemSalesByMaster), ...Object.keys(ordersByMaster), ...Object.keys(adjustmentsByMaster)]));
     const combinedMasterTotals = combinedMasterNames.map(name=>{
@@ -8118,20 +8223,34 @@
                   <div style="font-size:12px;color:var(--ink-soft);margin-bottom:8px;">
                     За МК: ${formatMoney(x.fromEvents)}${x.fromMaterialsComp>0?' (себес материалов: '+formatMoney(x.fromMaterialsComp)+')':''}${x.fromItems>0?' · за изделия: '+formatMoney(x.fromItems):''}${x.fromOrders>0?' · за заказы: '+formatMoney(x.fromOrders):''}${x.fromAdjustments!==0?' · корректировки: '+(x.fromAdjustments>0?'+':'')+formatMoney(x.fromAdjustments):''}
                   </div>
-                  <div style="display:flex;gap:16px;margin-bottom:10px;font-size:12.5px;">
-                    <div><b>1\u201315 число:</b> ${formatMoney(h1EventTotal)}</div>
-                    <div><b>16 – конец:</b> ${formatMoney(h2EventTotal)}</div>
-                  </div>
-                  ${details.length === 0 ? '<div style="color:var(--ink-soft);font-size:12.5px;">Нет мероприятий за этот месяц — вся сумма из изделий/заказов/корректировок выше.</div>' : `
-                    <div style="font-size:11px;color:var(--ink-soft);font-family:var(--font-mono);text-transform:uppercase;letter-spacing:0.03em;margin-bottom:4px;">Мастер-классы (${details.length})</div>
-                    ${details.map(d=>`
-                      <div class="stat-row" style="margin-bottom:5px;">
-                        <div class="stat-label" style="width:170px;">${formatDateText(d.date)}</div>
-                        <div style="flex:1;font-size:12.5px;">${escapeHtml(d.title)}</div>
-                        <div style="font-family:var(--font-mono);font-size:12.5px;">${formatMoney(d.total)}${d.materialsComp>0?' <span style="color:var(--accent);">(себес '+formatMoney(d.materialsComp)+')</span>':''}</div>
-                      </div>
-                    `).join('')}
-                  `}
+                  ${details.length === 0 ? '<div style="color:var(--ink-soft);font-size:12.5px;">Нет мероприятий за этот месяц — вся сумма из изделий/заказов/корректировок выше.</div>' : ['H1','H2'].map(half=>{
+                    const halfDetails = details.filter(d=>d.half===half);
+                    const halfTotal = half==='H1' ? h1EventTotal : h2EventTotal;
+                    const halfLabel = half==='H1' ? '1\u201315 число' : '16 \u2013 конец месяца';
+                    return `
+                    <div style="margin-bottom:12px;">
+                      <div style="font-size:12px;font-weight:600;margin-bottom:6px;">${halfLabel}: ${formatMoney(halfTotal)} <span style="font-weight:400;color:var(--ink-soft);font-size:11px;">(${halfDetails.length} МК)</span></div>
+                      ${halfDetails.length === 0 ? '<div style="color:var(--ink-soft);font-size:12px;margin-bottom:6px;">Нет МК в этот период.</div>' : halfDetails.map(d=>`
+                        <div class="stat-row" style="margin-bottom:5px;">
+                          <div class="stat-label" style="width:170px;">${formatDateText(d.date)}</div>
+                          <div style="flex:1;font-size:12.5px;">${escapeHtml(d.title)}</div>
+                          <div style="font-family:var(--font-mono);font-size:12.5px;">${formatMoney(d.total)}${d.materialsComp>0?' <span style="color:var(--accent);">(себес '+formatMoney(d.materialsComp)+')</span>':''}</div>
+                        </div>
+                      `).join('')}
+                    </div>
+                  `;}).join('')}
+                  ${(masterAdjustmentDetails[x.name]||[]).length > 0 ? `
+                    <div style="margin-top:4px;padding-top:10px;border-top:1px dashed var(--line-strong);">
+                      <div style="font-size:11px;color:var(--ink-soft);font-family:var(--font-mono);text-transform:uppercase;letter-spacing:0.03em;margin-bottom:4px;">Корректировки ЗП</div>
+                      ${masterAdjustmentDetails[x.name].sort((a,b)=>a.date.localeCompare(b.date)).map(a=>`
+                        <div class="stat-row" style="margin-bottom:5px;">
+                          <div class="stat-label" style="width:170px;">${formatDateText(a.date)}</div>
+                          <div style="flex:1;font-size:12.5px;">${escapeHtml(a.comment||'без комментария')}</div>
+                          <div style="font-family:var(--font-mono);font-size:12.5px;color:${a.amount>=0?'var(--status-green)':'var(--status-red)'};">${a.amount>=0?'+':''}${formatMoney(a.amount)}</div>
+                        </div>
+                      `).join('')}
+                    </div>
+                  ` : ''}
                 </div>
               ` : ''}
             </div>
