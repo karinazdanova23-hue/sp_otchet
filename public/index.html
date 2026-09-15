@@ -1047,6 +1047,8 @@
     certExpandedGroups: new Set(),
     certSummaryExpandedYears: null,
     expandedSalaryMasters: new Set(),
+    masterPersonalPasswords: {},
+    loggedInMasterName: null,
     pushRefundThreshold: 10000,
     marketingSpendCursor: new Date(),
     marketingSpendShowAll: false,
@@ -1109,7 +1111,7 @@
     if(view==='certificates') return roleCanAccessManagersTab(state.currentRole);
     if(view==='marketing') return roleCanAccessManagersTab(state.currentRole);
     if(view==='book') return roleCanAccessBook(state.currentRole);
-    if(view==='analytics') return roleCanAccessAnalytics(state.currentRole);
+    if(view==='analytics') return roleCanAccessAnalytics(state.currentRole) || !!state.loggedInMasterName;
     return false;
   }
 
@@ -1148,6 +1150,11 @@
       state.roleCodes = { ...DEFAULT_ROLE_CODES, ...parsed };
       if(!rc) await storageSetWithRetry('role-codes', JSON.stringify(state.roleCodes));
     }catch(e){ state.roleCodes = { ...DEFAULT_ROLE_CODES }; }
+
+    try{
+      const mp = await window.storage.get('master-passwords', true);
+      state.masterPersonalPasswords = mp ? JSON.parse(mp.value) : {};
+    }catch(e){ state.masterPersonalPasswords = {}; }
 
     try{
       const et = await window.storage.get('event-types', true);
@@ -2154,14 +2161,26 @@
         state.unlocked = true;
         state.unlockedAdmin = ['assistant','admin','owner'].includes(matchedRole);
         state.unlockedOwner = (matchedRole === 'owner');
+        state.loggedInMasterName = null;
         render();
         checkPushSubscriptionStatus().then(enabled=>{ state.pushEnabled = enabled; render(); });
-      } else {
-        errorEl.style.display = 'block';
-        input.style.borderColor = 'var(--danger)';
-        input.value = '';
-        input.focus();
+        return;
       }
+      const matchedMasterName = val ? Object.keys(state.masterPersonalPasswords).find(name => state.masterPersonalPasswords[name] && state.masterPersonalPasswords[name] === val) : null;
+      if(matchedMasterName){
+        state.currentRole = 'master';
+        state.unlocked = true;
+        state.unlockedAdmin = false;
+        state.unlockedOwner = false;
+        state.loggedInMasterName = matchedMasterName;
+        render();
+        checkPushSubscriptionStatus().then(enabled=>{ state.pushEnabled = enabled; render(); });
+        return;
+      }
+      errorEl.style.display = 'block';
+      input.style.borderColor = 'var(--danger)';
+      input.value = '';
+      input.focus();
     };
     document.getElementById('gate-submit').onclick = submit;
     input.onkeydown = (e)=>{ if(e.key==='Enter') submit(); };
@@ -2479,7 +2498,7 @@
           <div class="view-switch">
             <button data-view="calendar" class="${state.view==='calendar'?'active':''}">По пространствам</button>
             <button data-view="host" class="${state.view==='host'?'active':''}">По ведущим</button>
-            ${roleCanAccessAnalytics(role) ? `<button data-view="analytics" class="${state.view==='analytics'?'active':''}">Аналитика</button>` : ''}
+            ${(roleCanAccessAnalytics(role) || state.loggedInMasterName) ? `<button data-view="analytics" class="${state.view==='analytics'?'active':''}">${state.loggedInMasterName ? '💰 Моя зарплата' : 'Аналитика'}</button>` : ''}
             ${roleCanAccessManagersTab(role) ? `<button data-view="certificates" class="${state.view==='certificates'?'active':''}">Для менеджеров</button>` : ''}
             ${roleCanAccessManagersTab(role) ? `<button data-view="marketing" class="${state.view==='marketing'?'active':''}">Маркетинг</button>` : ''}
             ${roleCanAccessBook(role) ? `<button data-view="book" class="${state.view==='book'?'active':''}">Книга</button>` : ''}
@@ -6451,6 +6470,7 @@
         state.unlocked = false;
         state.unlockedAdmin = false;
         state.unlockedOwner = false;
+        state.loggedInMasterName = null;
         if(!canAccessView(state.view)) state.view = 'calendar';
         render();
       } else {
@@ -6780,6 +6800,18 @@
               <input type="text" class="role-code-input" data-role="${r}" placeholder="${escapeHtml(state.roleCodes[r])}" value="${escapeHtml(state.roleCodes[r])}">
             </div>
           `).join('')}
+          ${state.unlockedAdmin ? `
+            <div style="border-top:1px solid var(--line);margin-top:8px;padding-top:14px;">
+              <div style="font-size:13px;font-weight:600;margin-bottom:4px;">Личные пароли мастеров</div>
+              <div style="font-size:12px;color:var(--ink-soft);margin-bottom:10px;">Вход по личному паролю открывает мастеру только его собственную зарплату — остальные разделы недоступны. Оставьте поле пустым, если пароль не нужен.</div>
+              ${state.hostsList.map(h=>`
+                <div class="field">
+                  <label>${escapeHtml(h)}</label>
+                  <input type="text" class="master-password-input" data-master="${escapeHtml(h)}" placeholder="без личного пароля" value="${escapeHtml(state.masterPersonalPasswords[h]||'')}">
+                </div>
+              `).join('')}
+            </div>
+          ` : ''}
           <div class="modal-actions">
             <button class="btn-danger" id="btn-relock">Выйти</button>
             <button class="btn btn-primary" id="btn-save-code">Сохранить</button>
@@ -6810,8 +6842,29 @@
         else newCodes[inp.dataset.role] = val;
       });
       if(anyEmpty) return;
+
+      const masterPwInputs = [...overlay.querySelectorAll('.master-password-input')];
+      const newMasterPasswords = {};
+      const usedValues = new Set(Object.values(newCodes));
+      let duplicateFound = '';
+      masterPwInputs.forEach(inp=>{
+        const val = inp.value.trim();
+        if(!val) return;
+        if(usedValues.has(val)) duplicateFound = inp.dataset.master;
+        usedValues.add(val);
+        newMasterPasswords[inp.dataset.master] = val;
+      });
+      if(duplicateFound){
+        showToast(`Пароль у «${duplicateFound}» совпадает с другим паролем — исправьте, чтобы вход не путался.`, 'error');
+        return;
+      }
+
       state.roleCodes = newCodes;
       await storageSetWithRetry('role-codes', JSON.stringify(state.roleCodes));
+      if(masterPwInputs.length > 0){
+        state.masterPersonalPasswords = newMasterPasswords;
+        await storageSetWithRetry('master-passwords', JSON.stringify(state.masterPersonalPasswords));
+      }
       recordAction("Пароли сохранены");
       state.modal = null;
       overlay.remove();
@@ -8017,7 +8070,7 @@
       {id:'materials', label:'Себестоимость'},
       {id:'salary', label:'Зарплата'},
     ];
-    const activeFinTab = state.analyticsFinTab || 'revenue';
+    const activeFinTab = state.loggedInMasterName ? 'salary' : (state.analyticsFinTab || 'revenue');
     const finTabsHtml = `
       <div class="view-switch" style="margin-bottom:16px;">
         ${FIN_TABS.map(t=>`<button data-fintab="${t.id}" class="${activeFinTab===t.id?'active':''}">${t.label}</button>`).join('')}
@@ -8506,7 +8559,7 @@
     `;
     state.analyticsPanels = { plan: analyticsPanel_plan, occupancy: analyticsPanel_occupancy, days: analyticsPanel_days, ceramics: analyticsPanel_ceramics, guests: analyticsPanel_guests, legal: analyticsPanel_legal, reports: analyticsPanel_reports, netprofit: analyticsPanel_netprofit, yearsummary: analyticsPanel_yearsummary, auditlog: analyticsPanel_auditlog, marketing: analyticsPanel_marketing };
 
-    return `
+    const fullHtml = `
       <div class="cal-nav">
         <div class="month-label">${monthLabel}</div>
         <div class="cal-nav-btns">
@@ -8566,6 +8619,64 @@
 
       ${finTabsHtml}
       ${finContent}
+    `;
+    if(state.loggedInMasterName){
+      return renderPersonalMasterSalaryView(monthLabel, combinedMasterTotals, masterEventDetails, masterAdjustmentDetails, combinedGrandTotal);
+    }
+    return fullHtml;
+  }
+
+  function renderPersonalMasterSalaryView(monthLabel, combinedMasterTotals, masterEventDetails, masterAdjustmentDetails, combinedGrandTotal){
+    const myName = state.loggedInMasterName;
+    const mine = combinedMasterTotals.find(x=>x.name===myName);
+    const details = (masterEventDetails[myName]||[]).sort((a,b)=> a.date.localeCompare(b.date));
+    const h1EventTotal = details.filter(d=>d.half==='H1').reduce((s,d)=>s+d.total,0);
+    const h2EventTotal = details.filter(d=>d.half==='H2').reduce((s,d)=>s+d.total,0);
+    const myAdjustments = (masterAdjustmentDetails[myName]||[]).sort((a,b)=>a.date.localeCompare(b.date));
+    return `
+      <div class="analytics-header">
+        <h3 style="text-transform:capitalize;">${escapeHtml(monthLabel)}</h3>
+        <div class="nav-btns">
+          <button class="nav-btn" id="an-prev">‹</button>
+          <button class="nav-btn" id="an-next">›</button>
+        </div>
+      </div>
+      <div class="analytics-section">
+        <h4>Моя зарплата: ${formatMoney(mine ? mine.total : 0)}</h4>
+        ${!mine ? `<div style="color:var(--ink-soft);font-size:13px;">В этом месяце пока нет ни мероприятий, ни других начислений.</div>` : `
+          <div style="font-size:12px;color:var(--ink-soft);margin-bottom:10px;">
+            За МК: ${formatMoney(mine.fromEvents)}${mine.fromMaterialsComp>0?' (себес материалов: '+formatMoney(mine.fromMaterialsComp)+')':''}${mine.fromItems>0?' · за изделия: '+formatMoney(mine.fromItems):''}${mine.fromOrders>0?' · за заказы: '+formatMoney(mine.fromOrders):''}${mine.fromAdjustments!==0?' · корректировки: '+(mine.fromAdjustments>0?'+':'')+formatMoney(mine.fromAdjustments):''}
+          </div>
+          ${['H1','H2'].map(half=>{
+            const halfDetails = details.filter(d=>d.half===half);
+            const halfTotal = half==='H1' ? h1EventTotal : h2EventTotal;
+            const halfLabel = half==='H1' ? '1–15 число' : '16 – конец месяца';
+            return `
+            <div style="margin-bottom:14px;">
+              <div style="font-size:13px;font-weight:600;margin-bottom:6px;">${halfLabel}: ${formatMoney(halfTotal)} <span style="font-weight:400;color:var(--ink-soft);font-size:11px;">(${halfDetails.length} МК)</span></div>
+              ${halfDetails.length === 0 ? '<div style="color:var(--ink-soft);font-size:12.5px;">Нет МК в этот период.</div>' : halfDetails.map(d=>`
+                <div class="stat-row" style="margin-bottom:5px;">
+                  <div class="stat-label" style="width:170px;">${formatDateText(d.date)}</div>
+                  <div style="flex:1;font-size:12.5px;">${escapeHtml(d.title)}</div>
+                  <div style="font-family:var(--font-mono);font-size:12.5px;">${formatMoney(d.total)}${d.materialsComp>0?' <span style="color:var(--accent);">(себес '+formatMoney(d.materialsComp)+')</span>':''}</div>
+                </div>
+              `).join('')}
+            </div>
+          `;}).join('')}
+          ${myAdjustments.length > 0 ? `
+            <div style="margin-top:4px;padding-top:10px;border-top:1px dashed var(--line-strong);">
+              <div style="font-size:11px;color:var(--ink-soft);font-family:var(--font-mono);text-transform:uppercase;letter-spacing:0.03em;margin-bottom:4px;">Корректировки ЗП</div>
+              ${myAdjustments.map(a=>`
+                <div class="stat-row" style="margin-bottom:5px;">
+                  <div class="stat-label" style="width:170px;">${formatDateText(a.date)}</div>
+                  <div style="flex:1;font-size:12.5px;">${escapeHtml(a.comment||'без комментария')}</div>
+                  <div style="font-family:var(--font-mono);font-size:12.5px;color:${a.amount>=0?'var(--status-green)':'var(--status-red)'};">${a.amount>=0?'+':''}${formatMoney(a.amount)}</div>
+                </div>
+              `).join('')}
+            </div>
+          ` : ''}
+        `}
+      </div>
     `;
   }
 
