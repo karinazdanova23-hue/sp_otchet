@@ -1099,6 +1099,8 @@
 
   const DATA_VERSION = '3';
   const ROLES = ['hostess','master','manager','marketer','assistant','admin','owner'];
+  // мастера теперь входят только по личным паролям — общего кода для этой роли больше нет
+  const CODE_LOGIN_ROLES = ROLES.filter(r => r !== 'master');
   const ROLE_LABELS = { hostess:'Администратор', master:'Мастер', manager:'Менеджер', marketer:'Маркетолог', assistant:'Ассистент', admin:'Старший администратор', owner:'Руководитель' };
   const DEFAULT_ROLE_CODES = { hostess:'1111', master:'2222', manager:'3333', marketer:'6666', assistant:'4444', admin:'5555', owner:'0000' };
   // права: кто видит "Для менеджеров"/"Книгу" (менеджер, маркетолог и выше), кто видит "Аналитику" (ассистент/админ и выше), кто видит "Чистую прибыль" (только руководитель)
@@ -2155,7 +2157,7 @@
     const errorEl = document.getElementById('gate-error');
     const submit = ()=>{
       const val = input.value.trim();
-      const matchedRole = ROLES.find(r => val && val === state.roleCodes[r]);
+      const matchedRole = CODE_LOGIN_ROLES.find(r => val && val === state.roleCodes[r]);
       if(matchedRole){
         state.currentRole = matchedRole;
         state.unlocked = true;
@@ -6706,22 +6708,37 @@
     const errorEl = overlay.querySelector('#role-code-error');
     const submit = ()=>{
       const val = input.value.trim();
-      const matchedRole = ROLES.find(r => val && val === state.roleCodes[r]);
+      const matchedRole = CODE_LOGIN_ROLES.find(r => val && val === state.roleCodes[r]);
       if(matchedRole){
         state.currentRole = matchedRole;
         state.unlocked = true;
         state.unlockedAdmin = ['assistant','admin','owner'].includes(matchedRole);
         state.unlockedOwner = (matchedRole === 'owner');
+        state.loggedInMasterName = null;
         const action = state.pendingAction;
         state.pendingAction = null;
         state.modal = null;
         overlay.remove();
         if(action) action(); else render();
-      } else {
-        errorEl.textContent = 'Неверный пароль, попробуйте ещё раз';
-        errorEl.style.display = 'block';
-        input.style.borderColor = 'var(--danger)';
+        return;
       }
+      const matchedMasterName = val ? Object.keys(state.masterPersonalPasswords).find(name => state.masterPersonalPasswords[name] && state.masterPersonalPasswords[name] === val) : null;
+      if(matchedMasterName){
+        state.currentRole = 'master';
+        state.unlocked = true;
+        state.unlockedAdmin = false;
+        state.unlockedOwner = false;
+        state.loggedInMasterName = matchedMasterName;
+        const action = state.pendingAction;
+        state.pendingAction = null;
+        state.modal = null;
+        overlay.remove();
+        if(action) action(); else render();
+        return;
+      }
+      errorEl.textContent = 'Неверный пароль, попробуйте ещё раз';
+      errorEl.style.display = 'block';
+      input.style.borderColor = 'var(--danger)';
     };
     overlay.querySelector('#btn-submit-role-login').onclick = submit;
     input.onkeydown = (e)=>{ if(e.key==='Enter') submit(); };
@@ -6784,8 +6801,9 @@
 
   function renderCodeSettingsModal(){
     const isOwnerRole = state.currentRole === 'owner';
-    // ассистент/админ видят и меняют только пароли ролей ниже своей (хостес/мастер/менеджер) — не могут поднять себе или друг другу уровень
-    const editableRoles = isOwnerRole ? ROLES : ['hostess','master','manager','marketer'];
+    // ассистент/админ видят и меняют только пароли ролей ниже своей (хостес/менеджер) — не могут поднять себе или друг другу уровень.
+    // у "Мастера" больше нет общего пароля — только личные, у каждого свой (ниже).
+    const editableRoles = isOwnerRole ? CODE_LOGIN_ROLES : ['hostess','manager','marketer'];
     return `
       <div class="modal" style="max-width:420px;">
         <div class="modal-head">
@@ -6802,8 +6820,8 @@
           `).join('')}
           ${state.unlockedAdmin ? `
             <div style="border-top:1px solid var(--line);margin-top:8px;padding-top:14px;">
-              <div style="font-size:13px;font-weight:600;margin-bottom:4px;">Личные пароли мастеров</div>
-              <div style="font-size:12px;color:var(--ink-soft);margin-bottom:10px;">Вход по личному паролю открывает мастеру только его собственную зарплату — остальные разделы недоступны. Оставьте поле пустым, если пароль не нужен.</div>
+              <div style="font-size:13px;font-weight:600;margin-bottom:4px;">Пароли мастеров</div>
+              <div style="font-size:12px;color:var(--ink-soft);margin-bottom:10px;">У «Мастера» больше нет общего пароля — вход только по личному, отдельно для каждого. Личный пароль открывает только собственную зарплату, остальные разделы недоступны. Оставьте поле пустым, если этот мастер пока не заходит в приложение сам.</div>
               ${state.hostsList.map(h=>`
                 <div class="field">
                   <label>${escapeHtml(h)}</label>
