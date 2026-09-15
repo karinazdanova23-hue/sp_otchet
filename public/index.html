@@ -724,7 +724,7 @@
     return fmtDate(d);
   }
 
-  const PRODUCTS = ['День рождения','Свидание','Девичник','Корпоратив','Детский МК','Мастер-класс'];
+  const PRODUCTS = ['День рождения','Свадьба','Свидание','Девичник','Корпоратив','Детский МК','Мастер-класс'];
 
   const DEFAULT_HOSTS_LIST = [
     'Ира Керамика','Василена','Оксана Хост','Даша Тафтинг','Олюсик','Ольга','Наташа',
@@ -1046,6 +1046,7 @@
     pushEnabled: false,
     certExpandedGroups: new Set(),
     certSummaryExpandedYears: null,
+    expandedSalaryMasters: new Set(),
     pushRefundThreshold: 10000,
     marketingSpendCursor: new Date(),
     marketingSpendShowAll: false,
@@ -7722,12 +7723,31 @@
     const totalSalary = evts.reduce((sum,e)=> sum + eventTotalMasterPay(e), 0);
 
     const hostSalary = {};
+    const hostSessionPay = {};
+    const hostMaterialsComp = {};
+    const masterEventDetails = {};
     evts.forEach(e=>{
+      const half = parseInt(e.date.slice(8,10),10) <= 15 ? 'H1' : 'H2';
+      const materialsCompThisEvent = {};
+      eventMasterMaterialPayments(e).forEach(p=>{
+        materialsCompThisEvent[p.name] = (materialsCompThisEvent[p.name]||0) + p.amount;
+      });
       eventHostsWithPay(e).forEach(h=>{
         hostSalary[h.name] = (hostSalary[h.name]||0) + h.pay;
+        hostSessionPay[h.name] = (hostSessionPay[h.name]||0) + h.pay;
+        const comp = materialsCompThisEvent[h.name] || 0;
+        if(!masterEventDetails[h.name]) masterEventDetails[h.name] = [];
+        masterEventDetails[h.name].push({ date: e.date, title: e.title || 'Без названия', sessionPay: h.pay, materialsComp: comp, total: h.pay + comp, half });
+        delete materialsCompThisEvent[h.name];
       });
       eventMasterMaterialPayments(e).forEach(p=>{
         hostSalary[p.name] = (hostSalary[p.name]||0) + p.amount;
+        hostMaterialsComp[p.name] = (hostMaterialsComp[p.name]||0) + p.amount;
+        // если этот человек не ведущий на мероприятии (получает только компенсацию за материалы) — отдельная строка
+        if(materialsCompThisEvent[p.name] !== undefined){
+          if(!masterEventDetails[p.name]) masterEventDetails[p.name] = [];
+          masterEventDetails[p.name].push({ date: e.date, title: e.title || 'Без названия', sessionPay: 0, materialsComp: p.amount, total: p.amount, half });
+        }
       });
     });
 
@@ -7758,10 +7778,11 @@
     const combinedMasterNames = Array.from(new Set([...Object.keys(hostSalary), ...Object.keys(itemSalesByMaster), ...Object.keys(ordersByMaster), ...Object.keys(adjustmentsByMaster)]));
     const combinedMasterTotals = combinedMasterNames.map(name=>{
       const fromEvents = hostSalary[name] || 0;
+      const fromMaterialsComp = hostMaterialsComp[name] || 0;
       const fromItems = itemSalesByMaster[name] || 0;
       const fromOrders = ordersByMaster[name] || 0;
       const fromAdjustments = adjustmentsByMaster[name] || 0;
-      return { name, fromEvents, fromItems, fromOrders, fromAdjustments, total: fromEvents + fromItems + fromOrders + fromAdjustments };
+      return { name, fromEvents, fromMaterialsComp, fromItems, fromOrders, fromAdjustments, total: fromEvents + fromItems + fromOrders + fromAdjustments };
     }).filter(x=>x.total!==0).sort((a,b)=>b.total-a.total);
     const combinedGrandTotal = combinedMasterTotals.reduce((s,x)=>s+x.total, 0);
 
@@ -8080,40 +8101,41 @@
       finContent = `
         <div class="analytics-section">
           <h4>ЗП по мастерам за месяц: ${formatMoney(combinedGrandTotal)}</h4>
-          <div style="font-size:11.5px;color:var(--ink-soft);font-family:var(--font-mono);margin-bottom:8px;">МК — по ставкам за сессию: до ${(state.masterPayRates||DEFAULT_MASTER_PAY_RATES).tier1Max} чел — ${formatMoney((state.masterPayRates||DEFAULT_MASTER_PAY_RATES).tier1Flat)}, ${(state.masterPayRates||DEFAULT_MASTER_PAY_RATES).tier1Max+1}–${(state.masterPayRates||DEFAULT_MASTER_PAY_RATES).tier2Max} — ${formatMoney((state.masterPayRates||DEFAULT_MASTER_PAY_RATES).tier2Flat)}, ${(state.masterPayRates||DEFAULT_MASTER_PAY_RATES).tier2Max+1}+ — ${formatMoney((state.masterPayRates||DEFAULT_MASTER_PAY_RATES).tier3PerGuest)}/гость. Изделия — ${ITEM_SALE_MASTER_PCT}% от выручки со стеллажа. Заказ — сумма мастеру вводится вручную по договорённости.</div>
-          ${combinedMasterTotals.length ? combinedMasterTotals.map(x=>`
-            <div class="stat-row" style="align-items:flex-start;">
-              <div class="stat-label" style="width:100%;flex:1;">
-                <div style="display:flex;justify-content:space-between;">
-                  <b>${escapeHtml(x.name)}</b>
-                  <span style="font-family:var(--font-mono);">${formatMoney(x.total)}${combinedGrandTotal>0?' · '+Math.round(x.total/combinedGrandTotal*100)+'%':''}</span>
-                </div>
-                <div style="font-size:12px;color:var(--ink-soft);margin-top:2px;">за МК: ${formatMoney(x.fromEvents)}${x.fromItems>0?' · за изделия: '+formatMoney(x.fromItems):''}${x.fromOrders>0?' · за заказы: '+formatMoney(x.fromOrders):''}${x.fromAdjustments!==0?' · корректировки: '+(x.fromAdjustments>0?'+':'')+formatMoney(x.fromAdjustments):''}</div>
+          <div style="font-size:11.5px;color:var(--ink-soft);font-family:var(--font-mono);margin-bottom:8px;">МК — по ставкам за сессию: до ${(state.masterPayRates||DEFAULT_MASTER_PAY_RATES).tier1Max} чел — ${formatMoney((state.masterPayRates||DEFAULT_MASTER_PAY_RATES).tier1Flat)}, ${(state.masterPayRates||DEFAULT_MASTER_PAY_RATES).tier1Max+1}\u2013${(state.masterPayRates||DEFAULT_MASTER_PAY_RATES).tier2Max} — ${formatMoney((state.masterPayRates||DEFAULT_MASTER_PAY_RATES).tier2Flat)}, ${(state.masterPayRates||DEFAULT_MASTER_PAY_RATES).tier2Max+1}+ — ${formatMoney((state.masterPayRates||DEFAULT_MASTER_PAY_RATES).tier3PerGuest)}/гость. Изделия — ${ITEM_SALE_MASTER_PCT}% от выручки со стеллажа. Заказ — сумма мастеру вводится вручную по договорённости. Нажмите на сотрудника, чтобы увидеть каждый МК отдельно и разбивку по половинам месяца.</div>
+          ${combinedMasterTotals.length ? combinedMasterTotals.map(x=>{
+            const expanded = state.expandedSalaryMasters.has(x.name);
+            const details = (masterEventDetails[x.name]||[]).sort((a,b)=> a.date.localeCompare(b.date));
+            const h1EventTotal = details.filter(d=>d.half==='H1').reduce((s,d)=>s+d.total,0);
+            const h2EventTotal = details.filter(d=>d.half==='H2').reduce((s,d)=>s+d.total,0);
+            return `
+            <div class="cert-year-group">
+              <div class="cert-group-header" data-salarymaster="${escapeHtml(x.name)}">
+                <span>${expanded?'▾':'▸'} ${escapeHtml(x.name)}</span>
+                <span style="font-family:var(--font-mono);font-size:12px;color:var(--ink-soft);">${formatMoney(x.total)}${combinedGrandTotal>0?' · '+Math.round(x.total/combinedGrandTotal*100)+'%':''}</span>
               </div>
+              ${expanded ? `
+                <div style="padding:10px 14px;border-top:1px solid var(--line);">
+                  <div style="font-size:12px;color:var(--ink-soft);margin-bottom:8px;">
+                    За МК: ${formatMoney(x.fromEvents)}${x.fromMaterialsComp>0?' (себес материалов: '+formatMoney(x.fromMaterialsComp)+')':''}${x.fromItems>0?' · за изделия: '+formatMoney(x.fromItems):''}${x.fromOrders>0?' · за заказы: '+formatMoney(x.fromOrders):''}${x.fromAdjustments!==0?' · корректировки: '+(x.fromAdjustments>0?'+':'')+formatMoney(x.fromAdjustments):''}
+                  </div>
+                  <div style="display:flex;gap:16px;margin-bottom:10px;font-size:12.5px;">
+                    <div><b>1\u201315 число:</b> ${formatMoney(h1EventTotal)}</div>
+                    <div><b>16 – конец:</b> ${formatMoney(h2EventTotal)}</div>
+                  </div>
+                  ${details.length === 0 ? '<div style="color:var(--ink-soft);font-size:12.5px;">Нет мероприятий за этот месяц — вся сумма из изделий/заказов/корректировок выше.</div>' : `
+                    <div style="font-size:11px;color:var(--ink-soft);font-family:var(--font-mono);text-transform:uppercase;letter-spacing:0.03em;margin-bottom:4px;">Мастер-классы (${details.length})</div>
+                    ${details.map(d=>`
+                      <div class="stat-row" style="margin-bottom:5px;">
+                        <div class="stat-label" style="width:170px;">${formatDateText(d.date)}</div>
+                        <div style="flex:1;font-size:12.5px;">${escapeHtml(d.title)}</div>
+                        <div style="font-family:var(--font-mono);font-size:12.5px;">${formatMoney(d.total)}${d.materialsComp>0?' <span style="color:var(--accent);">(себес '+formatMoney(d.materialsComp)+')</span>':''}</div>
+                      </div>
+                    `).join('')}
+                  `}
+                </div>
+              ` : ''}
             </div>
-          `).join('') : `<div style="color:var(--ink-soft);font-size:13px;">В этом месяце нет ни мероприятий с мастером, ни продаж изделий.</div>`}
-        </div>
-        <div class="analytics-section">
-          <h4>К выдаче за 1–15 число: ${formatMoney(totalSalaryH1)}</h4>
-          <div style="font-size:11.5px;color:var(--ink-soft);font-family:var(--font-mono);margin-bottom:8px;">Общая сумма к выплате каждому мастеру за первую половину месяца — МК + изделия вместе.</div>
-          ${hostSalaryH1List.length ? hostSalaryH1List.map(([h,pay])=>`
-            <div class="stat-row">
-              <div class="stat-label">${escapeHtml(h)}</div>
-              <div class="stat-bar-track"><div class="stat-bar-fill" style="width:${Math.round(pay/maxHostSalaryH1*100)}%;background:var(--ink);"></div></div>
-              <div class="stat-count" style="width:auto;font-size:12px;">${formatMoney(pay)}</div>
-            </div>
-          `).join('') : `<div style="color:var(--ink-soft);font-size:13px;">За первую половину месяца выплат нет.</div>`}
-        </div>
-        <div class="analytics-section">
-          <h4>К выдаче за 16 – конец месяца: ${formatMoney(totalSalaryH2)}</h4>
-          <div style="font-size:11.5px;color:var(--ink-soft);font-family:var(--font-mono);margin-bottom:8px;">Общая сумма к выплате каждому мастеру за вторую половину месяца — МК + изделия вместе.</div>
-          ${hostSalaryH2List.length ? hostSalaryH2List.map(([h,pay])=>`
-            <div class="stat-row">
-              <div class="stat-label">${escapeHtml(h)}</div>
-              <div class="stat-bar-track"><div class="stat-bar-fill" style="width:${Math.round(pay/maxHostSalaryH2*100)}%;background:var(--ink);"></div></div>
-              <div class="stat-count" style="width:auto;font-size:12px;">${formatMoney(pay)}</div>
-            </div>
-          `).join('') : `<div style="color:var(--ink-soft);font-size:13px;">За вторую половину месяца выплат нет.</div>`}
+          `;}).join('') : `<div style="color:var(--ink-soft);font-size:13px;">В этом месяце нет ни мероприятий с мастером, ни продаж изделий.</div>`}
         </div>
         <div class="analytics-section">
           <h4 style="color:${salaryReconciliation.length>0?'var(--status-red)':'inherit'};">Начислено vs Выплачено ${salaryReconciliation.length ? `(${salaryReconciliation.length} расхождений)` : ''}</h4>
@@ -8429,6 +8451,15 @@
   }
 
   function attachAnalyticsEvents(){
+    document.querySelectorAll('[data-salarymaster]').forEach(header=>{
+      header.onclick = ()=>{
+        const name = header.dataset.salarymaster;
+        if(state.expandedSalaryMasters.has(name)) state.expandedSalaryMasters.delete(name);
+        else state.expandedSalaryMasters.add(name);
+        render();
+      };
+    });
+
     const prev = document.getElementById('an-prev');
     const next = document.getElementById('an-next');
     const today = document.getElementById('an-today');
@@ -10333,20 +10364,17 @@
                 <div style="margin-top:4px;">${linkedIncomes.map(i=>`${formatDateText(i.date)} · ${escapeHtml(i.operation)} · ${formatMoney(i.amount||0)} · ${escapeHtml(i.account)}`).join('<br>')}</div>
               </div>`;
             })()}
-            ${(()=>{
-              const certRedemptionsForEvent = [];
-              state.certificates.forEach(c=>{
-                (c.redemptions||[]).forEach(r=>{
-                  if(r.eventId === ev.id) certRedemptionsForEvent.push({cert:c, redemption:r});
-                });
-              });
-              if(certRedemptionsForEvent.length === 0) return '';
-              const sum = certRedemptionsForEvent.reduce((s,x)=> s+((x.redemption.amount!==undefined&&x.redemption.amount!==null&&!isNaN(x.redemption.amount))?Number(x.redemption.amount):0), 0);
-              return `<div style="margin-top:10px;padding:8px 10px;background:var(--paper-2);border-radius:var(--radius);font-size:12px;color:var(--ink-soft);">
-                🎟 Оплачено сертификатом(ами): ${certRedemptionsForEvent.length} на сумму ${formatMoney(sum)}
-                <div style="margin-top:4px;">${certRedemptionsForEvent.map(x=>`№${escapeHtml(String(x.cert.number))} · списано ${formatMoney(x.redemption.amount||0)} · остаток по сертификату ${formatMoney(certRemaining(x.cert))}`).join('<br>')}</div>
-              </div>`;
-            })()}
+            <div style="margin-top:10px;padding:10px;border:1px dashed var(--line-strong);border-radius:var(--radius);">
+              <label style="display:block;font-size:11.5px;font-family:var(--font-mono);color:var(--ink-soft);margin-bottom:6px;">🎟 Оплатить сертификатом</label>
+              <div style="display:flex;gap:8px;">
+                <input type="text" id="cert-attach-search" placeholder="Номер сертификата…" list="cert-attach-options" style="flex:1;border:1px solid var(--line-strong);border-radius:var(--radius);padding:8px 9px;font-family:var(--font-body);font-size:13px;background:var(--paper);">
+                <input type="number" id="cert-attach-amount" placeholder="Сумма" step="100" style="width:110px;border:1px solid var(--line-strong);border-radius:var(--radius);padding:8px 9px;font-family:var(--font-body);font-size:13px;background:var(--paper);">
+                <button type="button" class="btn btn-ghost" id="btn-attach-cert" style="white-space:nowrap;">+ Добавить</button>
+              </div>
+              <datalist id="cert-attach-options">${state.certificates.filter(c=>certRemaining(c)>0).map(c=>`<option value="№${escapeHtml(String(c.number))} — ${escapeHtml(c.ownerName||'без имени')} — остаток ${formatMoney(certRemaining(c))}">`).join('')}</datalist>
+              <div id="cert-attach-hint" style="font-size:11px;color:var(--ink-soft);margin-top:4px;"></div>
+            </div>
+            <div id="cert-attach-summary"></div>
             ${(()=>{
               const linkedRefunds = state.refunds.filter(r=>r.eventId===ev.id);
               if(linkedRefunds.length === 0) return '';
@@ -10865,6 +10893,78 @@
       paymentAmountInput.onkeydown = (e)=>{ if(e.key==='Enter'){ e.preventDefault(); doAdd(); } };
     }
 
+    function renderCertAttachSummary(){
+      const summaryEl = overlay.querySelector('#cert-attach-summary');
+      if(!summaryEl) return;
+      const certRedemptionsForEvent = [];
+      state.certificates.forEach(c=>{
+        (c.redemptions||[]).forEach(r=>{
+          if(r.eventId === state.modal.event.id) certRedemptionsForEvent.push({cert:c, redemption:r});
+        });
+      });
+      if(certRedemptionsForEvent.length === 0){ summaryEl.innerHTML = ''; return; }
+      const sum = certRedemptionsForEvent.reduce((s,x)=> s+((x.redemption.amount!==undefined&&x.redemption.amount!==null&&!isNaN(x.redemption.amount))?Number(x.redemption.amount):0), 0);
+      summaryEl.innerHTML = `<div style="margin-top:10px;padding:8px 10px;background:var(--paper-2);border-radius:var(--radius);font-size:12px;color:var(--ink-soft);">
+        🎟 Оплачено сертификатом(ами): ${certRedemptionsForEvent.length} на сумму ${formatMoney(sum)}
+        <div style="margin-top:4px;">${certRedemptionsForEvent.map(x=>`№${escapeHtml(String(x.cert.number))} · списано ${formatMoney(x.redemption.amount||0)} · остаток по сертификату ${formatMoney(certRemaining(x.cert))}`).join('<br>')}</div>
+      </div>`;
+    }
+    renderCertAttachSummary();
+
+    function refreshCertAttachOptions(){
+      const list = overlay.querySelector('#cert-attach-options');
+      if(!list) return;
+      list.innerHTML = state.certificates.filter(c=>certRemaining(c)>0).map(c=>`<option value="№${escapeHtml(String(c.number))} — ${escapeHtml(c.ownerName||'без имени')} — остаток ${formatMoney(certRemaining(c))}">`).join('');
+    }
+
+    const attachCertBtn = overlay.querySelector('#btn-attach-cert');
+    const certAttachSearch = overlay.querySelector('#cert-attach-search');
+    const certAttachAmount = overlay.querySelector('#cert-attach-amount');
+    const certAttachHint = overlay.querySelector('#cert-attach-hint');
+    if(attachCertBtn && certAttachSearch && certAttachAmount){
+      attachCertBtn.onclick = async ()=>{
+        certAttachHint.textContent = '';
+        certAttachHint.style.color = 'var(--status-red)';
+        const searchVal = certAttachSearch.value.trim();
+        const numberMatch = searchVal.match(/^№?(\S+)/);
+        const numberStr = numberMatch ? numberMatch[1] : searchVal;
+        const cert = state.certificates.find(c=> String(c.number) === numberStr);
+        if(!cert){ certAttachHint.textContent = 'Сертификат с таким номером не найден.'; return; }
+        const amount = parseInt(certAttachAmount.value) || 0;
+        if(amount <= 0){ certAttachHint.textContent = 'Впишите сумму больше нуля.'; return; }
+        const remaining = certRemaining(cert);
+        if(amount > remaining){ certAttachHint.textContent = `У сертификата №${cert.number} остаток только ${formatMoney(remaining)}.`; return; }
+
+        const dateVal = overlay.querySelector('#f-date') ? overlay.querySelector('#f-date').value : (state.modal.event.date || todayStr());
+        const redemption = { id: uid(), eventId: state.modal.event.id, date: dateVal || todayStr(), amount };
+        if(!Array.isArray(cert.redemptions)) cert.redemptions = [];
+        cert.redemptions.push(redemption);
+        cert.status = certRemaining(cert) <= 0 ? 'used' : 'partial';
+        const certIdx = state.certificates.findIndex(c=>c.id===cert.id);
+        if(certIdx>=0) state.certificates[certIdx] = cert;
+        await saveCertificates();
+        recordAction(`Сертификат №${cert.number} применён к мероприятию`, `${formatMoney(amount)}`);
+
+        paymentsArr.push({
+          amount, source: 'Сертификат', type: 'balance', ts: new Date().toISOString(),
+          certRedemptionRef: cert.id + ':' + redemption.id,
+        });
+        paymentsHidden.value = JSON.stringify(paymentsArr);
+        const priceInput = overlay.querySelector('#f-price');
+        priceInput.value = (parseInt(priceInput.value)||0) + amount;
+        priceInput.style.borderColor = '';
+        renderPaymentsLog();
+        updateAwaitingHint();
+
+        certAttachSearch.value = '';
+        certAttachAmount.value = '';
+        certAttachHint.style.color = 'var(--status-green)';
+        certAttachHint.textContent = `Готово — списано ${formatMoney(amount)} с сертификата №${cert.number}.`;
+        renderCertAttachSummary();
+        refreshCertAttachOptions();
+      };
+    }
+
     function setEventStatus(statusValue){
       overlay.querySelectorAll('.status-opt').forEach(o=>{
         o.classList.toggle('active', o.dataset.status === statusValue);
@@ -10888,7 +10988,7 @@
     // продукты, которые всегда частные заказы, а не занятия по расписанию —
     // при их выборе статус сам переключается на "Частник" (если сейчас "По расписанию" по умолчанию;
     // уже выставленный вручную "Выезд"/"Маркетинг" не трогаем — это тоже частный формат, просто другой)
-    const PRIVATE_PRODUCTS = ['Свидание', 'День рождения', 'Корпоратив', 'Девичник', 'Детский МК'];
+    const PRIVATE_PRODUCTS = ['Свидание', 'День рождения', 'Свадьба', 'Корпоратив', 'Девичник', 'Детский МК'];
     const productSelectForAuto = overlay.querySelector('#f-product');
     if(productSelectForAuto){
       productSelectForAuto.addEventListener('change', ()=>{
