@@ -1049,6 +1049,8 @@
     expandedSalaryMasters: new Set(),
     masterPersonalPasswords: {},
     loggedInMasterName: null,
+    hostessPersonalPasswords: {},
+    loggedInHostessName: null,
     pushRefundThreshold: 10000,
     marketingSpendCursor: new Date(),
     marketingSpendShowAll: false,
@@ -1113,7 +1115,7 @@
     if(view==='certificates') return roleCanAccessManagersTab(state.currentRole);
     if(view==='marketing') return roleCanAccessManagersTab(state.currentRole);
     if(view==='book') return roleCanAccessBook(state.currentRole);
-    if(view==='analytics') return roleCanAccessAnalytics(state.currentRole) || !!state.loggedInMasterName;
+    if(view==='analytics') return roleCanAccessAnalytics(state.currentRole) || !!state.loggedInMasterName || !!state.loggedInHostessName;
     return false;
   }
 
@@ -1157,6 +1159,11 @@
       const mp = await window.storage.get('master-passwords', true);
       state.masterPersonalPasswords = mp ? JSON.parse(mp.value) : {};
     }catch(e){ state.masterPersonalPasswords = {}; }
+
+    try{
+      const hp = await window.storage.get('hostess-passwords', true);
+      state.hostessPersonalPasswords = hp ? JSON.parse(hp.value) : {};
+    }catch(e){ state.hostessPersonalPasswords = {}; }
 
     try{
       const et = await window.storage.get('event-types', true);
@@ -1403,7 +1410,7 @@
     const CATEGORY_COMMENTS = {
       'Материалы': ['Закуп глины','Закуп воска','Закуп ароматов','Закуп фурнитуры','Пополнение расходников'],
       'Маркетинг': ['Реклама в Инсте','Таргет ВК','Съёмка контента','Продвижение постов','Баннер на сайт'],
-      'Зарплата': ['ЗП мастеру за месяц','Аванс мастеру','ЗП хостес','Доплата за переработку'],
+      'Зарплата': ['ЗП мастеру за месяц','Аванс мастеру','ЗП админу','Доплата за переработку'],
       'Подарки': ['Подарок клиенту','Сертификат в подарок','Сувениры для гостей'],
       'Операции': ['Клининг помещения','Коммунальные услуги','Ремонт оборудования','Канцелярия'],
       'Декор': ['Цветы для интерьера','Новый декор для фотозоны','Свечи для атмосферы'],
@@ -1782,7 +1789,7 @@
           if(entry && entry.name) names.push(`${entry.name} (${entry.start}–${entry.end})`);
         });
         if(names.length > 0){
-          await sendPushNotification('Смены хостес сегодня', names.join(', '), ['hostess']);
+          await sendPushNotification('Смены админов сегодня', names.join(', '), ['hostess']);
         }
       }
 
@@ -2175,6 +2182,19 @@
         state.unlockedAdmin = false;
         state.unlockedOwner = false;
         state.loggedInMasterName = matchedMasterName;
+        state.loggedInHostessName = null;
+        render();
+        checkPushSubscriptionStatus().then(enabled=>{ state.pushEnabled = enabled; render(); });
+        return;
+      }
+      const matchedHostessName = val ? Object.keys(state.hostessPersonalPasswords).find(name => state.hostessPersonalPasswords[name] && state.hostessPersonalPasswords[name] === val) : null;
+      if(matchedHostessName){
+        state.currentRole = 'hostess';
+        state.unlocked = true;
+        state.unlockedAdmin = false;
+        state.unlockedOwner = false;
+        state.loggedInMasterName = null;
+        state.loggedInHostessName = matchedHostessName;
         render();
         checkPushSubscriptionStatus().then(enabled=>{ state.pushEnabled = enabled; render(); });
         return;
@@ -2500,7 +2520,7 @@
           <div class="view-switch">
             <button data-view="calendar" class="${state.view==='calendar'?'active':''}">По пространствам</button>
             <button data-view="host" class="${state.view==='host'?'active':''}">По ведущим</button>
-            ${(roleCanAccessAnalytics(role) || state.loggedInMasterName) ? `<button data-view="analytics" class="${state.view==='analytics'?'active':''}">${state.loggedInMasterName ? '💰 Моя зарплата' : 'Аналитика'}</button>` : ''}
+            ${(roleCanAccessAnalytics(role) || state.loggedInMasterName || state.loggedInHostessName) ? `<button data-view="analytics" class="${state.view==='analytics'?'active':''}">${(state.loggedInMasterName || state.loggedInHostessName) ? '💰 Моя зарплата' : 'Аналитика'}</button>` : ''}
             ${roleCanAccessManagersTab(role) ? `<button data-view="certificates" class="${state.view==='certificates'?'active':''}">Для менеджеров</button>` : ''}
             ${roleCanAccessManagersTab(role) ? `<button data-view="marketing" class="${state.view==='marketing'?'active':''}">Маркетинг</button>` : ''}
             ${roleCanAccessBook(role) ? `<button data-view="book" class="${state.view==='book'?'active':''}">Книга</button>` : ''}
@@ -2508,7 +2528,7 @@
           <button class="lock-btn no-print" id="btn-today-view">📋 Сегодня</button>
           <button class="lock-btn no-print" id="btn-push-toggle">${state.pushEnabled ? '🔔 Уведомления включены' : '🔕 Включить уведомления'}</button>
           <button class="lock-btn ${role?'unlocked':''}" id="btn-lock">
-            ${role ? '👤 '+(state.loggedInMasterName ? escapeHtml(state.loggedInMasterName) : ROLE_LABELS[role])+' — выйти' : '🔒 Войти'}
+            ${role ? '👤 '+((state.loggedInMasterName || state.loggedInHostessName) ? escapeHtml(state.loggedInMasterName || state.loggedInHostessName) : ROLE_LABELS[role])+' — выйти' : '🔒 Войти'}
           </button>
           ${isAdminLevel ? `
           <button class="lock-btn" id="btn-role-settings">⚙ Настройки доступа</button>
@@ -2568,7 +2588,7 @@
       cells += `
         <div class="cal-cell ${inMonth?'':'other-month'} ${isToday?'today':''}" data-date="${dStr}">
           <div class="cal-daynum">${d.getDate()}${hasWarning?' <span class="cal-warn-icon" title="Перерыв между мероприятиями меньше 30 минут">⚠</span>':''}</div>
-          ${hostessLine ? `<div class="cal-hostess" title="Хостес: ${escapeHtml(hostessLine)}">🧑 ${escapeHtml(hostessLine)}</div>` : ''}
+          ${hostessLine ? `<div class="cal-hostess" title="Админ: ${escapeHtml(hostessLine)}">🧑 ${escapeHtml(hostessLine)}</div>` : ''}
           <div class="cal-events">
             ${shown.map(e=>`<div class="cal-evt-chip" style="background:${statusColor(e.status)}">${isAll?spaceBadge(getSpace(e.spaceId),'xs'):''}<span class="t">${e.time}</span><span>${escapeHtml(e.title)}</span></div>`).join('')}
             ${extra>0?`<div class="cal-more">+${extra} ещё</div>`:''}
@@ -6401,7 +6421,12 @@
               if(!ev) return;
               state.view = 'calendar';
               if(ev.date){ const [y,m] = ev.date.split('-'); state.cursor = new Date(parseInt(y), parseInt(m)-1, 1); }
-              requireUnlock(()=>{ state.modal = {type:'event', event:{...ev}, isNew:false, keepAll:true}; render(); });
+              if(state.currentRole === 'master'){
+                state.modal = {type:'quick-host', event:{...ev}, keepAll:true};
+                render();
+              } else {
+                requireUnlock(()=>{ state.modal = {type:'event', event:{...ev}, isNew:false, keepAll:true}; render(); });
+              }
             } else if(type === 'lead'){
               const lead = state.leads.find(l=>l.id===id);
               if(!lead) return;
@@ -6473,6 +6498,7 @@
         state.unlockedAdmin = false;
         state.unlockedOwner = false;
         state.loggedInMasterName = null;
+        state.loggedInHostessName = null;
         if(!canAccessView(state.view)) state.view = 'calendar';
         render();
       } else {
@@ -6559,7 +6585,14 @@
     document.querySelectorAll('.host-row').forEach(r=>{
       r.onclick = ()=>{
         const e = state.events.find(x=>x.id===r.dataset.eid);
-        if(e){ requireUnlock(()=>{ state.modal = {type:'event', event: {...e}, isNew:false, keepAll:true}; render(); }); }
+        if(e){
+          if(state.currentRole === 'master'){
+            state.modal = {type:'quick-host', event:{...e}, keepAll:true};
+            render();
+          } else {
+            requireUnlock(()=>{ state.modal = {type:'event', event: {...e}, isNew:false, keepAll:true}; render(); });
+          }
+        }
       };
     });
   }
@@ -6729,6 +6762,22 @@
         state.unlockedAdmin = false;
         state.unlockedOwner = false;
         state.loggedInMasterName = matchedMasterName;
+        state.loggedInHostessName = null;
+        const action = state.pendingAction;
+        state.pendingAction = null;
+        state.modal = null;
+        overlay.remove();
+        if(action) action(); else render();
+        return;
+      }
+      const matchedHostessName = val ? Object.keys(state.hostessPersonalPasswords).find(name => state.hostessPersonalPasswords[name] && state.hostessPersonalPasswords[name] === val) : null;
+      if(matchedHostessName){
+        state.currentRole = 'hostess';
+        state.unlocked = true;
+        state.unlockedAdmin = false;
+        state.unlockedOwner = false;
+        state.loggedInMasterName = null;
+        state.loggedInHostessName = matchedHostessName;
         const action = state.pendingAction;
         state.pendingAction = null;
         state.modal = null;
@@ -6829,6 +6878,22 @@
                 </div>
               `).join('')}
             </div>
+            <div style="border-top:1px solid var(--line);margin-top:8px;padding-top:14px;">
+              <div style="font-size:13px;font-weight:600;margin-bottom:4px;">Пароли администраторов</div>
+              <div style="font-size:12px;color:var(--ink-soft);margin-bottom:10px;">Личный пароль даёт полный доступ к мероприятиям (как у обычной роли «Администратор»), плюс собственную зарплату — без доступа к чужой.</div>
+              ${(()=>{
+                const hostessNames = new Set();
+                Object.values(state.hostessShifts).forEach(day=>{
+                  Object.values(day).forEach(entry=>{ if(entry && entry.name) hostessNames.add(entry.name.trim()); });
+                });
+                return Array.from(hostessNames).sort().map(h=>`
+                  <div class="field">
+                    <label>${escapeHtml(h)}</label>
+                    <input type="text" class="hostess-password-input" data-hostess="${escapeHtml(h)}" placeholder="без личного пароля" value="${escapeHtml(state.hostessPersonalPasswords[h]||'')}">
+                  </div>
+                `).join('');
+              })()}
+            </div>
           ` : ''}
           <div class="modal-actions">
             <button class="btn-danger" id="btn-relock">Выйти</button>
@@ -6877,11 +6942,29 @@
         return;
       }
 
+      const hostessPwInputs = [...overlay.querySelectorAll('.hostess-password-input')];
+      const newHostessPasswords = {};
+      hostessPwInputs.forEach(inp=>{
+        const val = inp.value.trim();
+        if(!val) return;
+        if(usedValues.has(val)) duplicateFound = inp.dataset.hostess;
+        usedValues.add(val);
+        newHostessPasswords[inp.dataset.hostess] = val;
+      });
+      if(duplicateFound){
+        showToast(`Пароль у «${duplicateFound}» совпадает с другим паролем — исправьте, чтобы вход не путался.`, 'error');
+        return;
+      }
+
       state.roleCodes = newCodes;
       await storageSetWithRetry('role-codes', JSON.stringify(state.roleCodes));
       if(masterPwInputs.length > 0){
         state.masterPersonalPasswords = newMasterPasswords;
         await storageSetWithRetry('master-passwords', JSON.stringify(state.masterPersonalPasswords));
+      }
+      if(hostessPwInputs.length > 0){
+        state.hostessPersonalPasswords = newHostessPasswords;
+        await storageSetWithRetry('hostess-passwords', JSON.stringify(state.hostessPersonalPasswords));
       }
       recordAction("Пароли сохранены");
       state.modal = null;
@@ -7558,7 +7641,7 @@
 
       <div class="analytics-section">
         <h4 style="margin-top:0;">ЗП по сотрудникам, по месяцам</h4>
-        <div style="font-size:11.5px;color:var(--ink-soft);margin-bottom:8px;">Мастера (МК + изделия + заказы + корректировки) и хостес (по графику смен) вместе — сколько всего заработал каждый человек в месяц.</div>
+        <div style="font-size:11.5px;color:var(--ink-soft);margin-bottom:8px;">Мастера (МК + изделия + заказы + корректировки) и админы (по графику смен) вместе — сколько всего заработал каждый человек в месяц.</div>
         <div style="overflow-x:auto;">
           <table style="width:100%;border-collapse:collapse;font-size:11.5px;white-space:nowrap;">
             <thead>
@@ -7626,7 +7709,7 @@
       </div>
     `;
 
-    if(total === 0 && !state.loggedInMasterName){
+    if(total === 0 && !state.loggedInMasterName && !state.loggedInHostessName){
       const analyticsPanel_netprofit_empty = `
         <div class="analytics-section">
           <div style="font-size:24px;font-family:var(--font-display);font-weight:600;color:${netProfit>=0?'var(--status-green)':'var(--status-red)'};margin-bottom:4px;">${formatMoney(netProfit)}</div>
@@ -7640,7 +7723,7 @@
           <div class="stat-row"><div class="stat-label">Материалы</div><div style="flex:1;font-family:var(--font-mono);font-size:13px;text-align:right;color:var(--status-red);">${formatMoney(npMaterialsCost)}</div></div>
           <div class="stat-row"><div class="stat-label">Маркетинг</div><div style="flex:1;font-family:var(--font-mono);font-size:13px;text-align:right;color:var(--status-red);">${formatMoney(npMarketingCost)}</div></div>
           <div class="stat-row"><div class="stat-label">ЗП мастеров</div><div style="flex:1;font-family:var(--font-mono);font-size:13px;text-align:right;color:var(--status-red);">${formatMoney(npMastersSalary)}</div></div>
-          <div class="stat-row"><div class="stat-label">ЗП хостес</div><div style="flex:1;font-family:var(--font-mono);font-size:13px;text-align:right;color:var(--status-red);">${formatMoney(npHostessSalary)}</div></div>
+          <div class="stat-row"><div class="stat-label">ЗП админов</div><div style="flex:1;font-family:var(--font-mono);font-size:13px;text-align:right;color:var(--status-red);">${formatMoney(npHostessSalary)}</div></div>
           <div class="stat-row"><div class="stat-label">ЗП менеджеров</div><div style="flex:1;font-family:var(--font-mono);font-size:13px;text-align:right;color:var(--status-red);">${formatMoney(npManagerSalary)}</div></div>
           <div class="stat-row"><div class="stat-label">Аренда</div><div style="flex:1;font-family:var(--font-mono);font-size:13px;text-align:right;color:var(--status-red);">${formatMoney(npRent)}</div></div>
           ${npStaffList.map(s=>`<div class="stat-row"><div class="stat-label">${escapeHtml(s.name||'Сотрудник')}</div><div style="flex:1;font-family:var(--font-mono);font-size:13px;text-align:right;color:var(--status-red);">${formatMoney(Number(s.amount)||0)}</div></div>`).join('')}
@@ -8088,7 +8171,7 @@
       {id:'materials', label:'Себестоимость'},
       {id:'salary', label:'Зарплата'},
     ];
-    const activeFinTab = state.loggedInMasterName ? 'salary' : (state.analyticsFinTab || 'revenue');
+    const activeFinTab = (state.loggedInMasterName || state.loggedInHostessName) ? 'salary' : (state.analyticsFinTab || 'revenue');
     const finTabsHtml = `
       <div class="view-switch" style="margin-bottom:16px;">
         ${FIN_TABS.map(t=>`<button data-fintab="${t.id}" class="${activeFinTab===t.id?'active':''}">${t.label}</button>`).join('')}
@@ -8339,7 +8422,7 @@
           `).join('') : `<div style="color:var(--status-green);font-size:13px;">✓ У всех мастеров начисленное совпадает с выплаченным.</div>`}
         </div>
         <div class="analytics-section">
-          <h4>Зарплата хостес за месяц: ${formatMoney(totalHostessSalary)}</h4>
+          <h4>Зарплата админов за месяц: ${formatMoney(totalHostessSalary)}</h4>
           <div style="font-size:11.5px;color:var(--ink-soft);font-family:var(--font-mono);margin-bottom:8px;">По ставкам за смену: будни — ${formatMoney(HOSTESS_WEEKDAY_RATE)}, выходные — ${formatMoney(HOSTESS_WEEKEND_RATE)}, плюс переработка (раньше/позже стандартного времени) — ${formatMoney(HOSTESS_EXTRA_HOUR_RATE)}/час. Считается по «Графику хостес» в карточках дней.</div>
           ${hostessSalaryList.length ? hostessSalaryList.map(([h,pay])=>`
             <div class="stat-row">
@@ -8347,27 +8430,27 @@
               <div class="stat-bar-track"><div class="stat-bar-fill" style="width:${Math.round(pay/maxHostessSalary*100)}%;background:var(--accent);"></div></div>
               <div class="stat-count" style="width:auto;font-size:12px;">${formatMoney(pay)}${totalHostessSalary>0?' · '+Math.round(pay/totalHostessSalary*100)+'%':''}</div>
             </div>
-          `).join('') : `<div style="color:var(--ink-soft);font-size:13px;">В этом месяце ни на одну смену не назначена хостес.</div>`}
+          `).join('') : `<div style="color:var(--ink-soft);font-size:13px;">В этом месяце ни на одну смену не назначен админ.</div>`}
         </div>
         <div class="analytics-section">
-          <h4>Зарплата хостес за 1–15 число: ${formatMoney(totalHostessSalaryH1)}</h4>
+          <h4>Зарплата админов за 1–15 число: ${formatMoney(totalHostessSalaryH1)}</h4>
           ${hostessSalaryH1List.length ? hostessSalaryH1List.map(([h,pay])=>`
             <div class="stat-row">
               <div class="stat-label">${escapeHtml(h)}</div>
               <div class="stat-bar-track"><div class="stat-bar-fill" style="width:${Math.round(pay/maxHostessSalaryH1*100)}%;background:var(--ink);"></div></div>
               <div class="stat-count" style="width:auto;font-size:12px;">${formatMoney(pay)}</div>
             </div>
-          `).join('') : `<div style="color:var(--ink-soft);font-size:13px;">Нет смен с хостес за первую половину месяца.</div>`}
+          `).join('') : `<div style="color:var(--ink-soft);font-size:13px;">Нет смен с админом за первую половину месяца.</div>`}
         </div>
         <div class="analytics-section">
-          <h4>Зарплата хостес за 16 – конец месяца: ${formatMoney(totalHostessSalaryH2)}</h4>
+          <h4>Зарплата админов за 16 – конец месяца: ${formatMoney(totalHostessSalaryH2)}</h4>
           ${hostessSalaryH2List.length ? hostessSalaryH2List.map(([h,pay])=>`
             <div class="stat-row">
               <div class="stat-label">${escapeHtml(h)}</div>
               <div class="stat-bar-track"><div class="stat-bar-fill" style="width:${Math.round(pay/maxHostessSalaryH2*100)}%;background:var(--ink);"></div></div>
               <div class="stat-count" style="width:auto;font-size:12px;">${formatMoney(pay)}</div>
             </div>
-          `).join('') : `<div style="color:var(--ink-soft);font-size:13px;">Нет смен с хостес за вторую половину месяца.</div>`}
+          `).join('') : `<div style="color:var(--ink-soft);font-size:13px;">Нет смен с админом за вторую половину месяца.</div>`}
         </div>
       `;
     }
@@ -8564,7 +8647,7 @@
         <div class="stat-row"><div class="stat-label">Материалы</div><div style="flex:1;font-family:var(--font-mono);font-size:13px;text-align:right;color:var(--status-red);">${formatMoney(npMaterialsCost)}</div></div>
         <div class="stat-row"><div class="stat-label">Маркетинг</div><div style="flex:1;font-family:var(--font-mono);font-size:13px;text-align:right;color:var(--status-red);">${formatMoney(npMarketingCost)}</div></div>
         <div class="stat-row"><div class="stat-label">ЗП мастеров</div><div style="flex:1;font-family:var(--font-mono);font-size:13px;text-align:right;color:var(--status-red);">${formatMoney(npMastersSalary)}</div></div>
-        <div class="stat-row"><div class="stat-label">ЗП хостес</div><div style="flex:1;font-family:var(--font-mono);font-size:13px;text-align:right;color:var(--status-red);">${formatMoney(npHostessSalary)}</div></div>
+        <div class="stat-row"><div class="stat-label">ЗП админов</div><div style="flex:1;font-family:var(--font-mono);font-size:13px;text-align:right;color:var(--status-red);">${formatMoney(npHostessSalary)}</div></div>
         <div class="stat-row"><div class="stat-label">ЗП менеджеров</div><div style="flex:1;font-family:var(--font-mono);font-size:13px;text-align:right;color:var(--status-red);">${formatMoney(npManagerSalary)}</div></div>
         <div class="stat-row"><div class="stat-label">Аренда</div><div style="flex:1;font-family:var(--font-mono);font-size:13px;text-align:right;color:var(--status-red);">${formatMoney(npRent)}</div></div>
         ${npStaffList.map(s=>`<div class="stat-row"><div class="stat-label">${escapeHtml(s.name||'Сотрудник')}</div><div style="flex:1;font-family:var(--font-mono);font-size:13px;text-align:right;color:var(--status-red);">${formatMoney(Number(s.amount)||0)}</div></div>`).join('')}
@@ -8641,7 +8724,81 @@
     if(state.loggedInMasterName){
       return renderPersonalMasterSalaryView(monthLabel, combinedMasterTotals, masterEventDetails, masterAdjustmentDetails, combinedGrandTotal);
     }
+    if(state.loggedInHostessName){
+      return renderPersonalHostessSalaryView(monthLabel, hostessSalary, hostessSalaryH1, hostessSalaryH2, totalHostessSalary);
+    }
     return fullHtml;
+  }
+
+  function renderPersonalHostessSalaryView(monthLabel, hostessSalary, hostessSalaryH1, hostessSalaryH2, totalHostessSalary){
+    const myName = state.loggedInHostessName;
+    const norm = s => (s||'').trim().toLowerCase();
+    const cursor = state.analyticsCursor;
+    const y = cursor.getFullYear(), m = cursor.getMonth();
+    const daysInMonth = new Date(y, m+1, 0).getDate();
+    let resolvedName = Object.keys(hostessSalary).find(n=>n===myName) || Object.keys(hostessSalary).find(n=>norm(n)===norm(myName));
+    const myTotal = resolvedName ? (hostessSalary[resolvedName]||0) : 0;
+    const shifts = [];
+    for(let d=1; d<=daysInMonth; d++){
+      const dateObj = new Date(y, m, d);
+      const dow = dateObj.getDay();
+      const rate = (dow===0 || dow===6) ? HOSTESS_WEEKEND_RATE : HOSTESS_WEEKDAY_RATE;
+      const dateStr = fmtDate(dateObj);
+      const dayShifts = state.hostessShifts[dateStr];
+      if(!dayShifts) continue;
+      SHIFT_DEFS.forEach(s=>{
+        const rawEntry = dayShifts[s.key];
+        const entry = normalizeShiftEntry(rawEntry, s);
+        if(entry && entry.name && norm(entry.name)===norm(myName)){
+          const extra = shiftExtraHours(rawEntry, s);
+          const pay = rate + extra*HOSTESS_EXTRA_HOUR_RATE;
+          shifts.push({ date: dateStr, start: entry.start, end: entry.end, pay, half: d<=15?'H1':'H2' });
+        }
+      });
+      const dishesBonusesMain = hostessDishesBonusesForDate(dateStr, dayShifts);
+      Object.entries(dishesBonusesMain).forEach(([name, bonus])=>{
+        if(norm(name)===norm(myName)){
+          shifts.push({ date: dateStr, start: '', end: '', pay: bonus, half: d<=15?'H1':'H2', isDishesBonus: true });
+        }
+      });
+    }
+    shifts.sort((a,b)=> a.date.localeCompare(b.date));
+    const h1Total = shifts.filter(s=>s.half==='H1').reduce((sum,s)=>sum+s.pay,0);
+    const h2Total = shifts.filter(s=>s.half==='H2').reduce((sum,s)=>sum+s.pay,0);
+    return `
+      <div class="analytics-header">
+        <h3 style="text-transform:capitalize;">${escapeHtml(monthLabel)}</h3>
+        <div class="nav-btns">
+          <button class="nav-btn" id="an-prev">‹</button>
+          <button class="nav-btn" id="an-next">›</button>
+        </div>
+      </div>
+      <div class="analytics-section">
+        <h4>Моя зарплата: ${formatMoney(myTotal)}</h4>
+        ${shifts.length === 0 ? `<div style="color:var(--ink-soft);font-size:13px;">${state.events.length>=0 && Object.values(state.hostessShifts).some(d=>Object.values(d).some(e=>e&&norm(e.name)===norm(myName))) ? 'В этом месяце пока нет смен.' : `Ваше имя «${escapeHtml(myName)}» пока ни разу не встречалось в графике смен. Возможно, оно записано чуть иначе — сверьтесь с администратором.`}</div>` : `
+          <div style="display:flex;gap:16px;margin-bottom:10px;font-size:12.5px;">
+            <div><b>1–15 число:</b> ${formatMoney(h1Total)}</div>
+            <div><b>16 – конец:</b> ${formatMoney(h2Total)}</div>
+          </div>
+          ${['H1','H2'].map(half=>{
+            const halfShifts = shifts.filter(s=>s.half===half);
+            if(halfShifts.length === 0) return '';
+            const halfLabel = half==='H1' ? '1–15 число' : '16 – конец месяца';
+            return `
+            <div style="margin-bottom:12px;">
+              <div style="font-size:12px;font-weight:600;margin-bottom:6px;">${halfLabel}</div>
+              ${halfShifts.map(s=>`
+                <div class="stat-row" style="margin-bottom:5px;">
+                  <div class="stat-label" style="width:170px;">${formatDateText(s.date)}</div>
+                  <div style="flex:1;font-size:12.5px;">${s.isDishesBonus ? '🍽 бонус за посуду' : `смена ${s.start}–${s.end}`}</div>
+                  <div style="font-family:var(--font-mono);font-size:12.5px;">${formatMoney(s.pay)}</div>
+                </div>
+              `).join('')}
+            </div>
+          `;}).join('')}
+        `}
+      </div>
+    `;
   }
 
   function renderPersonalMasterSalaryView(monthLabel, combinedMasterTotals, masterEventDetails, masterAdjustmentDetails, combinedGrandTotal){
@@ -8655,6 +8812,9 @@
     const h1EventTotal = details.filter(d=>d.half==='H1').reduce((s,d)=>s+d.total,0);
     const h2EventTotal = details.filter(d=>d.half==='H2').reduce((s,d)=>s+d.total,0);
     const myAdjustments = resolvedName ? (masterAdjustmentDetails[resolvedName]||[]).sort((a,b)=>a.date.localeCompare(b.date)) : [];
+    const myMissingReports = state.events
+      .filter(e=> e.date && e.date<=todayStr() && !hasMasterReport(e) && (norm(e.host)===norm(myName) || (e.additionalHosts||[]).some(h=>norm(h.name)===norm(myName))))
+      .sort((a,b)=> (b.date+b.time).localeCompare(a.date+a.time));
     return `
       <div class="analytics-header">
         <h3 style="text-transform:capitalize;">${escapeHtml(monthLabel)}</h3>
@@ -8663,6 +8823,19 @@
           <button class="nav-btn" id="an-next">›</button>
         </div>
       </div>
+      ${myMissingReports.length > 0 ? `
+        <div class="analytics-section" style="border:1px solid var(--status-red);">
+          <h4 style="color:var(--status-red);">📝 Не сдано отчётов: ${myMissingReports.length}</h4>
+          <div style="font-size:12px;color:var(--ink-soft);margin-bottom:8px;">Нажмите на мероприятие, чтобы заполнить отчёт.</div>
+          ${myMissingReports.map(e=>`
+            <div class="stat-row my-missing-report-row" data-eid="${e.id}" style="cursor:pointer;">
+              <div class="stat-label" style="width:170px;">${formatDateText(e.date)}</div>
+              <div style="flex:1;font-size:12.5px;">${escapeHtml(e.title||'Без названия')}</div>
+              <div style="font-family:var(--font-mono);font-size:12px;color:var(--status-red);">заполнить →</div>
+            </div>
+          `).join('')}
+        </div>
+      ` : ''}
       <div class="analytics-section">
         <h4>Моя зарплата: ${formatMoney(mine ? mine.total : 0)}</h4>
         ${!mine ? `<div style="color:var(--ink-soft);font-size:13px;">${state.events.some(e=>norm(e.host)===norm(myName) || (e.additionalHosts||[]).some(h=>norm(h.name)===norm(myName))) ? 'В этом месяце пока нет ни мероприятий, ни других начислений.' : `Ваше имя «${escapeHtml(myName)}» пока ни разу не встречалось в расписании как ведущий. Возможно, в мероприятиях оно записано чуть иначе (например, с фамилией или сокращением) — сверьтесь с администратором.`}</div>` : `
@@ -8703,6 +8876,16 @@
   }
 
   function attachAnalyticsEvents(){
+    document.querySelectorAll('.my-missing-report-row').forEach(row=>{
+      row.onclick = ()=>{
+        const e = state.events.find(x=>x.id===row.dataset.eid);
+        if(!e) return;
+        const keepAll = state.activeSpaceId==='all';
+        state.modal = {type:'quick-report', event:{...e}, keepAll};
+        render();
+      };
+    });
+
     document.querySelectorAll('[data-salarymaster]').forEach(header=>{
       header.onclick = ()=>{
         const name = header.dataset.salarymaster;
@@ -9038,7 +9221,7 @@
         <div class="modal-body">
           <div style="font-size:12.5px;color:var(--ink-soft);margin-top:-6px;">${formatDateText(shiftDate)}</div>
           <div class="field">
-            <label>Хостес</label>
+            <label>Админ</label>
             <select id="shift-name-select">
               <option value="" ${!currentName?'selected':''}>Не назначено</option>
               ${HOSTESS_LIST.map(h=>`<option value="${escapeHtml(h)}" ${currentName===h?'selected':''}>${escapeHtml(h)}</option>`).join('')}
@@ -10285,7 +10468,7 @@
     const dayShifts = state.hostessShifts[dateStr] || {};
     return `
       <div class="shift-block">
-        <div class="shift-block-title">График хостес</div>
+        <div class="shift-block-title">График админов</div>
         ${SHIFT_DEFS.map(s=>{
           const raw = dayShifts[s.key];
           const entry = normalizeShiftEntry(raw, s);
@@ -10361,7 +10544,7 @@
               </div>
             </div>
           `;}).join('') : `<div style="color:var(--ink-soft);font-size:13.5px;">На этот день пока ничего не запланировано</div>`}
-          <button class="add-evt-btn" id="btn-add-evt">+ добавить мероприятие</button>
+          ${state.currentRole !== 'master' ? `<button class="add-evt-btn" id="btn-add-evt">+ добавить мероприятие</button>` : ''}
         </div>
       </div>
     `;
@@ -10384,6 +10567,11 @@
         const e = state.events.find(x=>x.id===el.dataset.eid);
         const keepAll = state.activeSpaceId==='all';
         overlay.remove();
+        if(state.currentRole === 'master'){
+          state.modal = {type:'quick-host', event:{...e}, keepAll};
+          render();
+          return;
+        }
         requireUnlock(()=>{
           state.modal = {type:'event', event:{...e}, isNew:false, keepAll};
           render();
