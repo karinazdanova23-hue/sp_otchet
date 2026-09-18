@@ -681,7 +681,6 @@
 </script>
 
 
-
 <div class="app" id="app">
   <div class="loading-note">Загружаю расписание…</div>
 </div>
@@ -789,12 +788,17 @@
   const HOSTESS_WEEKDAY_RATE = 1300;
   const HOSTESS_DISHES_BONUS = 150;
   function hostessDishesBonusesForDate(dateStr, dayShifts){
-    // 150₽ той хостес, чья смена по времени покрывает мероприятие с платной посудой (300₽) в этот день
+    // 150₽ тому админу, кто отмечен в мероприятии как мывший посуду;
+    // если метка не проставлена — по старой логике: чья смена по времени покрывает мероприятие с платной посудой (300₽) в этот день
     const bonuses = {};
-    if(!dayShifts) return bonuses;
     const dayEvents = state.events.filter(e=> e.date===dateStr && e.dishes==='needed' && e.dishesPayment==='paid');
     if(dayEvents.length === 0) return bonuses;
     dayEvents.forEach(ev=>{
+      if(ev.dishesWasher){
+        bonuses[ev.dishesWasher] = (bonuses[ev.dishesWasher]||0) + HOSTESS_DISHES_BONUS;
+        return;
+      }
+      if(!dayShifts) return;
       SHIFT_DEFS.forEach(s=>{
         const entry = normalizeShiftEntry(dayShifts[s.key], s);
         if(!entry || !entry.name) return;
@@ -804,6 +808,14 @@
       });
     });
     return bonuses;
+  }
+  function getAllAdminNames(){
+    const names = new Set();
+    Object.values(state.hostessShifts||{}).forEach(day=>{
+      Object.values(day).forEach(entry=>{ if(entry && entry.name) names.add(entry.name.trim()); });
+    });
+    Object.keys(state.hostessPersonalPasswords||{}).forEach(n=>{ if(n) names.add(n.trim()); });
+    return Array.from(names).filter(Boolean).sort();
   }
   const HOSTESS_WEEKEND_RATE = 1500;
   const HOSTESS_EXTRA_HOUR_RATE = 260;
@@ -839,6 +851,14 @@
     const r = e.masterReport;
     if(!r || typeof r !== 'object') return false;
     return !!(r.source && r.source.trim() && r.professions && r.professions.trim() && r.rating);
+  }
+  // мастер может заполнять отчёт только по мероприятиям, где он сам ведущий (основной или дополнительный);
+  // все остальные роли — без ограничений (как и раньше)
+  function isMyEventForReport(e){
+    if(state.currentRole !== 'master') return true;
+    const norm = s => (s||'').trim().toLowerCase();
+    const myName = state.loggedInMasterName;
+    return norm(e.host)===norm(myName) || (e.additionalHosts||[]).some(h=>norm(h.name)===norm(myName));
   }
 
   const DEFAULT_EVENT_TYPES = [
@@ -1037,6 +1057,8 @@
     netProfitManual: null,
     yearSummaryManual: null,
     auditLog: null,
+    eventsIntegritySnapshot: null,
+    eventsIntegrityAlerts: null,
     closedMonths: null,
     marketingSpend: null,
     marketingPlans: null,
@@ -1109,10 +1131,14 @@
   function roleCanAccessManagersTab(role){ return ['manager','marketer','assistant','admin','owner'].includes(role); }
   function roleCanAccessBook(role){ return ['manager','marketer','assistant','admin','owner'].includes(role); }
   function roleCanAccessAnalytics(role){ return ['assistant','admin','owner'].includes(role); }
+  // администраторы (роль "hostess", отображается как "Администратор") продают сертификаты и изделия,
+  // поэтому им тоже открыт раздел "Для менеджеров" — но внутри него видны только вкладки
+  // "Сертификаты" и "Изделия" (без корректировок ЗП, возвратов, конверсии, заказов и выдачи — см. renderCertificatesView)
+  function roleCanAccessCertificatesView(role){ return roleCanAccessManagersTab(role) || role === 'hostess'; }
   function canAccessView(view){
     if(!state.currentRole) return false; // без входа теперь не видно вообще ничего
     if(view==='calendar' || view==='host' || view==='today') return true;
-    if(view==='certificates') return roleCanAccessManagersTab(state.currentRole);
+    if(view==='certificates') return roleCanAccessCertificatesView(state.currentRole);
     if(view==='marketing') return roleCanAccessManagersTab(state.currentRole);
     if(view==='book') return roleCanAccessBook(state.currentRole);
     if(view==='analytics') return roleCanAccessAnalytics(state.currentRole) || !!state.loggedInMasterName || !!state.loggedInHostessName;
@@ -1145,6 +1171,20 @@
     }
     if(!eventsLoaded){
       state.events = [];
+    }
+    if(eventsLoaded){
+      // подгружаем прошлый снимок ДО проверки — иначе проверке не с чем будет сравнивать
+      try{
+        const eis = await window.storage.get('events-integrity-snapshot', true);
+        state.eventsIntegritySnapshot = eis ? JSON.parse(eis.value) : null;
+      }catch(e){ state.eventsIntegritySnapshot = null; }
+      try{
+        const eia = await window.storage.get('events-integrity-alerts', true);
+        state.eventsIntegrityAlerts = eia ? JSON.parse(eia.value) : [];
+      }catch(e){ state.eventsIntegrityAlerts = []; }
+      // сверяем сохранность мероприятий "По расписанию" ТОЛЬКО когда реально получили данные с сервера —
+      // иначе неудачная загрузка на этом устройстве выглядела бы как "все мероприятия пропали"
+      try{ await checkEventsIntegrity(); }catch(e){ /* не критично для основной загрузки */ }
     }
     try{ await storageSetWithRetry('meta-version', DATA_VERSION); }catch(e){ /* не критично */ }
 
@@ -1919,6 +1959,95 @@
   async function saveAuditLog(){
     return storageSetWithRetry('audit-log', JSON.stringify(state.auditLog));
   }
+  async function saveEventsIntegritySnapshot(){
+    return storageSetWithRetry('events-integrity-snapshot', JSON.stringify(state.eventsIntegritySnapshot));
+  }
+  async function saveEventsIntegrityAlerts(){
+    return storageSetWithRetry('events-integrity-alerts', JSON.stringify(state.eventsIntegrityAlerts));
+  }
+  function addDaysToDateStr(dateStr, days){
+    const [y,m,d] = dateStr.split('-').map(Number);
+    const dt = new Date(y, m-1, d);
+    dt.setDate(dt.getDate()+days);
+    return fmtDate(dt);
+  }
+  const EVENTS_INTEGRITY_DAYS_BACK = 3;
+  const EVENTS_INTEGRITY_DAYS_FWD = 120;
+  function buildEventsIntegritySnapshotList(from, to){
+    return state.events
+      .filter(e => (e.status||'confirmed')==='confirmed' && e.date && e.date>=from && e.date<=to)
+      .map(e => ({ id: e.id, date: e.date, time: e.time||'', title: e.title||'', host: e.host||'' }));
+  }
+  // Проверка сохранности мероприятий "По расписанию": при каждой УСПЕШНОЙ загрузке данных с сервера
+  // (никогда — при неудачной, см. комментарий в loadData) сравниваем список таких мероприятий за окно
+  // "3 дня назад — 120 дней вперёд" с тем, что было записано в прошлый раз. Если часть пропала —
+  // записываем это как предупреждение, которое видно в окне "Сохранность расписания".
+  async function checkEventsIntegrity(){
+    const today = todayStr();
+    const from = addDaysToDateStr(today, -EVENTS_INTEGRITY_DAYS_BACK);
+    const to = addDaysToDateStr(today, EVENTS_INTEGRITY_DAYS_FWD);
+    const currentList = buildEventsIntegritySnapshotList(from, to);
+    const currentIds = new Set(currentList.map(e=>e.id));
+    const prevSnapshot = state.eventsIntegritySnapshot;
+    if(prevSnapshot && Array.isArray(prevSnapshot.events) && prevSnapshot.events.length > 0){
+      // сравниваем только те мероприятия из прошлого снимка, что по-прежнему должны попадать в текущее окно —
+      // иначе мероприятие, просто "выкатившееся" из окна назад по времени, ложно считалось бы пропавшим
+      const stillRelevant = prevSnapshot.events.filter(e => e.date >= from && e.date <= to);
+      const missing = stillRelevant.filter(e => !currentIds.has(e.id));
+      if(missing.length > 0){
+        if(!state.eventsIntegrityAlerts) state.eventsIntegrityAlerts = [];
+        state.eventsIntegrityAlerts.push({
+          ts: new Date().toISOString(),
+          prevCount: stillRelevant.length,
+          currentCount: currentList.length,
+          missingCount: missing.length,
+          missing: missing.slice(0, 30).map(e=>({date:e.date, time:e.time, title:e.title, host:e.host})),
+        });
+        if(state.eventsIntegrityAlerts.length > 200) state.eventsIntegrityAlerts = state.eventsIntegrityAlerts.slice(-200);
+        saveEventsIntegrityAlerts(); // не ждём — не критично для основной загрузки
+      }
+    }
+    state.eventsIntegritySnapshot = { ts: new Date().toISOString(), from, to, events: currentList };
+    saveEventsIntegritySnapshot(); // не ждём — не критично для основной загрузки
+  }
+  function renderEventsIntegrityPanel(){
+    const snap = state.eventsIntegritySnapshot;
+    const alerts = (state.eventsIntegrityAlerts || []).slice().reverse();
+    const todayNow = todayStr();
+    const currentConfirmed = state.events.filter(e=>(e.status||'confirmed')==='confirmed');
+    const currentUpcoming = currentConfirmed.filter(e=>e.date && e.date>=todayNow).length;
+    const lastCheckLabel = snap && snap.ts ? new Date(snap.ts).toLocaleString('ru-RU', {day:'2-digit', month:'2-digit', year:'numeric', hour:'2-digit', minute:'2-digit'}) : 'ещё не было';
+    const recentAlerts = alerts.slice(0, 50);
+    return `
+      <div class="analytics-section">
+        <div style="font-size:12px;color:var(--ink-soft);margin-bottom:10px;">Отслеживает мероприятия со статусом «По расписанию» за период примерно 3 дня назад — 4 месяца вперёд. При каждом открытии приложения текущий список сверяется с прошлым разом; если что-то из этого окна пропало — здесь появится предупреждение.</div>
+        <div class="stat-row"><div class="stat-label">Сейчас «По расписанию»</div><div style="flex:1;font-family:var(--font-mono);font-size:13px;">${currentConfirmed.length} <span style="color:var(--ink-soft);">(предстоящих: ${currentUpcoming})</span></div></div>
+        <div class="stat-row"><div class="stat-label">Последняя проверка</div><div style="flex:1;font-size:12.5px;color:var(--ink-soft);">${escapeHtml(lastCheckLabel)}</div></div>
+      </div>
+      ${recentAlerts.length === 0 ? `
+        <div class="analytics-section" style="border:1px solid var(--status-green);">
+          <div style="color:var(--status-green);font-weight:600;">✓ Пропаж не обнаружено</div>
+        </div>
+      ` : `
+        <div class="analytics-section" style="border:1px solid var(--status-red);">
+          <h4 style="color:var(--status-red);margin-top:0;">⚠ Обнаружены пропажи: ${recentAlerts.length}</h4>
+          ${recentAlerts.map(a=>{
+            const d = new Date(a.ts);
+            const dateLabel = isNaN(d.getTime()) ? a.ts : d.toLocaleString('ru-RU', {day:'2-digit', month:'2-digit', year:'numeric', hour:'2-digit', minute:'2-digit'});
+            return `
+            <div style="border-bottom:1px solid var(--line);padding-bottom:8px;margin-bottom:8px;">
+              <div style="font-family:var(--font-mono);font-size:11.5px;color:var(--ink-soft);">${escapeHtml(dateLabel)}</div>
+              <div style="font-size:13px;color:var(--status-red);font-weight:600;">Пропало мероприятий: ${a.missingCount} (было ${a.prevCount} → стало ${a.currentCount})</div>
+              <div style="font-size:12.5px;margin-top:4px;">
+                ${(a.missing||[]).map(m=>`<div>• ${formatDateText(m.date)}${m.time?', '+escapeHtml(m.time):''} — ${escapeHtml(m.title||'Без названия')}${m.host?' ('+escapeHtml(m.host)+')':''}</div>`).join('')}
+                ${a.missingCount > (a.missing||[]).length ? `<div style="color:var(--ink-soft);">и ещё ${a.missingCount - (a.missing||[]).length}…</div>` : ''}
+              </div>
+            </div>
+          `;}).join('')}
+        </div>
+      `}
+    `;
+  }
   async function saveClosedMonths(){
     return storageSetWithRetry('closed-months', JSON.stringify(state.closedMonths));
   }
@@ -2521,7 +2650,7 @@
             <button data-view="calendar" class="${state.view==='calendar'?'active':''}">По пространствам</button>
             <button data-view="host" class="${state.view==='host'?'active':''}">По ведущим</button>
             ${(roleCanAccessAnalytics(role) || state.loggedInMasterName || state.loggedInHostessName) ? `<button data-view="analytics" class="${state.view==='analytics'?'active':''}">${(state.loggedInMasterName || state.loggedInHostessName) ? '💰 Моя зарплата' : 'Аналитика'}</button>` : ''}
-            ${roleCanAccessManagersTab(role) ? `<button data-view="certificates" class="${state.view==='certificates'?'active':''}">Для менеджеров</button>` : ''}
+            ${roleCanAccessCertificatesView(role) ? `<button data-view="certificates" class="${state.view==='certificates'?'active':''}">${role==='hostess' ? 'Сертификаты / Изделия' : 'Для менеджеров'}</button>` : ''}
             ${roleCanAccessManagersTab(role) ? `<button data-view="marketing" class="${state.view==='marketing'?'active':''}">Маркетинг</button>` : ''}
             ${roleCanAccessBook(role) ? `<button data-view="book" class="${state.view==='book'?'active':''}">Книга</button>` : ''}
           </div>
@@ -3501,15 +3630,28 @@
   }
 
   function renderCertificatesView(){
+    // администратор (роль "hostess") видит здесь только "Сертификаты" и "Изделия" — то, что он сам продаёт;
+    // остальные вкладки (корректировки ЗП, возвраты, конверсия, заказы, выдача) остаются только у менеджеров и выше
+    const isHostessLimited = state.currentRole === 'hostess';
+    // старший администратор (роль "admin") видит почти всё как менеджер, кроме "Возвраты" и "Конверсия" —
+    // это финансово-аналитические вкладки, доступ к которым для него закрыт по просьбе владелицы
+    const isAdminNoRefundsConversion = state.currentRole === 'admin';
+    const hideRefundsConversion = isHostessLimited || isAdminNoRefundsConversion;
+    if(isHostessLimited && !['certificates','item-sales'].includes(state.certView)){
+      state.certView = 'certificates';
+    }
+    if(isAdminNoRefundsConversion && ['refunds','conversion'].includes(state.certView)){
+      state.certView = 'certificates';
+    }
     const subTabsHtml = `
       <div class="cert-subtabs">
         <button data-certview="certificates" class="${state.certView==='certificates'?'active':''}">Сертификаты</button>
-        <button data-certview="salary-adj" class="${state.certView==='salary-adj'?'active':''}">Корректировки ЗП</button>
-        <button data-certview="refunds" class="${state.certView==='refunds'?'active':''}">Возвраты</button>
-        <button data-certview="conversion" class="${state.certView==='conversion'?'active':''}">Конверсия</button>
+        ${!isHostessLimited ? `<button data-certview="salary-adj" class="${state.certView==='salary-adj'?'active':''}">Корректировки ЗП</button>` : ''}
+        ${!hideRefundsConversion ? `<button data-certview="refunds" class="${state.certView==='refunds'?'active':''}">Возвраты</button>` : ''}
+        ${!hideRefundsConversion ? `<button data-certview="conversion" class="${state.certView==='conversion'?'active':''}">Конверсия</button>` : ''}
         <button data-certview="item-sales" class="${state.certView==='item-sales'?'active':''}">Изделия</button>
-        <button data-certview="orders" class="${state.certView==='orders'?'active':''}">Заказ</button>
-        <button data-certview="pickups" class="${state.certView==='pickups'?'active':''}">Выдача</button>
+        ${!isHostessLimited ? `<button data-certview="orders" class="${state.certView==='orders'?'active':''}">Заказ</button>` : ''}
+        ${!isHostessLimited ? `<button data-certview="pickups" class="${state.certView==='pickups'?'active':''}">Выдача</button>` : ''}
       </div>
     `;
     if(state.certView === 'refunds'){
@@ -6623,6 +6765,8 @@
       overlay.innerHTML = renderQuickReportModal(state.modal.event);
     } else if(state.modal.type === 'quick-shift'){
       overlay.innerHTML = renderQuickShiftModal(state.modal.shiftDate, state.modal.shiftKey, state.modal.rawEntry);
+    } else if(state.modal.type === 'quick-add-slot'){
+      overlay.innerHTML = renderQuickAddSlotModal(state.modal.event);
     } else if(state.modal.type === 'event-types'){
       overlay.innerHTML = renderEventTypesModal();
     } else if(state.modal.type === 'materials-catalog'){
@@ -6684,6 +6828,7 @@
     else if(state.modal.type === 'quick-host'){ attachQuickHostModalEvents(overlay); }
     else if(state.modal.type === 'quick-report'){ attachQuickReportModalEvents(overlay); }
     else if(state.modal.type === 'quick-shift'){ attachQuickShiftModalEvents(overlay); }
+    else if(state.modal.type === 'quick-add-slot'){ attachQuickAddSlotModalEvents(overlay); }
     else if(state.modal.type === 'export'){ attachExportModalEvents(overlay); }
     else if(state.modal.type === 'event-types'){ attachEventTypesModalEvents(overlay); }
     else if(state.modal.type === 'materials-catalog'){ attachMaterialsCatalogModalEvents(overlay); }
@@ -6882,11 +7027,7 @@
               <div style="font-size:13px;font-weight:600;margin-bottom:4px;">Пароли администраторов</div>
               <div style="font-size:12px;color:var(--ink-soft);margin-bottom:10px;">Личный пароль даёт полный доступ к мероприятиям (как у обычной роли «Администратор»), плюс собственную зарплату — без доступа к чужой.</div>
               ${(()=>{
-                const hostessNames = new Set();
-                Object.values(state.hostessShifts).forEach(day=>{
-                  Object.values(day).forEach(entry=>{ if(entry && entry.name) hostessNames.add(entry.name.trim()); });
-                });
-                return Array.from(hostessNames).sort().map(h=>`
+                return getAllAdminNames().map(h=>`
                   <div class="field">
                     <label>${escapeHtml(h)}</label>
                     <input type="text" class="hostess-password-input" data-hostess="${escapeHtml(h)}" placeholder="без личного пароля" value="${escapeHtml(state.hostessPersonalPasswords[h]||'')}">
@@ -7112,6 +7253,9 @@
 
   function renderAnalytics(){
     const cursor = state.analyticsCursor;
+    // "старший администратор" видит аналитику, но без денежных показателей — только операционные вещи
+    // (заполняемость, планы по количеству, отчёты и т.п.); финансовые вкладки/суммы скрыты для этой роли
+    const isAdminFinRestricted = state.currentRole === 'admin';
     const monthLabel = MONTHS[cursor.getMonth()] + ' ' + cursor.getFullYear();
     const evts = getMonthEvents(cursor);
     const total = evts.length;
@@ -7733,7 +7877,7 @@
           </div>
         </div>
       `;
-      state.analyticsPanels = { plan: analyticsPanel_plan, netprofit: analyticsPanel_netprofit_empty, yearsummary: analyticsPanel_yearsummary, auditlog: analyticsPanel_auditlog, marketing: analyticsPanel_marketing };
+      state.analyticsPanels = { plan: analyticsPanel_plan, netprofit: analyticsPanel_netprofit_empty, yearsummary: analyticsPanel_yearsummary, auditlog: analyticsPanel_auditlog, marketing: analyticsPanel_marketing, integrity: renderEventsIntegrityPanel() };
       let emptyCompareHtml = '';
       if(state.compareMode){
         const prevCursor = new Date(cursor.getFullYear(), cursor.getMonth()-1, 1);
@@ -7766,10 +7910,11 @@
             <button class="btn btn-ghost owner-panel-btn" data-panel="netprofit" style="border-color:#6B4A1E;color:#6B4A1E;">🔒 Чистая прибыль</button>
             <button class="btn btn-ghost analytics-panel-btn" data-panel="yearsummary">📆 Сводка по годам</button>
             <button class="btn btn-ghost analytics-panel-btn" data-panel="auditlog">📜 Журнал действий</button>
+            <button class="btn btn-ghost analytics-panel-btn" data-panel="integrity" style="${(state.eventsIntegrityAlerts&&state.eventsIntegrityAlerts.length>0)?'border-color:var(--status-red);color:var(--status-red);':''}">🛡 Сохранность расписания</button>
             <button class="btn btn-ghost analytics-panel-btn" data-panel="marketing">📣 Маркетинг</button>
           </div>
         </div>
-        ${(certOutstandingSaleCount>0 || certOutstandingMarketingCount>0) ? `
+        ${(!isAdminFinRestricted && (certOutstandingSaleCount>0 || certOutstandingMarketingCount>0)) ? `
         <div class="analytics-section">
           <div class="stat-row"><div class="stat-label" style="color:var(--status-red);">Непогашено по проданным сертификатам</div><div style="flex:1;font-family:var(--font-mono);font-size:13px;color:var(--status-red);">${formatMoney(certOutstandingSale)} <span style="font-size:11px;">— ${certOutstandingSaleCount} шт., это студия ещё должна отдать услугами</span></div></div>
           ${certOutstandingMarketingCount>0?`<div class="stat-row"><div class="stat-label" style="color:var(--ink-soft);">Непогашено по маркетинговым сертификатам</div><div style="flex:1;font-family:var(--font-mono);font-size:13px;color:var(--ink-soft);">${formatMoney(certOutstandingMarketing)} <span style="font-size:11px;">— ${certOutstandingMarketingCount} шт.</span></div></div>`:''}
@@ -8391,6 +8536,13 @@
                           <div style="font-family:var(--font-mono);font-size:12.5px;">${formatMoney(d.total)}${d.materialsComp>0?' <span style="color:var(--accent);">(себес '+formatMoney(d.materialsComp)+')</span>':''}</div>
                         </div>
                       `).join('')}
+                      ${half==='H2' ? `
+                        <div style="margin-top:8px;padding-top:8px;border-top:1px solid var(--line-strong);">
+                          <div class="stat-row"><div class="stat-label">Сумма за 2-ю половину (МК)</div><div style="flex:1;text-align:right;font-family:var(--font-mono);font-size:12.5px;">${formatMoney(h2EventTotal)}</div></div>
+                          <div class="stat-row"><div class="stat-label">Корректировки</div><div style="flex:1;text-align:right;font-family:var(--font-mono);font-size:12.5px;color:${x.fromAdjustments>=0?'var(--status-green)':'var(--status-red)'};">${x.fromAdjustments>=0?'+':''}${formatMoney(x.fromAdjustments)}</div></div>
+                          <div class="stat-row" style="font-weight:600;"><div class="stat-label">Итог к выдаче (2-я половина)</div><div style="flex:1;text-align:right;font-family:var(--font-mono);font-size:13px;">${formatMoney(h2EventTotal + x.fromAdjustments)}</div></div>
+                        </div>
+                      ` : ''}
                     </div>
                   `;}).join('')}
                   ${(masterAdjustmentDetails[x.name]||[]).length > 0 ? `
@@ -8658,7 +8810,7 @@
         </div>
       </div>
     `;
-    state.analyticsPanels = { plan: analyticsPanel_plan, occupancy: analyticsPanel_occupancy, days: analyticsPanel_days, ceramics: analyticsPanel_ceramics, guests: analyticsPanel_guests, legal: analyticsPanel_legal, reports: analyticsPanel_reports, netprofit: analyticsPanel_netprofit, yearsummary: analyticsPanel_yearsummary, auditlog: analyticsPanel_auditlog, marketing: analyticsPanel_marketing };
+    state.analyticsPanels = { plan: analyticsPanel_plan, occupancy: analyticsPanel_occupancy, days: analyticsPanel_days, ceramics: analyticsPanel_ceramics, guests: analyticsPanel_guests, legal: analyticsPanel_legal, reports: analyticsPanel_reports, netprofit: analyticsPanel_netprofit, yearsummary: analyticsPanel_yearsummary, auditlog: analyticsPanel_auditlog, marketing: analyticsPanel_marketing, integrity: renderEventsIntegrityPanel() };
 
     const fullHtml = `
       <div class="cal-nav">
@@ -8683,10 +8835,13 @@
           </div>
         `).join('')}
         <div class="summary-card"><div class="num">${totalGuests}</div><div class="label">Гостей всего</div></div>
+        ${!isAdminFinRestricted ? `
         <div class="summary-card"><div class="num" style="font-size:22px;">${formatMoney(totalRevenue)}</div><div class="label">Выручка за месяц <span style="font-weight:400;">(прогноз)</span></div></div>
         <div class="summary-card" style="border-left:4px solid ${totalProfit>=0?'var(--status-green)':'var(--status-red)'};"><div class="num" style="font-size:22px;color:${totalProfit>=0?'var(--status-green)':'var(--status-red)'};">${formatMoney(totalProfit)}</div><div class="label">Прибыль за месяц <span style="font-weight:400;">(прогноз)</span></div></div>
+        ` : ''}
       </div>
 
+      ${!isAdminFinRestricted ? `
       <div class="analytics-section">
         <h4>Общая выручка бизнеса за месяц: ${formatMoney(grandTotalRevenue)}</h4>
         <div style="font-size:11.5px;color:var(--ink-soft);font-family:var(--font-mono);margin-bottom:8px;">Сумма из трёх независимых источников. «Мероприятия» — прогнозная сумма (включает ещё не внесённую доплату), а «Сертификаты» и «Книга» — уже реально поступившие деньги. Источники не сверяются автоматически между собой — если одна и та же оплата попала в несколько мест, сумма задвоится. Для сверки мероприятий с «Книгой» см. вкладку «Выручка» ниже.</div>
@@ -8698,6 +8853,7 @@
         ${certOutstandingMarketingCount>0?`<div class="stat-row"><div class="stat-label" style="color:var(--ink-soft);">Непогашено по маркетинговым сертификатам</div><div style="flex:1;font-family:var(--font-mono);font-size:13px;color:var(--ink-soft);">${formatMoney(certOutstandingMarketing)} <span style="font-size:11px;">— ${certOutstandingMarketingCount} шт., деньги не платились, но услуга ещё не оказана</span></div></div>`:''}
         <div class="stat-row"><div class="stat-label" style="color:${refundsUnlinkedAmount>0?'var(--status-red)':'var(--ink-soft)'};">Возвраты за месяц</div><div style="flex:1;font-family:var(--font-mono);font-size:13px;color:${refundsUnlinkedAmount>0?'var(--status-red)':'var(--ink-soft)'};">−${formatMoney(refundsTotalAmount)} <span style="font-size:11px;">${refundsLinkedAmount>0?'(из них '+formatMoney(refundsLinkedAmount)+' уже учтено в выручке мероприятий)':''}${refundsUnlinkedAmount>0?' ⚠ '+formatMoney(refundsUnlinkedAmount)+' — без привязки к мероприятию, нигде больше не вычтено':''}</span></div></div>
       </div>
+      ` : ''}
 
       <div class="analytics-section">
       <div class="analytics-section" style="padding:14px 16px;">
@@ -8713,13 +8869,14 @@
           <button class="btn btn-ghost analytics-panel-btn" data-panel="reports">📝 Отчёты мастеров</button>
           <button class="btn btn-ghost analytics-panel-btn" data-panel="yearsummary">📆 Сводка по годам</button>
             <button class="btn btn-ghost analytics-panel-btn" data-panel="auditlog">📜 Журнал действий</button>
+            <button class="btn btn-ghost analytics-panel-btn" data-panel="integrity" style="${(state.eventsIntegrityAlerts&&state.eventsIntegrityAlerts.length>0)?'border-color:var(--status-red);color:var(--status-red);':''}">🛡 Сохранность расписания</button>
             <button class="btn btn-ghost analytics-panel-btn" data-panel="marketing">📣 Маркетинг</button>
           <button class="btn btn-ghost owner-panel-btn" data-panel="netprofit" style="border-color:#6B4A1E;color:#6B4A1E;">🔒 Чистая прибыль</button>
         </div>
       </div>
 
-      ${finTabsHtml}
-      ${finContent}
+      ${!isAdminFinRestricted ? finTabsHtml : ''}
+      ${!isAdminFinRestricted ? finContent : ''}
     `;
     if(state.loggedInMasterName){
       return renderPersonalMasterSalaryView(monthLabel, combinedMasterTotals, masterEventDetails, masterAdjustmentDetails, combinedGrandTotal);
@@ -8856,6 +9013,13 @@
                   <div style="font-family:var(--font-mono);font-size:12.5px;">${formatMoney(d.total)}${d.materialsComp>0?' <span style="color:var(--accent);">(себес '+formatMoney(d.materialsComp)+')</span>':''}</div>
                 </div>
               `).join('')}
+              ${half==='H2' ? `
+                <div style="margin-top:8px;padding-top:8px;border-top:1px solid var(--line-strong);">
+                  <div class="stat-row"><div class="stat-label">Сумма за 2-ю половину (МК)</div><div style="flex:1;text-align:right;font-family:var(--font-mono);font-size:12.5px;">${formatMoney(h2EventTotal)}</div></div>
+                  <div class="stat-row"><div class="stat-label">Корректировки</div><div style="flex:1;text-align:right;font-family:var(--font-mono);font-size:12.5px;color:${(mine?mine.fromAdjustments:0)>=0?'var(--status-green)':'var(--status-red)'};">${(mine&&mine.fromAdjustments>=0)?'+':''}${formatMoney(mine?mine.fromAdjustments:0)}</div></div>
+                  <div class="stat-row" style="font-weight:600;"><div class="stat-label">Итог к выдаче (2-я половина)</div><div style="flex:1;text-align:right;font-family:var(--font-mono);font-size:13px;">${formatMoney(h2EventTotal + (mine?mine.fromAdjustments:0))}</div></div>
+                </div>
+              ` : ''}
             </div>
           `;}).join('')}
           ${myAdjustments.length > 0 ? `
@@ -9481,6 +9645,110 @@
     input.onkeydown = (e)=>{ if(e.key==='Enter') save(); };
   }
 
+  // мастера могут сами ставить себе "Слот" — время занято, без гостя и без себестоимости —
+  // но не могут создавать полноценные мероприятия (это остаётся у администрации)
+  function renderQuickAddSlotModal(ev){
+    const sp = getSpace(ev.spaceId);
+    return `
+      <div class="modal" style="max-width:380px;">
+        <div class="modal-head">
+          <h3>Добавить слот</h3>
+          <button class="modal-close">×</button>
+        </div>
+        <div class="modal-body">
+          <div style="font-size:11.5px;color:var(--ink-soft);margin-top:-6px;">Слот занимает время в расписании на ваше имя — без гостя и себестоимости. Остальные детали мероприятия сможет добавить администратор.</div>
+          <div class="field">
+            <label>Пространство</label>
+            <select id="qas-space">
+              ${state.spaces.filter(s=>s.id!=='s5' && s.name!=='Выезд').map(s=>`<option value="${s.id}" ${s.id===ev.spaceId?'selected':''}>${escapeHtml(s.name)}</option>`).join('')}
+            </select>
+          </div>
+          <div class="row2">
+            <div class="field">
+              <label>Дата</label>
+              <input type="date" id="qas-date" value="${ev.date}">
+            </div>
+            <div class="field">
+              <label>Время</label>
+              <input type="time" id="qas-time" value="${ev.time}">
+            </div>
+          </div>
+          <div class="field">
+            <label>Длительность (мин)</label>
+            <input type="number" id="qas-duration" value="${ev.duration||60}" min="15" step="15">
+          </div>
+          <div class="field">
+            <label>Название</label>
+            <input type="text" id="qas-title" value="${escapeHtml(ev.title||'')}" placeholder="Например: Слот" autofocus>
+          </div>
+          <div style="font-size:11.5px;color:var(--ink-soft);">Мастер: <b>${escapeHtml(ev.host||'')}</b>. Это действие не требует кода доступа.</div>
+          <div class="modal-actions">
+            <span></span>
+            <div style="display:flex;gap:8px;">
+              <button class="btn btn-ghost" id="qas-cancel">Отмена</button>
+              <button class="btn btn-primary" id="qas-save">Сохранить</button>
+            </div>
+          </div>
+        </div>
+      </div>
+    `;
+  }
+
+  function attachQuickAddSlotModalEvents(overlay){
+    overlay.querySelector('#qas-cancel').onclick = ()=>{ state.modal = null; overlay.remove(); };
+    overlay.querySelector('#qas-save').onclick = async ()=>{
+      const ev = state.modal.event;
+      const titleEl = overlay.querySelector('#qas-title');
+      const titleVal = titleEl.value.trim();
+      titleEl.style.borderColor = '';
+      if(!titleVal){
+        titleEl.style.borderColor = 'var(--danger)';
+        titleEl.scrollIntoView({block:'center', behavior:'smooth'});
+        return;
+      }
+      const spaceVal = overlay.querySelector('#qas-space').value;
+      const dateVal = overlay.querySelector('#qas-date').value;
+      const timeVal = overlay.querySelector('#qas-time').value;
+      const durationVal = parseInt(overlay.querySelector('#qas-duration').value) || 60;
+
+      const hostVal = ev.host || '';
+      if(hostVal && dateVal && timeVal){
+        const newStart = timeToMinutes(timeVal);
+        const newEnd = newStart + durationVal;
+        const conflict = state.events.find(e=>{
+          if((e.host||'').trim().toLowerCase() !== hostVal.toLowerCase()) return false;
+          if(e.date !== dateVal) return false;
+          const s = timeToMinutes(e.time);
+          const en = s + (Number(e.duration)||0);
+          return newStart < en && s < newEnd;
+        });
+        if(conflict){
+          const csp = getSpace(conflict.spaceId);
+          const conflictEnd = timeToMinutes(conflict.time) + (Number(conflict.duration)||0);
+          const endH = String(Math.floor(conflictEnd/60)).padStart(2,'0');
+          const endM = String(conflictEnd%60).padStart(2,'0');
+          showHostConflictPopup(
+            `Вы уже заняты в это время — «${escapeHtml(conflict.title)}» с ${conflict.time} до ${endH}:${endM} в пространстве «${escapeHtml(csp.name)}» (${formatDateText(dateVal)}).<br><br>Выберите другое время.`
+          );
+          return;
+        }
+      }
+
+      const newEvent = {
+        id: uid(), spaceId: spaceVal, date: dateVal, time: timeVal, duration: durationVal,
+        guests: null, itemsCount: null, itemsCountAuto: true, masterPay: null, masterPayAuto: true,
+        additionalHosts: [], guestName: '', price: null, agreedPrice: null, materialsItems: [], pickupItems: [],
+        payments: [], title: titleVal, product: '', host: hostVal, dishes: '', dishesPayment: '', dishesWasher: '',
+        rentalBefore: 0, rentalAfter: 0, payerType: 'individual', companyName: '',
+        documents: {contract:false, paymentOrder:false, act:false}, masterReport: null, notes: '', status: 'slot',
+      };
+      state.events.push(newEvent);
+      await saveEvents();
+      recordAction("Мастер добавил слот", `${titleVal} — ${formatDateText(dateVal)} ${timeVal}`);
+      state.modal = null; overlay.remove(); render();
+    };
+  }
+
   function renderMaterialRuleRows(rules, typeIdx){
     return (rules||[]).map((r,ri)=>`
       <div class="row2" data-rule-idx="${ri}" style="grid-template-columns: 1.2fr auto 100px 1fr 32px; gap:6px; margin:6px 0 6px 20px; align-items:center;">
@@ -9955,6 +10223,7 @@
     yearsummary: '📆 Сводка по годам',
     auditlog: '📜 Журнал действий',
     marketing: '📣 Маркетинг',
+    integrity: '🛡 Сохранность расписания',
   };
   function renderAnalyticsPanelModal(panel){
     const content = (state.analyticsPanels && state.analyticsPanels[panel]) || '<div style="color:var(--ink-soft);font-size:13px;">Нет данных.</div>';
@@ -10540,11 +10809,11 @@
               </div>
               <div style="display:flex;flex-direction:column;gap:6px;flex-shrink:0;">
                 <button class="quick-host-btn" data-eid="${e.id}" title="Сменить мастера (без кода)">✎ мастер</button>
-                <button class="quick-report-btn" data-eid="${e.id}" title="Отчёт мастера (без кода)" style="${hasMasterReport(e)?'border-color:var(--status-green);color:var(--status-green);':''}">📝 ${hasMasterReport(e)?'отчёт ✓':'отчёт'}</button>
+                ${isMyEventForReport(e) ? `<button class="quick-report-btn" data-eid="${e.id}" title="Отчёт мастера (без кода)" style="${hasMasterReport(e)?'border-color:var(--status-green);color:var(--status-green);':''}">📝 ${hasMasterReport(e)?'отчёт ✓':'отчёт'}</button>` : ''}
               </div>
             </div>
           `;}).join('') : `<div style="color:var(--ink-soft);font-size:13.5px;">На этот день пока ничего не запланировано</div>`}
-          ${state.currentRole !== 'master' ? `<button class="add-evt-btn" id="btn-add-evt">+ добавить мероприятие</button>` : ''}
+          ${state.currentRole !== 'master' ? `<button class="add-evt-btn" id="btn-add-evt">+ добавить мероприятие</button>` : `<button class="add-evt-btn" id="btn-add-slot">+ добавить слот</button>`}
         </div>
       </div>
     `;
@@ -10594,6 +10863,7 @@
         ev.stopPropagation();
         const e = state.events.find(x=>x.id===btn.dataset.eid);
         if(!e) return;
+        if(!isMyEventForReport(e)) return; // мастер может заполнять отчёт только по своим МК
         const keepAll = state.activeSpaceId==='all';
         overlay.remove();
         state.modal = {type:'quick-report', event:{...e}, keepAll};
@@ -10607,10 +10877,21 @@
       overlay.remove();
       requireUnlock(()=>{
         state.modal = {type:'event', isNew:true, keepAll, event:{
-          id: uid(), spaceId: defaultSpaceId, date: dateStr, time:'10:00', duration:60, guests:null, itemsCount:null, itemsCountAuto:true, masterPay:null, masterPayAuto:true, additionalHosts:[], guestName:'', price:null, agreedPrice:null, materialsItems:[], pickupItems:[], payments:[], title:'', product:'', host:'', dishes:'', rentalBefore:0, rentalAfter:0, payerType:'individual', companyName:'', documents:{contract:false,paymentOrder:false,act:false}, masterReport:null, notes:''
+          id: uid(), spaceId: defaultSpaceId, date: dateStr, time:'10:00', duration:60, guests:null, itemsCount:null, itemsCountAuto:true, masterPay:null, masterPayAuto:true, additionalHosts:[], guestName:'', price:null, agreedPrice:null, materialsItems:[], pickupItems:[], payments:[], title:'', product:'', host:'', dishes:'', dishesWasher:'', rentalBefore:0, rentalAfter:0, payerType:'individual', companyName:'', documents:{contract:false,paymentOrder:false,act:false}, masterReport:null, notes:''
         }};
         render();
       });
+    };
+
+    const addSlotBtn = overlay.querySelector('#btn-add-slot');
+    if(addSlotBtn) addSlotBtn.onclick = ()=>{
+      const defaultSpaceId = state.activeSpaceId === 'all' ? state.spaces[0].id : state.activeSpaceId;
+      const keepAll = state.activeSpaceId==='all';
+      overlay.remove();
+      state.modal = {type:'quick-add-slot', keepAll, event:{
+        id: uid(), spaceId: defaultSpaceId, date: dateStr, time:'10:00', duration:60, title:'', host: state.loggedInMasterName || ''
+      }};
+      render();
     };
   }
 
@@ -10692,20 +10973,27 @@
                   <span class="dot" style="background:var(--ink-soft)"></span>Без оплаты
                 </div>
               </div>
-              <div style="font-size:11px;color:var(--ink-soft);margin-top:4px;">Если «За 300 ₽» — хостес, работавшей в это время, автоматически начислится ${HOSTESS_DISHES_BONUS}₽.</div>
+              <div style="font-size:11px;color:var(--ink-soft);margin-top:4px;">Если «За 300 ₽» — ${HOSTESS_DISHES_BONUS}₽ начислится указанному ниже админу; если не указать — по умолчанию тому, чья смена по времени покрывает мероприятие.</div>
+              <div class="field" id="dishes-washer-field" style="margin-top:8px;display:${(ev.dishesPayment||'')==='paid'?'block':'none'};">
+                <label>Кто мыл посуду</label>
+                <select id="f-dishes-washer">
+                  <option value="">Автоматически (по смене)</option>
+                  ${getAllAdminNames().map(h=>`<option value="${escapeHtml(h)}" ${ev.dishesWasher===h?'selected':''}>${escapeHtml(h)}</option>`).join('')}
+                </select>
+              </div>
             </div>
             <input type="hidden" id="f-dishes-payment" value="${ev.dishesPayment||''}">
           </div>
           <div class="field" id="rental-field" style="display:${showsDishesAndRental(ev.status)?'block':'none'};">
-            <label>Доп. аренда пространства (для частников и маркетинга)</label>
+            <label>Доп. аренда пространства (для частников и маркетинга) <span style="font-weight:400;color:var(--ink-soft);">— по умолчанию 0, меняйте только если аренда правда была</span></label>
             <div class="row2">
               <div>
                 <label style="font-size:11px;color:var(--ink-soft);margin-bottom:4px;display:block;">До мероприятия (мин)</label>
-                <input type="number" id="f-rental-before" value="${ev.rentalBefore!==undefined&&ev.rentalBefore!==null?ev.rentalBefore:''}" min="0" step="15" placeholder="0">
+                <input type="number" id="f-rental-before" value="${ev.rentalBefore!==undefined&&ev.rentalBefore!==null?ev.rentalBefore:0}" min="0" step="15" placeholder="0">
               </div>
               <div>
                 <label style="font-size:11px;color:var(--ink-soft);margin-bottom:4px;display:block;">После мероприятия (мин)</label>
-                <input type="number" id="f-rental-after" value="${ev.rentalAfter!==undefined&&ev.rentalAfter!==null?ev.rentalAfter:''}" min="0" step="15" placeholder="0">
+                <input type="number" id="f-rental-after" value="${ev.rentalAfter!==undefined&&ev.rentalAfter!==null?ev.rentalAfter:0}" min="0" step="15" placeholder="0">
               </div>
             </div>
           </div>
@@ -11449,6 +11737,8 @@
         if(opt.dataset.dishes !== 'needed'){
           overlay.querySelector('#f-dishes-payment').value = '';
           overlay.querySelectorAll('.dishes-payment-opt').forEach(o=>o.classList.remove('active'));
+          const washerField = overlay.querySelector('#dishes-washer-field');
+          if(washerField) washerField.style.display = 'none';
         }
       };
     });
@@ -11458,6 +11748,8 @@
         overlay.querySelectorAll('.dishes-payment-opt').forEach(o=>o.classList.remove('active'));
         opt.classList.add('active');
         overlay.querySelector('#f-dishes-payment').value = opt.dataset.dishespayment;
+        const washerField = overlay.querySelector('#dishes-washer-field');
+        if(washerField) washerField.style.display = opt.dataset.dishespayment === 'paid' ? 'block' : 'none';
       };
     });
 
@@ -11630,13 +11922,14 @@
           const materialsListEl = overlay.querySelector('#materials-items-list');
           if(materialsListEl){ materialsListEl.style.boxShadow = 'inset 0 0 0 1.5px var(--danger)'; materialsListEl.style.borderRadius = 'var(--radius)'; if(!firstInvalid) firstInvalid = materialsListEl; }
         }
-        let dishesMissing = false, rentalMissing = false;
+        // аренда до/после мероприятия НЕ обязательна для заполнения — пустое поле значит 0 (см. rentalBeforeVal/rentalAfterVal ниже),
+        // это самый частый случай, и заставлять вручную вбивать "0" каждый раз не нужно
+        let dishesMissing = false;
         if(showsDishesAndRental(statusVal)){
           if(!dishesVal){ dishesMissing = true; if(dishesFieldEl) dishesFieldEl.style.boxShadow = 'inset 0 0 0 1.5px var(--danger)'; if(!firstInvalid) firstInvalid = dishesFieldEl; }
           else if(dishesVal === 'needed' && !dishesPaymentVal){ dishesMissing = true; if(dishesFieldEl) dishesFieldEl.style.boxShadow = 'inset 0 0 0 1.5px var(--danger)'; if(!firstInvalid) firstInvalid = dishesFieldEl; }
-          if(rentalBeforeRaw === '' || rentalAfterRaw === ''){ rentalMissing = true; if(rentalFieldEl) rentalFieldEl.style.boxShadow = 'inset 0 0 0 1.5px var(--danger)'; if(!firstInvalid) firstInvalid = rentalFieldEl; }
         }
-        if(!title || !hostVal || !dateVal || !timeVal || !durationVal || durationVal<=0 || guestsRaw==='' || priceRaw==='' || Number(priceRaw)<0 || agreedPriceNegative || masterPayNegative || additionalHostsNegative || materialsNegative || !notesVal || !guestNameVal || materialsMissing || dishesMissing || rentalMissing){
+        if(!title || !hostVal || !dateVal || !timeVal || !durationVal || durationVal<=0 || guestsRaw==='' || priceRaw==='' || Number(priceRaw)<0 || agreedPriceNegative || masterPayNegative || additionalHostsNegative || materialsNegative || !notesVal || !guestNameVal || materialsMissing || dishesMissing){
           showGapWarningBanner('Заполните все поля перед сохранением (для статуса «Слот» это необязательно). Себестоимость: добавьте хотя бы один материал с названием и суммой. Суммы (выручка, ЗП мастеру и со-ведущим, себестоимость) не могут быть отрицательными.');
           if(firstInvalid && firstInvalid.scrollIntoView) firstInvalid.scrollIntoView({block:'center', behavior:'smooth'});
           return;
@@ -11712,6 +12005,7 @@
         status: overlay.querySelector('#f-status').value || 'confirmed',
         dishes: overlay.querySelector('#f-dishes').value || '',
         dishesPayment: overlay.querySelector('#f-dishes').value === 'needed' ? (overlay.querySelector('#f-dishes-payment').value || '') : '',
+        dishesWasher: (overlay.querySelector('#f-dishes').value === 'needed' && overlay.querySelector('#f-dishes-payment').value === 'paid' && overlay.querySelector('#f-dishes-washer')) ? (overlay.querySelector('#f-dishes-washer').value || '') : '',
         rentalBefore: rentalBeforeVal,
         rentalAfter: rentalAfterVal,
         notes: overlay.querySelector('#f-notes').value.trim(),
