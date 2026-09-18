@@ -1118,6 +1118,11 @@
     const total = (c.amount!==undefined&&c.amount!==null&&!isNaN(c.amount))?Number(c.amount):0;
     return total - certSpentTotal(c);
   }
+  // подпись сертификата для выбора из списка — номер один и тот же может встречаться у нескольких
+  // сертификатов (например, после импорта), поэтому дата обязательно входит в подпись, чтобы различить их
+  function certPickerLabel(c){
+    return `№${c.number} — от ${c.saleDate?formatDateText(c.saleDate):'без даты'} — остаток ${formatMoney(certRemaining(c))}`;
+  }
   function uid(){ return 'e'+Date.now().toString(36)+Math.random().toString(36).slice(2,7); }
   function escapeHtml(s){ return (s||'').replace(/[&<>"']/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
 
@@ -2260,6 +2265,7 @@
           <button type="button" class="mi-source-opt ${m.source==='master'?'active':''}" data-source="master">Мастер</button>
         </div>
         <input type="text" class="mi-payto" value="${escapeHtml(m.payTo||'')}" placeholder="Кому платить" list="host-suggestions" style="display:${m.source==='master'?'block':'none'};width:130px;" title="Сумма автоматически уйдёт этому человеку в зарплату и посчитается в себестоимости. Оставьте пустым, если это просто для истории (мастер принёс материал сам, компенсация не нужна).">
+        <input type="date" class="mi-expdate" value="${escapeHtml(m.expenseDate||'')}" style="display:${(m.source==='master'&&m.payTo&&m.payTo.trim())?'block':'none'};width:132px;" title="Дата, когда фактически был расход (если отличается от даты мероприятия). По ней сумма попадёт в зарплату за нужный период. Оставьте пустым, если совпадает с датой мероприятия.">
         <button type="button" class="mi-del" data-idx="${i}" title="Удалить">✕</button>
       </div>
     `;}).join('');
@@ -7204,11 +7210,12 @@
     return 0;
   }
   function eventMasterMaterialPayments(e){
-    // строки материалов с источником "мастер" и указанным получателем — реальная компенсация, попадает в зарплату этого человека
+    // строки материалов с источником "мастер" и указанным получателем — реальная компенсация, попадает в зарплату этого человека.
+    // дата попадания в зарплату — дата расхода (m.expenseDate), если она указана, иначе дата самого мероприятия
     if(!Array.isArray(e.materialsItems)) return [];
     return e.materialsItems
       .filter(m=>m.source==='master' && m.payTo && m.payTo.trim() && m.cost>0)
-      .map(m=>({ name: m.payTo.trim(), amount: Number(m.cost) }));
+      .map(m=>({ name: m.payTo.trim(), amount: Number(m.cost), date: (m.expenseDate && m.expenseDate.trim()) ? m.expenseDate.trim() : e.date, expenseDateOverride: !!(m.expenseDate && m.expenseDate.trim()) }));
   }
   // сумма материалов, которые принёс сам мастер (не влияет на прибыль студии, но фиксируется для прозрачности)
   function eventMasterSuppliedMaterialsCost(e){
@@ -7394,7 +7401,9 @@
         const mOccupied = mEvts.filter(e=>e.status!=='offsite').length;
         // расходы по месяцу — только уже открытые везде категории (не то, что скрыто в "Чистой прибыли")
         const mMaterialsCost = mEvts.reduce((s,e)=> s + eventMaterialsCost(e), 0);
-        const mMastersSalary = mEvts.reduce((s,e)=> s + eventTotalMasterPay(e) + eventMasterMaterialPayments(e).reduce((s2,p)=>s2+p.amount,0), 0)
+        // компенсация за материалы считается по дате расхода (может отличаться от месяца самого мероприятия), поэтому перебираем все мероприятия, а не только mEvts
+        const mMastersSalary = mEvts.reduce((s,e)=> s + eventTotalMasterPay(e), 0)
+          + state.events.reduce((s,e)=> s + eventMasterMaterialPayments(e).filter(p=>p.date && p.date.startsWith(ym)).reduce((s2,p)=>s2+p.amount,0), 0)
           + state.itemSales.filter(x=>x.date && x.date.startsWith(ym)).reduce((s,x)=> s + Math.round(((x.revenue!==undefined&&x.revenue!==null&&!isNaN(x.revenue))?Number(x.revenue):0) * ITEM_SALE_MASTER_PCT / 100), 0)
           + state.orders.filter(x=>x.date && x.date.startsWith(ym)).reduce((s,x)=> s + ((x.masterShare!==undefined&&x.masterShare!==null&&!isNaN(x.masterShare))?Number(x.masterShare):0), 0)
           + state.salaryAdjustments.filter(a=>a.date && a.date.startsWith(ym)).reduce((s,a)=> s + (Number(a.amount)||0), 0);
@@ -7485,7 +7494,10 @@
       const ym = summaryYear+'-'+pad(mIdx+1);
       state.events.filter(e=> e.date && e.date.startsWith(ym)).forEach(e=>{
         eventHostsWithPay(e).forEach(h=> addStaffPay(h.name, mIdx, h.pay));
-        eventMasterMaterialPayments(e).forEach(p=> addStaffPay(p.name, mIdx, p.amount));
+      });
+      // компенсация за материалы — по дате расхода, поэтому проверяем все мероприятия, а не только этого месяца
+      state.events.forEach(e=>{
+        eventMasterMaterialPayments(e).filter(p=>p.date && p.date.startsWith(ym)).forEach(p=> addStaffPay(p.name, mIdx, p.amount));
       });
       state.itemSales.filter(x=>x.date && x.date.startsWith(ym)).forEach(x=>{
         const share = Math.round(((x.revenue!==undefined&&x.revenue!==null&&!isNaN(x.revenue))?Number(x.revenue):0) * ITEM_SALE_MASTER_PCT / 100);
@@ -8121,39 +8133,42 @@
     const maxDirectionMaterials = Math.max(1, ...directionMaterialsList.map(x=>x[1]));
 
     // зарплата мастеров (учитывает всех со-ведущих на мероприятии, не только основного)
+    const monthYmForItemSales = cursor.getFullYear()+'-'+pad(cursor.getMonth()+1);
     const totalSalary = evts.reduce((sum,e)=> sum + eventTotalMasterPay(e), 0);
 
     const hostSalary = {};
     const hostSessionPay = {};
     const hostMaterialsComp = {};
     const masterEventDetails = {};
+    // оплата за проведение МК — привязана к дате самого мероприятия
     evts.forEach(e=>{
       const half = parseInt(e.date.slice(8,10),10) <= 15 ? 'H1' : 'H2';
-      const materialsCompThisEvent = {};
-      eventMasterMaterialPayments(e).forEach(p=>{
-        materialsCompThisEvent[p.name] = (materialsCompThisEvent[p.name]||0) + p.amount;
-      });
       eventHostsWithPay(e).forEach(h=>{
         hostSalary[h.name] = (hostSalary[h.name]||0) + h.pay;
         hostSessionPay[h.name] = (hostSessionPay[h.name]||0) + h.pay;
-        const comp = materialsCompThisEvent[h.name] || 0;
         if(!masterEventDetails[h.name]) masterEventDetails[h.name] = [];
-        masterEventDetails[h.name].push({ date: e.date, title: e.title || 'Без названия', sessionPay: h.pay, materialsComp: comp, total: h.pay + comp, half });
-        delete materialsCompThisEvent[h.name];
+        masterEventDetails[h.name].push({ date: e.date, title: e.title || 'Без названия', sessionPay: h.pay, materialsComp: 0, total: h.pay, half, kind: 'session' });
       });
+    });
+    // компенсация за материалы ("Кому платить") — попадает в ЗП за период, когда фактически был расход:
+    // это дата расхода, указанная построчно у материала, а если её нет — дата самого мероприятия.
+    // расход мог быть в другом месяце, чем прошло мероприятие, поэтому перебираем ВСЕ мероприятия, а не только этого месяца,
+    // и фильтруем уже по эффективной дате компенсации
+    state.events.forEach(e=>{
       eventMasterMaterialPayments(e).forEach(p=>{
+        if(!p.date || !p.date.startsWith(monthYmForItemSales)) return;
+        const half = parseInt(p.date.slice(8,10),10) <= 15 ? 'H1' : 'H2';
         hostSalary[p.name] = (hostSalary[p.name]||0) + p.amount;
         hostMaterialsComp[p.name] = (hostMaterialsComp[p.name]||0) + p.amount;
-        // если этот человек не ведущий на мероприятии (получает только компенсацию за материалы) — отдельная строка
-        if(materialsCompThisEvent[p.name] !== undefined){
-          if(!masterEventDetails[p.name]) masterEventDetails[p.name] = [];
-          masterEventDetails[p.name].push({ date: e.date, title: e.title || 'Без названия', sessionPay: 0, materialsComp: p.amount, total: p.amount, half });
-        }
+        if(!masterEventDetails[p.name]) masterEventDetails[p.name] = [];
+        const label = p.expenseDateOverride
+          ? `Материалы к «${e.title || 'без названия'}» (МК ${formatDateText(e.date)})`
+          : (e.title || 'Без названия');
+        masterEventDetails[p.name].push({ date: p.date, title: label, sessionPay: 0, materialsComp: p.amount, total: p.amount, half, kind: 'materials' });
       });
     });
 
     // доля мастеров от продажи изделий за этот же месяц
-    const monthYmForItemSales = cursor.getFullYear()+'-'+pad(cursor.getMonth()+1);
     const itemSalesByMaster = {};
     state.itemSales.filter(x=> x.date && x.date.startsWith(monthYmForItemSales)).forEach(x=>{
       const name = (x.masterName||'').trim();
@@ -8199,7 +8214,12 @@
         if(day <= 15){ hostSalaryH1[h.name] = (hostSalaryH1[h.name]||0) + h.pay; totalSalaryH1 += h.pay; }
         else { hostSalaryH2[h.name] = (hostSalaryH2[h.name]||0) + h.pay; totalSalaryH2 += h.pay; }
       });
+    });
+    // компенсация за материалы — по дате расхода (может отличаться от даты мероприятия и попасть в другую половину месяца)
+    state.events.forEach(e=>{
       eventMasterMaterialPayments(e).forEach(p=>{
+        if(!p.date || !p.date.startsWith(monthYmForItemSales)) return;
+        const day = parseInt(p.date.split('-')[2], 10) || 1;
         if(day <= 15){ hostSalaryH1[p.name] = (hostSalaryH1[p.name]||0) + p.amount; totalSalaryH1 += p.amount; }
         else { hostSalaryH2[p.name] = (hostSalaryH2[p.name]||0) + p.amount; totalSalaryH2 += p.amount; }
       });
@@ -8528,12 +8548,12 @@
                     const halfLabel = half==='H1' ? '1\u201315 число' : '16 \u2013 конец месяца';
                     return `
                     <div style="margin-bottom:12px;">
-                      <div style="font-size:12px;font-weight:600;margin-bottom:6px;">${halfLabel}: ${formatMoney(halfTotal)} <span style="font-weight:400;color:var(--ink-soft);font-size:11px;">(${halfDetails.length} МК)</span></div>
-                      ${halfDetails.length === 0 ? '<div style="color:var(--ink-soft);font-size:12px;margin-bottom:6px;">Нет МК в этот период.</div>' : halfDetails.map(d=>`
+                      <div style="font-size:12px;font-weight:600;margin-bottom:6px;">${halfLabel}: ${formatMoney(halfTotal)} <span style="font-weight:400;color:var(--ink-soft);font-size:11px;">(${halfDetails.length} начисл.)</span></div>
+                      ${halfDetails.length === 0 ? '<div style="color:var(--ink-soft);font-size:12px;margin-bottom:6px;">Нет начислений в этот период.</div>' : halfDetails.map(d=>`
                         <div class="stat-row" style="margin-bottom:5px;">
                           <div class="stat-label" style="width:170px;">${formatDateText(d.date)}</div>
-                          <div style="flex:1;font-size:12.5px;">${escapeHtml(d.title)}</div>
-                          <div style="font-family:var(--font-mono);font-size:12.5px;">${formatMoney(d.total)}${d.materialsComp>0?' <span style="color:var(--accent);">(себес '+formatMoney(d.materialsComp)+')</span>':''}</div>
+                          <div style="flex:1;font-size:12.5px;">${escapeHtml(d.title)}${d.kind==='materials'?' <span style="color:var(--ink-soft);">— себестоимость материалов</span>':''}</div>
+                          <div style="font-family:var(--font-mono);font-size:12.5px;${d.kind==='materials'?'color:var(--accent);':''}">${formatMoney(d.total)}</div>
                         </div>
                       `).join('')}
                       ${half==='H2' ? `
@@ -9005,12 +9025,12 @@
             const halfLabel = half==='H1' ? '1–15 число' : '16 – конец месяца';
             return `
             <div style="margin-bottom:14px;">
-              <div style="font-size:13px;font-weight:600;margin-bottom:6px;">${halfLabel}: ${formatMoney(halfTotal)} <span style="font-weight:400;color:var(--ink-soft);font-size:11px;">(${halfDetails.length} МК)</span></div>
-              ${halfDetails.length === 0 ? '<div style="color:var(--ink-soft);font-size:12.5px;">Нет МК в этот период.</div>' : halfDetails.map(d=>`
+              <div style="font-size:13px;font-weight:600;margin-bottom:6px;">${halfLabel}: ${formatMoney(halfTotal)} <span style="font-weight:400;color:var(--ink-soft);font-size:11px;">(${halfDetails.length} начисл.)</span></div>
+              ${halfDetails.length === 0 ? '<div style="color:var(--ink-soft);font-size:12.5px;">Нет начислений в этот период.</div>' : halfDetails.map(d=>`
                 <div class="stat-row" style="margin-bottom:5px;">
                   <div class="stat-label" style="width:170px;">${formatDateText(d.date)}</div>
-                  <div style="flex:1;font-size:12.5px;">${escapeHtml(d.title)}</div>
-                  <div style="font-family:var(--font-mono);font-size:12.5px;">${formatMoney(d.total)}${d.materialsComp>0?' <span style="color:var(--accent);">(себес '+formatMoney(d.materialsComp)+')</span>':''}</div>
+                  <div style="flex:1;font-size:12.5px;">${escapeHtml(d.title)}${d.kind==='materials'?' <span style="color:var(--ink-soft);">— себестоимость материалов</span>':''}</div>
+                  <div style="font-family:var(--font-mono);font-size:12.5px;${d.kind==='materials'?'color:var(--accent);':''}">${formatMoney(d.total)}</div>
                 </div>
               `).join('')}
               ${half==='H2' ? `
@@ -11096,10 +11116,12 @@
               <label style="display:block;font-size:11.5px;font-family:var(--font-mono);color:var(--ink-soft);margin-bottom:6px;">🎟 Оплатить сертификатом</label>
               <div style="display:flex;gap:8px;">
                 <input type="text" id="cert-attach-search" placeholder="Номер сертификата…" list="cert-attach-options" style="flex:1;border:1px solid var(--line-strong);border-radius:var(--radius);padding:8px 9px;font-family:var(--font-body);font-size:13px;background:var(--paper);">
+                <input type="hidden" id="cert-attach-id" value="">
                 <input type="number" id="cert-attach-amount" placeholder="Сумма" step="100" style="width:110px;border:1px solid var(--line-strong);border-radius:var(--radius);padding:8px 9px;font-family:var(--font-body);font-size:13px;background:var(--paper);">
                 <button type="button" class="btn btn-ghost" id="btn-attach-cert" style="white-space:nowrap;">+ Добавить</button>
               </div>
-              <datalist id="cert-attach-options">${state.certificates.filter(c=>certRemaining(c)>0).map(c=>`<option value="№${escapeHtml(String(c.number))} — ${escapeHtml(c.ownerName||'без имени')} — остаток ${formatMoney(certRemaining(c))}">`).join('')}</datalist>
+              <datalist id="cert-attach-options">${state.certificates.filter(c=>certRemaining(c)>0).map(c=>`<option value="${escapeHtml(certPickerLabel(c))}">`).join('')}</datalist>
+              <div style="font-size:11px;color:var(--ink-soft);margin-top:4px;">Если один номер встречается несколько раз (например, после импорта) — выбирайте по дате, показанной в списке.</div>
               <div id="cert-attach-hint" style="font-size:11px;color:var(--ink-soft);margin-top:4px;"></div>
             </div>
             <div id="cert-attach-summary"></div>
@@ -11348,6 +11370,7 @@
         const qtyInput = row.querySelector('.mi-qty');
         const sourceActive = row.querySelector('.mi-source-opt.active');
         const payToInput = row.querySelector('.mi-payto');
+        const expDateInput = row.querySelector('.mi-expdate');
         if(materialsItemsDraft[i]){
           materialsItemsDraft[i] = {
             name: nameInput.value,
@@ -11355,6 +11378,7 @@
             qty: qtyInput && qtyInput.value !== '' ? parseFloat(qtyInput.value) : null,
             source: sourceActive ? sourceActive.dataset.source : 'studio',
             payTo: payToInput ? payToInput.value : '',
+            expenseDate: expDateInput ? expDateInput.value : '',
           };
         }
       });
@@ -11392,12 +11416,23 @@
           updateMaterialsTotalHint();
           updateEstimateAndProfit();
         });
+        const payToInputForRow = row.querySelector('.mi-payto');
+        const expDateInputForRow = row.querySelector('.mi-expdate');
+        const refreshExpDateVisibility = ()=>{
+          const isMaster = row.querySelector('.mi-source-opt.active')?.dataset.source === 'master';
+          if(expDateInputForRow) expDateInputForRow.style.display = (isMaster && payToInputForRow && payToInputForRow.value.trim()) ? 'block' : 'none';
+        };
+        if(payToInputForRow) payToInputForRow.addEventListener('input', ()=>{
+          refreshExpDateVisibility();
+          syncMaterialsItemsFromInputs();
+        });
+        if(expDateInputForRow) expDateInputForRow.addEventListener('input', syncMaterialsItemsFromInputs);
         row.querySelectorAll('.mi-source-opt').forEach(opt=>{
           opt.onclick = ()=>{
             row.querySelectorAll('.mi-source-opt').forEach(o=>o.classList.remove('active'));
             opt.classList.add('active');
-            const payToInput = row.querySelector('.mi-payto');
-            if(payToInput) payToInput.style.display = (opt.dataset.source === 'master') ? 'block' : 'none';
+            if(payToInputForRow) payToInputForRow.style.display = (opt.dataset.source === 'master') ? 'block' : 'none';
+            refreshExpDateVisibility();
             syncMaterialsItemsFromInputs();
             updateMaterialsTotalHint();
             updateEstimateAndProfit();
@@ -11639,25 +11674,46 @@
     }
     renderCertAttachSummary();
 
+    // подпись → id сертификата, чтобы точно понимать, какой из нескольких сертификатов с одинаковым
+    // номером (например, после импорта) выбрали из списка — differentiate по дате в подписи
+    let certAttachLabelToId = {};
     function refreshCertAttachOptions(){
       const list = overlay.querySelector('#cert-attach-options');
       if(!list) return;
-      list.innerHTML = state.certificates.filter(c=>certRemaining(c)>0).map(c=>`<option value="№${escapeHtml(String(c.number))} — ${escapeHtml(c.ownerName||'без имени')} — остаток ${formatMoney(certRemaining(c))}">`).join('');
+      const certs = state.certificates.filter(c=>certRemaining(c)>0);
+      certAttachLabelToId = {};
+      certs.forEach(c=>{ certAttachLabelToId[certPickerLabel(c)] = c.id; });
+      list.innerHTML = certs.map(c=>`<option value="${escapeHtml(certPickerLabel(c))}">`).join('');
     }
+    refreshCertAttachOptions(); // заполняем карту "подпись → id" сразу же, а не только после первого списания
 
     const attachCertBtn = overlay.querySelector('#btn-attach-cert');
     const certAttachSearch = overlay.querySelector('#cert-attach-search');
+    const certAttachIdHidden = overlay.querySelector('#cert-attach-id');
     const certAttachAmount = overlay.querySelector('#cert-attach-amount');
     const certAttachHint = overlay.querySelector('#cert-attach-hint');
+    if(certAttachSearch && certAttachIdHidden){
+      certAttachSearch.addEventListener('input', ()=>{
+        const val = certAttachSearch.value.trim();
+        certAttachIdHidden.value = certAttachLabelToId[val] || '';
+      });
+    }
     if(attachCertBtn && certAttachSearch && certAttachAmount){
       attachCertBtn.onclick = async ()=>{
         certAttachHint.textContent = '';
         certAttachHint.style.color = 'var(--status-red)';
         const searchVal = certAttachSearch.value.trim();
-        const numberMatch = searchVal.match(/^№?(\S+)/);
-        const numberStr = numberMatch ? numberMatch[1] : searchVal;
-        const cert = state.certificates.find(c=> String(c.number) === numberStr);
-        if(!cert){ certAttachHint.textContent = 'Сертификат с таким номером не найден.'; return; }
+        // сначала пробуем точный выбор из списка (по id, надёжно различает дубли номеров),
+        // и только если строка не совпала ни с одной подписью — терпимо ищем по номеру (сработает, если номер уникален)
+        let cert = certAttachIdHidden.value ? state.certificates.find(c=>c.id === certAttachIdHidden.value) : null;
+        if(!cert){
+          const numberMatch = searchVal.match(/^№?(\S+)/);
+          const numberStr = numberMatch ? numberMatch[1] : searchVal;
+          const matches = state.certificates.filter(c=> String(c.number) === numberStr);
+          if(matches.length > 1){ certAttachHint.textContent = `Есть несколько сертификатов №${numberStr} — выберите нужный из списка (по дате).`; return; }
+          cert = matches[0];
+        }
+        if(!cert){ certAttachHint.textContent = 'Сертификат с таким номером не найден. Выберите его из списка.'; return; }
         const amount = parseInt(certAttachAmount.value) || 0;
         if(amount <= 0){ certAttachHint.textContent = 'Впишите сумму больше нуля.'; return; }
         const remaining = certRemaining(cert);
@@ -11685,6 +11741,7 @@
         updateAwaitingHint();
 
         certAttachSearch.value = '';
+        certAttachIdHidden.value = '';
         certAttachAmount.value = '';
         certAttachHint.style.color = 'var(--status-green)';
         certAttachHint.textContent = `Готово — списано ${formatMoney(amount)} с сертификата №${cert.number}.`;
@@ -11876,7 +11933,7 @@
       const guestNameVal = overlay.querySelector('#f-guest-name').value.trim();
       syncMaterialsItemsFromInputs();
       const cleanedMaterialsItems = materialsItemsDraft
-        .map(m=>({name:(m.name||'').trim(), cost:(m.cost!==undefined&&m.cost!==null&&!isNaN(m.cost))?Number(m.cost):null, qty:(m.qty!==undefined&&m.qty!==null&&!isNaN(m.qty))?Number(m.qty):null, source:m.source==='master'?'master':'studio', payTo:m.source==='master'?(m.payTo||'').trim():''}))
+        .map(m=>({name:(m.name||'').trim(), cost:(m.cost!==undefined&&m.cost!==null&&!isNaN(m.cost))?Number(m.cost):null, qty:(m.qty!==undefined&&m.qty!==null&&!isNaN(m.qty))?Number(m.qty):null, source:m.source==='master'?'master':'studio', payTo:m.source==='master'?(m.payTo||'').trim():'', expenseDate:(m.source==='master'&&m.payTo&&m.payTo.trim())?(m.expenseDate||'').trim():''}))
         .filter(m=>m.name && m.cost!==null);
       const materialsMissing = cleanedMaterialsItems.length === 0;
       syncPickupItemsFromInputs();
