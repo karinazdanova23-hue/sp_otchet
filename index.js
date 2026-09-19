@@ -294,6 +294,9 @@ const BACKUP_KEY_MAP = {
   marketingSpend: 'marketing-spend',
   marketingPlans: 'marketing-plans',
   contentPosts: 'content-posts',
+  managerShifts: 'manager-shifts',
+  suppliers: 'suppliers',
+  stockReceipts: 'stock-receipts',
 };
 
 async function readSharedKeyRaw(key) {
