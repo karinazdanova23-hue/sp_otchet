@@ -3,14 +3,16 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
-<title>Расписание студии</title>
+<title>Свободное Пространство</title>
 <link rel="manifest" href="/manifest.json">
-<meta name="theme-color" content="#2A2520">
-<link rel="icon" href="/icon-192.png">
-<link rel="apple-touch-icon" href="/icon-192.png">
+<meta name="theme-color" content="#171512">
+<link rel="icon" href="/favicon.ico" sizes="any">
+<link rel="icon" type="image/png" sizes="192x192" href="/icon-192.png">
+<link rel="icon" type="image/png" sizes="512x512" href="/icon-512.png">
+<link rel="apple-touch-icon" href="/apple-touch-icon.png">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-<meta name="apple-mobile-web-app-title" content="Расписание СП">
+<meta name="apple-mobile-web-app-title" content="Свободное Пространство">
 <meta name="mobile-web-app-capable" content="yes">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -756,6 +758,7 @@
   const MARKETING_SOCIAL_NETWORKS = ['ТГ','ВК','Инста','Макс','Сайт','Гео','Авито'];
 
   const HOSTESS_LIST = ['Ира','Оксана','Соня','Сара'];
+  const MANAGER_LIST = ['Алёна','Яна'];
   function renderBarChart(data, opts){
     opts = opts || {};
     const height = opts.height || 160;
@@ -816,6 +819,11 @@
     });
     Object.keys(state.hostessPersonalPasswords||{}).forEach(n=>{ if(n) names.add(n.trim()); });
     return Array.from(names).filter(Boolean).sort();
+  }
+  // менеджер, назначенный на день (график менеджеров — просто имя на весь день, без смен по времени)
+  function managerForDate(dateStr){
+    const name = (state.managerShifts||{})[dateStr];
+    return (name && name.trim()) ? name.trim() : '';
   }
   const HOSTESS_WEEKEND_RATE = 1500;
   const HOSTESS_EXTRA_HOUR_RATE = 260;
@@ -1044,6 +1052,7 @@
     bookView: 'incomes',
     leads: null,
     hostessShifts: null,
+    managerShifts: null,
     syncToken: null,
     syncWarningShown: false,
     hostsList: null,
@@ -1073,9 +1082,15 @@
     loggedInMasterName: null,
     hostessPersonalPasswords: {},
     loggedInHostessName: null,
+    managerPersonalPasswords: {},
+    loggedInManagerName: null,
     pushRefundThreshold: 10000,
     marketingSpendCursor: new Date(),
     marketingSpendShowAll: false,
+    suppliers: null,
+    procurementTab: 'stock',
+    stockReceipts: null,
+    procurementBudgetCursor: new Date(new Date().getFullYear(), new Date().getMonth(), 1),
   };
 
   function pad(n){ return n<10 ? '0'+n : ''+n; }
@@ -1140,6 +1155,8 @@
   // поэтому им тоже открыт раздел "Для менеджеров" — но внутри него видны только вкладки
   // "Сертификаты" и "Изделия" (без корректировок ЗП, возвратов, конверсии, заказов и выдачи — см. renderCertificatesView)
   function roleCanAccessCertificatesView(role){ return roleCanAccessManagersTab(role) || role === 'hostess'; }
+  // "Закупки" — рабочий инструмент старшего администратора (закуп материалов) и руководителя
+  function roleCanAccessProcurement(role){ return ['admin','owner'].includes(role); }
   function canAccessView(view){
     if(!state.currentRole) return false; // без входа теперь не видно вообще ничего
     if(view==='calendar' || view==='host' || view==='today') return true;
@@ -1147,6 +1164,7 @@
     if(view==='marketing') return roleCanAccessManagersTab(state.currentRole);
     if(view==='book') return roleCanAccessBook(state.currentRole);
     if(view==='analytics') return roleCanAccessAnalytics(state.currentRole) || !!state.loggedInMasterName || !!state.loggedInHostessName;
+    if(view==='procurement') return roleCanAccessProcurement(state.currentRole);
     return false;
   }
 
@@ -1209,6 +1227,11 @@
       const hp = await window.storage.get('hostess-passwords', true);
       state.hostessPersonalPasswords = hp ? JSON.parse(hp.value) : {};
     }catch(e){ state.hostessPersonalPasswords = {}; }
+
+    try{
+      const gp = await window.storage.get('manager-passwords', true);
+      state.managerPersonalPasswords = gp ? JSON.parse(gp.value) : {};
+    }catch(e){ state.managerPersonalPasswords = {}; }
 
     try{
       const et = await window.storage.get('event-types', true);
@@ -1285,6 +1308,16 @@
     }catch(e){ state.marketingSpend = []; }
 
     try{
+      const sup = await window.storage.get('suppliers', true);
+      state.suppliers = sup ? JSON.parse(sup.value) : [];
+    }catch(e){ state.suppliers = []; }
+
+    try{
+      const rc = await window.storage.get('stock-receipts', true);
+      state.stockReceipts = rc ? JSON.parse(rc.value) : [];
+    }catch(e){ state.stockReceipts = []; }
+
+    try{
       const mp = await window.storage.get('marketing-plans', true);
       state.marketingPlans = mp ? JSON.parse(mp.value) : {};
     }catch(e){ state.marketingPlans = {}; }
@@ -1325,6 +1358,11 @@
       const hs = await window.storage.get('hostess-shifts', true);
       state.hostessShifts = hs ? JSON.parse(hs.value) : {};
     }catch(e){ state.hostessShifts = {}; }
+
+    try{
+      const ms = await window.storage.get('manager-shifts', true);
+      state.managerShifts = ms ? JSON.parse(ms.value) : {};
+    }catch(e){ state.managerShifts = {}; }
 
     // демо-данные для тестирования отключены — реальный запуск начинается с чистой базы
     // await seedDemo30Once();
@@ -1789,6 +1827,7 @@
       masterPayOverrides: state.masterPayOverrides,
       monthlyPlans: state.monthlyPlans,
       hostessShifts: state.hostessShifts,
+      managerShifts: state.managerShifts,
       netProfitManual: state.netProfitManual,
       yearSummaryManual: state.yearSummaryManual,
       auditLog: state.auditLog,
@@ -1796,6 +1835,8 @@
       marketingSpend: state.marketingSpend,
       marketingPlans: state.marketingPlans,
       contentPosts: state.contentPosts,
+      suppliers: state.suppliers,
+      stockReceipts: state.stockReceipts,
     }, null, 2);
   }
 
@@ -1841,6 +1882,10 @@
       const outOfStock = state.materialsCatalog.filter(m=>m.trackStock && (m.stock===undefined||m.stock===null||m.stock<=0));
       if(outOfStock.length > 0){
         await sendPushNotification('Закончился материал', outOfStock.map(m=>m.name).join(', '), ['admin','owner']);
+      }
+      const belowMinStock = state.materialsCatalog.filter(m=>m.trackStock && m.minStock>0 && m.stock!==undefined && m.stock!==null && m.stock>0 && m.stock<m.minStock);
+      if(belowMinStock.length > 0){
+        await sendPushNotification('Остаток ниже минимального', belowMinStock.map(m=>`${m.name} (${m.stock}${m.unit?' '+m.unit:''})`).join(', '), ['admin','owner']);
       }
     }catch(e){ /* напоминания не критичны — не мешаем работе приложения при сбое */ }
   }
@@ -2059,11 +2104,51 @@
   async function saveMarketingSpend(){
     return storageSetWithRetry('marketing-spend', JSON.stringify(state.marketingSpend));
   }
+  async function saveSuppliers(){
+    return storageSetWithRetry('suppliers', JSON.stringify(state.suppliers));
+  }
+  async function saveStockReceipts(){
+    return storageSetWithRetry('stock-receipts', JSON.stringify(state.stockReceipts));
+  }
+  function stockReceiptsStats(days){
+    const cutoff = new Date(); cutoff.setDate(cutoff.getDate() - days);
+    const cutoffStr = fmtDate(cutoff);
+    const today = todayStr();
+    return (state.stockReceipts||[]).filter(r=> r.date && r.date >= cutoffStr && r.date <= today)
+      .reduce((s,r)=> s + (Number(r.amount)||0), 0);
+  }
+  function monthReceiptsBreakdown(ym){
+    const rows = (state.stockReceipts||[]).filter(r=> (r.date||'').startsWith(ym));
+    const total = rows.reduce((s,r)=> s + (Number(r.amount)||0), 0);
+    const catMap = {};
+    rows.forEach(r=>{
+      const mat = state.materialsCatalog.find(m=> m.name.trim().toLowerCase() === (r.material||'').trim().toLowerCase());
+      const cat = (mat && mat.category && mat.category.trim()) ? mat.category.trim() : 'Без категории';
+      catMap[cat] = (catMap[cat] || 0) + (Number(r.amount) || 0);
+    });
+    const byCategory = Object.entries(catMap).map(([category, amount])=>({category, amount})).sort((a,b)=>b.amount-a.amount);
+    return { total, count: rows.length, byCategory };
+  }
   async function saveMarketingPlans(){
     return storageSetWithRetry('marketing-plans', JSON.stringify(state.marketingPlans));
   }
   async function saveContentPosts(){
     return storageSetWithRetry('content-posts', JSON.stringify(state.contentPosts));
+  }
+  async function syncStockReceiptExpense(receipt){
+    // каждый приход на склад отражается расходом в "Книге" (категория "Материалы"),
+    // чтобы фактическая закупка была видна в общих расходах студии, а не только в разделе "Закупки"
+    const label = `Приход на склад: ${receipt.material} — ${receipt.qty}${receipt.unit ? ' '+receipt.unit : ''}${receipt.supplierName ? ' у '+receipt.supplierName : ''}`;
+    const expenseEntry = {
+      id: receipt.expenseId || uid(),
+      date: receipt.date, category: 'Материалы', direction: receipt.material, master: '',
+      source: 'Точка', amount: Number(receipt.amount)||0, responsible: '',
+      eventId: '', comment: receipt.notes ? `${label} — ${receipt.notes}` : label,
+    };
+    const idx = state.expenses.findIndex(x=>x.id===expenseEntry.id);
+    if(idx>=0) state.expenses[idx] = expenseEntry; else state.expenses.push(expenseEntry);
+    await saveExpenses();
+    return expenseEntry.id;
   }
   async function syncMarketingSpendExpense(spend){
     // каждая трата в разделе "Маркетинг" отражается расходом в "Книге" (категория "Маркетинг"),
@@ -2113,6 +2198,9 @@
   }
   async function saveHostessShifts(){
     return storageSetWithRetry('hostess-shifts', JSON.stringify(state.hostessShifts));
+  }
+  async function saveManagerShifts(){
+    return storageSetWithRetry('manager-shifts', JSON.stringify(state.managerShifts));
   }
 
   let toastHideTimer = null;
@@ -2281,7 +2369,7 @@
     return `
       <div class="login-gate">
         <div class="login-gate-card">
-          <h1 class="app-title" style="margin-bottom:2px;">Расписание студии</h1>
+          <h1 class="app-title" style="margin-bottom:2px;">Свободное Пространство</h1>
           <div class="app-sub" style="margin-bottom:22px;">Введите свой пароль, чтобы продолжить</div>
           <div class="field">
             <label>Пароль</label>
@@ -2306,6 +2394,8 @@
         state.unlockedAdmin = ['assistant','admin','owner'].includes(matchedRole);
         state.unlockedOwner = (matchedRole === 'owner');
         state.loggedInMasterName = null;
+        state.loggedInHostessName = null;
+        state.loggedInManagerName = null;
         render();
         checkPushSubscriptionStatus().then(enabled=>{ state.pushEnabled = enabled; render(); });
         return;
@@ -2318,6 +2408,7 @@
         state.unlockedOwner = false;
         state.loggedInMasterName = matchedMasterName;
         state.loggedInHostessName = null;
+        state.loggedInManagerName = null;
         render();
         checkPushSubscriptionStatus().then(enabled=>{ state.pushEnabled = enabled; render(); });
         return;
@@ -2330,6 +2421,20 @@
         state.unlockedOwner = false;
         state.loggedInMasterName = null;
         state.loggedInHostessName = matchedHostessName;
+        state.loggedInManagerName = null;
+        render();
+        checkPushSubscriptionStatus().then(enabled=>{ state.pushEnabled = enabled; render(); });
+        return;
+      }
+      const matchedManagerName = val ? Object.keys(state.managerPersonalPasswords).find(name => state.managerPersonalPasswords[name] && state.managerPersonalPasswords[name] === val) : null;
+      if(matchedManagerName){
+        state.currentRole = 'manager';
+        state.unlocked = true;
+        state.unlockedAdmin = false;
+        state.unlockedOwner = false;
+        state.loggedInMasterName = null;
+        state.loggedInHostessName = null;
+        state.loggedInManagerName = matchedManagerName;
         render();
         checkPushSubscriptionStatus().then(enabled=>{ state.pushEnabled = enabled; render(); });
         return;
@@ -2379,6 +2484,8 @@
       html += renderMarketingView();
     } else if(state.view === 'book'){
       html += renderBookView();
+    } else if(state.view === 'procurement'){
+      html += renderProcurementView();
     }
     app.innerHTML = html;
     attachHeaderEvents();
@@ -2387,6 +2494,7 @@
     else if(state.view === 'analytics'){ attachAnalyticsEvents(); }
     else if(state.view === 'certificates'){ attachCertificatesEvents(); }
     else if(state.view === 'marketing'){ attachMarketingEvents(); }
+    else if(state.view === 'procurement'){ attachProcurementEvents(); }
     else if(state.view === 'book'){ attachBookEvents(); }
 
     if(state.modal){ renderModal(); }
@@ -2469,7 +2577,11 @@
 
     // закончились отслеживаемые материалы
     const outOfStock = state.materialsCatalog.filter(m=>m.trackStock && (m.stock===undefined||m.stock===null||m.stock<=0));
-    if(outOfStock.length > 0) alerts.push({icon:'🧱', text:`Закончился материал: ${outOfStock.map(m=>m.name).join(', ')}`});
+    if(outOfStock.length > 0) alerts.push({icon:'🧱', text:`Закончился материал: ${outOfStock.map(m=>m.name).join(', ')}`, view: roleCanAccessProcurement(state.currentRole) ? 'procurement' : undefined});
+
+    // остаток ниже заданного минимума (но ещё не закончился)
+    const belowMinStock = state.materialsCatalog.filter(m=>m.trackStock && m.minStock>0 && m.stock!==undefined && m.stock!==null && m.stock>0 && m.stock<m.minStock);
+    if(belowMinStock.length > 0) alerts.push({icon:'📉', text:`Ниже минимального остатка: ${belowMinStock.map(m=>m.name).join(', ')}`, view: roleCanAccessProcurement(state.currentRole) ? 'procurement' : undefined});
 
     // несданные отчёты мастеров за последние 14 дней
     const cutoff = new Date(); cutoff.setDate(cutoff.getDate()-14);
@@ -2644,12 +2756,12 @@
     return `
       <div class="app-header">
         <div>
-          <h1 class="app-title">Расписание студии</h1>
+          <h1 class="app-title">Свободное Пространство</h1>
           <div class="app-sub">4 пространства · мероприятия и ведущие</div>
         </div>
-        <div style="display:flex; align-items:center; gap:10px; flex-wrap:wrap;">
+        <div class="header-actions" style="display:flex; align-items:center; gap:10px; flex-wrap:wrap;">
           <div class="global-search-wrap" style="position:relative;">
-            <input type="text" id="global-search-input" placeholder="🔍 Поиск: мероприятие, гость, сертификат…" style="width:260px; padding:9px 12px; border:1px solid var(--line-strong); border-radius:var(--radius); font-size:12.5px; font-family:var(--font-body); background:var(--white);">
+            <input type="text" id="global-search-input" placeholder="🔍 Поиск: мероприятие, гость, сертификат…" style="width:260px; max-width:100%; padding:9px 12px; border:1px solid var(--line-strong); border-radius:var(--radius); font-size:12.5px; font-family:var(--font-body); background:var(--white);">
             <div id="global-search-results" style="display:none; position:absolute; top:calc(100% + 4px); left:0; right:0; background:var(--white); border:1px solid var(--line-strong); border-radius:var(--radius); box-shadow:0 8px 24px rgba(0,0,0,0.12); max-height:360px; overflow-y:auto; z-index:500;"></div>
           </div>
           <div class="view-switch">
@@ -2659,11 +2771,12 @@
             ${roleCanAccessCertificatesView(role) ? `<button data-view="certificates" class="${state.view==='certificates'?'active':''}">${role==='hostess' ? 'Сертификаты / Изделия' : 'Для менеджеров'}</button>` : ''}
             ${roleCanAccessManagersTab(role) ? `<button data-view="marketing" class="${state.view==='marketing'?'active':''}">Маркетинг</button>` : ''}
             ${roleCanAccessBook(role) ? `<button data-view="book" class="${state.view==='book'?'active':''}">Книга</button>` : ''}
+            ${roleCanAccessProcurement(role) ? `<button data-view="procurement" class="${state.view==='procurement'?'active':''}">📦 Закупки</button>` : ''}
           </div>
           <button class="lock-btn no-print" id="btn-today-view">📋 Сегодня</button>
           <button class="lock-btn no-print" id="btn-push-toggle">${state.pushEnabled ? '🔔 Уведомления включены' : '🔕 Включить уведомления'}</button>
           <button class="lock-btn ${role?'unlocked':''}" id="btn-lock">
-            ${role ? '👤 '+((state.loggedInMasterName || state.loggedInHostessName) ? escapeHtml(state.loggedInMasterName || state.loggedInHostessName) : ROLE_LABELS[role])+' — выйти' : '🔒 Войти'}
+            ${role ? '👤 '+((state.loggedInMasterName || state.loggedInHostessName || state.loggedInManagerName) ? escapeHtml(state.loggedInMasterName || state.loggedInHostessName || state.loggedInManagerName) : ROLE_LABELS[role])+' — выйти' : '🔒 Войти'}
           </button>
           ${isAdminLevel ? `
           <button class="lock-btn" id="btn-role-settings">⚙ Настройки доступа</button>
@@ -6647,6 +6760,7 @@
         state.unlockedOwner = false;
         state.loggedInMasterName = null;
         state.loggedInHostessName = null;
+        state.loggedInManagerName = null;
         if(!canAccessView(state.view)) state.view = 'calendar';
         render();
       } else {
@@ -6771,6 +6885,8 @@
       overlay.innerHTML = renderQuickReportModal(state.modal.event);
     } else if(state.modal.type === 'quick-shift'){
       overlay.innerHTML = renderQuickShiftModal(state.modal.shiftDate, state.modal.shiftKey, state.modal.rawEntry);
+    } else if(state.modal.type === 'quick-manager-shift'){
+      overlay.innerHTML = renderQuickManagerShiftModal(state.modal.shiftDate);
     } else if(state.modal.type === 'quick-add-slot'){
       overlay.innerHTML = renderQuickAddSlotModal(state.modal.event);
     } else if(state.modal.type === 'event-types'){
@@ -6813,6 +6929,10 @@
       overlay.innerHTML = renderMarketingPlanEditModal();
     } else if(state.modal.type === 'content-post'){
       overlay.innerHTML = renderContentPostModal();
+    } else if(state.modal.type === 'supplier-entry'){
+      overlay.innerHTML = renderSupplierModal();
+    } else if(state.modal.type === 'stock-receipt'){
+      overlay.innerHTML = renderStockReceiptModal();
     }
     document.body.appendChild(overlay);
 
@@ -6834,6 +6954,7 @@
     else if(state.modal.type === 'quick-host'){ attachQuickHostModalEvents(overlay); }
     else if(state.modal.type === 'quick-report'){ attachQuickReportModalEvents(overlay); }
     else if(state.modal.type === 'quick-shift'){ attachQuickShiftModalEvents(overlay); }
+    else if(state.modal.type === 'quick-manager-shift'){ attachQuickManagerShiftModalEvents(overlay); }
     else if(state.modal.type === 'quick-add-slot'){ attachQuickAddSlotModalEvents(overlay); }
     else if(state.modal.type === 'export'){ attachExportModalEvents(overlay); }
     else if(state.modal.type === 'event-types'){ attachEventTypesModalEvents(overlay); }
@@ -6856,6 +6977,8 @@
     else if(state.modal.type === 'marketing-spend'){ attachMarketingSpendModalEvents(overlay); }
     else if(state.modal.type === 'marketing-plan-edit'){ attachMarketingPlanEditModalEvents(overlay); }
     else if(state.modal.type === 'content-post'){ attachContentPostModalEvents(overlay); }
+    else if(state.modal.type === 'supplier-entry'){ attachSupplierModalEvents(overlay); }
+    else if(state.modal.type === 'stock-receipt'){ attachStockReceiptModalEvents(overlay); }
   }
 
   function renderRoleLoginModal(){
@@ -6899,6 +7022,8 @@
         state.unlockedAdmin = ['assistant','admin','owner'].includes(matchedRole);
         state.unlockedOwner = (matchedRole === 'owner');
         state.loggedInMasterName = null;
+        state.loggedInHostessName = null;
+        state.loggedInManagerName = null;
         const action = state.pendingAction;
         state.pendingAction = null;
         state.modal = null;
@@ -6914,6 +7039,7 @@
         state.unlockedOwner = false;
         state.loggedInMasterName = matchedMasterName;
         state.loggedInHostessName = null;
+        state.loggedInManagerName = null;
         const action = state.pendingAction;
         state.pendingAction = null;
         state.modal = null;
@@ -6929,6 +7055,23 @@
         state.unlockedOwner = false;
         state.loggedInMasterName = null;
         state.loggedInHostessName = matchedHostessName;
+        state.loggedInManagerName = null;
+        const action = state.pendingAction;
+        state.pendingAction = null;
+        state.modal = null;
+        overlay.remove();
+        if(action) action(); else render();
+        return;
+      }
+      const matchedManagerName = val ? Object.keys(state.managerPersonalPasswords).find(name => state.managerPersonalPasswords[name] && state.managerPersonalPasswords[name] === val) : null;
+      if(matchedManagerName){
+        state.currentRole = 'manager';
+        state.unlocked = true;
+        state.unlockedAdmin = false;
+        state.unlockedOwner = false;
+        state.loggedInMasterName = null;
+        state.loggedInHostessName = null;
+        state.loggedInManagerName = matchedManagerName;
         const action = state.pendingAction;
         state.pendingAction = null;
         state.modal = null;
@@ -7041,6 +7184,16 @@
                 `).join('');
               })()}
             </div>
+            <div style="border-top:1px solid var(--line);margin-top:8px;padding-top:14px;">
+              <div style="font-size:13px;font-weight:600;margin-bottom:4px;">Пароли менеджеров</div>
+              <div style="font-size:12px;color:var(--ink-soft);margin-bottom:10px;">Личный пароль даёт полный доступ роли «Менеджер», как и общий пароль — но в шапке будет видно имя вошедшего. Оставьте поле пустым, если менеджер пока входит по общему паролю.</div>
+              ${MANAGER_LIST.map(m=>`
+                <div class="field">
+                  <label>${escapeHtml(m)}</label>
+                  <input type="text" class="manager-password-input" data-manager="${escapeHtml(m)}" placeholder="без личного пароля" value="${escapeHtml(state.managerPersonalPasswords[m]||'')}">
+                </div>
+              `).join('')}
+            </div>
           ` : ''}
           <div class="modal-actions">
             <button class="btn-danger" id="btn-relock">Выйти</button>
@@ -7103,6 +7256,20 @@
         return;
       }
 
+      const managerPwInputs = [...overlay.querySelectorAll('.manager-password-input')];
+      const newManagerPasswords = {};
+      managerPwInputs.forEach(inp=>{
+        const val = inp.value.trim();
+        if(!val) return;
+        if(usedValues.has(val)) duplicateFound = inp.dataset.manager;
+        usedValues.add(val);
+        newManagerPasswords[inp.dataset.manager] = val;
+      });
+      if(duplicateFound){
+        showToast(`Пароль у «${duplicateFound}» совпадает с другим паролем — исправьте, чтобы вход не путался.`, 'error');
+        return;
+      }
+
       state.roleCodes = newCodes;
       await storageSetWithRetry('role-codes', JSON.stringify(state.roleCodes));
       if(masterPwInputs.length > 0){
@@ -7112,6 +7279,10 @@
       if(hostessPwInputs.length > 0){
         state.hostessPersonalPasswords = newHostessPasswords;
         await storageSetWithRetry('hostess-passwords', JSON.stringify(state.hostessPersonalPasswords));
+      }
+      if(managerPwInputs.length > 0){
+        state.managerPersonalPasswords = newManagerPasswords;
+        await storageSetWithRetry('manager-passwords', JSON.stringify(state.managerPersonalPasswords));
       }
       recordAction("Пароли сохранены");
       state.modal = null;
@@ -7176,6 +7347,99 @@
 
   function formatMoney(n){
     return Math.round(n).toLocaleString('ru-RU') + ' ₽';
+  }
+
+  // ---------- закупки: списание за период и прогноз потребности ----------
+  function materialUsageStats(days){
+    // сколько материала фактически списано (по мероприятиям с датой в последние `days` дней, включая сегодня)
+    const cutoff = new Date(); cutoff.setDate(cutoff.getDate() - days);
+    const cutoffStr = fmtDate(cutoff);
+    const today = todayStr();
+    const map = {};
+    state.events.forEach(e=>{
+      if(!e.date || e.date < cutoffStr || e.date > today) return;
+      (e.materialsItems||[]).forEach(m=>{
+        const nm = (m.name||'').trim();
+        if(!nm) return;
+        const key = nm.toLowerCase();
+        if(!map[key]) map[key] = { name: nm, qty: 0, cost: 0 };
+        if(m.qty!==undefined && m.qty!==null && !isNaN(m.qty)) map[key].qty += Number(m.qty);
+        map[key].cost += Number(m.cost) || 0;
+      });
+    });
+    return map;
+  }
+
+  function materialBookedAheadStats(days){
+    // сколько материала уже "забронировано" будущими мероприятиями (по уже проставленным в них материалам)
+    const today = todayStr();
+    const horizon = new Date(); horizon.setDate(horizon.getDate() + days);
+    const horizonStr = fmtDate(horizon);
+    const map = {};
+    const add = (name, qty)=>{
+      const nm = (name||'').trim();
+      if(!nm || !qty) return;
+      const key = nm.toLowerCase();
+      if(!map[key]) map[key] = { name: nm, qty: 0 };
+      map[key].qty += qty;
+    };
+    state.events.forEach(e=>{
+      if(!e.date || e.date <= today || e.date > horizonStr) return;
+      (e.materialsItems||[]).forEach(m=>{
+        if(m.qty!==undefined && m.qty!==null && !isNaN(m.qty)) add(m.name, Number(m.qty));
+      });
+      // холст для будущих "рисовальных" мероприятий, где он ещё не проставлен вручную — та же логика 1 гость = 1 холст,
+      // что и при автосписании прошедших (см. autoDeductCanvasesForPastPaintingEvents)
+      if(isPaintingEvent(e.title)){
+        const hasCanvas = (e.materialsItems||[]).some(m=>(m.name||'').trim().toLowerCase()==='холст');
+        if(!hasCanvas){
+          const guests = Number(e.guests) || 0;
+          if(guests > 0) add('Холст', guests);
+        }
+      }
+    });
+    return map;
+  }
+
+  function computeMaterialToBuy(m, booked30){
+    // "докупить" = сколько не хватит, чтобы закрыть уже забронированные будущие мероприятия
+    // И оставить после этого минимальный остаток (буфер на случай непредвиденной записи)
+    const key = m.name.trim().toLowerCase();
+    const stock = (m.stock!==undefined&&m.stock!==null&&!isNaN(m.stock)) ? Number(m.stock) : 0;
+    const minStock = (m.minStock!==undefined&&m.minStock!==null&&!isNaN(m.minStock)) ? Number(m.minStock) : 0;
+    const booked = booked30[key] ? booked30[key].qty : 0;
+    const toBuy = Math.max(0, Math.round(((booked + minStock) - stock) * 100) / 100);
+    const belowMin = minStock > 0 && stock < minStock;
+    return { stock, minStock, booked, toBuy, belowMin };
+  }
+
+  function cheapestSupplierByMaterial(){
+    const map = {};
+    state.suppliers.forEach(s=>{
+      const key = (s.material||'').trim().toLowerCase();
+      const price = Number(s.price);
+      if(!key || isNaN(price)) return;
+      if(map[key]===undefined || price < map[key].price) map[key] = { price, supplierName: s.supplierName, unit: s.unit, leadDays: (s.leadDays!==undefined&&s.leadDays!==null&&!isNaN(s.leadDays))?Number(s.leadDays):null };
+    });
+    return map;
+  }
+
+  function daysBetweenDates(fromStr, toStr){
+    const a = new Date(fromStr+'T00:00:00'), b = new Date(toStr+'T00:00:00');
+    return Math.round((b-a) / 86400000);
+  }
+
+  function earliestNeedDateForMaterial(materialName){
+    // ближайшая будущая дата мероприятия, где этот материал уже проставлен с количеством — "успеть купить нужно к этой дате"
+    const key = (materialName||'').trim().toLowerCase();
+    const today = todayStr();
+    let earliest = null;
+    state.events.forEach(e=>{
+      if(!e.date || e.date <= today) return;
+      const has = (e.materialsItems||[]).some(m=> (m.name||'').trim().toLowerCase()===key && m.qty!==undefined && m.qty!==null && !isNaN(m.qty) && Number(m.qty)>0);
+      if(has && (!earliest || e.date < earliest)) earliest = e.date;
+    });
+    return earliest;
   }
 
   const DEFAULT_MASTER_PAY_RATES = { tier1Max: 3, tier1Flat: 1300, tier2Max: 8, tier2Flat: 1500, tier3PerGuest: 200 };
@@ -9326,7 +9590,7 @@
       reader.onload = ()=>{
         try{
           const data = JSON.parse(reader.result);
-          const KNOWN_FIELDS = ['spaces','events','certificates','refunds','leads','incomes','expenses','eventTypes','hostsList','materialsCatalog','itemSales','orders','salaryAdjustments','masterPayRates','masterPayOverrides','monthlyPlans','hostessShifts','netProfitManual','yearSummaryManual','auditLog','closedMonths','marketingSpend','marketingPlans','contentPosts'];
+          const KNOWN_FIELDS = ['spaces','events','certificates','refunds','leads','incomes','expenses','eventTypes','hostsList','materialsCatalog','itemSales','orders','salaryAdjustments','masterPayRates','masterPayOverrides','monthlyPlans','hostessShifts','managerShifts','netProfitManual','yearSummaryManual','auditLog','closedMonths','marketingSpend','marketingPlans','contentPosts','suppliers','stockReceipts'];
           const hasAnyKnownField = KNOWN_FIELDS.some(f => data[f] !== undefined);
           if(!hasAnyKnownField) throw new Error('bad shape');
           pendingImportData = data;
@@ -9343,6 +9607,8 @@
           if(Array.isArray(data.itemSales)) parts.push(`${data.itemSales.length} продаж изделий`);
           if(Array.isArray(data.orders)) parts.push(`${data.orders.length} заказов`);
           if(Array.isArray(data.salaryAdjustments)) parts.push(`${data.salaryAdjustments.length} корректировок ЗП`);
+          if(Array.isArray(data.suppliers)) parts.push(`${data.suppliers.length} поставщиков`);
+          if(Array.isArray(data.stockReceipts)) parts.push(`${data.stockReceipts.length} приходов на склад`);
           statusEl.textContent = `Файл прочитан: ${parts.join(', ')}. Дата экспорта: ${data.exportedAt ? new Date(data.exportedAt).toLocaleString('ru-RU') : '—'}`;
           statusEl.style.color = 'var(--ink-soft)';
           importBtn.style.display = 'inline-block';
@@ -9376,6 +9642,7 @@
         if(pendingImportData.masterPayOverrides){ state.masterPayOverrides = pendingImportData.masterPayOverrides; await saveMasterPayOverrides(); }
         if(pendingImportData.monthlyPlans){ state.monthlyPlans = pendingImportData.monthlyPlans; await saveMonthlyPlans(); }
         if(pendingImportData.hostessShifts){ state.hostessShifts = pendingImportData.hostessShifts; await saveHostessShifts(); }
+        if(pendingImportData.managerShifts){ state.managerShifts = pendingImportData.managerShifts; await saveManagerShifts(); }
         if(pendingImportData.netProfitManual){ state.netProfitManual = pendingImportData.netProfitManual; await saveNetProfitManual(); }
         if(pendingImportData.yearSummaryManual){ state.yearSummaryManual = pendingImportData.yearSummaryManual; await saveYearSummaryManual(); }
         if(Array.isArray(pendingImportData.auditLog)){ state.auditLog = pendingImportData.auditLog; await saveAuditLog(); }
@@ -9383,6 +9650,8 @@
         if(Array.isArray(pendingImportData.marketingSpend)){ state.marketingSpend = pendingImportData.marketingSpend; await saveMarketingSpend(); }
         if(pendingImportData.marketingPlans){ state.marketingPlans = pendingImportData.marketingPlans; await saveMarketingPlans(); }
         if(Array.isArray(pendingImportData.contentPosts)){ state.contentPosts = pendingImportData.contentPosts; await saveContentPosts(); }
+        if(Array.isArray(pendingImportData.suppliers)){ state.suppliers = pendingImportData.suppliers; await saveSuppliers(); }
+        if(Array.isArray(pendingImportData.stockReceipts)){ state.stockReceipts = pendingImportData.stockReceipts; await saveStockReceipts(); }
         pendingImportData = null;
         recordAction('Данные восстановлены');
         state.modal = null;
@@ -9482,6 +9751,76 @@
       }
       await saveHostessShifts();
       recordAction('Смена сохранена');
+      overlay.remove();
+      state.modal = {type:'day', date: shiftDate};
+      render();
+    };
+  }
+
+  // график менеджеров — просто "кто дежурит в этот день", без смен по времени и без расчёта ЗП
+  function renderQuickManagerShiftModal(shiftDate){
+    const currentName = managerForDate(shiftDate);
+    const isCustom = currentName && !MANAGER_LIST.includes(currentName);
+    return `
+      <div class="modal" style="max-width:380px;">
+        <div class="modal-head">
+          <h3>Менеджер на день</h3>
+          <button class="modal-close">×</button>
+        </div>
+        <div class="modal-body">
+          <div style="font-size:12.5px;color:var(--ink-soft);margin-top:-6px;">${formatDateText(shiftDate)}</div>
+          <div class="field">
+            <label>Менеджер</label>
+            <select id="manager-shift-name-select">
+              <option value="" ${!currentName?'selected':''}>Не назначено</option>
+              ${MANAGER_LIST.map(m=>`<option value="${escapeHtml(m)}" ${currentName===m?'selected':''}>${escapeHtml(m)}</option>`).join('')}
+              <option value="__custom__" ${isCustom?'selected':''}>Другое (вписать имя)</option>
+            </select>
+          </div>
+          <div class="field" id="manager-shift-custom-field" style="display:${isCustom?'block':'none'};">
+            <label>Имя</label>
+            <input type="text" id="manager-shift-name-custom" value="${escapeHtml(isCustom?currentName:'')}" placeholder="Введите имя">
+          </div>
+          <div style="font-size:11.5px;color:var(--ink-soft);">Это действие не требует кода доступа.</div>
+          <div class="modal-actions">
+            <span></span>
+            <div style="display:flex;gap:8px;">
+              <button class="btn btn-ghost" id="manager-shift-cancel">Отмена</button>
+              <button class="btn btn-primary" id="manager-shift-save">Сохранить</button>
+            </div>
+          </div>
+        </div>
+      </div>
+    `;
+  }
+
+  function attachQuickManagerShiftModalEvents(overlay){
+    const { shiftDate } = state.modal;
+    const selectEl = overlay.querySelector('#manager-shift-name-select');
+    const customField = overlay.querySelector('#manager-shift-custom-field');
+
+    selectEl.onchange = ()=>{
+      customField.style.display = (selectEl.value === '__custom__') ? 'block' : 'none';
+    };
+
+    overlay.querySelector('#manager-shift-cancel').onclick = ()=>{
+      overlay.remove();
+      state.modal = {type:'day', date: shiftDate};
+      render();
+    };
+    overlay.querySelector('#manager-shift-save').onclick = async ()=>{
+      let name = selectEl.value;
+      if(name === '__custom__'){
+        name = overlay.querySelector('#manager-shift-name-custom').value.trim();
+      }
+      if(!state.managerShifts) state.managerShifts = {};
+      if(name){
+        state.managerShifts[shiftDate] = name;
+      } else {
+        delete state.managerShifts[shiftDate];
+      }
+      await saveManagerShifts();
+      recordAction('Менеджер на день сохранён');
       overlay.remove();
       state.modal = {type:'day', date: shiftDate};
       render();
@@ -9958,12 +10297,700 @@
     };
   }
 
+  // ---------- Закупки: остатки/прогноз + база поставщиков (старший администратор + руководитель) ----------
+  function renderProcurementView(){
+    const tab = state.procurementTab || 'stock';
+    const subTabsHtml = `
+      <div class="cert-subtabs proc-subtabs">
+        <button data-proctab="stock" class="${tab==='stock'?'active':''}">Остатки и прогноз</button>
+        <button data-proctab="receipts" class="${tab==='receipts'?'active':''}">Приход на склад</button>
+        <button data-proctab="suppliers" class="${tab==='suppliers'?'active':''}">Поставщики</button>
+        <button data-proctab="budget" class="${tab==='budget'?'active':''}">Бюджет</button>
+      </div>
+    `;
+    let body;
+    if(tab==='suppliers') body = renderProcurementSuppliersTab();
+    else if(tab==='receipts') body = renderProcurementReceiptsTab();
+    else if(tab==='budget') body = renderProcurementBudgetTab();
+    else body = renderProcurementStockTab();
+    return subTabsHtml + body;
+  }
+
+  function renderProcurementStockTab(){
+    const usage30 = materialUsageStats(30);
+    const booked30 = materialBookedAheadStats(30);
+    const totalSpend30 = Object.values(usage30).reduce((s,x)=>s+x.cost, 0);
+    const itemsUsed30 = Object.values(usage30).filter(x=>x.qty>0 || x.cost>0).length;
+    const cheapestByMaterial = cheapestSupplierByMaterial();
+
+    const tracked = [...state.materialsCatalog].filter(m=>m.trackStock).sort((a,b)=>
+      ((a.category||'').trim().localeCompare((b.category||'').trim(),'ru')) || a.name.localeCompare(b.name,'ru'));
+    const untracked = [...state.materialsCatalog].filter(m=>!m.trackStock);
+    const untrackedSpend = untracked.map(m=>{
+      const key = m.name.trim().toLowerCase();
+      return { name: m.name, cost: usage30[key] ? usage30[key].cost : 0 };
+    }).filter(x=>x.cost>0).sort((a,b)=>b.cost-a.cost);
+    const maxUntrackedSpend = Math.max(1, ...untrackedSpend.map(x=>x.cost));
+
+    const enriched = tracked.map(m=>({ m, calc: computeMaterialToBuy(m, booked30) }));
+    const lowStockCount = enriched.filter(x=>x.calc.stock<=0).length;
+    const belowMinCount = enriched.filter(x=>x.calc.belowMin && x.calc.stock>0).length;
+    const bought30 = stockReceiptsStats(30);
+
+    const shoppingList = enriched.filter(x=>x.calc.toBuy>0).map(x=>{
+      const key = x.m.name.trim().toLowerCase();
+      const best = cheapestByMaterial[key];
+      const needBy = earliestNeedDateForMaterial(x.m.name);
+      const daysLeft = needBy ? daysBetweenDates(todayStr(), needBy) : null;
+      const atRisk = !!(best && best.leadDays!==null && daysLeft!==null && best.leadDays > daysLeft);
+      return { name: x.m.name, unit: x.m.unit, toBuy: x.calc.toBuy, supplierName: best?best.supplierName:null, price: best?best.price:null, estCost: best ? Math.round(best.price*x.calc.toBuy) : null, leadDays: best?best.leadDays:null, needBy, daysLeft, atRisk };
+    });
+    const shoppingTotal = shoppingList.reduce((s,x)=> s + (x.estCost||0), 0);
+    const shoppingHasUnknownPrice = shoppingList.some(x=>x.estCost===null);
+    const shoppingHasRisk = shoppingList.some(x=>x.atRisk);
+
+    return `
+      <div class="analytics-summary">
+        <div class="summary-card green"><div class="num">${formatMoney(bought30)}</div><div class="label">КУПЛЕНО (ПРИХОД) ЗА 30 ДНЕЙ</div></div>
+        <div class="summary-card"><div class="num">${formatMoney(totalSpend30)}</div><div class="label">СПИСАНО МАТЕРИАЛОВ ЗА 30 ДНЕЙ</div></div>
+        <div class="summary-card"><div class="num">${itemsUsed30}</div><div class="label">РАЗНЫХ МАТЕРИАЛОВ В РАСХОДЕ</div></div>
+        <div class="summary-card ${lowStockCount>0?'red':''}"><div class="num">${lowStockCount}</div><div class="label">ЗАКОНЧИЛИСЬ НА СКЛАДЕ</div></div>
+        <div class="summary-card ${belowMinCount>0?'red':''}"><div class="num">${belowMinCount}</div><div class="label">НИЖЕ МИНИМАЛЬНОГО ОСТАТКА</div></div>
+      </div>
+
+      ${shoppingList.length>0 ? `
+      <div class="analytics-section">
+        <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px;margin-bottom:10px;">
+          <h4 style="margin:0;">Готовый список закупок${shoppingTotal>0?': ≈ '+formatMoney(shoppingTotal):''}</h4>
+          <button class="btn btn-ghost" id="btn-copy-shopping-list">📋 Скопировать список</button>
+        </div>
+        <div style="font-size:11.5px;color:var(--ink-soft);font-family:var(--font-mono);margin-bottom:10px;">Материалы, по которым уже не хватает на будущие записи и/или минимальный остаток. Сумма — по самой выгодной цене из «Поставщиков», где она известна.${shoppingHasUnknownPrice?' По части материалов цена поставщика не указана — добавьте её во вкладке «Поставщики», чтобы сумма считалась точнее.':''}${shoppingHasRisk?' <span style="color:var(--status-red);font-weight:600;">⚠ по части материалов можем не успеть к сроку поставки — см. пометки ниже.</span>':''}</div>
+        <div class="proc-row head proc-row-6">
+          <div>Материал</div><div>Купить</div><div>Поставщик</div><div>Цена</div><div>Срок</div><div>Сумма</div>
+        </div>
+        ${shoppingList.map(x=>{
+          const unitSuffix = x.unit ? ' '+escapeHtml(x.unit) : '';
+          const leadText = x.leadDays!==null ? `${x.leadDays} дн.` : '—';
+          const riskBadge = x.atRisk ? ` <span class="cert-badge refunded" style="background:#F6DCD6;color:var(--status-red);">не успеть</span>` : '';
+          return `
+          <div class="proc-row proc-row-6">
+            <div data-label="Материал" style="font-weight:500;">${escapeHtml(x.name)}</div>
+            <div data-label="Купить" style="font-family:var(--font-mono);font-weight:700;color:var(--status-red);">${x.toBuy}${unitSuffix}</div>
+            <div data-label="Поставщик">${x.supplierName?escapeHtml(x.supplierName):'<span style="color:var(--ink-soft);">не указан</span>'}</div>
+            <div data-label="Цена" style="font-family:var(--font-mono);">${x.price!==null?formatMoney(x.price)+(x.unit?'/'+escapeHtml(x.unit):''):'—'}</div>
+            <div data-label="Срок" style="font-family:var(--font-mono);">${leadText}${riskBadge}</div>
+            <div data-label="Сумма" style="font-family:var(--font-mono);font-weight:600;">${x.estCost!==null?formatMoney(x.estCost):'—'}</div>
+          </div>
+          `;
+        }).join('')}
+      </div>
+      ` : ''}
+
+      <div class="analytics-section">
+        <h4>Отслеживаемые остатки — что докупить</h4>
+        <div style="font-size:11.5px;color:var(--ink-soft);font-family:var(--font-mono);margin-bottom:10px;">«Списано» — фактический расход за последние 30 дней. «Забронировано» — сумма материалов, уже проставленных в мероприятиях на ближайшие 30 дней. «Мин.» — заданный минимальный остаток (настраивается в «Себес»); если текущий остаток ниже него, материал подсвечивается, даже если броней пока немного. «Докупить» — сколько нужно докупить, чтобы закрыть брони и сохранить минимальный остаток. Если в будущих мероприятиях материалы ещё не указаны — прогноз занижен, добавляйте их в карточку мероприятия по мере записи гостей.</div>
+        ${tracked.length===0 ? `<div class="host-empty">В справочнике «Себес» нет материалов с учётом остатков. Добавьте их через кнопку «Себес» в шапке.</div>` : `
+        <div class="proc-row head proc-row-6">
+          <div>Материал</div><div>Остаток</div><div>Мин.</div><div>Списано / 30д</div><div>Забронировано / 30д</div><div>Докупить</div>
+        </div>
+        ${(()=>{
+          const anyCategoryUsed = tracked.some(m=>(m.category||'').trim());
+          let lastCategory = undefined;
+          return enriched.map(({m, calc})=>{
+            const used = usage30[m.name.trim().toLowerCase()] ? usage30[m.name.trim().toLowerCase()].qty : 0;
+            const unitSuffix = m.unit ? ' '+escapeHtml(m.unit) : '';
+            const stockColor = calc.stock<=0 ? 'var(--status-red)' : (calc.belowMin ? '#8A5A1E' : 'inherit');
+            const cat = (m.category||'').trim();
+            let categoryHeader = '';
+            if(anyCategoryUsed && cat !== lastCategory){
+              lastCategory = cat;
+              categoryHeader = `<div class="host-group-label" style="padding:14px 4px 4px;">${cat ? escapeHtml(cat) : 'Без категории'}</div>`;
+            }
+            return categoryHeader + `
+            <div class="proc-row proc-row-6">
+              <div data-label="Материал" style="font-weight:500;">${escapeHtml(m.name)}</div>
+              <div data-label="Остаток" style="color:${stockColor};font-family:var(--font-mono);">${calc.stock}${unitSuffix}${calc.belowMin && calc.stock>0 ? ' <span class="cert-badge in_progress">ниже мин.</span>' : ''}</div>
+              <div data-label="Мин." style="font-family:var(--font-mono);color:var(--ink-soft);">${calc.minStock>0 ? calc.minStock+unitSuffix : '—'}</div>
+              <div data-label="Списано / 30д" style="font-family:var(--font-mono);">${used}${unitSuffix}</div>
+              <div data-label="Забронировано / 30д" style="font-family:var(--font-mono);">${calc.booked}${unitSuffix}</div>
+              <div data-label="Докупить" style="font-family:var(--font-mono);font-weight:${calc.toBuy>0?'700':'400'};color:${calc.toBuy>0?'var(--status-red)':'var(--status-green)'};">${calc.toBuy>0 ? calc.toBuy+unitSuffix : 'хватает'}</div>
+            </div>
+            `;
+          }).join('');
+        })()}
+        `}
+      </div>
+
+      <div class="analytics-section">
+        <h4>Расход по остальным материалам за 30 дней <span style="font-weight:400;color:var(--ink-soft);font-size:12px;">(без учёта складских остатков)</span></h4>
+        ${untrackedSpend.length===0 ? `<div style="color:var(--ink-soft);font-size:13px;">Нет расходов за этот период.</div>` : untrackedSpend.map(x=>`
+          <div class="stat-row">
+            <div class="stat-label">${escapeHtml(x.name)}</div>
+            <div class="stat-bar-track"><div class="stat-bar-fill" style="width:${Math.round(x.cost/maxUntrackedSpend*100)}%;background:var(--accent);"></div></div>
+            <div class="stat-count" style="width:auto;font-size:12px;">${formatMoney(x.cost)}</div>
+          </div>
+        `).join('')}
+      </div>
+    `;
+  }
+
+  function buildShoppingListText(){
+    const booked30 = materialBookedAheadStats(30);
+    const cheapestByMaterial = cheapestSupplierByMaterial();
+    const tracked = [...state.materialsCatalog].filter(m=>m.trackStock);
+    const shoppingList = tracked.map(m=>{
+      const calc = computeMaterialToBuy(m, booked30);
+      if(calc.toBuy<=0) return null;
+      const key = m.name.trim().toLowerCase();
+      const best = cheapestByMaterial[key];
+      const needBy = earliestNeedDateForMaterial(m.name);
+      const daysLeft = needBy ? daysBetweenDates(todayStr(), needBy) : null;
+      const atRisk = !!(best && best.leadDays!==null && daysLeft!==null && best.leadDays > daysLeft);
+      return { name:m.name, unit:m.unit, toBuy:calc.toBuy, supplierName: best?best.supplierName:null, price: best?best.price:null, estCost: best ? Math.round(best.price*calc.toBuy) : null, leadDays: best?best.leadDays:null, needBy, atRisk };
+    }).filter(Boolean);
+    if(shoppingList.length===0) return '';
+    const lines = [`Список закупок — ${formatDateText(todayStr())}`, ''];
+    shoppingList.forEach(x=>{
+      const unitSuffix = x.unit ? ' '+x.unit : '';
+      let line = `— ${x.name}: ${x.toBuy}${unitSuffix}`;
+      if(x.supplierName) line += ` (у «${x.supplierName}»${x.price!==null?', '+formatMoney(x.price)+(x.unit?'/'+x.unit:''):''})`;
+      if(x.estCost!==null) line += ` — ${formatMoney(x.estCost)}`;
+      if(x.leadDays!==null) line += ` [срок поставки ${x.leadDays} дн.${x.atRisk?', нужно к '+formatDateText(x.needBy)+' — ЗАКАЗАТЬ СРОЧНО':''}]`;
+      lines.push(line);
+    });
+    const total = shoppingList.reduce((s,x)=>s+(x.estCost||0),0);
+    if(total>0) lines.push('', `Итого: ≈ ${formatMoney(total)}`);
+    return lines.join('\n');
+  }
+
+  function renderProcurementBudgetTab(){
+    const cursor = state.procurementBudgetCursor;
+    const y = cursor.getFullYear(), m = cursor.getMonth();
+    const ym = y+'-'+pad(m+1);
+    const label = MONTHS[m] + ' ' + y;
+    const now = new Date();
+    const isPastMonth = (y < now.getFullYear()) || (y===now.getFullYear() && m < now.getMonth());
+    const isCurrentMonth = (y===now.getFullYear() && m===now.getMonth());
+    const daysInMonth = new Date(y, m+1, 0).getDate();
+    const daysElapsed = isCurrentMonth ? now.getDate() : (isPastMonth ? daysInMonth : 0);
+
+    const plan = (state.monthlyPlans && state.monthlyPlans[ym]) || {};
+    const budget = (plan.procurementBudget!==undefined && plan.procurementBudget!==null && plan.procurementBudget!=='') ? Number(plan.procurementBudget) : null;
+    const breakdown = monthReceiptsBreakdown(ym);
+    const pctUsed = (budget!==null && budget>0) ? Math.round(breakdown.total/budget*100) : null;
+    const expectedByNow = (budget!==null && daysElapsed>0) ? Math.round(budget * daysElapsed / daysInMonth) : null;
+
+    let paceStatus = 'no_budget';
+    if(budget!==null){
+      if(breakdown.total > budget) paceStatus = 'over_budget';
+      else if(expectedByNow!==null && breakdown.total > expectedByNow) paceStatus = 'over_pace';
+      else paceStatus = 'on_track';
+    }
+    const PACE_COLOR = { over_budget: 'var(--status-red)', over_pace: '#8A5A1E', on_track: 'var(--status-green)', no_budget: 'var(--ink-soft)' };
+    const PACE_LABEL = { over_budget: '⚠ бюджет превышен', over_pace: '⚠ тратим быстрее плана', on_track: '✅ в рамках плана', no_budget: '' };
+    const maxCatSpend = Math.max(1, ...breakdown.byCategory.map(x=>x.amount));
+
+    return `
+      <div class="cal-nav">
+        <div class="month-label" style="text-transform:capitalize;">${escapeHtml(label)}</div>
+        <div class="cal-nav-btns">
+          <button class="today-btn" id="pb-today">текущий месяц</button>
+          <button class="nav-btn" id="pb-prev">‹</button>
+          <button class="nav-btn" id="pb-next">›</button>
+        </div>
+      </div>
+
+      <div class="analytics-section">
+        <div class="field" style="max-width:280px;">
+          <label>Бюджет закупок на месяц (₽) <span style="font-weight:400;color:var(--ink-soft);">— необязательно</span></label>
+          <input type="number" id="pb-budget-input" value="${budget!==null?budget:''}" min="0" step="1000" placeholder="Например: 60000">
+        </div>
+      </div>
+
+      <div class="analytics-summary">
+        <div class="summary-card"><div class="num">${budget!==null?formatMoney(budget):'—'}</div><div class="label">БЮДЖЕТ НА МЕСЯЦ</div></div>
+        <div class="summary-card ${paceStatus==='over_budget'?'red':(paceStatus==='on_track'?'green':'')}"><div class="num">${formatMoney(breakdown.total)}</div><div class="label">ПОТРАЧЕНО (ПРИХОД)</div></div>
+        <div class="summary-card ${paceStatus==='over_budget'?'red':''}"><div class="num">${budget!==null?formatMoney(Math.abs(budget-breakdown.total)):'—'}</div><div class="label">${paceStatus==='over_budget'?'ПРЕВЫШЕНИЕ':'ОСТАТОК БЮДЖЕТА'}</div></div>
+        <div class="summary-card"><div class="num">${pctUsed!==null?pctUsed+'%':'—'}</div><div class="label">% ИСПОЛЬЗОВАНО</div></div>
+        <div class="summary-card"><div class="num">${breakdown.count}</div><div class="label">ПРИХОДОВ ЗА МЕСЯЦ</div></div>
+      </div>
+
+      ${budget!==null ? `
+      <div class="analytics-section">
+        <div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:6px;">
+          <span style="font-size:13px;">${formatMoney(breakdown.total)} <span style="color:var(--ink-soft);">из ${formatMoney(budget)}${pctUsed!==null?' ('+pctUsed+'%)':''}</span></span>
+          <span style="font-size:12px;color:${PACE_COLOR[paceStatus]};">${PACE_LABEL[paceStatus]}</span>
+        </div>
+        <div class="stat-bar-track"><div class="stat-bar-fill" style="width:${Math.min(100,pctUsed||0)}%;background:${PACE_COLOR[paceStatus]};"></div></div>
+        ${daysElapsed>0 && expectedByNow!==null ? `<div style="font-size:11.5px;color:var(--ink-soft);margin-top:6px;">День ${daysElapsed} из ${daysInMonth}. При равномерном темпе к этому дню — ${formatMoney(expectedByNow)}.</div>` : ''}
+      </div>
+      ` : `
+      <div class="analytics-section">
+        <div style="color:var(--ink-soft);font-size:13px;">Бюджет на этот месяц не задан — заполните поле выше, чтобы видеть темп расходования и превышения.</div>
+      </div>
+      `}
+
+      <div class="analytics-section">
+        <h4 style="margin-top:0;">Расход по категориям за месяц</h4>
+        ${breakdown.byCategory.length===0 ? `<div class="host-empty">Приходов за ${escapeHtml(label)} пока нет.</div>` : breakdown.byCategory.map(x=>`
+          <div class="stat-row">
+            <div class="stat-label" style="width:150px;">${escapeHtml(x.category)}</div>
+            <div class="stat-bar-track"><div class="stat-bar-fill" style="width:${Math.round(x.amount/maxCatSpend*100)}%;background:var(--accent);"></div></div>
+            <div style="width:90px;text-align:right;font-family:var(--font-mono);font-size:13px;">${formatMoney(x.amount)}</div>
+          </div>
+        `).join('')}
+      </div>
+    `;
+  }
+
+  function renderProcurementSuppliersTab(){
+    const rows = [...state.suppliers].sort((a,b)=> (a.material||'').localeCompare(b.material||'','ru') || (Number(a.price)||0)-(Number(b.price)||0));
+    const minByMaterial = {};
+    state.suppliers.forEach(s=>{
+      const key = (s.material||'').trim().toLowerCase();
+      const price = Number(s.price);
+      if(!key || isNaN(price)) return;
+      if(minByMaterial[key]===undefined || price < minByMaterial[key]) minByMaterial[key] = price;
+    });
+    return `
+      <div class="cert-toolbar">
+        <div style="font-size:12px;color:var(--ink-soft);font-family:var(--font-mono);">Записей: ${rows.length}</div>
+        <button class="btn btn-primary" id="btn-add-supplier">+ Добавить поставщика</button>
+      </div>
+      ${rows.length===0 ? `<div class="host-empty">Пока нет ни одной записи о поставщике.<br>Добавляйте: материал, у кого покупаем и по какой цене — так будет легко сравнивать варианты.</div>` : `
+      <div class="cert-list">
+        ${rows.map(s=>{
+          const key = (s.material||'').trim().toLowerCase();
+          const price = Number(s.price);
+          const isCheapest = key && !isNaN(price) && price === minByMaterial[key];
+          const hasHistory = Array.isArray(s.priceHistory) && s.priceHistory.length>1;
+          const prevEntry = hasHistory ? s.priceHistory[s.priceHistory.length-2] : null;
+          const priceChangeHint = prevEntry && Number(prevEntry.price)!==price
+            ? ` <span style="font-size:11px;color:var(--ink-soft);">(было ${formatMoney(prevEntry.price)})</span>` : '';
+          return `
+          <div class="refund-row proc-supplier-row" data-sid="${s.id}">
+            <div class="cell" style="font-weight:500;">${escapeHtml(s.material||'—')}</div>
+            <div class="cell">${escapeHtml(s.supplierName||'—')}</div>
+            <div class="amount">${!isNaN(price) ? formatMoney(price) : '—'}${s.unit?' / '+escapeHtml(s.unit):''}${isCheapest?' <span class="cert-badge used">выгоднее всех</span>':''}${priceChangeHint}</div>
+            <div class="cell" style="font-family:var(--font-mono);color:var(--ink-soft);">${s.leadDays!==undefined&&s.leadDays!==null&&s.leadDays!==''?s.leadDays+' дн.':'—'}</div>
+            <div class="cell">${escapeHtml(s.contact||'')}</div>
+            <div class="reason">${escapeHtml(s.notes||'')}</div>
+          </div>
+        `;}).join('')}
+      </div>
+      `}
+    `;
+  }
+
+  function renderProcurementReceiptsTab(){
+    const rows = [...(state.stockReceipts||[])].sort((a,b)=> (b.date||'').localeCompare(a.date||''));
+    const total30 = stockReceiptsStats(30);
+    return `
+      <div class="cert-toolbar">
+        <div style="font-size:12px;color:var(--ink-soft);font-family:var(--font-mono);">Записей: ${rows.length} · За 30 дней: ${formatMoney(total30)}</div>
+        <button class="btn btn-primary" id="btn-add-receipt">+ Приход на склад</button>
+      </div>
+      <div style="font-size:11.5px;color:var(--ink-soft);font-family:var(--font-mono);margin-bottom:12px;">Каждый приход сразу пополняет остаток материала на складе и попадает расходом в «Книгу» (категория «Материалы») — отдельно вносить его туда не нужно.</div>
+      ${rows.length===0 ? `<div class="host-empty">Пока нет ни одного прихода. Добавьте первую закупку — остаток на складе и «Книга» обновятся сами.</div>` : `
+      <div class="cert-list">
+        ${rows.map(r=>`
+          <div class="refund-row proc-receipt-row" data-rcid="${r.id}">
+            <div class="cell">${formatDateText(r.date)}</div>
+            <div class="cell" style="font-weight:500;">${escapeHtml(r.material)}</div>
+            <div class="cell">${r.qty}${r.unit?' '+escapeHtml(r.unit):''}</div>
+            <div class="amount">${formatMoney(r.amount||0)}</div>
+            <div class="cell">${escapeHtml(r.supplierName||'—')}</div>
+            <div class="reason">${escapeHtml(r.notes||'')}</div>
+          </div>
+        `).join('')}
+      </div>
+      `}
+    `;
+  }
+
+  function attachProcurementEvents(){
+    document.querySelectorAll('.proc-subtabs button').forEach(b=>{
+      b.onclick = ()=>{ state.procurementTab = b.dataset.proctab; render(); };
+    });
+    const addBtn = document.getElementById('btn-add-supplier');
+    if(addBtn) addBtn.onclick = ()=>{
+      state.modal = {type:'supplier-entry', isNew:true, supplier:{ id: uid(), material:'', supplierName:'', price:'', unit:'', leadDays:'', contact:'', notes:'', priceHistory:[] }};
+      render();
+    };
+    document.querySelectorAll('.proc-supplier-row[data-sid]').forEach(row=>{
+      row.onclick = ()=>{
+        const item = state.suppliers.find(x=>x.id===row.dataset.sid);
+        if(!item) return;
+        state.modal = {type:'supplier-entry', isNew:false, supplier:{...item}};
+        render();
+      };
+    });
+    const addReceiptBtn = document.getElementById('btn-add-receipt');
+    if(addReceiptBtn) addReceiptBtn.onclick = ()=>{
+      state.modal = {type:'stock-receipt', isNew:true, receipt:{ id: uid(), date: todayStr(), material:'', qty:'', unit:'', supplierName:'', amount:'', notes:'', expenseId:'' }};
+      render();
+    };
+    document.querySelectorAll('.proc-receipt-row[data-rcid]').forEach(row=>{
+      row.onclick = ()=>{
+        const item = (state.stockReceipts||[]).find(x=>x.id===row.dataset.rcid);
+        if(!item) return;
+        state.modal = {type:'stock-receipt', isNew:false, receipt:{...item}};
+        render();
+      };
+    });
+    const copyBtn = document.getElementById('btn-copy-shopping-list');
+    if(copyBtn) copyBtn.onclick = async ()=>{
+      const text = buildShoppingListText();
+      if(!text) return;
+      try{
+        if(navigator.clipboard && navigator.clipboard.writeText){
+          await navigator.clipboard.writeText(text);
+        } else {
+          const ta = document.createElement('textarea');
+          ta.value = text; ta.style.position = 'fixed'; ta.style.opacity = '0';
+          document.body.appendChild(ta); ta.select();
+          document.execCommand('copy');
+          document.body.removeChild(ta);
+        }
+        showToast('Список скопирован');
+      }catch(e){
+        showToast('Не удалось скопировать — выделите список вручную');
+      }
+    };
+    const pbPrev = document.getElementById('pb-prev');
+    const pbNext = document.getElementById('pb-next');
+    const pbToday = document.getElementById('pb-today');
+    if(pbPrev) pbPrev.onclick = ()=>{ state.procurementBudgetCursor = new Date(state.procurementBudgetCursor.getFullYear(), state.procurementBudgetCursor.getMonth()-1, 1); render(); };
+    if(pbNext) pbNext.onclick = ()=>{ state.procurementBudgetCursor = new Date(state.procurementBudgetCursor.getFullYear(), state.procurementBudgetCursor.getMonth()+1, 1); render(); };
+    if(pbToday) pbToday.onclick = ()=>{ state.procurementBudgetCursor = new Date(new Date().getFullYear(), new Date().getMonth(), 1); render(); };
+    const pbBudgetInput = document.getElementById('pb-budget-input');
+    if(pbBudgetInput) pbBudgetInput.onchange = async ()=>{
+      const cursor = state.procurementBudgetCursor;
+      const ym = cursor.getFullYear()+'-'+pad(cursor.getMonth()+1);
+      const raw = pbBudgetInput.value;
+      if(!state.monthlyPlans) state.monthlyPlans = {};
+      if(!state.monthlyPlans[ym]) state.monthlyPlans[ym] = {};
+      state.monthlyPlans[ym].procurementBudget = raw!=='' ? parseFloat(raw) : null;
+      if(state.monthlyPlans[ym].procurementBudget===null && Object.keys(state.monthlyPlans[ym]).every(k=>state.monthlyPlans[ym][k]===null||state.monthlyPlans[ym][k]===undefined||(Array.isArray(state.monthlyPlans[ym][k])&&state.monthlyPlans[ym][k].length===0))){
+        delete state.monthlyPlans[ym];
+      }
+      await saveMonthlyPlans();
+      recordAction(`Бюджет закупок на ${ym} изменён`);
+      render();
+      showToast('Бюджет сохранён');
+    };
+  }
+
+  function renderStockReceiptModal(){
+    const isNew = state.modal.isNew;
+    const r = state.modal.receipt;
+    return `
+      <div class="modal" style="max-width:480px;">
+        <div class="modal-head">
+          <h3>Приход на склад</h3>
+          <button class="modal-close">×</button>
+        </div>
+        <div class="modal-body">
+          <div class="row2">
+            <div class="field">
+              <label>Дата</label>
+              <input type="date" id="rc-date" value="${r.date||todayStr()}">
+            </div>
+            <div class="field">
+              <label>Материал</label>
+              <input type="text" id="rc-material" value="${escapeHtml(r.material||'')}" placeholder="Например: Глина" list="rc-material-options">
+              <datalist id="rc-material-options">${state.materialsCatalog.map(m=>`<option value="${escapeHtml(m.name)}">`).join('')}</datalist>
+            </div>
+          </div>
+          <div class="row2">
+            <div class="field">
+              <label>Количество</label>
+              <input type="number" id="rc-qty" value="${r.qty!==undefined&&r.qty!==null&&r.qty!==''?r.qty:''}" min="0" step="0.1" placeholder="Например: 10">
+            </div>
+            <div class="field">
+              <label>Ед. измерения</label>
+              <input type="text" id="rc-unit" value="${escapeHtml(r.unit||'')}" placeholder="кг, л, шт…">
+            </div>
+          </div>
+          <div class="field">
+            <label>Поставщик <span style="font-weight:400;color:var(--ink-soft);">— необязательно</span></label>
+            <input type="text" id="rc-supplier" value="${escapeHtml(r.supplierName||'')}" placeholder="Начните вводить…" list="rc-supplier-options">
+            <datalist id="rc-supplier-options">${[...new Set(state.suppliers.map(s=>s.supplierName).filter(Boolean))].map(n=>`<option value="${escapeHtml(n)}">`).join('')}</datalist>
+          </div>
+          <div class="field">
+            <label>Сумма (₽), итого за приход</label>
+            <input type="number" id="rc-amount" value="${r.amount!==undefined&&r.amount!==null&&r.amount!==''?r.amount:''}" min="0" step="10" placeholder="Например: 2500">
+            <div style="font-size:11.5px;color:var(--ink-soft);margin-top:4px;" id="rc-amount-hint"></div>
+          </div>
+          <div class="field">
+            <label>Заметка</label>
+            <textarea id="rc-notes" rows="2" placeholder="Необязательно">${escapeHtml(r.notes||'')}</textarea>
+          </div>
+          <div style="font-size:11.5px;color:var(--ink-soft);">Остаток материала на складе увеличится на указанное количество, а сумма попадёт расходом в «Книгу» (категория «Материалы»).</div>
+        </div>
+        <div class="modal-actions">
+          <div>${!isNew ? `<button class="btn-danger" id="btn-del-receipt">Удалить</button>` : '<span></span>'}</div>
+          <div style="display:flex;gap:8px;">
+            <button class="btn btn-ghost" id="btn-cancel-receipt">Отмена</button>
+            <button class="btn btn-primary" id="btn-save-receipt">Сохранить</button>
+          </div>
+        </div>
+      </div>
+    `;
+  }
+
+  function attachStockReceiptModalEvents(overlay){
+    overlay.querySelector('#btn-cancel-receipt').onclick = ()=>{ state.modal = null; overlay.remove(); };
+
+    const materialInput = overlay.querySelector('#rc-material');
+    const unitInput = overlay.querySelector('#rc-unit');
+    const supplierInput = overlay.querySelector('#rc-supplier');
+    const qtyInput = overlay.querySelector('#rc-qty');
+    const amountInput = overlay.querySelector('#rc-amount');
+    const amountHint = overlay.querySelector('#rc-amount-hint');
+
+    function suggestAmount(){
+      const matName = materialInput.value.trim().toLowerCase();
+      const supName = supplierInput.value.trim().toLowerCase();
+      const qty = parseFloat(qtyInput.value);
+      if(!matName || !qty || amountInput.value !== ''){ amountHint.textContent = ''; return; }
+      let candidates = state.suppliers.filter(s=>(s.material||'').trim().toLowerCase()===matName && !isNaN(Number(s.price)));
+      if(supName) candidates = candidates.filter(s=>(s.supplierName||'').trim().toLowerCase()===supName);
+      if(candidates.length===0){ amountHint.textContent = ''; return; }
+      const cheapest = candidates.reduce((min,s)=> Number(s.price)<Number(min.price) ? s : min);
+      const suggested = Math.round(Number(cheapest.price) * qty);
+      amountHint.textContent = `Подсказка: ${cheapest.supplierName} по ${formatMoney(cheapest.price)}/${cheapest.unit||'ед'} → ≈ ${formatMoney(suggested)} за ${qty}${cheapest.unit||''}`;
+    }
+    [materialInput, supplierInput, qtyInput].forEach(el=> el.addEventListener('input', suggestAmount));
+    materialInput.addEventListener('input', ()=>{
+      const match = state.materialsCatalog.find(m=>m.name.trim().toLowerCase()===materialInput.value.trim().toLowerCase());
+      if(match && match.unit && !unitInput.value) unitInput.value = match.unit;
+    });
+    suggestAmount();
+
+    overlay.querySelector('#btn-save-receipt').onclick = async ()=>{
+      const dateVal = overlay.querySelector('#rc-date').value;
+      const materialVal = materialInput.value.trim();
+      const qtyRaw = qtyInput.value;
+      const unitVal = unitInput.value.trim();
+      const supplierVal = supplierInput.value.trim();
+      const amountRaw = amountInput.value;
+      const notesVal = overlay.querySelector('#rc-notes').value.trim();
+
+      overlay.querySelectorAll('#rc-date,#rc-material,#rc-qty,#rc-amount').forEach(el=>el.style.borderColor='');
+      let firstInvalid = null;
+      const markInvalid = (id)=>{ const el = overlay.querySelector('#'+id); if(el){ el.style.borderColor='var(--danger)'; if(!firstInvalid) firstInvalid = el; } };
+
+      const qty = parseFloat(qtyRaw);
+      const amount = amountRaw==='' ? 0 : parseFloat(amountRaw);
+      if(!dateVal) markInvalid('rc-date');
+      if(!materialVal) markInvalid('rc-material');
+      if(qtyRaw==='' || isNaN(qty) || qty<=0) markInvalid('rc-qty');
+      if(amountRaw!=='' && (isNaN(amount) || amount<0)) markInvalid('rc-amount');
+
+      if(!dateVal || !materialVal || qtyRaw==='' || isNaN(qty) || qty<=0 || (amountRaw!=='' && (isNaN(amount)||amount<0))){
+        showGapWarningBanner('Укажите дату, материал и количество (больше нуля).');
+        if(firstInvalid && firstInvalid.scrollIntoView) firstInvalid.scrollIntoView({block:'center', behavior:'smooth'});
+        return;
+      }
+
+      if(state.currentRole !== 'owner'){
+        const ymCheck = dateVal.slice(0,7);
+        const origYm = (!state.modal.isNew && state.modal.receipt.date) ? state.modal.receipt.date.slice(0,7) : null;
+        const blockedYm = [ymCheck, origYm].find(ym => ym && state.closedMonths && state.closedMonths.includes(ym));
+        if(blockedYm){
+          showGapWarningBanner(`Месяц ${blockedYm} закрыт для редактирования. Обратитесь к руководителю.`);
+          return;
+        }
+      }
+
+      const prevReceipt = state.modal.receipt;
+
+      // сначала откатываем эффект прежней версии прихода на складе (если это редактирование)
+      if(!state.modal.isNew){
+        const oldCat = state.materialsCatalog.find(m=>m.name.trim().toLowerCase()===(prevReceipt.material||'').trim().toLowerCase());
+        if(oldCat && oldCat.trackStock){
+          oldCat.stock = (Number(oldCat.stock)||0) - (Number(prevReceipt.qty)||0);
+        }
+      }
+      // затем применяем новую версию
+      const newCat = state.materialsCatalog.find(m=>m.name.trim().toLowerCase()===materialVal.toLowerCase());
+      if(newCat && newCat.trackStock){
+        newCat.stock = (Number(newCat.stock)||0) + qty;
+      }
+      await saveMaterialsCatalog();
+
+      const updated = {
+        id: prevReceipt.id,
+        date: dateVal, material: materialVal, qty, unit: unitVal,
+        supplierName: supplierVal, amount, notes: notesVal,
+        expenseId: prevReceipt.expenseId || '',
+      };
+      updated.expenseId = await syncStockReceiptExpense(updated);
+
+      const idx = state.stockReceipts.findIndex(x=>x.id===updated.id);
+      if(idx>=0) state.stockReceipts[idx] = updated; else state.stockReceipts.push(updated);
+      await saveStockReceipts();
+      recordAction('Приход на склад сохранён');
+      state.modal = null; overlay.remove(); render();
+    };
+
+    const delBtn = overlay.querySelector('#btn-del-receipt');
+    if(delBtn) delBtn.onclick = ()=>{
+      if(state.currentRole !== 'owner'){
+        const ym = state.modal.receipt.date ? state.modal.receipt.date.slice(0,7) : null;
+        if(ym && state.closedMonths && state.closedMonths.includes(ym)){
+          showGapWarningBanner(`Месяц ${ym} закрыт для редактирования. Обратитесь к руководителю.`);
+          return;
+        }
+      }
+      showConfirmDeletePopup('Удалить этот приход? Остаток на складе уменьшится на соответствующее количество, а расход уберётся из «Книги». Действие необратимо.', async ()=>{
+        const toDelete = state.modal.receipt;
+        const catItem = state.materialsCatalog.find(m=>m.name.trim().toLowerCase()===(toDelete.material||'').trim().toLowerCase());
+        if(catItem && catItem.trackStock){
+          catItem.stock = (Number(catItem.stock)||0) - (Number(toDelete.qty)||0);
+          await saveMaterialsCatalog();
+        }
+        if(toDelete.expenseId){
+          state.expenses = state.expenses.filter(x=>x.id !== toDelete.expenseId);
+          await saveExpenses();
+        }
+        state.stockReceipts = state.stockReceipts.filter(x=>x.id !== toDelete.id);
+        await saveStockReceipts();
+        recordAction('Приход на склад удалён');
+        state.modal = null; render();
+      });
+    };
+  }
+
+  function renderSupplierModal(){
+    const isNew = state.modal.isNew;
+    const s = state.modal.supplier;
+    return `
+      <div class="modal" style="max-width:460px;">
+        <div class="modal-head">
+          <h3>${isNew ? 'Новый поставщик' : 'Поставщик'}</h3>
+          <button class="modal-close">×</button>
+        </div>
+        <div class="modal-body">
+          <div class="field">
+            <label>Материал</label>
+            <input type="text" id="sup-material" value="${escapeHtml(s.material||'')}" placeholder="Например: Глазурь" list="sup-material-options">
+            <datalist id="sup-material-options">${state.materialsCatalog.map(m=>`<option value="${escapeHtml(m.name)}">`).join('')}</datalist>
+          </div>
+          <div class="field">
+            <label>Поставщик</label>
+            <input type="text" id="sup-name" value="${escapeHtml(s.supplierName||'')}" placeholder="Название компании или имя">
+          </div>
+          <div class="row2">
+            <div class="field">
+              <label>Цена</label>
+              <input type="number" id="sup-price" value="${s.price!==undefined&&s.price!==null&&s.price!==''?s.price:''}" min="0" step="1" placeholder="Например: 350">
+            </div>
+            <div class="field">
+              <label>Ед. измерения</label>
+              <input type="text" id="sup-unit" value="${escapeHtml(s.unit||'')}" placeholder="кг, л, шт…">
+            </div>
+          </div>
+          <div class="field">
+            <label>Срок поставки, дней <span style="font-weight:400;color:var(--ink-soft);">— необязательно</span></label>
+            <input type="number" id="sup-leaddays" value="${s.leadDays!==undefined&&s.leadDays!==null&&s.leadDays!==''?s.leadDays:''}" min="0" step="1" placeholder="Например: 3">
+          </div>
+          <div class="field">
+            <label>Контакт</label>
+            <input type="text" id="sup-contact" value="${escapeHtml(s.contact||'')}" placeholder="Телефон, сайт, соцсеть">
+          </div>
+          <div class="field">
+            <label>Заметка</label>
+            <textarea id="sup-notes" rows="2" placeholder="Необязательно">${escapeHtml(s.notes||'')}</textarea>
+          </div>
+          ${Array.isArray(s.priceHistory) && s.priceHistory.length>1 ? `
+          <div class="field">
+            <label>История цен</label>
+            <div style="font-size:12.5px;color:var(--ink-soft);display:flex;flex-direction:column;gap:3px;">
+              ${[...s.priceHistory].reverse().map(h=>`<div>${formatDateText(h.date)} — ${formatMoney(h.price)}${s.unit?'/'+escapeHtml(s.unit):''}</div>`).join('')}
+            </div>
+          </div>
+          ` : ''}
+        </div>
+        <div class="modal-actions">
+          <div>${!isNew ? `<button class="btn-danger" id="btn-del-supplier">Удалить</button>` : '<span></span>'}</div>
+          <div style="display:flex;gap:8px;">
+            <button class="btn btn-ghost" id="btn-cancel-supplier">Отмена</button>
+            <button class="btn btn-primary" id="btn-save-supplier">Сохранить</button>
+          </div>
+        </div>
+      </div>
+    `;
+  }
+
+  function attachSupplierModalEvents(overlay){
+    overlay.querySelector('#btn-cancel-supplier').onclick = ()=>{ state.modal = null; overlay.remove(); };
+
+    overlay.querySelector('#btn-save-supplier').onclick = async ()=>{
+      const material = overlay.querySelector('#sup-material').value.trim();
+      const supplierName = overlay.querySelector('#sup-name').value.trim();
+      const priceRaw = overlay.querySelector('#sup-price').value;
+      const unit = overlay.querySelector('#sup-unit').value.trim();
+      const leadDaysRaw = overlay.querySelector('#sup-leaddays').value;
+      const contact = overlay.querySelector('#sup-contact').value.trim();
+      const notes = overlay.querySelector('#sup-notes').value.trim();
+
+      overlay.querySelectorAll('#sup-material,#sup-name,#sup-price,#sup-leaddays').forEach(el=>el.style.borderColor='');
+      let firstInvalid = null;
+      const markInvalid = (id)=>{ const el = overlay.querySelector('#'+id); if(el){ el.style.borderColor='var(--danger)'; if(!firstInvalid) firstInvalid = el; } };
+      if(!material) markInvalid('sup-material');
+      if(!supplierName) markInvalid('sup-name');
+      if(priceRaw==='' || Number(priceRaw)<0) markInvalid('sup-price');
+      if(leadDaysRaw!=='' && Number(leadDaysRaw)<0) markInvalid('sup-leaddays');
+      if(!material || !supplierName || priceRaw==='' || Number(priceRaw)<0 || (leadDaysRaw!=='' && Number(leadDaysRaw)<0)){
+        showGapWarningBanner('Укажите материал, поставщика и цену (цена и срок поставки не могут быть отрицательными).');
+        if(firstInvalid && firstInvalid.scrollIntoView) firstInvalid.scrollIntoView({block:'center', behavior:'smooth'});
+        return;
+      }
+
+      const price = parseFloat(priceRaw);
+      const existing = state.suppliers.find(x=>x.id===state.modal.supplier.id);
+      let priceHistory = (existing && Array.isArray(existing.priceHistory)) ? [...existing.priceHistory] : [];
+      if(!existing){
+        priceHistory = [{ date: todayStr(), price }];
+      } else if(Number(existing.price) !== price){
+        priceHistory.push({ date: todayStr(), price });
+      }
+
+      const updated = {
+        id: state.modal.supplier.id,
+        material, supplierName,
+        price,
+        unit,
+        leadDays: leadDaysRaw!=='' ? parseInt(leadDaysRaw) : null,
+        contact, notes,
+        priceHistory,
+      };
+      const idx = state.suppliers.findIndex(x=>x.id===updated.id);
+      if(idx>=0) state.suppliers[idx] = updated; else state.suppliers.push(updated);
+      await saveSuppliers();
+      recordAction('Поставщик сохранён');
+      state.modal = null; overlay.remove(); render();
+    };
+
+    const delBtn = overlay.querySelector('#btn-del-supplier');
+    if(delBtn) delBtn.onclick = ()=>{
+      showConfirmDeletePopup('Удалить эту запись о поставщике? Действие необратимо.', async ()=>{
+        state.suppliers = state.suppliers.filter(x=>x.id !== state.modal.supplier.id);
+        await saveSuppliers();
+        state.modal = null; render();
+      });
+    };
+  }
+
   function renderMaterialsCatalogModal(){
     if(!draftMaterialsCatalog) draftMaterialsCatalog = state.materialsCatalog.map(m=>({...m}));
     function renderRow(m, i){
       return `
       <div class="et-row" data-idx="${i}" style="flex-wrap:wrap;gap:6px;">
         <input type="text" class="mc-name" value="${escapeHtml(m.name)}" placeholder="Название материала" style="flex:2;min-width:140px;">
+        <input type="text" class="mc-category" value="${escapeHtml(m.category||'')}" placeholder="категория" list="mc-category-options" style="width:110px;" title="Категория — для группировки в «Себес» и «Закупках»">
         <input type="number" class="mc-cost" value="${m.cost}" min="0" step="10" style="width:80px;" title="Цена">
         <span class="et-unit">₽</span>
         <label style="display:flex;align-items:center;gap:4px;font-size:11px;color:var(--ink-soft);cursor:pointer;white-space:nowrap;" title="Отслеживать остаток на складе (для расходников типа глины — выключить)">
@@ -9971,10 +10998,13 @@
         </label>
         <input type="text" class="mc-unit" value="${escapeHtml(m.unit||'')}" placeholder="ед. (г, мл, шт)" style="width:90px;" title="Единица измерения" ${m.trackStock?'':'disabled'}>
         <input type="number" class="mc-stock" value="${m.stock!==undefined&&m.stock!==null?m.stock:0}" step="1" style="width:80px;color:${(m.trackStock&&m.stock!==undefined&&m.stock<=0)?'var(--status-red)':'inherit'};" title="Текущий остаток" ${m.trackStock?'':'disabled'}>
+        <input type="number" class="mc-minstock" value="${m.minStock!==undefined&&m.minStock!==null?m.minStock:''}" step="1" min="0" placeholder="мин." style="width:70px;" title="Минимальный остаток — при снижении ниже этого значения материал попадёт в «Закупки» как требующий внимания" ${m.trackStock?'':'disabled'}>
         <button class="et-del" data-idx="${i}" title="Удалить">✕</button>
       </div>
     `;
     }
+    const usedCategories = [...new Set(draftMaterialsCatalog.map(m=>(m.category||'').trim()).filter(Boolean))].sort((a,b)=>a.localeCompare(b,'ru'));
+    const categoryOptionsHtml = `<datalist id="mc-category-options">${usedCategories.map(c=>`<option value="${escapeHtml(c)}">`).join('')}</datalist>`;
     const costOnlyRows = draftMaterialsCatalog.map((m,i)=>({m,i})).filter(x=>!x.m.trackStock);
     const stockRows = draftMaterialsCatalog.map((m,i)=>({m,i})).filter(x=>x.m.trackStock);
     return `
@@ -9984,13 +11014,14 @@
           <button class="modal-close">×</button>
         </div>
         <div class="modal-body">
+          ${categoryOptionsHtml}
           <div style="font-family:var(--font-display);font-weight:600;font-size:15px;margin-top:4px;">Общий себес МК</div>
           <div style="font-size:12.5px;color:var(--ink-soft);margin-top:-6px;">Ориентировочная цена по направлению — подсказывается при заполнении себестоимости мероприятия. Остатки по этим материалам не считаем (расходники вроде глины, красок).</div>
           <div class="et-list">${costOnlyRows.length ? costOnlyRows.map(x=>renderRow(x.m,x.i)).join('') : '<div style="color:var(--ink-soft);font-size:13px;">Пусто</div>'}</div>
           <button class="add-evt-btn" id="mc-add-cost">+ добавить материал (без учёта остатков)</button>
 
           <div style="font-family:var(--font-display);font-weight:600;font-size:15px;margin-top:20px;border-top:1px solid var(--line);padding-top:16px;">Отслеживаемые остатки (склад)</div>
-          <div style="font-size:12.5px;color:var(--ink-soft);margin-top:-6px;">Конкретные материалы, которые считаем поштучно/по объёму (например, холсты). Остаток списывается автоматически, когда материал указан в мероприятии с количеством.</div>
+          <div style="font-size:12.5px;color:var(--ink-soft);margin-top:-6px;">Конкретные материалы, которые считаем поштучно/по объёму (например, холсты). Остаток списывается автоматически, когда материал указан в мероприятии с количеством. Поле «мин.» — минимальный остаток: если он задан, материал появится в «Закупках» как требующий внимания ещё до того, как закончится совсем.</div>
           <div class="et-list">${stockRows.length ? stockRows.map(x=>renderRow(x.m,x.i)).join('') : '<div style="color:var(--ink-soft);font-size:13px;">Пока нет отслеживаемых материалов</div>'}</div>
           <button class="add-evt-btn" id="mc-add-stock">+ добавить отслеживаемый материал</button>
 
@@ -10011,11 +11042,14 @@
     overlay.querySelectorAll('.et-row').forEach(row=>{
       const i = parseInt(row.dataset.idx);
       const name = row.querySelector('.mc-name').value;
+      const category = row.querySelector('.mc-category').value;
       const cost = parseInt(row.querySelector('.mc-cost').value) || 0;
       const trackStock = row.querySelector('.mc-track').checked;
       const unit = row.querySelector('.mc-unit').value;
       const stock = row.querySelector('.mc-stock').value !== '' ? parseFloat(row.querySelector('.mc-stock').value) : 0;
-      if(draftMaterialsCatalog[i]) draftMaterialsCatalog[i] = {name, cost, trackStock, unit, stock};
+      const minStockRaw = row.querySelector('.mc-minstock').value;
+      const minStock = minStockRaw !== '' ? parseFloat(minStockRaw) : null;
+      if(draftMaterialsCatalog[i]) draftMaterialsCatalog[i] = {name, category, cost, trackStock, unit, stock, minStock};
     });
   }
 
@@ -10043,13 +11077,13 @@
     const addCostBtn = overlay.querySelector('#mc-add-cost');
     if(addCostBtn) addCostBtn.onclick = ()=>{
       syncMaterialsCatalogFromInputs(overlay);
-      draftMaterialsCatalog.push({name:'', cost:0, trackStock:false, unit:'', stock:0});
+      draftMaterialsCatalog.push({name:'', category:'', cost:0, trackStock:false, unit:'', stock:0, minStock:null});
       refreshMaterialsCatalogModal(overlay);
     };
     const addStockBtn = overlay.querySelector('#mc-add-stock');
     if(addStockBtn) addStockBtn.onclick = ()=>{
       syncMaterialsCatalogFromInputs(overlay);
-      draftMaterialsCatalog.push({name:'', cost:0, trackStock:true, unit:'', stock:0});
+      draftMaterialsCatalog.push({name:'', category:'', cost:0, trackStock:true, unit:'', stock:0, minStock:null});
       refreshMaterialsCatalogModal(overlay);
     };
     overlay.querySelector('#mc-cancel').onclick = ()=>{
@@ -10058,7 +11092,7 @@
     overlay.querySelector('#mc-save').onclick = ()=>{
       syncMaterialsCatalogFromInputs(overlay);
       const cleaned = draftMaterialsCatalog
-        .map(m=>({name:(m.name||'').trim(), cost:m.cost||0, trackStock:!!m.trackStock, unit:(m.unit||'').trim(), stock:(m.stock!==undefined&&m.stock!==null&&!isNaN(m.stock))?m.stock:0}))
+        .map(m=>({name:(m.name||'').trim(), category:(m.category||'').trim(), cost:m.cost||0, trackStock:!!m.trackStock, unit:(m.unit||'').trim(), stock:(m.stock!==undefined&&m.stock!==null&&!isNaN(m.stock))?m.stock:0, minStock:(m.minStock!==undefined&&m.minStock!==null&&!isNaN(m.minStock))?m.minStock:null}))
         .filter(m=>m.name);
       overlay.remove();
       requireAdminUnlock(async ()=>{
@@ -10775,6 +11809,20 @@
     `;
   }
 
+  // график менеджеров — просто кто дежурит в этот день, без смен по времени и без расчёта ЗП
+  function renderManagerShiftBlock(dateStr){
+    const name = managerForDate(dateStr);
+    return `
+      <div class="shift-block">
+        <div class="shift-block-title">График менеджеров</div>
+        <div class="shift-row">
+          <span class="shift-name ${name?'':'empty'}">${name ? escapeHtml(name) : 'не назначено'}</span>
+          <button class="manager-shift-edit-btn" data-date="${dateStr}">✎</button>
+        </div>
+      </div>
+    `;
+  }
+
   function renderDayModal(dateStr){
     const d = parseDate(dateStr);
     const dLabel = d.toLocaleDateString('ru-RU', {weekday:'long', day:'numeric', month:'long'});
@@ -10813,6 +11861,7 @@
           </div>
           ` : ''}
           ${renderShiftBlock(dateStr)}
+          ${renderManagerShiftBlock(dateStr)}
           ${!isAll ? `<div style="font-size:12px;color:var(--ink-soft);font-family:var(--font-mono);margin-top:-8px;display:flex;align-items:center;gap:6px;">
             ${spaceBadge(space,'sm')}${escapeHtml(space.name)}
           </div>` : ''}
@@ -10848,6 +11897,15 @@
         const rawEntry = (state.hostessShifts[shiftDate] || {})[shiftKey] || null;
         overlay.remove();
         state.modal = {type:'quick-shift', shiftDate, shiftKey, rawEntry};
+        render();
+      };
+    });
+    overlay.querySelectorAll('.manager-shift-edit-btn').forEach(btn=>{
+      btn.onclick = (ev)=>{
+        ev.stopPropagation();
+        const shiftDate = btn.dataset.date;
+        overlay.remove();
+        state.modal = {type:'quick-manager-shift', shiftDate};
         render();
       };
     });
