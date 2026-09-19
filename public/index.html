@@ -703,6 +703,11 @@
   const SPACE_CAPACITY = { s1:8, s2:10, s3:14, s4:16, s5:null };
 
   const STATUS_LABEL = { confirmed: 'По расписанию', tentative: 'Частник', marketing: 'Маркетинг', offsite: 'Выезд', slot: 'Слот' };
+  // ЗП менеджеров: единая на всех (не привязана к конкретному сотруднику) — оклад + проценты от выручки студии за месяц
+  const MANAGER_SALARY_BASE = 10000;
+  const MANAGER_SALARY_PCT_TENTATIVE = 0.03; // % от выручки "Частник"
+  const MANAGER_SALARY_PCT_CONFIRMED = 0.01; // % от выручки "По расписанию"
+  const MANAGER_SALARY_PCT_CERTS = 0.01;     // % от суммы проданных сертификатов
   const STATUS_COLOR_VAR = { confirmed: '--status-green', tentative: '--status-red', marketing: '--status-blue', offsite: '--status-purple', slot: '--status-cyan' };
   function statusColor(status){ return 'var(' + (STATUS_COLOR_VAR[status] || '--status-green') + ')'; }
   function showsDishesAndRental(status){ return status === 'tentative' || status === 'marketing'; }
@@ -1091,6 +1096,8 @@
     procurementTab: 'stock',
     stockReceipts: null,
     procurementBudgetCursor: new Date(new Date().getFullYear(), new Date().getMonth(), 1),
+    daysOff: null,
+    managerSalaryCursor: new Date(new Date().getFullYear(), new Date().getMonth(), 1),
   };
 
   function pad(n){ return n<10 ? '0'+n : ''+n; }
@@ -1157,6 +1164,9 @@
   function roleCanAccessCertificatesView(role){ return roleCanAccessManagersTab(role) || role === 'hostess'; }
   // "Закупки" — рабочий инструмент старшего администратора (закуп материалов) и руководителя
   function roleCanAccessProcurement(role){ return ['admin','owner'].includes(role); }
+  // отмечать себя выходным в календаре могут менеджеры, ассистент, старший администратор и руководитель —
+  // каждый только сам за себя (см. canDayOffEntryBeRemovedByMe)
+  function roleCanMarkDayOff(role){ return ['manager','assistant','admin','owner'].includes(role); }
   function canAccessView(view){
     if(!state.currentRole) return false; // без входа теперь не видно вообще ничего
     if(view==='calendar' || view==='host' || view==='today') return true;
@@ -1316,6 +1326,11 @@
       const rc = await window.storage.get('stock-receipts', true);
       state.stockReceipts = rc ? JSON.parse(rc.value) : [];
     }catch(e){ state.stockReceipts = []; }
+
+    try{
+      const dof = await window.storage.get('days-off', true);
+      state.daysOff = dof ? JSON.parse(dof.value) : [];
+    }catch(e){ state.daysOff = []; }
 
     try{
       const mp = await window.storage.get('marketing-plans', true);
@@ -1837,6 +1852,7 @@
       contentPosts: state.contentPosts,
       suppliers: state.suppliers,
       stockReceipts: state.stockReceipts,
+      daysOff: state.daysOff,
     }, null, 2);
   }
 
@@ -2110,6 +2126,34 @@
   async function saveStockReceipts(){
     return storageSetWithRetry('stock-receipts', JSON.stringify(state.stockReceipts));
   }
+  async function saveDaysOff(){
+    return storageSetWithRetry('days-off', JSON.stringify(state.daysOff));
+  }
+  function dayOffEntriesFor(dateStr){
+    return (state.daysOff||[]).filter(x=>x.date===dateStr);
+  }
+  // менеджер узнаётся по личному входу (как в сменах); у ассистента/ст.администратора/руководителя
+  // общий код на роль без личного входа, поэтому для них имя просто вводится вручную каждый раз
+  // (браузер запоминает последнее введённое имя для удобства — см. getRememberedDayOffName)
+  function currentDayOffIdentity(){
+    const role = state.currentRole;
+    if(!roleCanMarkDayOff(role)) return null;
+    if(role==='manager' && state.loggedInManagerName) return { role, name: state.loggedInManagerName, locked:true };
+    return { role, name: getRememberedDayOffName(role), locked:false };
+  }
+  function getRememberedDayOffName(role){
+    try{ return localStorage.getItem('dayoff-myname-'+role) || ''; }catch(e){ return ''; }
+  }
+  function setRememberedDayOffName(role, name){
+    try{ localStorage.setItem('dayoff-myname-'+role, name); }catch(e){ /* браузер без localStorage — не критично */ }
+  }
+  function canDayOffEntryBeRemovedByMe(entry){
+    if(state.currentRole==='owner') return true; // руководитель может поправить любую запись
+    if(state.currentRole!==entry.role) return false;
+    const identity = currentDayOffIdentity();
+    if(identity && identity.locked) return identity.name.trim().toLowerCase()===entry.name.trim().toLowerCase();
+    return true; // роль без личного входа — считаем "тот же человек за той же ролью"
+  }
   function stockReceiptsStats(days){
     const cutoff = new Date(); cutoff.setDate(cutoff.getDate() - days);
     const cutoffStr = fmtDate(cutoff);
@@ -2128,6 +2172,34 @@
     });
     const byCategory = Object.entries(catMap).map(([category, amount])=>({category, amount})).sort((a,b)=>b.amount-a.amount);
     return { total, count: rows.length, byCategory };
+  }
+  // ЗП менеджеров за месяц: оклад + % от выручки "Частник" + % от выручки "По расписанию" + % от суммы проданных сертификатов.
+  // Единая цифра на всех менеджеров (не привязана к конкретному человеку — см. обсуждение при добавлении).
+  function computeManagerSalaryForMonth(ym){
+    const revenueByStatus = { confirmed: 0, tentative: 0 };
+    state.events.forEach(e=>{
+      if(!e.date || !e.date.startsWith(ym)) return;
+      if(e.status!=='confirmed' && e.status!=='tentative') return;
+      const price = (e.price!==undefined && e.price!==null && !isNaN(e.price)) ? Number(e.price) : 0;
+      revenueByStatus[e.status] += price;
+    });
+    const certsRevenue = state.certificates.reduce((sum,c)=>{
+      if(!c.saleDate || !c.saleDate.startsWith(ym)) return sum;
+      if(c.purpose === 'marketing') return sum; // маркетинговые сертификаты — не продажа, в выручку не считаем
+      const amt = (c.amount!==undefined && c.amount!==null && !isNaN(c.amount)) ? Number(c.amount) : 0;
+      return sum + amt;
+    }, 0);
+    const bonusTentative = Math.round(revenueByStatus.tentative * MANAGER_SALARY_PCT_TENTATIVE);
+    const bonusConfirmed = Math.round(revenueByStatus.confirmed * MANAGER_SALARY_PCT_CONFIRMED);
+    const bonusCerts = Math.round(certsRevenue * MANAGER_SALARY_PCT_CERTS);
+    const total = MANAGER_SALARY_BASE + bonusTentative + bonusConfirmed + bonusCerts;
+    return {
+      base: MANAGER_SALARY_BASE,
+      revenueTentative: revenueByStatus.tentative, bonusTentative,
+      revenueConfirmed: revenueByStatus.confirmed, bonusConfirmed,
+      certsRevenue, bonusCerts,
+      total,
+    };
   }
   async function saveMarketingPlans(){
     return storageSetWithRetry('marketing-plans', JSON.stringify(state.marketingPlans));
@@ -2833,9 +2905,10 @@
       const extra = evts.length - shown.length;
       const hasWarning = Object.keys(computeGapWarnings(evts)).length > 0;
       const hostessLine = shiftSummaryShort(dStr);
+      const dayOffEntries = dayOffEntriesFor(dStr);
       cells += `
         <div class="cal-cell ${inMonth?'':'other-month'} ${isToday?'today':''}" data-date="${dStr}">
-          <div class="cal-daynum">${d.getDate()}${hasWarning?' <span class="cal-warn-icon" title="Перерыв между мероприятиями меньше 30 минут">⚠</span>':''}</div>
+          <div class="cal-daynum">${d.getDate()}${hasWarning?' <span class="cal-warn-icon" title="Перерыв между мероприятиями меньше 30 минут">⚠</span>':''}${dayOffEntries.length ? `<span class="cal-dayoff-marks">${dayOffEntries.map(x=>`<span class="cal-dayoff-x" title="${escapeHtml(x.name)} — выходной (${escapeHtml(ROLE_LABELS[x.role]||x.role)})">✕</span>`).join('')}</span>` : ''}</div>
           ${hostessLine ? `<div class="cal-hostess" title="Админ: ${escapeHtml(hostessLine)}">🧑 ${escapeHtml(hostessLine)}</div>` : ''}
           <div class="cal-events">
             ${shown.map(e=>`<div class="cal-evt-chip" style="background:${statusColor(e.status)}">${isAll?spaceBadge(getSpace(e.spaceId),'xs'):''}<span class="t">${e.time}</span><span>${escapeHtml(e.title)}</span></div>`).join('')}
@@ -3766,6 +3839,7 @@
       <div class="cert-subtabs">
         <button data-certview="certificates" class="${state.certView==='certificates'?'active':''}">Сертификаты</button>
         ${!isHostessLimited ? `<button data-certview="salary-adj" class="${state.certView==='salary-adj'?'active':''}">Корректировки ЗП</button>` : ''}
+        ${!isHostessLimited ? `<button data-certview="manager-salary" class="${state.certView==='manager-salary'?'active':''}">ЗП менеджеров</button>` : ''}
         ${!hideRefundsConversion ? `<button data-certview="refunds" class="${state.certView==='refunds'?'active':''}">Возвраты</button>` : ''}
         ${!hideRefundsConversion ? `<button data-certview="conversion" class="${state.certView==='conversion'?'active':''}">Конверсия</button>` : ''}
         <button data-certview="item-sales" class="${state.certView==='item-sales'?'active':''}">Изделия</button>
@@ -3790,6 +3864,9 @@
     }
     if(state.certView === 'salary-adj'){
       return subTabsHtml + renderSalaryAdjustmentsView();
+    }
+    if(state.certView === 'manager-salary'){
+      return subTabsHtml + renderManagerSalaryView();
     }
     return subTabsHtml + renderCertificatesListView();
   }
@@ -3964,6 +4041,13 @@
     document.querySelectorAll('[data-certview]').forEach(btn=>{
       btn.onclick = ()=>{ state.certView = btn.dataset.certview; render(); };
     });
+
+    const msSalPrev = document.getElementById('ms-sal-prev');
+    const msSalNext = document.getElementById('ms-sal-next');
+    const msSalToday = document.getElementById('ms-sal-today');
+    if(msSalPrev) msSalPrev.onclick = ()=>{ state.managerSalaryCursor = new Date(state.managerSalaryCursor.getFullYear(), state.managerSalaryCursor.getMonth()-1, 1); render(); };
+    if(msSalNext) msSalNext.onclick = ()=>{ state.managerSalaryCursor = new Date(state.managerSalaryCursor.getFullYear(), state.managerSalaryCursor.getMonth()+1, 1); render(); };
+    if(msSalToday) msSalToday.onclick = ()=>{ state.managerSalaryCursor = new Date(new Date().getFullYear(), new Date().getMonth(), 1); render(); };
 
     document.querySelectorAll('[data-certgroup]').forEach(header=>{
       header.onclick = ()=>{
@@ -4465,6 +4549,57 @@
         <div class="cert-list">${pickedUp.slice(0,20).map(p=>pickupRow(p,true)).join('')}</div>
       </div>
       ` : ''}
+    `;
+  }
+
+  function renderManagerSalaryView(){
+    const cursor = state.managerSalaryCursor;
+    const y = cursor.getFullYear(), m = cursor.getMonth();
+    const ym = y+'-'+pad(m+1);
+    const label = MONTHS[m] + ' ' + y;
+    const calc = computeManagerSalaryForMonth(ym);
+    return `
+      <div class="cal-nav">
+        <div class="month-label" style="text-transform:capitalize;">${escapeHtml(label)}</div>
+        <div class="cal-nav-btns">
+          <button class="today-btn" id="ms-sal-today">текущий месяц</button>
+          <button class="nav-btn" id="ms-sal-prev">‹</button>
+          <button class="nav-btn" id="ms-sal-next">›</button>
+        </div>
+      </div>
+      <div style="font-size:11.5px;color:var(--ink-soft);font-family:var(--font-mono);margin-bottom:16px;">Общая ЗП менеджеров за месяц — оклад + проценты от выручки студии. Не привязана к конкретному сотруднику.</div>
+
+      <div class="analytics-summary" style="margin-bottom:20px;">
+        <div class="summary-card"><div class="num" style="font-size:22px;">${formatMoney(calc.total)}</div><div class="label">ИТОГО ЗА МЕСЯЦ</div></div>
+      </div>
+
+      <div class="analytics-section">
+        <div class="stat-row">
+          <div class="stat-label" style="width:200px;">Оклад</div>
+          <div style="flex:1;font-family:var(--font-mono);font-size:13px;color:var(--ink-soft);">фиксированная часть</div>
+          <div style="width:110px;text-align:right;font-family:var(--font-mono);font-size:14px;font-weight:600;">${formatMoney(calc.base)}</div>
+        </div>
+        <div class="stat-row">
+          <div class="stat-label" style="width:200px;">Частник (${Math.round(MANAGER_SALARY_PCT_TENTATIVE*100)}%)</div>
+          <div style="flex:1;font-family:var(--font-mono);font-size:13px;color:var(--ink-soft);">выручка ${formatMoney(calc.revenueTentative)}</div>
+          <div style="width:110px;text-align:right;font-family:var(--font-mono);font-size:14px;font-weight:600;">${formatMoney(calc.bonusTentative)}</div>
+        </div>
+        <div class="stat-row">
+          <div class="stat-label" style="width:200px;">По расписанию (${Math.round(MANAGER_SALARY_PCT_CONFIRMED*100)}%)</div>
+          <div style="flex:1;font-family:var(--font-mono);font-size:13px;color:var(--ink-soft);">выручка ${formatMoney(calc.revenueConfirmed)}</div>
+          <div style="width:110px;text-align:right;font-family:var(--font-mono);font-size:14px;font-weight:600;">${formatMoney(calc.bonusConfirmed)}</div>
+        </div>
+        <div class="stat-row">
+          <div class="stat-label" style="width:200px;">Сертификаты (${Math.round(MANAGER_SALARY_PCT_CERTS*100)}%)</div>
+          <div style="flex:1;font-family:var(--font-mono);font-size:13px;color:var(--ink-soft);">продано на ${formatMoney(calc.certsRevenue)}</div>
+          <div style="width:110px;text-align:right;font-family:var(--font-mono);font-size:14px;font-weight:600;">${formatMoney(calc.bonusCerts)}</div>
+        </div>
+        <div class="stat-row" style="border-top:1px solid var(--line-strong);margin-top:4px;padding-top:10px;">
+          <div class="stat-label" style="width:200px;font-weight:600;">Итого</div>
+          <div style="flex:1;"></div>
+          <div style="width:110px;text-align:right;font-family:var(--font-mono);font-size:15px;font-weight:700;">${formatMoney(calc.total)}</div>
+        </div>
+      </div>
     `;
   }
 
@@ -9590,7 +9725,7 @@
       reader.onload = ()=>{
         try{
           const data = JSON.parse(reader.result);
-          const KNOWN_FIELDS = ['spaces','events','certificates','refunds','leads','incomes','expenses','eventTypes','hostsList','materialsCatalog','itemSales','orders','salaryAdjustments','masterPayRates','masterPayOverrides','monthlyPlans','hostessShifts','managerShifts','netProfitManual','yearSummaryManual','auditLog','closedMonths','marketingSpend','marketingPlans','contentPosts','suppliers','stockReceipts'];
+          const KNOWN_FIELDS = ['spaces','events','certificates','refunds','leads','incomes','expenses','eventTypes','hostsList','materialsCatalog','itemSales','orders','salaryAdjustments','masterPayRates','masterPayOverrides','monthlyPlans','hostessShifts','managerShifts','netProfitManual','yearSummaryManual','auditLog','closedMonths','marketingSpend','marketingPlans','contentPosts','suppliers','stockReceipts','daysOff'];
           const hasAnyKnownField = KNOWN_FIELDS.some(f => data[f] !== undefined);
           if(!hasAnyKnownField) throw new Error('bad shape');
           pendingImportData = data;
@@ -9609,6 +9744,7 @@
           if(Array.isArray(data.salaryAdjustments)) parts.push(`${data.salaryAdjustments.length} корректировок ЗП`);
           if(Array.isArray(data.suppliers)) parts.push(`${data.suppliers.length} поставщиков`);
           if(Array.isArray(data.stockReceipts)) parts.push(`${data.stockReceipts.length} приходов на склад`);
+          if(Array.isArray(data.daysOff)) parts.push(`${data.daysOff.length} отметок о выходных`);
           statusEl.textContent = `Файл прочитан: ${parts.join(', ')}. Дата экспорта: ${data.exportedAt ? new Date(data.exportedAt).toLocaleString('ru-RU') : '—'}`;
           statusEl.style.color = 'var(--ink-soft)';
           importBtn.style.display = 'inline-block';
@@ -9652,6 +9788,7 @@
         if(Array.isArray(pendingImportData.contentPosts)){ state.contentPosts = pendingImportData.contentPosts; await saveContentPosts(); }
         if(Array.isArray(pendingImportData.suppliers)){ state.suppliers = pendingImportData.suppliers; await saveSuppliers(); }
         if(Array.isArray(pendingImportData.stockReceipts)){ state.stockReceipts = pendingImportData.stockReceipts; await saveStockReceipts(); }
+        if(Array.isArray(pendingImportData.daysOff)){ state.daysOff = pendingImportData.daysOff; await saveDaysOff(); }
         pendingImportData = null;
         recordAction('Данные восстановлены');
         state.modal = null;
@@ -11823,6 +11960,31 @@
     `;
   }
 
+  function renderDaysOffBlock(dateStr){
+    const entries = dayOffEntriesFor(dateStr);
+    const canMark = roleCanMarkDayOff(state.currentRole);
+    const identity = currentDayOffIdentity();
+    const alreadyMarked = identity && identity.name ? entries.some(x=>x.role===identity.role && x.name.trim().toLowerCase()===identity.name.trim().toLowerCase()) : false;
+    if(!entries.length && !canMark) return '';
+    return `
+      <div class="shift-block">
+        <div class="shift-block-title">Выходные в этот день</div>
+        ${entries.length ? entries.map(x=>`
+          <div class="shift-row">
+            <span class="shift-name">✕ ${escapeHtml(x.name)} <span style="color:var(--ink-soft);font-weight:400;">· ${escapeHtml(ROLE_LABELS[x.role]||x.role)}</span></span>
+            ${canDayOffEntryBeRemovedByMe(x) ? `<button type="button" class="dayoff-del-btn" data-id="${x.id}" title="Убрать отметку">✕</button>` : ''}
+          </div>
+        `).join('') : `<div style="font-size:12.5px;color:var(--ink-soft);">Пока никто не отмечен</div>`}
+        ${canMark && !alreadyMarked ? `
+          <div style="display:flex;gap:6px;margin-top:8px;">
+            <input type="text" id="dayoff-name-input" placeholder="Ваше имя" value="${escapeHtml((identity&&identity.name)||'')}" ${identity&&identity.locked?'readonly':''} style="flex:1;padding:6px 8px;border:1px solid var(--line-strong);border-radius:var(--radius);font-size:13px;background:${identity&&identity.locked?'var(--paper)':'var(--white)'};">
+            <button type="button" class="btn btn-ghost" id="btn-mark-dayoff" style="font-size:12.5px;padding:6px 12px;white-space:nowrap;">🚫 Я выходной</button>
+          </div>
+        ` : ''}
+      </div>
+    `;
+  }
+
   function renderDayModal(dateStr){
     const d = parseDate(dateStr);
     const dLabel = d.toLocaleDateString('ru-RU', {weekday:'long', day:'numeric', month:'long'});
@@ -11862,6 +12024,7 @@
           ` : ''}
           ${renderShiftBlock(dateStr)}
           ${renderManagerShiftBlock(dateStr)}
+          ${renderDaysOffBlock(dateStr)}
           ${!isAll ? `<div style="font-size:12px;color:var(--ink-soft);font-family:var(--font-mono);margin-top:-8px;display:flex;align-items:center;gap:6px;">
             ${spaceBadge(space,'sm')}${escapeHtml(space.name)}
           </div>` : ''}
@@ -11906,6 +12069,32 @@
         const shiftDate = btn.dataset.date;
         overlay.remove();
         state.modal = {type:'quick-manager-shift', shiftDate};
+        render();
+      };
+    });
+    const markDayOffBtn = overlay.querySelector('#btn-mark-dayoff');
+    if(markDayOffBtn) markDayOffBtn.onclick = async (ev)=>{
+      ev.stopPropagation();
+      const input = overlay.querySelector('#dayoff-name-input');
+      const name = (input.value||'').trim();
+      if(!name){ input.style.borderColor = 'var(--danger)'; input.focus(); return; }
+      if(!state.daysOff) state.daysOff = [];
+      state.daysOff.push({ id: uid(), date: dateStr, role: state.currentRole, name });
+      await saveDaysOff();
+      setRememberedDayOffName(state.currentRole, name);
+      recordAction(`${name} отметил(а) себя выходным на ${formatDateText(dateStr)}`);
+      overlay.remove();
+      state.modal = {type:'day', date: dateStr};
+      render();
+    };
+    overlay.querySelectorAll('.dayoff-del-btn').forEach(btn=>{
+      btn.onclick = async (ev)=>{
+        ev.stopPropagation();
+        const id = btn.dataset.id;
+        state.daysOff = (state.daysOff||[]).filter(x=>x.id!==id);
+        await saveDaysOff();
+        overlay.remove();
+        state.modal = {type:'day', date: dateStr};
         render();
       };
     });
