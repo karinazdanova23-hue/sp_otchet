@@ -375,6 +375,78 @@ async function checkAndSendScheduledBackup() {
 }
 setInterval(checkAndSendScheduledBackup, 60 * 60 * 1000); // проверяем раз в час
 
+// --- Снимки данных каждые 15 минут: кольцевой буфер на 96 слотов = последние 24 часа ---
+// Новый снимок каждый раз перезаписывает слот, которому ровно сутки — место в S3 не растёт.
+const SNAPSHOT_INTERVAL_MS = 15 * 60 * 1000;
+const SNAPSHOT_SLOTS = 96; // 24 часа × 4 снимка в час
+const SNAPSHOT_META_KEY = 'auto-snapshot-meta';
+
+async function readSnapshotMeta() {
+  const raw = await readSharedKeyRaw(SNAPSHOT_META_KEY);
+  if (!raw) return {};
+  try { return JSON.parse(raw); } catch (e) { return {}; }
+}
+
+async function takeAutoSnapshot() {
+  try {
+    const now = new Date();
+    const minutesSinceMidnightUtc = now.getUTCHours() * 60 + now.getUTCMinutes();
+    const slot = Math.floor(minutesSinceMidnightUtc / 15) % SNAPSHOT_SLOTS;
+    const backup = await buildServerSideBackup();
+    await s3.send(new PutObjectCommand({
+      Bucket: BUCKET,
+      Key: objectPath(`auto-snapshot-${slot}`, true),
+      Body: JSON.stringify(backup),
+      ContentType: 'application/json; charset=utf-8',
+    }));
+    const meta = await readSnapshotMeta();
+    meta[slot] = now.toISOString();
+    await s3.send(new PutObjectCommand({
+      Bucket: BUCKET,
+      Key: objectPath(SNAPSHOT_META_KEY, true),
+      Body: JSON.stringify(meta),
+      ContentType: 'application/json; charset=utf-8',
+    }));
+    console.log('[auto-snapshot] сохранён слот', slot, 'в', now.toISOString());
+  } catch (err) {
+    console.error('[auto-snapshot] не удалось сохранить снимок:', err);
+  }
+}
+setInterval(takeAutoSnapshot, SNAPSHOT_INTERVAL_MS);
+takeAutoSnapshot(); // и сразу один при старте сервера, не дожидаясь первых 15 минут
+
+// список снимков за последние 24 часа — как и /api/backup/send-now выше, не гейтится ролью
+// (сервер не хранит пароли ролей), URL никому не сообщается
+app.get('/api/backup/snapshots', async (req, res) => {
+  try {
+    const meta = await readSnapshotMeta();
+    const list = Object.entries(meta)
+      .map(([slot, savedAt]) => ({ slot: Number(slot), savedAt }))
+      .sort((a, b) => new Date(b.savedAt) - new Date(a.savedAt));
+    res.json({ snapshots: list });
+  } catch (err) {
+    console.error('GET /api/backup/snapshots error:', err);
+    res.status(500).json({ error: 'list_failed' });
+  }
+});
+
+app.get('/api/backup/snapshots/:slot', async (req, res) => {
+  try {
+    const slot = Number(req.params.slot);
+    if (!Number.isInteger(slot) || slot < 0 || slot >= SNAPSHOT_SLOTS) {
+      return res.status(400).json({ error: 'invalid_slot' });
+    }
+    const raw = await readSharedKeyRaw(`auto-snapshot-${slot}`);
+    if (raw === null) return res.status(404).json({ error: 'not_found' });
+    res.setHeader('Content-Disposition', `attachment; filename="snapshot-slot-${slot}.json"`);
+    res.setHeader('Content-Type', 'application/json; charset=utf-8');
+    res.send(raw);
+  } catch (err) {
+    console.error('GET /api/backup/snapshots/:slot error:', err);
+    res.status(500).json({ error: 'read_failed' });
+  }
+});
+
 app.listen(PORT, () => {
   console.log(`Сервер запущен на порту ${PORT}`);
 });
