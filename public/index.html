@@ -1092,6 +1092,9 @@
     pushRefundThreshold: 10000,
     marketingSpendCursor: new Date(),
     marketingSpendShowAll: false,
+    marketingStatsCursor: new Date(),
+    marketingStatsMode: 'month',
+    marketingPlanCursor: new Date(),
     suppliers: null,
     procurementTab: 'stock',
     stockReceipts: null,
@@ -1587,7 +1590,10 @@
   async function syncEventIncomeIfNeeded(event){
     // автоматическая синхронизация с "Книга → Доходы" для "Частник" и "Выезд" — тех же статусов,
     // что и сверка "Календарь vs Книга". "По расписанию" сюда не попадает — для него доход ведётся иначе.
-    const eligible = RECONCILE_STATUSES.includes(event.status) && Number(event.price) > 0;
+    // Если по мероприятию уже ведётся построчный "Журнал платежей" (см. syncEventPaymentsToBook),
+    // эта грубая запись на всю сумму сразу не нужна — построчные записи точнее и не должны задваиваться с ней.
+    const hasRealPayments = Array.isArray(event.payments) && event.payments.some(p=> p.source !== 'Сертификат' && !p.certRedemptionRef && p.type !== 'refund' && !p.refundRef);
+    const eligible = RECONCILE_STATUSES.includes(event.status) && Number(event.price) > 0 && !hasRealPayments;
     const existingAutoIncome = state.incomes.find(i=> i.eventId===event.id && i.autoFromEvent);
     if(eligible){
       const incomeEntry = {
@@ -1602,6 +1608,71 @@
     } else if(existingAutoIncome){
       state.incomes = state.incomes.filter(x=>x.id !== existingAutoIncome.id);
       await saveIncomes();
+    }
+  }
+
+  // синхронизация построчного "Журнала платежей" мероприятия с "Книга → Доходы": у каждой реальной
+  // оплаты (кроме списанных с сертификата — это не новые деньги, а трата уже собранного при продаже
+  // сертификата) появляется зеркальная запись в "Книге" датой самого платежа. Работает для любого статуса
+  // мероприятия (в отличие от syncEventIncomeIfNeeded, который знает только "Частник"/"Выезд").
+  async function syncEventPaymentsToBook(event){
+    const payments = Array.isArray(event.payments) ? event.payments : [];
+    let paymentsIdsAssigned = false;
+    payments.forEach(p=>{ if(!p.id){ p.id = uid(); paymentsIdsAssigned = true; } });
+
+    // "живые" оплаты — не сертификат (эти деньги уже учтены доходом при продаже сертификата) и не возврат.
+    const genuinePayments = payments.filter(p=> p.source !== 'Сертификат' && !p.certRedemptionRef && p.type !== 'refund' && !p.refundRef);
+    // записи возврата (source:'Возврат'/type:'refund' — добавляется при сохранении возврата в "Возвратах").
+    // Зеркалим их в "Книгу" отрицательной суммой, но ТОЛЬКО если по мероприятию уже ведётся построчный
+    // журнал (есть хоть одна "живая" оплата) — тогда это нужно, чтобы "Книга" осталась равна выручке
+    // мероприятия после возврата (ev.price к этому моменту уже уменьшен на сумму возврата). Если же
+    // журнал не велся вовсе (грубая запись "на всю сумму" по частнику/выезду), возврат уже и так учтён —
+    // через уменьшение ev.price, которое подхватит syncEventIncomeIfNeeded, — второй раз зеркалить не нужно.
+    // Задвоения с "Возвраты" в Кэшфлоу при этом не происходит: зеркальная запись помечена autoFromPayment
+    // и не участвует в строке "Доходы из «Книги»" кэшфлоу, а "Оплаты по мероприятиям" считается отдельно
+    // и только по записям с явной датой — у записи возврата даты нет, так что туда она тоже не попадает.
+    const refundPayments = payments.filter(p=> (p.type === 'refund' || p.refundRef) && p.source !== 'Сертификат' && !p.certRedemptionRef);
+    const realPayments = genuinePayments.length > 0 ? [...genuinePayments, ...refundPayments] : [];
+    const currentPaymentIds = new Set(realPayments.map(p=>p.id));
+
+    let incomesChanged = false;
+    const stale = state.incomes.filter(i=> i.eventId===event.id && i.autoFromPayment && !currentPaymentIds.has(i.paymentId));
+    if(stale.length){
+      const staleIds = new Set(stale.map(i=>i.id));
+      state.incomes = state.incomes.filter(i=>!staleIds.has(i.id));
+      incomesChanged = true;
+    }
+
+    realPayments.forEach(p=>{
+      const date = (p.date && p.date.trim()) ? p.date.trim() : (p.ts ? fmtDate(new Date(p.ts)) : event.date);
+      const existing = state.incomes.find(i=> i.eventId===event.id && i.autoFromPayment && i.paymentId===p.id);
+      const entry = {
+        id: existing ? existing.id : uid(),
+        date, operation: 'Оплата', product: event.product || 'Мастер-класс',
+        account: p.source || '', eventId: event.id, paymentId: p.id, amount: Number(p.amount)||0,
+        masterName: '', itemSaleId: '', orderId: '',
+        comment: `Оплата по журналу: ${event.title || 'без названия'}`, autoFromPayment: true,
+      };
+      if(!existing || existing.date!==entry.date || existing.amount!==entry.amount || existing.account!==entry.account){
+        const idx = state.incomes.findIndex(i=>i.id===entry.id);
+        if(idx>=0) state.incomes[idx] = entry; else state.incomes.push(entry);
+        incomesChanged = true;
+      }
+    });
+
+    // построчные записи появились — старая грубая запись "на всю сумму" (если была) больше не нужна
+    if(genuinePayments.length > 0){
+      const oldAutoFull = state.incomes.find(i=> i.eventId===event.id && i.autoFromEvent);
+      if(oldAutoFull){
+        state.incomes = state.incomes.filter(i=>i.id!==oldAutoFull.id);
+        incomesChanged = true;
+      }
+    }
+
+    if(incomesChanged) await saveIncomes();
+    if(paymentsIdsAssigned){
+      const idx = state.events.findIndex(e=>e.id===event.id);
+      if(idx>=0){ state.events[idx].payments = payments; await saveEvents(); }
     }
   }
   async function migrateIncomeProductNamesOnce(){
@@ -2905,11 +2976,13 @@
       const extra = evts.length - shown.length;
       const hasWarning = Object.keys(computeGapWarnings(evts)).length > 0;
       const hostessLine = shiftSummaryShort(dStr);
+      const managerLine = managerForDate(dStr);
       const dayOffEntries = dayOffEntriesFor(dStr);
       cells += `
         <div class="cal-cell ${inMonth?'':'other-month'} ${isToday?'today':''}" data-date="${dStr}">
           <div class="cal-daynum">${d.getDate()}${hasWarning?' <span class="cal-warn-icon" title="Перерыв между мероприятиями меньше 30 минут">⚠</span>':''}${dayOffEntries.length ? `<span class="cal-dayoff-marks">${dayOffEntries.map(x=>`<span class="cal-dayoff-x" title="${escapeHtml(x.name)} — выходной (${escapeHtml(ROLE_LABELS[x.role]||x.role)})">✕</span>`).join('')}</span>` : ''}</div>
           ${hostessLine ? `<div class="cal-hostess" title="Админ: ${escapeHtml(hostessLine)}">🧑 ${escapeHtml(hostessLine)}</div>` : ''}
+          ${managerLine ? `<div class="cal-manager" title="Менеджер: ${escapeHtml(managerLine)}">🧑‍💼 ${escapeHtml(managerLine)}</div>` : ''}
           <div class="cal-events">
             ${shown.map(e=>`<div class="cal-evt-chip" style="background:${statusColor(e.status)}">${isAll?spaceBadge(getSpace(e.spaceId),'xs'):''}<span class="t">${e.time}</span><span>${escapeHtml(e.title)}</span></div>`).join('')}
             ${extra>0?`<div class="cal-more">+${extra} ещё</div>`:''}
@@ -3060,35 +3133,38 @@
   }
 
   function renderMarketingStatsView(){
-    const statsYear = String(new Date().getFullYear());
-    const spendThisYear = state.marketingSpend.filter(m=> m.date && m.date.startsWith(statsYear));
-    const leadsThisYear = state.leads.filter(l=> l.requestDate && l.requestDate.startsWith(statsYear));
+    const mode = state.marketingStatsMode || 'month';
+    const cursor = state.marketingStatsCursor || (state.marketingStatsCursor = new Date());
+    const year = cursor.getFullYear();
+    const monthIdx = cursor.getMonth();
+    const ym = year+'-'+pad(monthIdx+1);
+    const periodLabel = mode==='month' ? (MONTHS[monthIdx]+' '+year) : (year+' год');
+    const navLabel = mode==='month' ? periodLabel : String(year); // в шапке без слова «год» — CSS делает text-transform:capitalize и превращает его в «Год»
+    const inPeriod = (dateStr)=> dateStr && (mode==='month' ? dateStr.startsWith(ym) : dateStr.startsWith(String(year)));
 
-    const totalSpendYear = spendThisYear.reduce((s,m)=>s+(Number(m.amount)||0), 0);
-    const totalRevenueYear = state.events
-      .filter(e=> e.date && e.date.startsWith(statsYear))
+    const spendInPeriod = state.marketingSpend.filter(m=> inPeriod(m.date));
+    const leadsInPeriod = state.leads.filter(l=> inPeriod(l.requestDate));
+
+    const totalSpendPeriod = spendInPeriod.reduce((s,m)=>s+(Number(m.amount)||0), 0);
+    const totalRevenuePeriod = state.events
+      .filter(e=> inPeriod(e.date))
       .reduce((s,e)=> s + eventRevenueForecast(e), 0);
-    const spendPctOfRevenue = totalRevenueYear>0 ? (totalSpendYear/totalRevenueYear*100) : null;
+    const spendPctOfRevenue = totalRevenuePeriod>0 ? (totalSpendPeriod/totalRevenuePeriod*100) : null;
 
-    const marketingCertsThisYear = state.certificates.filter(c=> c.purpose==='marketing' && c.saleDate && c.saleDate.startsWith(statsYear));
-    const marketingCertsValue = marketingCertsThisYear.reduce((s,c)=> s + (Number(c.amount)||0), 0);
+    const marketingCertsInPeriod = state.certificates.filter(c=> c.purpose==='marketing' && inPeriod(c.saleDate));
+    const marketingCertsValue = marketingCertsInPeriod.reduce((s,c)=> s + (Number(c.amount)||0), 0);
 
-    // сколько раз реально ПРИШЛИ и воспользовались маркетинговым сертификатом за год — считаем по всем
-    // маркетинговым сертификатам (не только выпущенным в этом году), но сами списания смотрим за этот год
-    const marketingRedemptionsThisYear = [];
+    // сколько раз реально ПРИШЛИ и воспользовались маркетинговым сертификатом за период — считаем по всем
+    // маркетинговым сертификатам (не только выпущенным в этом периоде), но сами списания смотрим за этот период
+    const marketingRedemptionsInPeriod = [];
     state.certificates.filter(c=>c.purpose==='marketing').forEach(c=>{
       (c.redemptions||[]).forEach(r=>{
-        if(r.date && r.date.startsWith(statsYear)) marketingRedemptionsThisYear.push(r);
+        if(inPeriod(r.date)) marketingRedemptionsInPeriod.push(r);
       });
-    });
-    const redemptionsByMonth = Array(12).fill(0);
-    marketingRedemptionsThisYear.forEach(r=>{
-      const monthIdx = parseInt(r.date.slice(5,7),10) - 1;
-      if(monthIdx>=0 && monthIdx<12) redemptionsByMonth[monthIdx]++;
     });
 
     const byDirection = {};
-    spendThisYear.forEach(m=>{
+    spendInPeriod.forEach(m=>{
       byDirection[m.direction] = (byDirection[m.direction]||0) + (Number(m.amount)||0);
     });
     const maxDir = Math.max(1, ...Object.values(byDirection));
@@ -3096,14 +3172,14 @@
     // канал = соцсеть, если указана; иначе — само направление (для офлайн-направлений типа "Листовки")
     const channelOf = (m)=> m.socialNetwork || m.direction;
     const spendByChannel = {};
-    spendThisYear.forEach(m=>{
+    spendInPeriod.forEach(m=>{
       const ch = channelOf(m);
       spendByChannel[ch] = (spendByChannel[ch]||0) + (Number(m.amount)||0);
     });
     const leadsByChannel = {};
     const soldByChannel = {};
     const soldRevenueByChannel = {};
-    leadsThisYear.forEach(l=>{
+    leadsInPeriod.forEach(l=>{
       leadsByChannel[l.source] = (leadsByChannel[l.source]||0) + 1;
       if(l.sold){
         soldByChannel[l.source] = (soldByChannel[l.source]||0) + 1;
@@ -3112,16 +3188,8 @@
     });
     const allChannels = [...new Set([...Object.keys(spendByChannel), ...Object.keys(leadsByChannel)])];
 
-    // динамика по месяцам текущего года
-    const monthlyTotals = Array(12).fill(0);
-    spendThisYear.forEach(m=>{
-      const monthIdx = parseInt(m.date.slice(5,7),10) - 1;
-      if(monthIdx>=0 && monthIdx<12) monthlyTotals[monthIdx] += Number(m.amount)||0;
-    });
-    const maxMonthly = Math.max(1, ...monthlyTotals);
-
     // блогеры — рейтинг по цене охвата (дешевле охват — выше в списке)
-    const bloggerRows = spendThisYear.filter(m=>m.direction==='Блогеры').map(m=>{
+    const bloggerRows = spendInPeriod.filter(m=>m.direction==='Блогеры').map(m=>{
       const linkedEvent = m.eventId ? state.events.find(e=>e.id===m.eventId) : null;
       const linkedRevenue = linkedEvent ? eventRevenueForecast(linkedEvent) : null;
       const realRoi = (linkedRevenue!==null && Number(m.amount)>0) ? Math.round((linkedRevenue/Number(m.amount))*100) : null;
@@ -3141,35 +3209,64 @@
       return a.perReach - b.perReach;
     });
 
-    return `
+    // только для режима «Год»: динамика по месяцам + погашения сертификатов по месяцам
+    let yearOnlyHtml = '';
+    if(mode === 'year'){
+      const monthlyTotals = Array(12).fill(0);
+      spendInPeriod.forEach(m=>{
+        const mi = parseInt(m.date.slice(5,7),10) - 1;
+        if(mi>=0 && mi<12) monthlyTotals[mi] += Number(m.amount)||0;
+      });
+      const redemptionsByMonth = Array(12).fill(0);
+      marketingRedemptionsInPeriod.forEach(r=>{
+        const mi = parseInt(r.date.slice(5,7),10) - 1;
+        if(mi>=0 && mi<12) redemptionsByMonth[mi]++;
+      });
+      yearOnlyHtml = `
+        ${marketingRedemptionsInPeriod.length>0 ? `
+        <div class="analytics-section">
+          <h4>Погашения маркетинговых сертификатов по месяцам — ${periodLabel}</h4>
+          ${MONTHS.map((name,i)=> redemptionsByMonth[i]>0 ? `
+            <div class="stat-row">
+              <div class="stat-label">${escapeHtml(name)}</div>
+              <div style="flex:1;font-family:var(--font-mono);font-size:13px;">${redemptionsByMonth[i]} раз</div>
+            </div>
+          ` : '').join('')}
+        </div>
+        ` : ''}
+        <div class="analytics-section">
+          <h4>Динамика по месяцам — ${periodLabel}</h4>
+          ${renderBarChart(MONTHS.map((name,i)=>({ label: name.slice(0,3), value: monthlyTotals[i], valueLabel: formatMoney(monthlyTotals[i]) })))}
+        </div>
+      `;
+    }
+
+    const navHtml = `
+      <div class="cal-nav" style="margin-bottom:14px;">
+        <div class="month-label">${escapeHtml(navLabel)}</div>
+        <div class="cal-nav-btns">
+          <button class="today-btn" id="mst-mode-toggle">${mode==='month' ? '📆 Сводка за год' : '📅 По месяцам'}</button>
+          <button class="today-btn" id="mst-today">${mode==='month' ? 'текущий месяц' : 'текущий год'}</button>
+          <button class="nav-btn" id="mst-prev">‹</button>
+          <button class="nav-btn" id="mst-next">›</button>
+        </div>
+      </div>
+    `;
+
+    return navHtml + `
       <div class="analytics-section">
-        <h4>Общая картина — ${statsYear} год</h4>
-        <div class="stat-row"><div class="stat-label">Потрачено на маркетинг</div><div style="flex:1;font-family:var(--font-mono);font-size:13px;">${formatMoney(totalSpendYear)}</div></div>
-        <div class="stat-row"><div class="stat-label">Доля от выручки студии</div><div style="flex:1;font-family:var(--font-mono);font-size:13px;">${spendPctOfRevenue!==null ? spendPctOfRevenue.toFixed(1)+'%' : '— (выручки за год пока нет)'}</div></div>
-        ${marketingCertsValue>0 ? `<div class="stat-row"><div class="stat-label">+ маркетинговые сертификаты (услугами)</div><div style="flex:1;font-family:var(--font-mono);font-size:13px;color:var(--ink-soft);">${formatMoney(marketingCertsValue)} · ${marketingCertsThisYear.length} шт. — деньги не платились, но это тоже часть промо-бюджета</div></div>` : ''}
-        <div class="stat-row"><div class="stat-label">Пришли по маркетинговому сертификату</div><div style="flex:1;font-family:var(--font-mono);font-size:13px;">${marketingRedemptionsThisYear.length>0 ? marketingRedemptionsThisYear.length+' раз' : '— (пока никто не воспользовался)'}</div></div>
+        <h4>Общая картина — ${periodLabel}</h4>
+        <div class="stat-row"><div class="stat-label">Потрачено на маркетинг</div><div style="flex:1;font-family:var(--font-mono);font-size:13px;">${formatMoney(totalSpendPeriod)}</div></div>
+        <div class="stat-row"><div class="stat-label">Доля от выручки студии</div><div style="flex:1;font-family:var(--font-mono);font-size:13px;">${spendPctOfRevenue!==null ? spendPctOfRevenue.toFixed(1)+'%' : '— (выручки за этот период пока нет)'}</div></div>
+        ${marketingCertsValue>0 ? `<div class="stat-row"><div class="stat-label">+ маркетинговые сертификаты (услугами)</div><div style="flex:1;font-family:var(--font-mono);font-size:13px;color:var(--ink-soft);">${formatMoney(marketingCertsValue)} · ${marketingCertsInPeriod.length} шт. — деньги не платились, но это тоже часть промо-бюджета</div></div>` : ''}
+        <div class="stat-row"><div class="stat-label">Пришли по маркетинговому сертификату</div><div style="flex:1;font-family:var(--font-mono);font-size:13px;">${marketingRedemptionsInPeriod.length>0 ? marketingRedemptionsInPeriod.length+' раз' : '— (пока никто не воспользовался)'}</div></div>
       </div>
 
-      ${marketingRedemptionsThisYear.length>0 ? `
-      <div class="analytics-section">
-        <h4>Погашения маркетинговых сертификатов по месяцам — ${statsYear} год</h4>
-        ${MONTHS.map((name,i)=> redemptionsByMonth[i]>0 ? `
-          <div class="stat-row">
-            <div class="stat-label">${escapeHtml(name)}</div>
-            <div style="flex:1;font-family:var(--font-mono);font-size:13px;">${redemptionsByMonth[i]} раз</div>
-          </div>
-        ` : '').join('')}
-      </div>
-      ` : ''}
+      ${yearOnlyHtml}
 
       <div class="analytics-section">
-        <h4>Динамика по месяцам — ${statsYear} год</h4>
-        ${renderBarChart(MONTHS.map((name,i)=>({ label: name.slice(0,3), value: monthlyTotals[i], valueLabel: formatMoney(monthlyTotals[i]) })))}
-      </div>
-
-      <div class="analytics-section">
-        <h4>Траты по направлениям — ${statsYear} год</h4>
-        ${Object.keys(byDirection).length===0 ? '<div style="color:var(--ink-soft);font-size:13px;">Пока нет данных за этот год.</div>' : Object.entries(byDirection).sort((a,b)=>b[1]-a[1]).map(([dir,amt])=>`
+        <h4>Траты по направлениям — ${periodLabel}</h4>
+        ${Object.keys(byDirection).length===0 ? `<div style="color:var(--ink-soft);font-size:13px;">Пока нет данных за этот период.</div>` : Object.entries(byDirection).sort((a,b)=>b[1]-a[1]).map(([dir,amt])=>`
           <div class="stat-row">
             <div class="stat-label">${escapeHtml(dir)}</div>
             <div class="stat-bar-track"><div class="stat-bar-fill" style="width:${Math.round(amt/maxDir*100)}%;"></div></div>
@@ -3179,9 +3276,9 @@
       </div>
 
       <div class="analytics-section">
-        <h4>По каналам: цена заявки, конверсия, окупаемость — ${statsYear} год</h4>
+        <h4>По каналам: цена заявки, конверсия, окупаемость — ${periodLabel}</h4>
         <div style="font-size:12px;color:var(--ink-soft);margin-bottom:10px;">Канал — соцсеть (если указана в трате) либо само направление для офлайна (листовки, гео-сервисы и т.п.). Сверяется с «Конверсией» по такому же источнику заявки.</div>
-        ${allChannels.length===0 ? '<div style="color:var(--ink-soft);font-size:13px;">Пока нет ни трат, ни заявок в этом году.</div>' : allChannels.sort((a,b)=>(spendByChannel[b]||0)-(spendByChannel[a]||0)).map(ch=>{
+        ${allChannels.length===0 ? `<div style="color:var(--ink-soft);font-size:13px;">Пока нет ни трат, ни заявок за этот период.</div>` : allChannels.sort((a,b)=>(spendByChannel[b]||0)-(spendByChannel[a]||0)).map(ch=>{
           const spend = spendByChannel[ch]||0;
           const leadsCount = leadsByChannel[ch]||0;
           const soldCount = soldByChannel[ch]||0;
@@ -3201,9 +3298,9 @@
       </div>
 
       <div class="analytics-section">
-        <h4>Блогеры — рейтинг по эффективности (${statsYear} год)</h4>
+        <h4>Блогеры — рейтинг по эффективности (${periodLabel})</h4>
         <div style="font-size:12px;color:var(--ink-soft);margin-bottom:10px;">Сверху — те, у кого есть настоящая окупаемость (привязано мероприятие с реальной выручкой), от самой высокой. Дальше — по цене охвата, от самого дешёвого. Снизу — без данных для сравнения.</div>
-        ${bloggerRows.length===0 ? '<div style="color:var(--ink-soft);font-size:13px;">В этом году трат на блогеров ещё не было.</div>' : bloggerRows.map(m=>`
+        ${bloggerRows.length===0 ? `<div style="color:var(--ink-soft);font-size:13px;">За этот период трат на блогеров ещё не было.</div>` : bloggerRows.map(m=>`
           <div class="stat-row">
             <div class="stat-label">${escapeHtml(m.bloggerHandle||'без ника')} · ${m.date?formatDateText(m.date):''}</div>
             <div style="flex:1;font-family:var(--font-mono);font-size:13px;">
@@ -3217,7 +3314,9 @@
   }
 
   function renderMarketingPlanView(){
-    const ym = todayStr().slice(0,7);
+    const planCursor = state.marketingPlanCursor || (state.marketingPlanCursor = new Date());
+    const ym = planCursor.getFullYear()+'-'+pad(planCursor.getMonth()+1);
+    const monthLabel = MONTHS[planCursor.getMonth()] + ' ' + planCursor.getFullYear();
     const planForMonth = (state.marketingPlans && state.marketingPlans[ym]) || { directions:{}, bloggers:{} };
     const factByDirection = {};
     state.marketingSpend.filter(m=>m.date && m.date.startsWith(ym)).forEach(m=>{
@@ -3231,9 +3330,17 @@
     const bloggerNames = new Set([...Object.keys(planForMonth.bloggers||{}), ...Object.keys(factByBlogger)]);
 
     return `
+      <div class="cal-nav" style="margin-bottom:14px;">
+        <div class="month-label">${escapeHtml(monthLabel)}</div>
+        <div class="cal-nav-btns">
+          <button class="today-btn" id="mp-today">текущий месяц</button>
+          <button class="nav-btn" id="mp-prev">‹</button>
+          <button class="nav-btn" id="mp-next">›</button>
+        </div>
+      </div>
       <div class="analytics-section">
         <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;">
-          <h4 style="margin:0;">План/факт по направлениям — ${escapeHtml(ym)}</h4>
+          <h4 style="margin:0;">План/факт по направлениям — ${escapeHtml(monthLabel)}</h4>
           <button class="btn btn-ghost" id="btn-edit-marketing-plan">✏ Задать план на месяц</button>
         </div>
         ${MARKETING_DIRECTIONS.map(dir=>{
@@ -3249,7 +3356,7 @@
       </div>
 
       <div class="analytics-section">
-        <h4>План/факт по блогерам — ${escapeHtml(ym)}</h4>
+        <h4>План/факт по блогерам — ${escapeHtml(monthLabel)}</h4>
         ${bloggerNames.size===0 ? '<div style="color:var(--ink-soft);font-size:13px;">Пока нет ни плана, ни трат по блогерам в этом месяце.</div>' : [...bloggerNames].map(name=>{
           const plan = (planForMonth.bloggers||{})[name] || 0;
           const fact = factByBlogger[name] || 0;
@@ -3674,7 +3781,8 @@
   }
 
   function renderMarketingPlanEditModal(){
-    const ym = todayStr().slice(0,7);
+    const planCursor = state.marketingPlanCursor || (state.marketingPlanCursor = new Date());
+    const ym = planCursor.getFullYear()+'-'+pad(planCursor.getMonth()+1);
     const planForMonth = (state.marketingPlans && state.marketingPlans[ym]) || { directions:{}, bloggers:{} };
     const bloggerNamesKnown = new Set([
       ...Object.keys(planForMonth.bloggers||{}),
@@ -3683,7 +3791,7 @@
     return `
       <div class="modal" style="max-width:480px;">
         <div class="modal-head">
-          <h3>План на ${escapeHtml(ym)}</h3>
+          <h3>План на ${escapeHtml(MONTHS[planCursor.getMonth()] + ' ' + planCursor.getFullYear())}</h3>
           <button class="modal-close">×</button>
         </div>
         <div class="modal-body">
@@ -3737,7 +3845,8 @@
 
     overlay.querySelector('#btn-save-marketing-plan').onclick = async ()=>{
       requireAdminUnlock(async ()=>{
-        const ym = todayStr().slice(0,7);
+        const planCursor = state.marketingPlanCursor || new Date();
+        const ym = planCursor.getFullYear()+'-'+pad(planCursor.getMonth()+1);
         if(!state.marketingPlans) state.marketingPlans = {};
         const directions = {};
         overlay.querySelectorAll('.mp-dir-input').forEach(inp=>{
@@ -3771,6 +3880,36 @@
     if(todayBtn) todayBtn.onclick = ()=>{ state.marketingSpendCursor = new Date(); render(); };
     const toggleAllBtn = document.getElementById('ms-toggle-all');
     if(toggleAllBtn) toggleAllBtn.onclick = ()=>{ state.marketingSpendShowAll = !state.marketingSpendShowAll; render(); };
+
+    // Статистика (конверсия/маркетинг) — по месяцам или сводка за год
+    const mstPrevBtn = document.getElementById('mst-prev');
+    if(mstPrevBtn) mstPrevBtn.onclick = ()=>{
+      const c = state.marketingStatsCursor;
+      state.marketingStatsCursor = (state.marketingStatsMode==='year')
+        ? new Date(c.getFullYear()-1, c.getMonth(), 1)
+        : new Date(c.getFullYear(), c.getMonth()-1, 1);
+      render();
+    };
+    const mstNextBtn = document.getElementById('mst-next');
+    if(mstNextBtn) mstNextBtn.onclick = ()=>{
+      const c = state.marketingStatsCursor;
+      state.marketingStatsCursor = (state.marketingStatsMode==='year')
+        ? new Date(c.getFullYear()+1, c.getMonth(), 1)
+        : new Date(c.getFullYear(), c.getMonth()+1, 1);
+      render();
+    };
+    const mstTodayBtn = document.getElementById('mst-today');
+    if(mstTodayBtn) mstTodayBtn.onclick = ()=>{ state.marketingStatsCursor = new Date(); render(); };
+    const mstModeToggleBtn = document.getElementById('mst-mode-toggle');
+    if(mstModeToggleBtn) mstModeToggleBtn.onclick = ()=>{ state.marketingStatsMode = state.marketingStatsMode==='year' ? 'month' : 'year'; render(); };
+
+    // План/факт маркетинга — по месяцам
+    const mpPrevBtn = document.getElementById('mp-prev');
+    if(mpPrevBtn) mpPrevBtn.onclick = ()=>{ state.marketingPlanCursor = new Date(state.marketingPlanCursor.getFullYear(), state.marketingPlanCursor.getMonth()-1, 1); render(); };
+    const mpNextBtn = document.getElementById('mp-next');
+    if(mpNextBtn) mpNextBtn.onclick = ()=>{ state.marketingPlanCursor = new Date(state.marketingPlanCursor.getFullYear(), state.marketingPlanCursor.getMonth()+1, 1); render(); };
+    const mpTodayBtn = document.getElementById('mp-today');
+    if(mpTodayBtn) mpTodayBtn.onclick = ()=>{ state.marketingPlanCursor = new Date(); render(); };
 
     const addBtn = document.getElementById('btn-add-marketing-spend');
     if(addBtn) addBtn.onclick = ()=>{
@@ -6659,12 +6798,22 @@
             const before = ev.payments.length;
             ev.payments = ev.payments.filter(p=>{
               if(p.refundRef === refundToDelete.id){
-                ev.price = (ev.price||0) + Math.abs(p.amount||0);
+                const restoreAmt = Math.abs(p.amount||0);
+                ev.price = (ev.price||0) + restoreAmt;
+                // "Согласованная цена" уменьшалась вместе с "Выручкой" при оформлении этого возврата
+                // (чтобы прогнозная выручка в "Чистой прибыли" тоже учитывала возврат) — восстанавливаем и её
+                if(ev.agreedPrice!==undefined && ev.agreedPrice!==null && !isNaN(ev.agreedPrice)){
+                  ev.agreedPrice = Number(ev.agreedPrice) + restoreAmt;
+                }
                 return false;
               }
               return true;
             });
-            if(ev.payments.length !== before) await saveEvents();
+            if(ev.payments.length !== before){
+              await saveEvents();
+              await syncEventIncomeIfNeeded(ev);
+              await syncEventPaymentsToBook(ev);
+            }
           }
         }
         await saveRefunds();
@@ -6767,16 +6916,34 @@
         if(!Array.isArray(ev.payments)) ev.payments = [];
         const before = ev.payments.length;
         ev.payments = ev.payments.filter(p=>{
-          if(p.refundRef === updated.id){ ev.price = (ev.price||0) + Math.abs(p.amount||0); return false; }
+          if(p.refundRef === updated.id){
+            const restoreAmt = Math.abs(p.amount||0);
+            ev.price = (ev.price||0) + restoreAmt;
+            if(ev.agreedPrice!==undefined && ev.agreedPrice!==null && !isNaN(ev.agreedPrice)) ev.agreedPrice = Number(ev.agreedPrice) + restoreAmt;
+            return false;
+          }
           return true;
         });
         if(eventId === updated.eventId && updated.status === 'refunded'){
           ev.payments.push({ amount: -updated.amount, source:'Возврат', type:'refund', ts: Date.now(), refundRef: updated.id });
           ev.price = Math.max(0, (ev.price||0) - updated.amount);
+          // "Согласованная цена" тоже уменьшается — иначе "Чистая прибыль" считает прогнозную выручку
+          // как max(цена, согласованная цена) и при указанной согласованной цене продолжит игнорировать возврат
+          if(ev.agreedPrice!==undefined && ev.agreedPrice!==null && !isNaN(ev.agreedPrice)){
+            ev.agreedPrice = Math.max(0, Number(ev.agreedPrice) - updated.amount);
+          }
         }
         if(ev.payments.length !== before || (eventId === updated.eventId && updated.status === 'refunded')) anyRefundEventChanged = true;
       });
       if(anyRefundEventChanged) await saveEvents();
+      // возврат меняет цену/журнал платежей мероприятия — подтягиваем "Книгу" (и грубую авто-запись, если журнала нет),
+      // иначе "Книга" останется на сумме до возврата и сверка "Календарь vs Книга" покажет ложное расхождение
+      for(const eventId of affectedRefundEventIds){
+        const ev = state.events.find(e=>e.id===eventId);
+        if(!ev) continue;
+        await syncEventIncomeIfNeeded(ev);
+        await syncEventPaymentsToBook(ev);
+      }
 
       const idx = state.refunds.findIndex(x=>x.id===updated.id);
       if(idx >= 0) state.refunds[idx] = updated; else state.refunds.push(updated);
@@ -8008,7 +8175,8 @@
       }
     }
     const npManual = (state.netProfitManual && state.netProfitManual[monthYm]) || {};
-    const npManagerSalary = (npManual.managerSalary!==undefined && npManual.managerSalary!==null) ? Number(npManual.managerSalary) : 0;
+    // ЗП менеджеров считается автоматически по той же формуле, что и в «Для менеджеров → ЗП менеджеров»
+    const npManagerSalary = computeManagerSalaryForMonth(monthYm).total;
     const npRent = (npManual.rent!==undefined && npManual.rent!==null) ? Number(npManual.rent) : 0;
     const npStaffList = npManual.staff || [];
     const npStaffTotal = npStaffList.reduce((s,x)=> s + (Number(x.amount)||0), 0);
@@ -8017,6 +8185,46 @@
 
     const npTotalExpenses = npMaterialsCost + npMarketingCost + npMastersSalary + npHostessSalary + npManagerSalary + npRent + npStaffTotal + npCustomTotal;
     const netProfit = npTotalRevenue - npTotalExpenses;
+
+    // ---------- КЭШФЛОУ: реальное движение денег по датам (в отличие от начисленной прибыли выше) ----------
+    // "Чистая прибыль" выше — это начисление: выручка мероприятия учитывается целиком в момент мероприятия,
+    // расход на смену — в момент начисления ЗП, и т.п. Кэшфлоу считает только то, что ФАКТИЧЕСКИ
+    // пришло/ушло этой датой: оплаты из журнала платежей мероприятий, продажи (сертификаты/изделия/заказы),
+    // доходы из "Книги" — и ВСЕ расходы (любой категории) и возвраты, у которых дата попадает в этот месяц.
+    const cfEventPayments = [];
+    state.events.forEach(e=>{
+      (e.payments||[]).forEach(p=>{
+        if(p.date && p.date.startsWith(monthYm)) cfEventPayments.push({ ...p, eventTitle: e.title||'Без названия', eventDate: e.date });
+      });
+    });
+    const cfEventPaymentsTotal = cfEventPayments.reduce((s,p)=> s + (Number(p.amount)||0), 0);
+    // мероприятия этого месяца с указанной ценой, но без единой записи в журнале платежей —
+    // их деньги в кэшфлоу не попадают, пока оплата не занесена туда с датой
+    const cfEventsMissingLog = evts.filter(e=> (Number(e.price)||0) > 0 && !(Array.isArray(e.payments) && e.payments.length>0));
+    const cfEventsMissingLogSum = cfEventsMissingLog.reduce((s,e)=> s + (Number(e.price)||0), 0);
+
+    // "Доходы из «Книги»" не должны задваивать оплаты, которые уже попали в «Журнал платежей» выше —
+    // такие записи (autoFromPayment) созданы автоматически из тех же самых оплат, поэтому здесь их исключаем.
+    // Грубые записи "на всю сумму" по Частнику/Выезду без журнала (autoFromEvent) — не дублируют журнал и остаются.
+    const incomesMonthTotalForCashflow = state.incomes
+      .filter(i=> i.date && i.date.startsWith(monthYm) && !i.autoFromPayment)
+      .reduce((s,i)=> s + ((i.amount!==undefined&&i.amount!==null&&!isNaN(i.amount))?Number(i.amount):0), 0);
+    const cfCashInRows = [
+      { label: 'Оплаты по мероприятиям (журнал платежей)', amount: cfEventPaymentsTotal },
+      { label: 'Продажа сертификатов', amount: certMonthSales },
+      { label: 'Продажа изделий', amount: npItemSalesRevenue },
+      { label: 'Заказы', amount: npOrdersRevenue },
+      { label: 'Доходы из «Книги»', amount: incomesMonthTotalForCashflow },
+    ].filter(r=>r.amount>0);
+    const cfCashIn = cfCashInRows.reduce((s,r)=>s+r.amount, 0);
+
+    const cfExpensesTotal = state.expenses.filter(e=> e.date && e.date.startsWith(monthYm)).reduce((s,e)=> s + ((e.amount!==undefined&&e.amount!==null&&!isNaN(e.amount))?Number(e.amount):0), 0);
+    const cfCashOutRows = [
+      { label: 'Все расходы («Книга»)', amount: cfExpensesTotal },
+      { label: 'Возвраты', amount: refundsTotalAmount },
+    ].filter(r=>r.amount>0);
+    const cfCashOut = cfCashOutRows.reduce((s,r)=>s+r.amount, 0);
+    const cfNet = cfCashIn - cfCashOut;
 
     const certUsedThisMonth = state.certificates.reduce((sum,c)=>{
       if(!Array.isArray(c.redemptions)) return sum;
@@ -8264,6 +8472,36 @@
       </div>
     `;
 
+    const analyticsPanel_cashflow = `
+      <div class="analytics-section">
+        <div style="font-size:24px;font-family:var(--font-display);font-weight:600;color:${cfNet>=0?'var(--status-green)':'var(--status-red)'};margin-bottom:4px;">${formatMoney(cfNet)}</div>
+        <div style="font-size:12px;color:var(--ink-soft);margin-bottom:14px;">Реальные деньги за ${monthLabel}, по датам факта — приход минус расход. В отличие от «Чистой прибыли», не начисляется заранее: мероприятие попадает сюда только если по нему занесена оплата в «Журнал платежей» карточки мероприятия, с датой, попадающей в этот месяц.</div>
+        ${netProfit !== cfNet ? `<div class="stat-row"><div class="stat-label">Для сравнения: начисленная прибыль</div><div style="flex:1;font-family:var(--font-mono);font-size:13px;text-align:right;color:${netProfit>=0?'var(--status-green)':'var(--status-red)'};">${formatMoney(netProfit)}</div></div>` : ''}
+      </div>
+      <div class="analytics-section">
+        <h4 style="margin-top:0;">Приход: ${formatMoney(cfCashIn)}</h4>
+        ${cfCashInRows.length===0 ? '<div style="color:var(--ink-soft);font-size:13px;">В этом месяце реальных поступлений не зафиксировано.</div>' : cfCashInRows.map(r=>`
+          <div class="stat-row"><div class="stat-label">${escapeHtml(r.label)}</div><div style="flex:1;font-family:var(--font-mono);font-size:13px;text-align:right;color:var(--status-green);">${formatMoney(r.amount)}</div></div>
+        `).join('')}
+      </div>
+      <div class="analytics-section">
+        <h4 style="margin-top:0;">Расход: ${formatMoney(cfCashOut)}</h4>
+        ${cfCashOutRows.length===0 ? '<div style="color:var(--ink-soft);font-size:13px;">В этом месяце расходов не зафиксировано.</div>' : cfCashOutRows.map(r=>`
+          <div class="stat-row"><div class="stat-label">${escapeHtml(r.label)}</div><div style="flex:1;font-family:var(--font-mono);font-size:13px;text-align:right;color:var(--status-red);">${formatMoney(r.amount)}</div></div>
+        `).join('')}
+      </div>
+      ${cfEventsMissingLog.length>0 ? `
+      <div class="analytics-section">
+        <h4 style="margin-top:0;color:var(--status-red);">⚠ Не занесено в журнал платежей: ${cfEventsMissingLog.length} мероприятий на ${formatMoney(cfEventsMissingLogSum)}</h4>
+        <div style="font-size:12px;color:var(--ink-soft);margin-bottom:10px;">Эти деньги не попали в приход выше — цена указана, но ни одной оплаты в «Журнал платежей» карточки мероприятия не занесено. Занесите оплаты с реальными датами, чтобы кэшфлоу считал их.</div>
+        ${cfEventsMissingLog.slice(0,20).map(e=>`
+          <div class="stat-row"><div class="stat-label">${escapeHtml(e.date?formatDateText(e.date):'')} · ${escapeHtml(e.title||'без названия')}</div><div style="flex:1;font-family:var(--font-mono);font-size:13px;text-align:right;">${formatMoney(Number(e.price)||0)}</div></div>
+        `).join('')}
+        ${cfEventsMissingLog.length>20 ? `<div style="font-size:12px;color:var(--ink-soft);margin-top:6px;">…и ещё ${cfEventsMissingLog.length-20}</div>` : ''}
+      </div>
+      ` : ''}
+    `;
+
     if(total === 0 && !state.loggedInMasterName && !state.loggedInHostessName){
       const analyticsPanel_netprofit_empty = `
         <div class="analytics-section">
@@ -8279,16 +8517,16 @@
           <div class="stat-row"><div class="stat-label">Маркетинг</div><div style="flex:1;font-family:var(--font-mono);font-size:13px;text-align:right;color:var(--status-red);">${formatMoney(npMarketingCost)}</div></div>
           <div class="stat-row"><div class="stat-label">ЗП мастеров</div><div style="flex:1;font-family:var(--font-mono);font-size:13px;text-align:right;color:var(--status-red);">${formatMoney(npMastersSalary)}</div></div>
           <div class="stat-row"><div class="stat-label">ЗП админов</div><div style="flex:1;font-family:var(--font-mono);font-size:13px;text-align:right;color:var(--status-red);">${formatMoney(npHostessSalary)}</div></div>
-          <div class="stat-row"><div class="stat-label">ЗП менеджеров</div><div style="flex:1;font-family:var(--font-mono);font-size:13px;text-align:right;color:var(--status-red);">${formatMoney(npManagerSalary)}</div></div>
+          <div class="stat-row"><div class="stat-label">ЗП менеджеров (авто)</div><div style="flex:1;font-family:var(--font-mono);font-size:13px;text-align:right;color:var(--status-red);">${formatMoney(npManagerSalary)}</div></div>
           <div class="stat-row"><div class="stat-label">Аренда</div><div style="flex:1;font-family:var(--font-mono);font-size:13px;text-align:right;color:var(--status-red);">${formatMoney(npRent)}</div></div>
           ${npStaffList.map(s=>`<div class="stat-row"><div class="stat-label">${escapeHtml(s.name||'Сотрудник')}</div><div style="flex:1;font-family:var(--font-mono);font-size:13px;text-align:right;color:var(--status-red);">${formatMoney(Number(s.amount)||0)}</div></div>`).join('')}
           ${npCustomList.map(c=>`<div class="stat-row"><div class="stat-label">${escapeHtml(c.name||'Статья расхода')}</div><div style="flex:1;font-family:var(--font-mono);font-size:13px;text-align:right;color:var(--status-red);">${formatMoney(Number(c.amount)||0)}</div></div>`).join('')}
           <div style="margin-top:16px;">
-            <button class="btn btn-ghost owner-panel-btn" data-panel="netprofit-edit" style="border-color:#6B4A1E;color:#6B4A1E;">✏ Изменить ЗП менеджеров / аренду / свои статьи</button>
+            <button class="btn btn-ghost owner-panel-btn" data-panel="netprofit-edit" style="border-color:#6B4A1E;color:#6B4A1E;">✏ Изменить аренду / свои статьи</button>
           </div>
         </div>
       `;
-      state.analyticsPanels = { plan: analyticsPanel_plan, netprofit: analyticsPanel_netprofit_empty, yearsummary: analyticsPanel_yearsummary, auditlog: analyticsPanel_auditlog, marketing: analyticsPanel_marketing, integrity: renderEventsIntegrityPanel() };
+      state.analyticsPanels = { plan: analyticsPanel_plan, netprofit: analyticsPanel_netprofit_empty, cashflow: analyticsPanel_cashflow, yearsummary: analyticsPanel_yearsummary, auditlog: analyticsPanel_auditlog, marketing: analyticsPanel_marketing, integrity: renderEventsIntegrityPanel() };
       let emptyCompareHtml = '';
       if(state.compareMode){
         const prevCursor = new Date(cursor.getFullYear(), cursor.getMonth()-1, 1);
@@ -8319,6 +8557,7 @@
             <button class="btn btn-ghost analytics-panel-btn" data-panel="plan" style="${hasAnyPlan?'':'border-color:var(--accent);color:var(--accent);'}">🎯 Выполнение плана</button>
             <button class="btn btn-ghost" id="btn-edit-plan">✏ Задать план</button>
             <button class="btn btn-ghost owner-panel-btn" data-panel="netprofit" style="border-color:#6B4A1E;color:#6B4A1E;">🔒 Чистая прибыль</button>
+            <button class="btn btn-ghost owner-panel-btn" data-panel="cashflow" style="border-color:#6B4A1E;color:#6B4A1E;">💵 Кэшфлоу</button>
             <button class="btn btn-ghost analytics-panel-btn" data-panel="yearsummary">📆 Сводка по годам</button>
             <button class="btn btn-ghost analytics-panel-btn" data-panel="auditlog">📜 Журнал действий</button>
             <button class="btn btn-ghost analytics-panel-btn" data-panel="integrity" style="${(state.eventsIntegrityAlerts&&state.eventsIntegrityAlerts.length>0)?'border-color:var(--status-red);color:var(--status-red);':''}">🛡 Сохранность расписания</button>
@@ -8696,22 +8935,41 @@
     const maxHostessSalaryH1 = Math.max(1, ...hostessSalaryH1List.map(x=>x[1]));
     const maxHostessSalaryH2 = Math.max(1, ...hostessSalaryH2List.map(x=>x[1]));
 
-    // сверка: начислено (МК + изделия + заказы + корректировки) vs выплачено (по расходам категории "Зарплата")
-    const monthExpenses = state.expenses.filter(e=> e.date && e.date.startsWith(cursor.getFullYear()+'-'+pad(cursor.getMonth()+1)));
-    const hostPaid = {};
-    monthExpenses.filter(e=>e.category==='Зарплата' && e.master).forEach(e=>{
-      const m = e.master.trim();
-      hostPaid[m] = (hostPaid[m]||0) + ((e.amount!==undefined&&e.amount!==null&&!isNaN(e.amount))?Number(e.amount):0);
+    // сверка: начислено vs выплачено (по расходам категории "Зарплата"), с учётом того, что ЗП выдаётся
+    // двумя частями по фактическому графику выплат: за 1–15 число — 16-го числа ЭТОГО ЖЕ месяца,
+    // за 16 – конец месяца — 2-го числа СЛЕДУЮЩЕГО месяца. Поэтому:
+    //  - расход категории «Зарплата», помеченный мастером, с датой 16-е число и позже в месяце M — это выплата за 1-ю половину M;
+    //  - такой же расход с датой 1–15 число в месяце M+1 — это выплата за 2-ю половину M.
+    // И до наступления даты выплаты (16-е / 2-е) расхождение не считается долгом — ещё рано его платить.
+    const reconY = cursor.getFullYear(), reconM = cursor.getMonth();
+    const reconYm = reconY+'-'+pad(reconM+1);
+    const reconNextYm = reconM===11 ? (reconY+1)+'-01' : reconY+'-'+pad(reconM+2);
+    const dueDateH1 = reconYm+'-16';
+    const dueDateH2 = reconNextYm+'-02';
+    const todayD = todayStr();
+    const hostPaidH1 = {}, hostPaidH2 = {};
+    state.expenses.forEach(e=>{
+      if(e.category!=='Зарплата' || !e.master || !e.date) return;
+      const name = e.master.trim();
+      const amount = (e.amount!==undefined&&e.amount!==null&&!isNaN(e.amount)) ? Number(e.amount) : 0;
+      const eym = e.date.slice(0,7);
+      const day = parseInt(e.date.slice(8,10),10) || 1;
+      if(eym===reconYm && day>=16){ hostPaidH1[name] = (hostPaidH1[name]||0) + amount; }
+      if(eym===reconNextYm && day<=15){ hostPaidH2[name] = (hostPaidH2[name]||0) + amount; }
     });
-    const accruedByHost = {};
-    combinedMasterTotals.forEach(x=>{ accruedByHost[x.name] = x.total; });
-    const allSalaryHosts = Array.from(new Set([...Object.keys(accruedByHost), ...Object.keys(hostPaid)]));
-    const salaryReconciliation = allSalaryHosts.map(h=>{
-      const accrued = accruedByHost[h]||0;
-      const paid = hostPaid[h]||0;
-      return { name:h, accrued, paid, diff: accrued - paid };
-    }).filter(x=> x.diff !== 0)
-      .sort((a,b)=> Math.abs(b.diff)-Math.abs(a.diff));
+    const allSalaryHosts = Array.from(new Set([...Object.keys(hostSalaryH1), ...Object.keys(hostSalaryH2), ...Object.keys(hostPaidH1), ...Object.keys(hostPaidH2)]));
+    const salaryReconciliation = [];
+    allSalaryHosts.forEach(name=>{
+      const accruedH1 = hostSalaryH1[name]||0, paidH1v = hostPaidH1[name]||0, diffH1 = accruedH1 - paidH1v;
+      if(diffH1 !== 0 && todayD >= dueDateH1){
+        salaryReconciliation.push({ name, halfLabel: '1–15 число', accrued: accruedH1, paid: paidH1v, diff: diffH1 });
+      }
+      const accruedH2 = hostSalaryH2[name]||0, paidH2v = hostPaidH2[name]||0, diffH2 = accruedH2 - paidH2v;
+      if(diffH2 !== 0 && todayD >= dueDateH2){
+        salaryReconciliation.push({ name, halfLabel: '16 – конец месяца', accrued: accruedH2, paid: paidH2v, diff: diffH2 });
+      }
+    });
+    salaryReconciliation.sort((a,b)=> Math.abs(b.diff)-Math.abs(a.diff));
 
     function hostBreakdownHtml(hostName){
       const hostEvts = evts.filter(e=>{
@@ -8983,14 +9241,14 @@
         </div>
         <div class="analytics-section">
           <h4 style="color:${salaryReconciliation.length>0?'var(--status-red)':'inherit'};">Начислено vs Выплачено ${salaryReconciliation.length ? `(${salaryReconciliation.length} расхождений)` : ''}</h4>
-          <div style="font-size:11.5px;color:var(--ink-soft);font-family:var(--font-mono);margin-bottom:8px;">Начислено — вся зарплата мастера за месяц (МК + изделия + заказы + корректировки). Выплачено — сумма расходов категории «Зарплата» с указанным мастером за этот месяц (поле «Мастер» в «Расходах»).</div>
+          <div style="font-size:11.5px;color:var(--ink-soft);font-family:var(--font-mono);margin-bottom:8px;">ЗП выдаётся двумя частями: за 1–15 число — 16-го, за 16 – конец месяца — 2-го числа следующего месяца. Выплаченным считается расход категории «Зарплата» с указанным мастером и датой в соответствующем окне выдачи. Расхождение показывается только после даты выдачи — до неё платить ещё рано.</div>
           ${salaryReconciliation.length ? salaryReconciliation.map(x=>`
             <div class="stat-row">
-              <div class="stat-label">${escapeHtml(x.name)}</div>
+              <div class="stat-label">${escapeHtml(x.name)} <span style="color:var(--ink-soft);font-weight:400;">· ${x.halfLabel}</span></div>
               <div style="flex:1;font-size:12.5px;">Начислено: ${formatMoney(x.accrued)} · Выплачено: ${formatMoney(x.paid)}</div>
               <div class="stat-count" style="width:auto;font-size:12px;color:${x.diff>0?'var(--status-red)':'var(--status-blue)'};">${x.diff>0?'−':'+'}${formatMoney(Math.abs(x.diff))}</div>
             </div>
-          `).join('') : `<div style="color:var(--status-green);font-size:13px;">✓ У всех мастеров начисленное совпадает с выплаченным.</div>`}
+          `).join('') : `<div style="color:var(--status-green);font-size:13px;">✓ У всех мастеров начисленное совпадает с выплаченным (по срокам, которые уже наступили).</div>`}
         </div>
         <div class="analytics-section">
           <h4>Зарплата админов за месяц: ${formatMoney(totalHostessSalary)}</h4>
@@ -9219,17 +9477,17 @@
         <div class="stat-row"><div class="stat-label">Маркетинг</div><div style="flex:1;font-family:var(--font-mono);font-size:13px;text-align:right;color:var(--status-red);">${formatMoney(npMarketingCost)}</div></div>
         <div class="stat-row"><div class="stat-label">ЗП мастеров</div><div style="flex:1;font-family:var(--font-mono);font-size:13px;text-align:right;color:var(--status-red);">${formatMoney(npMastersSalary)}</div></div>
         <div class="stat-row"><div class="stat-label">ЗП админов</div><div style="flex:1;font-family:var(--font-mono);font-size:13px;text-align:right;color:var(--status-red);">${formatMoney(npHostessSalary)}</div></div>
-        <div class="stat-row"><div class="stat-label">ЗП менеджеров</div><div style="flex:1;font-family:var(--font-mono);font-size:13px;text-align:right;color:var(--status-red);">${formatMoney(npManagerSalary)}</div></div>
+        <div class="stat-row"><div class="stat-label">ЗП менеджеров (авто)</div><div style="flex:1;font-family:var(--font-mono);font-size:13px;text-align:right;color:var(--status-red);">${formatMoney(npManagerSalary)}</div></div>
         <div class="stat-row"><div class="stat-label">Аренда</div><div style="flex:1;font-family:var(--font-mono);font-size:13px;text-align:right;color:var(--status-red);">${formatMoney(npRent)}</div></div>
         ${npStaffList.map(s=>`<div class="stat-row"><div class="stat-label">${escapeHtml(s.name||'Сотрудник')}</div><div style="flex:1;font-family:var(--font-mono);font-size:13px;text-align:right;color:var(--status-red);">${formatMoney(Number(s.amount)||0)}</div></div>`).join('')}
         ${npCustomList.map(c=>`<div class="stat-row"><div class="stat-label">${escapeHtml(c.name||'Статья расхода')}</div><div style="flex:1;font-family:var(--font-mono);font-size:13px;text-align:right;color:var(--status-red);">${formatMoney(Number(c.amount)||0)}</div></div>`).join('')}
 
         <div style="margin-top:16px;">
-          <button class="btn btn-ghost owner-panel-btn" data-panel="netprofit-edit" style="border-color:#6B4A1E;color:#6B4A1E;">✏ Изменить ЗП менеджеров / аренду / свои статьи</button>
+          <button class="btn btn-ghost owner-panel-btn" data-panel="netprofit-edit" style="border-color:#6B4A1E;color:#6B4A1E;">✏ Изменить аренду / свои статьи</button>
         </div>
       </div>
     `;
-    state.analyticsPanels = { plan: analyticsPanel_plan, occupancy: analyticsPanel_occupancy, days: analyticsPanel_days, ceramics: analyticsPanel_ceramics, guests: analyticsPanel_guests, legal: analyticsPanel_legal, reports: analyticsPanel_reports, netprofit: analyticsPanel_netprofit, yearsummary: analyticsPanel_yearsummary, auditlog: analyticsPanel_auditlog, marketing: analyticsPanel_marketing, integrity: renderEventsIntegrityPanel() };
+    state.analyticsPanels = { plan: analyticsPanel_plan, occupancy: analyticsPanel_occupancy, days: analyticsPanel_days, ceramics: analyticsPanel_ceramics, guests: analyticsPanel_guests, legal: analyticsPanel_legal, reports: analyticsPanel_reports, netprofit: analyticsPanel_netprofit, cashflow: analyticsPanel_cashflow, yearsummary: analyticsPanel_yearsummary, auditlog: analyticsPanel_auditlog, marketing: analyticsPanel_marketing, integrity: renderEventsIntegrityPanel() };
 
     const fullHtml = `
       <div class="cal-nav">
@@ -9291,6 +9549,7 @@
             <button class="btn btn-ghost analytics-panel-btn" data-panel="integrity" style="${(state.eventsIntegrityAlerts&&state.eventsIntegrityAlerts.length>0)?'border-color:var(--status-red);color:var(--status-red);':''}">🛡 Сохранность расписания</button>
             <button class="btn btn-ghost analytics-panel-btn" data-panel="marketing">📣 Маркетинг</button>
           <button class="btn btn-ghost owner-panel-btn" data-panel="netprofit" style="border-color:#6B4A1E;color:#6B4A1E;">🔒 Чистая прибыль</button>
+            <button class="btn btn-ghost owner-panel-btn" data-panel="cashflow" style="border-color:#6B4A1E;color:#6B4A1E;">💵 Кэшфлоу</button>
         </div>
       </div>
 
@@ -11404,6 +11663,7 @@
 
   const ANALYTICS_PANEL_TITLES = {
     plan: '🎯 Выполнение плана',
+    cashflow: '💵 Кэшфлоу (реальные деньги)',
     occupancy: '📊 Заполняемость',
     days: '📅 Сводка по дням',
     ceramics: '🏺 Изделия (керамика, гончарный круг)',
@@ -11532,6 +11792,7 @@
     const ym = cursor.getFullYear()+'-'+pad(cursor.getMonth()+1);
     const label = MONTHS[cursor.getMonth()] + ' ' + cursor.getFullYear();
     const manual = (state.netProfitManual && state.netProfitManual[ym]) || {};
+    const autoManagerSalary = computeManagerSalaryForMonth(ym).total;
     return `
       <div class="modal" style="max-width:460px;">
         <div class="modal-head">
@@ -11540,15 +11801,10 @@
         </div>
         <div class="modal-body">
           <div style="font-size:12px;color:var(--ink-soft);margin-top:-6px;">Эти суммы не считаются автоматически нигде в приложении — вписываются вручную каждый месяц. Видно и редактируется только владельцем.</div>
-          <div class="row2">
-            <div class="field">
-              <label>ЗП менеджеров (₽)</label>
-              <input type="number" id="np-manager-salary" value="${manual.managerSalary!==undefined&&manual.managerSalary!==null?manual.managerSalary:''}" placeholder="0">
-            </div>
-            <div class="field">
-              <label>Аренда (₽)</label>
-              <input type="number" id="np-rent" value="${manual.rent!==undefined&&manual.rent!==null?manual.rent:''}" placeholder="0">
-            </div>
+          <div style="font-size:12px;color:var(--ink-soft);background:var(--cream);border-radius:var(--radius);padding:10px 12px;">ЗП менеджеров теперь считается автоматически (оклад + проценты от выручки) и сюда не вписывается — за ${escapeHtml(label)}: <strong>${formatMoney(autoManagerSalary)}</strong>. Посмотреть расчёт — вкладка «Для менеджеров → ЗП менеджеров».</div>
+          <div class="field">
+            <label>Аренда (₽)</label>
+            <input type="number" id="np-rent" value="${manual.rent!==undefined&&manual.rent!==null?manual.rent:''}" placeholder="0">
           </div>
           <div class="field" style="border-top:1px solid var(--line);padding-top:16px;">
             <label style="font-family:var(--font-display);font-size:15px;font-weight:600;">Другие сотрудники</label>
@@ -11632,13 +11888,12 @@
       const cleanedStaff = staffDraft.map(x=>({name:(x.name||'').trim(), amount:x.amount})).filter(x=>x.name);
       const cleanedCustom = customDraft.map(x=>({name:(x.name||'').trim(), amount:x.amount})).filter(x=>x.name);
       const newManual = {
-        managerSalary: readVal('np-manager-salary'),
         rent: readVal('np-rent'),
         staff: cleanedStaff,
         customExpenses: cleanedCustom,
       };
       if(!state.netProfitManual) state.netProfitManual = {};
-      const hasAny = newManual.managerSalary!==null || newManual.rent!==null || cleanedStaff.length>0 || cleanedCustom.length>0;
+      const hasAny = newManual.rent!==null || cleanedStaff.length>0 || cleanedCustom.length>0;
       if(hasAny) state.netProfitManual[ym] = newManual; else delete state.netProfitManual[ym];
       await saveNetProfitManual();
       recordAction("Данные сохранены");
@@ -12345,6 +12600,7 @@
               </select>
             </div>
             <div style="display:flex;gap:8px;margin-top:8px;">
+              <input type="date" id="payment-add-date" value="${todayStr()}" style="border:1px solid var(--line-strong);border-radius:var(--radius);padding:8px 9px;font-family:var(--font-body);font-size:13px;background:var(--paper);">
               <input type="number" id="payment-add-amount" placeholder="Например: 1000" step="100" style="flex:1;border:1px solid var(--line-strong);border-radius:var(--radius);padding:8px 9px;font-family:var(--font-body);font-size:13px;background:var(--paper);">
               <button type="button" class="btn btn-ghost" id="btn-add-payment" style="white-space:nowrap;">+ Добавить оплату</button>
             </div>
@@ -12838,7 +13094,7 @@
       if(!paymentsLogEl) return;
       paymentsLogEl.innerHTML = paymentsArr.map((p,i)=>`
         <div class="payment-log-row" data-idx="${i}" style="display:flex;justify-content:space-between;align-items:center;font-size:12px;color:var(--ink-soft);font-family:var(--font-mono);">
-          <span>+${formatMoney(p.amount)}${p.source?' · '+escapeHtml(p.source):''}${p.type?' · '+(PAYMENT_TYPE_LABEL[p.type]||p.type):''}${p.ts?' · '+new Date(p.ts).toLocaleString('ru-RU',{day:'numeric',month:'short',hour:'2-digit',minute:'2-digit'}):''}</span>
+          <span>+${formatMoney(p.amount)}${p.source?' · '+escapeHtml(p.source):''}${p.type?' · '+(PAYMENT_TYPE_LABEL[p.type]||p.type):''}${p.date?' · '+formatDateText(p.date):(p.ts?' · '+new Date(p.ts).toLocaleString('ru-RU',{day:'numeric',month:'short',hour:'2-digit',minute:'2-digit'}):'')}</span>
           <button type="button" class="payment-del" data-idx="${i}" style="background:none;border:none;color:var(--danger);cursor:pointer;font-size:11px;font-family:var(--font-body);">убрать</button>
         </div>
       `).join('');
@@ -12879,6 +13135,7 @@
 
     const addPaymentBtn = overlay.querySelector('#btn-add-payment');
     const paymentAmountInput = overlay.querySelector('#payment-add-amount');
+    const paymentDateInput = overlay.querySelector('#payment-add-date');
     const paymentSourceSelect = overlay.querySelector('#payment-source');
     const paymentTypeSelect = overlay.querySelector('#payment-type');
     if(addPaymentBtn && paymentAmountInput){
@@ -12886,9 +13143,11 @@
         const amount = parseInt(paymentAmountInput.value) || 0;
         if(amount <= 0) return;
         paymentsArr.push({
+          id: uid(),
           amount,
           source: paymentSourceSelect ? paymentSourceSelect.value : '',
           type: paymentTypeSelect ? paymentTypeSelect.value : '',
+          date: (paymentDateInput && paymentDateInput.value) ? paymentDateInput.value : todayStr(),
           ts: new Date().toISOString(),
         });
         paymentsHidden.value = JSON.stringify(paymentsArr);
@@ -13089,9 +13348,10 @@
         catalogChanged = true;
       });
       if(catalogChanged) await saveMaterialsCatalog();
-      const linkedAutoIncome = state.incomes.find(i=> i.eventId===eventToDelete.id && i.autoFromEvent);
-      if(linkedAutoIncome){
-        state.incomes = state.incomes.filter(x=>x.id !== linkedAutoIncome.id);
+      const linkedAutoIncomes = state.incomes.filter(i=> i.eventId===eventToDelete.id && (i.autoFromEvent || i.autoFromPayment));
+      if(linkedAutoIncomes.length){
+        const removeIds = new Set(linkedAutoIncomes.map(i=>i.id));
+        state.incomes = state.incomes.filter(x=>!removeIds.has(x.id));
         await saveIncomes();
       }
       await saveEvents();
@@ -13365,6 +13625,7 @@
 
       await saveEvents();
       await syncEventIncomeIfNeeded(updated);
+      await syncEventPaymentsToBook(updated);
       const dayEvts = state.events.filter(e=>e.date===updated.date && e.spaceId===updated.spaceId);
       const warns = computeGapWarnings(dayEvts);
       recordAction('Мероприятие сохранено');
