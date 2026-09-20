@@ -749,7 +749,7 @@
   const INCOME_PRODUCTS = [...PRODUCTS, 'Сертификат', 'Изделие', 'Заказ', 'Другое'];
   const INCOME_ACCOUNTS = ['Точка','Наличные','Юклиент','ЮрСчет'];
 
-  const EXPENSE_CATEGORIES = ['Материалы','Инвентарь','Маркетинг','Зарплата','Подарки','Операции','Декор','Логистика','Продукты','Типография','Косяки'];
+  const EXPENSE_CATEGORIES = ['Материалы','Инвентарь','Маркетинг','Зарплата','Аренда','Подарки','Операции','Декор','Логистика','Продукты','Типография','Косяки'];
   const EXPENSE_SOURCES = ['Наличные','Точка','ВБ','Озон','Карина'];
   const EXPENSE_RESPONSIBLE = ['Карина','Ассистент','Менеджер'];
 
@@ -5805,7 +5805,8 @@
   function renderExpensesView(period){
     const inPeriod = period ? period.inPeriod : (()=>true);
     const periodLabel = period ? period.periodLabel : '';
-    const expensesP = state.expenses.filter(e=>inPeriod(e.date));
+    const isOwner = state.currentRole === 'owner';
+    const expensesP = state.expenses.filter(e=>inPeriod(e.date) && (isOwner || !e.ownerOnly));
     const items = [...expensesP].sort((a,b)=> (b.date||'').localeCompare(a.date||''));
     const total = items.reduce((s,e)=> s + ((e.amount!==undefined&&e.amount!==null&&!isNaN(e.amount))?Number(e.amount):0), 0);
 
@@ -5839,7 +5840,7 @@
           ${items.map(e=>`
             <div class="expense-row" data-eid="${e.id}">
               <div class="cell">${e.date ? formatDateText(e.date) : '—'}</div>
-              <div class="cell">${escapeHtml(e.category||'')}${e.category==='Материалы'&&e.direction?'<br><span style="color:var(--ink-soft);font-size:11px;">'+escapeHtml(e.direction)+'</span>':''}${e.category==='Зарплата'&&e.master?'<br><span style="color:var(--ink-soft);font-size:11px;">'+escapeHtml(e.master)+'</span>':''}</div>
+              <div class="cell">${escapeHtml(e.category||'')}${e.ownerOnly?' <span title="Из «Ручные расходы» — редактируется там, видно только владельцу" style="opacity:.55;">🔒</span>':''}${e.category==='Материалы'&&e.direction?'<br><span style="color:var(--ink-soft);font-size:11px;">'+escapeHtml(e.direction)+'</span>':''}${e.category==='Зарплата'&&e.master?'<br><span style="color:var(--ink-soft);font-size:11px;">'+escapeHtml(e.master)+'</span>':''}</div>
               <div class="cell">${escapeHtml(e.source||'')}</div>
               <div class="amount">${e.amount!==undefined&&e.amount!==null ? formatMoney(e.amount) : ''}</div>
               <div class="cell">${escapeHtml(e.responsible||'')}</div>
@@ -5911,6 +5912,16 @@
       row.onclick = ()=>{
         const e = state.expenses.find(x=>x.id===row.dataset.eid);
         if(!e) return;
+        if(e.ownerOnly && e.netProfitRef){
+          const ym = e.netProfitRef.split(':')[1];
+          const [y,m] = ym.split('-').map(Number);
+          requireUnlock(()=>{
+            state.analyticsCursor = new Date(y, m-1, 1);
+            state.modal = {type:'netprofit-edit'};
+            render();
+          });
+          return;
+        }
         requireUnlock(()=>{
           state.modal = {type:'expense', isNew:false, expense:{...e}};
           render();
@@ -8316,6 +8327,23 @@
 
     const npTotalExpenses = npMaterialsCost + npMarketingCost + npMastersSalary + npHostessSalary + npManagerSalary + npRent + npStaffTotal + npCustomTotal;
     const netProfit = npTotalRevenue - npTotalExpenses;
+    // разбивка для финмодели ("из чего состоит выручка/расходы") — доли считаются от выручки месяца
+    const npRevenueRows = [
+      {label:'Мероприятия', amount: npEventsRevenue},
+      {label:'Изделия', amount: npItemSalesRevenue},
+      {label:'Сертификаты', amount: npCertSalesRevenue},
+      {label:'Заказы', amount: npOrdersRevenue},
+    ];
+    const npExpenseRows = [
+      {label:'Материалы', amount: npMaterialsCost},
+      {label:'Маркетинг', amount: npMarketingCost},
+      {label:'ЗП мастеров', amount: npMastersSalary},
+      {label:'ЗП админов', amount: npHostessSalary},
+      {label:'ЗП менеджеров (авто)', amount: npManagerSalary},
+      {label:'Аренда', amount: npRent},
+      ...npStaffList.map(s=>({label: s.name||'Сотрудник', amount: Number(s.amount)||0})),
+      ...npCustomList.map(c=>({label: c.name||'Статья расхода', amount: Number(c.amount)||0})),
+    ];
 
     // ---------- КЭШФЛОУ: реальное движение денег по датам (в отличие от начисленной прибыли выше) ----------
     // "Чистая прибыль" выше — это начисление: выручка мероприятия учитывается целиком в момент мероприятия,
@@ -8636,22 +8664,9 @@
     if(total === 0 && !state.loggedInMasterName && !state.loggedInHostessName){
       const analyticsPanel_netprofit_empty = `
         <div class="analytics-section">
-          <div style="font-size:24px;font-family:var(--font-display);font-weight:600;color:${netProfit>=0?'var(--status-green)':'var(--status-red)'};margin-bottom:4px;">${formatMoney(netProfit)}</div>
+          <div style="font-size:24px;font-family:var(--font-display);font-weight:600;color:${netProfit>=0?'var(--status-green)':'var(--status-red)'};margin-bottom:4px;">${formatMoney(netProfit)}${npSharePct(netProfit, npTotalRevenue)}</div>
           <div style="font-size:12px;color:var(--ink-soft);margin-bottom:14px;">Выручка − Расходы за месяц. В этом месяце нет мероприятий, но остальная выручка/расходы всё равно считаются.</div>
-          <div style="font-family:var(--font-display);font-weight:600;font-size:14px;margin-top:6px;">Выручка: ${formatMoney(npTotalRevenue)}</div>
-          <div class="stat-row"><div class="stat-label">Мероприятия</div><div style="flex:1;font-family:var(--font-mono);font-size:13px;text-align:right;">${formatMoney(npEventsRevenue)}</div></div>
-          <div class="stat-row"><div class="stat-label">Изделия</div><div style="flex:1;font-family:var(--font-mono);font-size:13px;text-align:right;">${formatMoney(npItemSalesRevenue)}</div></div>
-          <div class="stat-row"><div class="stat-label">Сертификаты</div><div style="flex:1;font-family:var(--font-mono);font-size:13px;text-align:right;">${formatMoney(npCertSalesRevenue)}</div></div>
-          <div class="stat-row"><div class="stat-label">Заказы</div><div style="flex:1;font-family:var(--font-mono);font-size:13px;text-align:right;">${formatMoney(npOrdersRevenue)}</div></div>
-          <div style="font-family:var(--font-display);font-weight:600;font-size:14px;margin-top:16px;">Расходы: ${formatMoney(npTotalExpenses)}</div>
-          <div class="stat-row"><div class="stat-label">Материалы</div><div style="flex:1;font-family:var(--font-mono);font-size:13px;text-align:right;color:var(--status-red);">${formatMoney(npMaterialsCost)}</div></div>
-          <div class="stat-row"><div class="stat-label">Маркетинг</div><div style="flex:1;font-family:var(--font-mono);font-size:13px;text-align:right;color:var(--status-red);">${formatMoney(npMarketingCost)}</div></div>
-          <div class="stat-row"><div class="stat-label">ЗП мастеров</div><div style="flex:1;font-family:var(--font-mono);font-size:13px;text-align:right;color:var(--status-red);">${formatMoney(npMastersSalary)}</div></div>
-          <div class="stat-row"><div class="stat-label">ЗП админов</div><div style="flex:1;font-family:var(--font-mono);font-size:13px;text-align:right;color:var(--status-red);">${formatMoney(npHostessSalary)}</div></div>
-          <div class="stat-row"><div class="stat-label">ЗП менеджеров (авто)</div><div style="flex:1;font-family:var(--font-mono);font-size:13px;text-align:right;color:var(--status-red);">${formatMoney(npManagerSalary)}</div></div>
-          <div class="stat-row"><div class="stat-label">Аренда</div><div style="flex:1;font-family:var(--font-mono);font-size:13px;text-align:right;color:var(--status-red);">${formatMoney(npRent)}</div></div>
-          ${npStaffList.map(s=>`<div class="stat-row"><div class="stat-label">${escapeHtml(s.name||'Сотрудник')}</div><div style="flex:1;font-family:var(--font-mono);font-size:13px;text-align:right;color:var(--status-red);">${formatMoney(Number(s.amount)||0)}</div></div>`).join('')}
-          ${npCustomList.map(c=>`<div class="stat-row"><div class="stat-label">${escapeHtml(c.name||'Статья расхода')}</div><div style="flex:1;font-family:var(--font-mono);font-size:13px;text-align:right;color:var(--status-red);">${formatMoney(Number(c.amount)||0)}</div></div>`).join('')}
+          ${renderNetProfitFinModel(npRevenueRows, npExpenseRows, npTotalRevenue, npTotalExpenses, netProfit)}
           <div style="margin-top:16px;">
             <button class="btn btn-ghost owner-panel-btn" data-panel="netprofit-edit" style="border-color:#6B4A1E;color:#6B4A1E;">✏ Изменить аренду / свои статьи</button>
           </div>
@@ -9594,25 +9609,9 @@
       </div>`;
     const analyticsPanel_netprofit = `
       <div class="analytics-section">
-        <div style="font-size:24px;font-family:var(--font-display);font-weight:600;color:${netProfit>=0?'var(--status-green)':'var(--status-red)'};margin-bottom:4px;">${formatMoney(netProfit)}</div>
+        <div style="font-size:24px;font-family:var(--font-display);font-weight:600;color:${netProfit>=0?'var(--status-green)':'var(--status-red)'};margin-bottom:4px;">${formatMoney(netProfit)}${npSharePct(netProfit, npTotalRevenue)}</div>
         <div style="font-size:12px;color:var(--ink-soft);margin-bottom:14px;">Выручка − Расходы за месяц</div>
-
-        <div style="font-family:var(--font-display);font-weight:600;font-size:14px;margin-top:6px;">Выручка: ${formatMoney(npTotalRevenue)}</div>
-        <div class="stat-row"><div class="stat-label">Мероприятия</div><div style="flex:1;font-family:var(--font-mono);font-size:13px;text-align:right;">${formatMoney(npEventsRevenue)}</div></div>
-        <div class="stat-row"><div class="stat-label">Изделия</div><div style="flex:1;font-family:var(--font-mono);font-size:13px;text-align:right;">${formatMoney(npItemSalesRevenue)}</div></div>
-        <div class="stat-row"><div class="stat-label">Сертификаты</div><div style="flex:1;font-family:var(--font-mono);font-size:13px;text-align:right;">${formatMoney(npCertSalesRevenue)}</div></div>
-        <div class="stat-row"><div class="stat-label">Заказы</div><div style="flex:1;font-family:var(--font-mono);font-size:13px;text-align:right;">${formatMoney(npOrdersRevenue)}</div></div>
-
-        <div style="font-family:var(--font-display);font-weight:600;font-size:14px;margin-top:16px;">Расходы: ${formatMoney(npTotalExpenses)}</div>
-        <div class="stat-row"><div class="stat-label">Материалы</div><div style="flex:1;font-family:var(--font-mono);font-size:13px;text-align:right;color:var(--status-red);">${formatMoney(npMaterialsCost)}</div></div>
-        <div class="stat-row"><div class="stat-label">Маркетинг</div><div style="flex:1;font-family:var(--font-mono);font-size:13px;text-align:right;color:var(--status-red);">${formatMoney(npMarketingCost)}</div></div>
-        <div class="stat-row"><div class="stat-label">ЗП мастеров</div><div style="flex:1;font-family:var(--font-mono);font-size:13px;text-align:right;color:var(--status-red);">${formatMoney(npMastersSalary)}</div></div>
-        <div class="stat-row"><div class="stat-label">ЗП админов</div><div style="flex:1;font-family:var(--font-mono);font-size:13px;text-align:right;color:var(--status-red);">${formatMoney(npHostessSalary)}</div></div>
-        <div class="stat-row"><div class="stat-label">ЗП менеджеров (авто)</div><div style="flex:1;font-family:var(--font-mono);font-size:13px;text-align:right;color:var(--status-red);">${formatMoney(npManagerSalary)}</div></div>
-        <div class="stat-row"><div class="stat-label">Аренда</div><div style="flex:1;font-family:var(--font-mono);font-size:13px;text-align:right;color:var(--status-red);">${formatMoney(npRent)}</div></div>
-        ${npStaffList.map(s=>`<div class="stat-row"><div class="stat-label">${escapeHtml(s.name||'Сотрудник')}</div><div style="flex:1;font-family:var(--font-mono);font-size:13px;text-align:right;color:var(--status-red);">${formatMoney(Number(s.amount)||0)}</div></div>`).join('')}
-        ${npCustomList.map(c=>`<div class="stat-row"><div class="stat-label">${escapeHtml(c.name||'Статья расхода')}</div><div style="flex:1;font-family:var(--font-mono);font-size:13px;text-align:right;color:var(--status-red);">${formatMoney(Number(c.amount)||0)}</div></div>`).join('')}
-
+        ${renderNetProfitFinModel(npRevenueRows, npExpenseRows, npTotalRevenue, npTotalExpenses, netProfit)}
         <div style="margin-top:16px;">
           <button class="btn btn-ghost owner-panel-btn" data-panel="netprofit-edit" style="border-color:#6B4A1E;color:#6B4A1E;">✏ Изменить аренду / свои статьи</button>
         </div>
@@ -11850,11 +11849,39 @@
     };
   }
 
+  // Финмодель: из чего состоит выручка и расходы месяца, с долей каждой строки от выручки,
+  // плюс маржа чистой прибыли (% от выручки). Используется в обоих вариантах панели "Чистая прибыль"
+  // (месяц с мероприятиями и пустой месяц), чтобы не рассинхронизировать разметку.
+  function npSharePct(amount, base){
+    if(!base || base<=0) return '';
+    return ` <span style="color:var(--ink-soft);font-size:11px;">(${Math.round(amount/base*100)}%)</span>`;
+  }
+
+  function renderNetProfitFinModel(revenueRows, expenseRows, npTotalRevenue, npTotalExpenses, netProfit){
+    const marginPct = npTotalRevenue>0 ? Math.round(netProfit/npTotalRevenue*100) : 0;
+    const revHtml = revenueRows.filter(r=>r.amount>0).map(r=>`
+      <div class="stat-row"><div class="stat-label">${escapeHtml(r.label)}</div><div style="flex:1;font-family:var(--font-mono);font-size:13px;text-align:right;">${formatMoney(r.amount)}${npSharePct(r.amount, npTotalRevenue)}</div></div>
+    `).join('');
+    const expHtml = expenseRows.filter(r=>r.amount>0).map(r=>`
+      <div class="stat-row"><div class="stat-label">${escapeHtml(r.label)}</div><div style="flex:1;font-family:var(--font-mono);font-size:13px;text-align:right;color:var(--status-red);">${formatMoney(r.amount)}${npSharePct(r.amount, npTotalRevenue)}</div></div>
+    `).join('');
+    return `
+      <div style="font-family:var(--font-display);font-weight:600;font-size:14px;margin-top:6px;">Выручка: ${formatMoney(npTotalRevenue)} <span style="color:var(--ink-soft);font-size:12px;font-weight:400;">(100%)</span></div>
+      ${revHtml}
+      <div style="font-family:var(--font-display);font-weight:600;font-size:14px;margin-top:16px;">Расходы: ${formatMoney(npTotalExpenses)}${npSharePct(npTotalExpenses, npTotalRevenue)}</div>
+      ${expHtml}
+      <div style="font-family:var(--font-display);font-weight:600;font-size:15px;margin-top:16px;padding-top:12px;border-top:1px solid var(--line);">Чистая прибыль: <span style="color:${netProfit>=0?'var(--status-green)':'var(--status-red)'};">${formatMoney(netProfit)}${npSharePct(netProfit, npTotalRevenue)}</span></div>
+    `;
+  }
+
   function renderNetProfitAmountRows(list, cls){
     return list.map((m,i)=>`
-      <div class="row2" data-npr-idx="${i}" style="grid-template-columns: 1.4fr 110px 32px; margin-bottom:8px;align-items:center;">
+      <div class="row2" data-npr-idx="${i}" style="grid-template-columns: 1.2fr 100px 112px 32px; margin-bottom:8px;align-items:center;">
         <input type="text" class="${cls}-name" value="${escapeHtml(m.name||'')}" placeholder="Название">
         <input type="number" class="${cls}-amount" value="${m.amount!==undefined&&m.amount!==null?m.amount:''}" placeholder="Сумма ₽">
+        <select class="${cls}-source" title="Откуда взяли деньги">
+          ${EXPENSE_SOURCES.map(s=>`<option value="${escapeHtml(s)}" ${(m.source||EXPENSE_SOURCES[0])===s?'selected':''}>${escapeHtml(s)}</option>`).join('')}
+        </select>
         <button type="button" class="${cls}-del" data-idx="${i}" style="border:1px solid var(--line-strong);background:var(--white);border-radius:var(--radius);color:var(--danger);cursor:pointer;">✕</button>
       </div>
     `).join('');
@@ -11931,11 +11958,16 @@
           <button class="modal-close">×</button>
         </div>
         <div class="modal-body">
-          <div style="font-size:12px;color:var(--ink-soft);margin-top:-6px;">Эти суммы не считаются автоматически нигде в приложении — вписываются вручную каждый месяц. Видно и редактируется только владельцем.</div>
+          <div style="font-size:12px;color:var(--ink-soft);margin-top:-6px;">Вписываются вручную каждый месяц. Редактируется только владельцем — и при сохранении каждая сумма автоматически попадает отдельной записью в Книга → Расходы (с выбранным источником денег), но видно её там тоже только владельцу. Менять эти записи нужно здесь, а не в самой Книге.</div>
           <div style="font-size:12px;color:var(--ink-soft);background:var(--cream);border-radius:var(--radius);padding:10px 12px;">ЗП менеджеров теперь считается автоматически (оклад + проценты от выручки) и сюда не вписывается — за ${escapeHtml(label)}: <strong>${formatMoney(autoManagerSalary)}</strong>. Посмотреть расчёт — вкладка «Для менеджеров → ЗП менеджеров».</div>
           <div class="field">
             <label>Аренда (₽)</label>
-            <input type="number" id="np-rent" value="${manual.rent!==undefined&&manual.rent!==null?manual.rent:''}" placeholder="0">
+            <div class="row2" style="grid-template-columns:1fr 130px;">
+              <input type="number" id="np-rent" value="${manual.rent!==undefined&&manual.rent!==null?manual.rent:''}" placeholder="0">
+              <select id="np-rent-source" title="Откуда взяли деньги">
+                ${EXPENSE_SOURCES.map(s=>`<option value="${escapeHtml(s)}" ${(manual.rentSource||EXPENSE_SOURCES[0])===s?'selected':''}>${escapeHtml(s)}</option>`).join('')}
+              </select>
+            </div>
           </div>
           <div class="field" style="border-top:1px solid var(--line);padding-top:16px;">
             <label style="font-family:var(--font-display);font-size:15px;font-weight:600;">Другие сотрудники</label>
@@ -11965,8 +11997,8 @@
     const cursor = state.analyticsCursor;
     const ym = cursor.getFullYear()+'-'+pad(cursor.getMonth()+1);
     const existing = (state.netProfitManual && state.netProfitManual[ym]) || {};
-    let staffDraft = (existing.staff || []).map(x=>({...x}));
-    let customDraft = (existing.customExpenses || []).map(x=>({...x}));
+    let staffDraft = (existing.staff || []).map(x=>({id:x.id||uid(), name:x.name, amount:x.amount, source:x.source||EXPENSE_SOURCES[0]}));
+    let customDraft = (existing.customExpenses || []).map(x=>({id:x.id||uid(), name:x.name, amount:x.amount, source:x.source||EXPENSE_SOURCES[0]}));
 
     function makeListManager(containerId, draftGetter, draftSetter, cls, addBtnId){
       function sync(){
@@ -11976,8 +12008,10 @@
           if(!draft[i]) return;
           const amountRaw = row.querySelector(`.${cls}-amount`).value;
           draft[i] = {
+            id: draft[i].id,
             name: row.querySelector(`.${cls}-name`).value,
             amount: amountRaw !== '' ? parseFloat(amountRaw) : null,
+            source: row.querySelector(`.${cls}-source`).value,
           };
         });
       }
@@ -12002,7 +12036,7 @@
       if(addBtn) addBtn.onclick = ()=>{
         sync();
         const draft = draftGetter();
-        draft.push({name:'', amount:null});
+        draft.push({id:uid(), name:'', amount:null, source:EXPENSE_SOURCES[0]});
         draftSetter(draft);
         refresh();
       };
@@ -12016,22 +12050,68 @@
     overlay.querySelector('#np-save').onclick = async ()=>{
       syncStaff(); syncCustom();
       const readVal = (id)=>{ const v = overlay.querySelector('#'+id).value; return v!=='' ? parseFloat(v) : null; };
-      const cleanedStaff = staffDraft.map(x=>({name:(x.name||'').trim(), amount:x.amount})).filter(x=>x.name);
-      const cleanedCustom = customDraft.map(x=>({name:(x.name||'').trim(), amount:x.amount})).filter(x=>x.name);
+      const cleanedStaff = staffDraft.map(x=>({id:x.id, name:(x.name||'').trim(), amount:x.amount, source:x.source||EXPENSE_SOURCES[0]})).filter(x=>x.name);
+      const cleanedCustom = customDraft.map(x=>({id:x.id, name:(x.name||'').trim(), amount:x.amount, source:x.source||EXPENSE_SOURCES[0]})).filter(x=>x.name);
       const newManual = {
         rent: readVal('np-rent'),
+        rentSource: overlay.querySelector('#np-rent-source').value,
         staff: cleanedStaff,
         customExpenses: cleanedCustom,
       };
       if(!state.netProfitManual) state.netProfitManual = {};
       const hasAny = newManual.rent!==null || cleanedStaff.length>0 || cleanedCustom.length>0;
       if(hasAny) state.netProfitManual[ym] = newManual; else delete state.netProfitManual[ym];
+      syncNetProfitLinkedExpenses(ym, hasAny ? newManual : {});
       await saveNetProfitManual();
+      await saveExpenses();
       recordAction("Данные сохранены");
       state.modal = null;
       overlay.remove();
       render();
     };
+  }
+
+  // Зеркалит "Ручные расходы" (аренда / другие сотрудники / свои статьи) из модалки чистой прибыли
+  // в настоящие записи Книга → Расходы — чтобы деньги не "терялись" и было видно, из какого источника
+  // они ушли. Эти записи помечаются ownerOnly и видны только владельцу, редактируются только отсюда
+  // (не через обычную форму расхода), чтобы не разъезжались с исходными данными месяца.
+  function syncNetProfitLinkedExpenses(ym, manual){
+    const prefix = 'npm:'+ym+':';
+    const desiredRefs = new Set();
+    const hasRent = manual.rent!==undefined && manual.rent!==null && Number(manual.rent)>0;
+    if(hasRent) desiredRefs.add(prefix+'rent');
+    (manual.staff||[]).forEach(s=>{ if(s.id && s.amount!==undefined && s.amount!==null && Number(s.amount)>0) desiredRefs.add(prefix+'staff:'+s.id); });
+    (manual.customExpenses||[]).forEach(c=>{ if(c.id && c.amount!==undefined && c.amount!==null && Number(c.amount)>0) desiredRefs.add(prefix+'custom:'+c.id); });
+
+    // убираем записи этого месяца, которых больше нет в "Ручных расходах" (удалили строку/обнулили сумму)
+    state.expenses = state.expenses.filter(e=> !(e.netProfitRef && e.netProfitRef.startsWith(prefix) && !desiredRefs.has(e.netProfitRef)));
+
+    function upsert(ref, category, name, amount, source){
+      const existing = state.expenses.find(e=>e.netProfitRef===ref);
+      const comment = name ? `Ручные расходы (чистая прибыль): ${name}` : 'Ручные расходы (чистая прибыль)';
+      if(existing){
+        existing.amount = Number(amount);
+        existing.source = source || EXPENSE_SOURCES[0];
+        existing.category = category;
+        existing.comment = comment;
+        existing.ownerOnly = true;
+      } else {
+        state.expenses.push({
+          id: uid(), date: ym+'-01', category, direction:'', master:'',
+          source: source || EXPENSE_SOURCES[0], amount: Number(amount),
+          responsible: 'Карина', eventId: '',
+          comment, ownerOnly: true, netProfitRef: ref,
+        });
+      }
+    }
+
+    if(hasRent) upsert(prefix+'rent', 'Аренда', '', manual.rent, manual.rentSource);
+    (manual.staff||[]).forEach(s=>{
+      if(s.id && s.amount!==undefined && s.amount!==null && Number(s.amount)>0) upsert(prefix+'staff:'+s.id, 'Зарплата', s.name, s.amount, s.source);
+    });
+    (manual.customExpenses||[]).forEach(c=>{
+      if(c.id && c.amount!==undefined && c.amount!==null && Number(c.amount)>0) upsert(prefix+'custom:'+c.id, 'Операции', c.name, c.amount, c.source);
+    });
   }
 
   function renderPlanCustomRows(list){
