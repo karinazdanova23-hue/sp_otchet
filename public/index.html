@@ -1055,6 +1055,16 @@
     incomes: null,
     expenses: null,
     bookView: 'incomes',
+    bookCursor: new Date(),
+    bookMode: 'month',
+    refundsCursor: new Date(),
+    refundsMode: 'month',
+    itemSalesCursor: new Date(),
+    itemSalesMode: 'month',
+    ordersCursor: new Date(),
+    ordersMode: 'month',
+    salaryAdjCursor: new Date(),
+    salaryAdjMode: 'month',
     leads: null,
     hostessShifts: null,
     managerShifts: null,
@@ -2982,7 +2992,8 @@
         <div class="cal-cell ${inMonth?'':'other-month'} ${isToday?'today':''}" data-date="${dStr}">
           <div class="cal-daynum">${d.getDate()}${hasWarning?' <span class="cal-warn-icon" title="Перерыв между мероприятиями меньше 30 минут">⚠</span>':''}${dayOffEntries.length ? `<span class="cal-dayoff-marks">${dayOffEntries.map(x=>`<span class="cal-dayoff-x" title="${escapeHtml(x.name)} — выходной (${escapeHtml(ROLE_LABELS[x.role]||x.role)})">✕</span>`).join('')}</span>` : ''}</div>
           ${hostessLine ? `<div class="cal-hostess" title="Админ: ${escapeHtml(hostessLine)}">🧑 ${escapeHtml(hostessLine)}</div>` : ''}
-          ${managerLine ? `<div class="cal-manager" title="Менеджер: ${escapeHtml(managerLine)}">🧑‍💼 ${escapeHtml(managerLine)}</div>` : ''}
+          ${managerLine ? `<div class="cal-manager" title="Менеджер: ${escapeHtml(managerLine)}">👔 ${escapeHtml(managerLine)}</div>` : ''}
+          ${dayOffEntries.length ? `<div class="cal-dayoff-line" title="Выходной: ${escapeHtml(dayOffEntries.map(x=>`${x.name} (${ROLE_LABELS[x.role]||x.role})`).join(', '))}">🚫 ${escapeHtml(dayOffEntries.map(x=>x.name).join(', '))}</div>` : ''}
           <div class="cal-events">
             ${shown.map(e=>`<div class="cal-evt-chip" style="background:${statusColor(e.status)}">${isAll?spaceBadge(getSpace(e.spaceId),'xs'):''}<span class="t">${e.time}</span><span>${escapeHtml(e.title)}</span></div>`).join('')}
             ${extra>0?`<div class="cal-more">+${extra} ещё</div>`:''}
@@ -3016,9 +3027,11 @@
         </div>
       </div>
       ${legend}
-      <div class="cal-grid">
-        ${DOW.map(d=>`<div class="cal-dow">${d}</div>`).join('')}
-        ${cells}
+      <div class="cal-grid-wrap">
+        <div class="cal-grid">
+          ${DOW.map(d=>`<div class="cal-dow">${d}</div>`).join('')}
+          ${cells}
+        </div>
       </div>
     `;
   }
@@ -4152,11 +4165,13 @@
   }
 
   function renderRefundsView(){
-    const refunds = [...state.refunds].sort((a,b)=> (b.requestDate||'').localeCompare(a.requestDate||''));
-    const totalAmount = state.refunds.reduce((s,r)=> s + ((r.amount!==undefined&&r.amount!==null&&!isNaN(r.amount))?Number(r.amount):0), 0);
-    return `
+    const { navHtml, period } = buildPeriodNav('refundsCursor', 'refundsMode', 'refunds-nav');
+    const refundsAll = state.refunds.filter(r=>period.inPeriod(r.requestDate));
+    const refunds = [...refundsAll].sort((a,b)=> (b.requestDate||'').localeCompare(a.requestDate||''));
+    const totalAmount = refundsAll.reduce((s,r)=> s + ((r.amount!==undefined&&r.amount!==null&&!isNaN(r.amount))?Number(r.amount):0), 0);
+    return navHtml + `
       <div class="cert-toolbar">
-        <div style="font-size:12px;color:var(--ink-soft);font-family:var(--font-mono);">Всего: ${state.refunds.length} · В процессе: ${state.refunds.filter(r=>r.status!=='refunded').length} · Возвращено: ${state.refunds.filter(r=>r.status==='refunded').length} · Сумма: ${formatMoney(totalAmount)}</div>
+        <div style="font-size:12px;color:var(--ink-soft);font-family:var(--font-mono);">${escapeHtml(period.periodLabel)} · Всего: ${refundsAll.length} · В процессе: ${refundsAll.filter(r=>r.status!=='refunded').length} · Возвращено: ${refundsAll.filter(r=>r.status==='refunded').length} · Сумма: ${formatMoney(totalAmount)}</div>
         <button class="btn btn-primary" id="btn-add-refund">+ Добавить возврат</button>
       </div>
       ${refunds.length === 0 ? `<div class="host-empty">Возвратов пока нет</div>` : `
@@ -4187,6 +4202,11 @@
     if(msSalPrev) msSalPrev.onclick = ()=>{ state.managerSalaryCursor = new Date(state.managerSalaryCursor.getFullYear(), state.managerSalaryCursor.getMonth()-1, 1); render(); };
     if(msSalNext) msSalNext.onclick = ()=>{ state.managerSalaryCursor = new Date(state.managerSalaryCursor.getFullYear(), state.managerSalaryCursor.getMonth()+1, 1); render(); };
     if(msSalToday) msSalToday.onclick = ()=>{ state.managerSalaryCursor = new Date(new Date().getFullYear(), new Date().getMonth(), 1); render(); };
+
+    attachPeriodNav('refundsCursor', 'refundsMode', 'refunds-nav');
+    attachPeriodNav('itemSalesCursor', 'itemSalesMode', 'itemsales-nav');
+    attachPeriodNav('ordersCursor', 'ordersMode', 'orders-nav');
+    attachPeriodNav('salaryAdjCursor', 'salaryAdjMode', 'salaryadj-nav');
 
     document.querySelectorAll('[data-certgroup]').forEach(header=>{
       header.onclick = ()=>{
@@ -4529,13 +4549,15 @@
   }
 
   function renderItemSalesView(){
-    const items = [...state.itemSales].sort((a,b)=> (b.date||'').localeCompare(a.date||''));
-    const totalRevenue = state.itemSales.reduce((s,x)=> s + ((x.revenue!==undefined&&x.revenue!==null&&!isNaN(x.revenue))?Number(x.revenue):0), 0);
+    const { navHtml, period } = buildPeriodNav('itemSalesCursor', 'itemSalesMode', 'itemsales-nav');
+    const itemsAll = state.itemSales.filter(x=>period.inPeriod(x.date));
+    const items = [...itemsAll].sort((a,b)=> (b.date||'').localeCompare(a.date||''));
+    const totalRevenue = itemsAll.reduce((s,x)=> s + ((x.revenue!==undefined&&x.revenue!==null&&!isNaN(x.revenue))?Number(x.revenue):0), 0);
     const totalMasterShare = Math.round(totalRevenue * ITEM_SALE_MASTER_PCT / 100);
     const totalStudioShare = totalRevenue - totalMasterShare;
 
     const byMaster = {};
-    state.itemSales.forEach(x=>{
+    itemsAll.forEach(x=>{
       const name = (x.masterName||'').trim() || 'Без мастера';
       const rev = (x.revenue!==undefined&&x.revenue!==null&&!isNaN(x.revenue))?Number(x.revenue):0;
       byMaster[name] = (byMaster[name]||0) + rev;
@@ -4543,7 +4565,7 @@
     const byMasterList = Object.entries(byMaster).sort((a,b)=>b[1]-a[1]);
     const maxMaster = Math.max(1, ...byMasterList.map(x=>x[1]));
 
-    return `
+    return navHtml + `
       <div class="analytics-summary" style="margin-bottom:20px;">
         <div class="summary-card"><div class="num" style="font-size:20px;">${formatMoney(totalRevenue)}</div><div class="label">Выручка от продажи изделий</div></div>
         <div class="summary-card"><div class="num" style="font-size:20px;color:var(--accent);">${formatMoney(totalMasterShare)}</div><div class="label">Мастерам (${ITEM_SALE_MASTER_PCT}%)</div></div>
@@ -4564,7 +4586,7 @@
       ` : ''}
 
       <div class="cert-toolbar">
-        <div style="font-size:12px;color:var(--ink-soft);font-family:var(--font-mono);">Продажа изделий со стеллажа — ${ITEM_SALE_MASTER_PCT}% мастеру / ${ITEM_SALE_STUDIO_PCT}% студии</div>
+        <div style="font-size:12px;color:var(--ink-soft);font-family:var(--font-mono);">${escapeHtml(period.periodLabel)} · Продажа изделий со стеллажа — ${ITEM_SALE_MASTER_PCT}% мастеру / ${ITEM_SALE_STUDIO_PCT}% студии</div>
         <button class="btn btn-primary" id="btn-add-itemsale">+ Добавить продажу</button>
       </div>
       ${items.length === 0 ? `<div class="host-empty">Продаж пока нет</div>` : `
@@ -4584,13 +4606,15 @@
   }
 
   function renderOrdersView(){
-    const items = [...state.orders].sort((a,b)=> (b.date||'').localeCompare(a.date||''));
-    const totalRevenue = state.orders.reduce((s,x)=> s + ((x.revenue!==undefined&&x.revenue!==null&&!isNaN(x.revenue))?Number(x.revenue):0), 0);
-    const totalMasterShare = state.orders.reduce((s,x)=> s + ((x.masterShare!==undefined&&x.masterShare!==null&&!isNaN(x.masterShare))?Number(x.masterShare):0), 0);
+    const { navHtml, period } = buildPeriodNav('ordersCursor', 'ordersMode', 'orders-nav');
+    const ordersAll = state.orders.filter(x=>period.inPeriod(x.date));
+    const items = [...ordersAll].sort((a,b)=> (b.date||'').localeCompare(a.date||''));
+    const totalRevenue = ordersAll.reduce((s,x)=> s + ((x.revenue!==undefined&&x.revenue!==null&&!isNaN(x.revenue))?Number(x.revenue):0), 0);
+    const totalMasterShare = ordersAll.reduce((s,x)=> s + ((x.masterShare!==undefined&&x.masterShare!==null&&!isNaN(x.masterShare))?Number(x.masterShare):0), 0);
     const totalStudioShare = totalRevenue - totalMasterShare;
 
     const byMaster = {};
-    state.orders.forEach(x=>{
+    ordersAll.forEach(x=>{
       const name = (x.masterName||'').trim() || 'Без мастера';
       const rev = (x.revenue!==undefined&&x.revenue!==null&&!isNaN(x.revenue))?Number(x.revenue):0;
       const share = (x.masterShare!==undefined&&x.masterShare!==null&&!isNaN(x.masterShare))?Number(x.masterShare):0;
@@ -4601,7 +4625,7 @@
     const byMasterList = Object.entries(byMaster).sort((a,b)=>b[1].revenue-a[1].revenue);
     const maxMaster = Math.max(1, ...byMasterList.map(x=>x[1].revenue));
 
-    return `
+    return navHtml + `
       <div class="analytics-summary" style="margin-bottom:20px;">
         <div class="summary-card"><div class="num" style="font-size:20px;">${formatMoney(totalRevenue)}</div><div class="label">Выручка от заказов</div></div>
         <div class="summary-card"><div class="num" style="font-size:20px;color:var(--accent);">${formatMoney(totalMasterShare)}</div><div class="label">Мастерам (по договорённости)</div></div>
@@ -4622,7 +4646,7 @@
       ` : ''}
 
       <div class="cert-toolbar">
-        <div style="font-size:12px;color:var(--ink-soft);font-family:var(--font-mono);">Заказ на изготовление — сумма мастеру договаривается индивидуально по каждому заказу</div>
+        <div style="font-size:12px;color:var(--ink-soft);font-family:var(--font-mono);">${escapeHtml(period.periodLabel)} · Заказ на изготовление — сумма мастеру договаривается индивидуально по каждому заказу</div>
         <button class="btn btn-primary" id="btn-add-order">+ Добавить заказ</button>
       </div>
       ${items.length === 0 ? `<div class="host-empty">Заказов пока нет</div>` : `
@@ -4743,18 +4767,20 @@
   }
 
   function renderSalaryAdjustmentsView(){
-    const items = [...state.salaryAdjustments].sort((a,b)=> (b.date||'').localeCompare(a.date||''));
-    const totalPlus = state.salaryAdjustments.filter(a=>a.amount>0).reduce((s,a)=>s+Number(a.amount), 0);
-    const totalMinus = state.salaryAdjustments.filter(a=>a.amount<0).reduce((s,a)=>s+Number(a.amount), 0);
+    const { navHtml, period } = buildPeriodNav('salaryAdjCursor', 'salaryAdjMode', 'salaryadj-nav');
+    const adjAll = state.salaryAdjustments.filter(a=>period.inPeriod(a.date));
+    const items = [...adjAll].sort((a,b)=> (b.date||'').localeCompare(a.date||''));
+    const totalPlus = adjAll.filter(a=>a.amount>0).reduce((s,a)=>s+Number(a.amount), 0);
+    const totalMinus = adjAll.filter(a=>a.amount<0).reduce((s,a)=>s+Number(a.amount), 0);
 
     const byMaster = {};
-    state.salaryAdjustments.forEach(a=>{
+    adjAll.forEach(a=>{
       const name = (a.masterName||'').trim() || 'Без мастера';
       byMaster[name] = (byMaster[name]||0) + Number(a.amount||0);
     });
     const byMasterList = Object.entries(byMaster).sort((a,b)=>b[1]-a[1]);
 
-    return `
+    return navHtml + `
       <div class="analytics-summary" style="margin-bottom:20px;">
         <div class="summary-card"><div class="num" style="font-size:20px;color:var(--status-green);">+${formatMoney(totalPlus)}</div><div class="label">Доплаты студии мастерам</div></div>
         <div class="summary-card" style="border-left:4px solid var(--status-red);"><div class="num" style="font-size:20px;color:var(--status-red);">${formatMoney(totalMinus)}</div><div class="label">Удержания из ЗП</div></div>
@@ -4773,7 +4799,7 @@
       ` : ''}
 
       <div class="cert-toolbar">
-        <div style="font-size:12px;color:var(--ink-soft);font-family:var(--font-mono);">Например: мастер оплатил такси сам — доплата (+), студия вычла на общий сбор — удержание (−)</div>
+        <div style="font-size:12px;color:var(--ink-soft);font-family:var(--font-mono);">${escapeHtml(period.periodLabel)} · Например: мастер оплатил такси сам — доплата (+), студия вычла на общий сбор — удержание (−)</div>
         <div style="display:flex;gap:8px;">
           <button class="btn btn-ghost" id="btn-bulk-salaryadj">👥 Массовая корректировка</button>
           <button class="btn btn-primary" id="btn-add-salaryadj">+ Добавить корректировку</button>
@@ -5517,6 +5543,54 @@
     };
   }
 
+  // Универсальный помощник для панели навигации "по месяцам / сводка за год" —
+  // используется в разделах без собственной сложной логики (Возвраты, Изделия, Заказы, Корректировки ЗП).
+  // cursorKey/modeKey — имена полей в state (например 'refundsCursor'/'refundsMode'), idPrefix — префикс для id кнопок в DOM.
+  function buildPeriodNav(cursorKey, modeKey, idPrefix){
+    const mode = state[modeKey] || 'month';
+    const cursor = state[cursorKey] || (state[cursorKey] = new Date());
+    const year = cursor.getFullYear();
+    const monthIdx = cursor.getMonth();
+    const ym = year+'-'+pad(monthIdx+1);
+    const periodLabel = mode==='month' ? (MONTHS[monthIdx]+' '+year) : (year+' год');
+    const navLabel = mode==='month' ? periodLabel : String(year); // без слова «год» — иначе CSS text-transform:capitalize превратит его в «Год»
+    const inPeriod = (dateStr)=> dateStr && (mode==='month' ? dateStr.startsWith(ym) : dateStr.startsWith(String(year)));
+    const navHtml = `
+      <div class="cal-nav" style="margin-bottom:14px;">
+        <div class="month-label">${escapeHtml(navLabel)}</div>
+        <div class="cal-nav-btns">
+          <button class="today-btn" id="${idPrefix}-mode-toggle">${mode==='month' ? '📆 Сводка за год' : '📅 По месяцам'}</button>
+          <button class="today-btn" id="${idPrefix}-today">${mode==='month' ? 'текущий месяц' : 'текущий год'}</button>
+          <button class="nav-btn" id="${idPrefix}-prev">‹</button>
+          <button class="nav-btn" id="${idPrefix}-next">›</button>
+        </div>
+      </div>
+    `;
+    return { navHtml, period: { mode, periodLabel, inPeriod } };
+  }
+  function attachPeriodNav(cursorKey, modeKey, idPrefix){
+    const prevBtn = document.getElementById(`${idPrefix}-prev`);
+    if(prevBtn) prevBtn.onclick = ()=>{
+      const c = state[cursorKey];
+      state[cursorKey] = (state[modeKey]==='year')
+        ? new Date(c.getFullYear()-1, c.getMonth(), 1)
+        : new Date(c.getFullYear(), c.getMonth()-1, 1);
+      render();
+    };
+    const nextBtn = document.getElementById(`${idPrefix}-next`);
+    if(nextBtn) nextBtn.onclick = ()=>{
+      const c = state[cursorKey];
+      state[cursorKey] = (state[modeKey]==='year')
+        ? new Date(c.getFullYear()+1, c.getMonth(), 1)
+        : new Date(c.getFullYear(), c.getMonth()+1, 1);
+      render();
+    };
+    const todayBtn = document.getElementById(`${idPrefix}-today`);
+    if(todayBtn) todayBtn.onclick = ()=>{ state[cursorKey] = new Date(); render(); };
+    const modeToggleBtn = document.getElementById(`${idPrefix}-mode-toggle`);
+    if(modeToggleBtn) modeToggleBtn.onclick = ()=>{ state[modeKey] = state[modeKey]==='year' ? 'month' : 'year'; render(); };
+  }
+
   function renderBookView(){
     const subTabsHtml = `
       <div class="cert-subtabs">
@@ -5525,22 +5599,48 @@
         <button data-bookview="book-analytics" class="${state.bookView==='book-analytics'?'active':''}">Аналитика</button>
       </div>
     `;
+    const mode = state.bookMode || 'month';
+    const cursor = state.bookCursor || (state.bookCursor = new Date());
+    const year = cursor.getFullYear();
+    const monthIdx = cursor.getMonth();
+    const ym = year+'-'+pad(monthIdx+1);
+    const periodLabel = mode==='month' ? (MONTHS[monthIdx]+' '+year) : (year+' год');
+    const navLabel = mode==='month' ? periodLabel : String(year); // без слова «год» — иначе CSS text-transform:capitalize превратит его в «Год»
+    const inPeriod = (dateStr)=> dateStr && (mode==='month' ? dateStr.startsWith(ym) : dateStr.startsWith(String(year)));
+    const navHtml = `
+      <div class="cal-nav" style="margin-bottom:14px;">
+        <div class="month-label">${escapeHtml(navLabel)}</div>
+        <div class="cal-nav-btns">
+          <button class="today-btn" id="book-mode-toggle">${mode==='month' ? '📆 Сводка за год' : '📅 По месяцам'}</button>
+          <button class="today-btn" id="book-today">${mode==='month' ? 'текущий месяц' : 'текущий год'}</button>
+          <button class="nav-btn" id="book-prev">‹</button>
+          <button class="nav-btn" id="book-next">›</button>
+        </div>
+      </div>
+    `;
+    const period = { mode, periodLabel, inPeriod };
     if(state.bookView === 'expenses'){
-      return subTabsHtml + renderExpensesView();
+      return subTabsHtml + navHtml + renderExpensesView(period);
     }
     if(state.bookView === 'book-analytics'){
-      return subTabsHtml + renderBookAnalyticsView();
+      return subTabsHtml + navHtml + renderBookAnalyticsView(period);
     }
-    return subTabsHtml + renderIncomesView();
+    return subTabsHtml + navHtml + renderIncomesView(period);
   }
 
-  function renderBookAnalyticsView(){
-    const totalIncome = state.incomes.reduce((s,i)=> s + ((i.amount!==undefined&&i.amount!==null&&!isNaN(i.amount))?Number(i.amount):0), 0);
-    const totalExpense = state.expenses.reduce((s,e)=> s + ((e.amount!==undefined&&e.amount!==null&&!isNaN(e.amount))?Number(e.amount):0), 0);
+  function renderBookAnalyticsView(period){
+    const inPeriod = period ? period.inPeriod : (()=>true);
+    const mode = period ? period.mode : 'month';
+    const periodLabel = period ? period.periodLabel : '';
+    const incomesP = state.incomes.filter(i=>inPeriod(i.date));
+    const expensesP = state.expenses.filter(e=>inPeriod(e.date));
+
+    const totalIncome = incomesP.reduce((s,i)=> s + ((i.amount!==undefined&&i.amount!==null&&!isNaN(i.amount))?Number(i.amount):0), 0);
+    const totalExpense = expensesP.reduce((s,e)=> s + ((e.amount!==undefined&&e.amount!==null&&!isNaN(e.amount))?Number(e.amount):0), 0);
     const balance = totalIncome - totalExpense;
 
     const byCategory = {};
-    state.expenses.forEach(e=>{
+    expensesP.forEach(e=>{
       const cat = e.category || 'Без категории';
       byCategory[cat] = (byCategory[cat]||0) + ((e.amount!==undefined&&e.amount!==null&&!isNaN(e.amount))?Number(e.amount):0);
     });
@@ -5548,7 +5648,7 @@
     const maxCat = Math.max(1, ...catList.map(x=>x[1]));
 
     const byDirection = {};
-    state.expenses.filter(e=>e.category==='Материалы' && e.direction).forEach(e=>{
+    expensesP.filter(e=>e.category==='Материалы' && e.direction).forEach(e=>{
       byDirection[e.direction] = (byDirection[e.direction]||0) + ((e.amount!==undefined&&e.amount!==null&&!isNaN(e.amount))?Number(e.amount):0);
     });
     const dirList = Object.entries(byDirection).filter(([k,v])=>v>0).sort((a,b)=>b[1]-a[1]);
@@ -5556,7 +5656,7 @@
 
     // расходы по источникам оплаты
     const bySourceExp = {};
-    state.expenses.forEach(e=>{
+    expensesP.forEach(e=>{
       const src = e.source || 'Не указан';
       bySourceExp[src] = (bySourceExp[src]||0) + ((e.amount!==undefined&&e.amount!==null&&!isNaN(e.amount))?Number(e.amount):0);
     });
@@ -5565,7 +5665,7 @@
 
     // доходы по продукту
     const incomeByProduct = {};
-    state.incomes.forEach(i=>{
+    incomesP.forEach(i=>{
       const p = i.product || 'Без категории';
       incomeByProduct[p] = (incomeByProduct[p]||0) + ((i.amount!==undefined&&i.amount!==null&&!isNaN(i.amount))?Number(i.amount):0);
     });
@@ -5574,22 +5674,39 @@
 
     // доходы по счёту
     const incomeByAccount = {};
-    state.incomes.forEach(i=>{
+    incomesP.forEach(i=>{
       const a = i.account || 'Не указан';
       incomeByAccount[a] = (incomeByAccount[a]||0) + ((i.amount!==undefined&&i.amount!==null&&!isNaN(i.amount))?Number(i.amount):0);
     });
     const incomeAccountList = Object.entries(incomeByAccount).filter(([k,v])=>v>0).sort((a,b)=>b[1]-a[1]);
     const maxIncomeAccount = Math.max(1, ...incomeAccountList.map(x=>x[1]));
 
-    // доходы по месяцам (динамика)
-    const incomeByMonth = {};
-    state.incomes.forEach(i=>{
-      if(!i.date) return;
-      const ym = i.date.slice(0,7);
-      incomeByMonth[ym] = (incomeByMonth[ym]||0) + ((i.amount!==undefined&&i.amount!==null&&!isNaN(i.amount))?Number(i.amount):0);
-    });
-    const incomeMonthList = Object.entries(incomeByMonth).sort((a,b)=> b[0].localeCompare(a[0]));
-    const maxIncomeMonth = Math.max(1, ...incomeMonthList.map(x=>x[1]));
+    // динамика по месяцам — только в режиме "Сводка за год"
+    let yearOnlyHtml = '';
+    if(mode === 'year'){
+      const incomeByMonthIdx = Array(12).fill(0);
+      incomesP.forEach(i=>{
+        if(!i.date) return;
+        const mi = parseInt(i.date.slice(5,7),10) - 1;
+        if(mi>=0 && mi<12) incomeByMonthIdx[mi] += (i.amount!==undefined&&i.amount!==null&&!isNaN(i.amount))?Number(i.amount):0;
+      });
+      const expenseByMonthIdx = Array(12).fill(0);
+      expensesP.forEach(e=>{
+        if(!e.date) return;
+        const mi = parseInt(e.date.slice(5,7),10) - 1;
+        if(mi>=0 && mi<12) expenseByMonthIdx[mi] += (e.amount!==undefined&&e.amount!==null&&!isNaN(e.amount))?Number(e.amount):0;
+      });
+      yearOnlyHtml = `
+        <div class="analytics-section">
+          <h4>Доходы по месяцам — ${escapeHtml(periodLabel)}</h4>
+          ${renderBarChart(MONTHS.map((name,i)=>({ label: name.slice(0,3), value: incomeByMonthIdx[i], valueLabel: formatMoney(incomeByMonthIdx[i]) })))}
+        </div>
+        <div class="analytics-section">
+          <h4>Расходы по месяцам — ${escapeHtml(periodLabel)}</h4>
+          ${renderBarChart(MONTHS.map((name,i)=>({ label: name.slice(0,3), value: expenseByMonthIdx[i], valueLabel: formatMoney(expenseByMonthIdx[i]) })))}
+        </div>
+      `;
+    }
 
     return `
       <div class="analytics-summary" style="margin-bottom:20px;">
@@ -5620,19 +5737,7 @@
         `).join('') : `<div style="color:var(--ink-soft);font-size:13px;">Доходов пока нет.</div>`}
       </div>
 
-      <div class="analytics-section">
-        <h4>Доходы по месяцам</h4>
-        ${incomeMonthList.length ? incomeMonthList.map(([ym,sum])=>{
-          const [y,m] = ym.split('-').map(Number);
-          const label = MONTHS[m-1].charAt(0).toUpperCase()+MONTHS[m-1].slice(1)+' '+y;
-          return `
-          <div class="stat-row">
-            <div class="stat-label" style="width:140px;text-transform:capitalize;">${escapeHtml(label)}</div>
-            <div class="stat-bar-track"><div class="stat-bar-fill" style="width:${Math.round(sum/maxIncomeMonth*100)}%;background:var(--status-green);"></div></div>
-            <div class="stat-count" style="width:auto;font-size:12px;">${formatMoney(sum)}</div>
-          </div>
-        `;}).join('') : `<div style="color:var(--ink-soft);font-size:13px;">Доходов пока нет.</div>`}
-      </div>
+      ${yearOnlyHtml}
 
       <div class="analytics-section">
         <h4>Расходы по категориям — всего ${formatMoney(totalExpense)}</h4>
@@ -5670,12 +5775,14 @@
     `;
   }
 
-  function renderIncomesView(){
-    const items = [...state.incomes].sort((a,b)=> (b.date||'').localeCompare(a.date||''));
-    const total = state.incomes.reduce((s,i)=> s + ((i.amount!==undefined&&i.amount!==null&&!isNaN(i.amount))?Number(i.amount):0), 0);
+  function renderIncomesView(period){
+    const inPeriod = period ? period.inPeriod : (()=>true);
+    const periodLabel = period ? period.periodLabel : '';
+    const items = state.incomes.filter(i=>inPeriod(i.date)).sort((a,b)=> (b.date||'').localeCompare(a.date||''));
+    const total = items.reduce((s,i)=> s + ((i.amount!==undefined&&i.amount!==null&&!isNaN(i.amount))?Number(i.amount):0), 0);
     return `
       <div class="cert-toolbar">
-        <div style="font-size:12px;color:var(--ink-soft);font-family:var(--font-mono);">Всего записей: ${state.incomes.length} · Сумма: ${formatMoney(total)}</div>
+        <div style="font-size:12px;color:var(--ink-soft);font-family:var(--font-mono);">${escapeHtml(periodLabel)} · Записей: ${items.length} · Сумма: ${formatMoney(total)}</div>
         <button class="btn btn-primary" id="btn-add-income">+ Добавить доход</button>
       </div>
       ${items.length === 0 ? `<div class="host-empty">Записей пока нет</div>` : `
@@ -5695,12 +5802,15 @@
     `;
   }
 
-  function renderExpensesView(){
-    const items = [...state.expenses].sort((a,b)=> (b.date||'').localeCompare(a.date||''));
-    const total = state.expenses.reduce((s,e)=> s + ((e.amount!==undefined&&e.amount!==null&&!isNaN(e.amount))?Number(e.amount):0), 0);
+  function renderExpensesView(period){
+    const inPeriod = period ? period.inPeriod : (()=>true);
+    const periodLabel = period ? period.periodLabel : '';
+    const expensesP = state.expenses.filter(e=>inPeriod(e.date));
+    const items = [...expensesP].sort((a,b)=> (b.date||'').localeCompare(a.date||''));
+    const total = items.reduce((s,e)=> s + ((e.amount!==undefined&&e.amount!==null&&!isNaN(e.amount))?Number(e.amount):0), 0);
 
     const byCategory = {};
-    state.expenses.forEach(e=>{
+    expensesP.forEach(e=>{
       const cat = e.category || 'Без категории';
       byCategory[cat] = (byCategory[cat]||0) + ((e.amount!==undefined&&e.amount!==null&&!isNaN(e.amount))?Number(e.amount):0);
     });
@@ -5721,7 +5831,7 @@
       </div>
       ` : ''}
       <div class="cert-toolbar">
-        <div style="font-size:12px;color:var(--ink-soft);font-family:var(--font-mono);">Всего записей: ${state.expenses.length} · Сумма: ${formatMoney(total)}</div>
+        <div style="font-size:12px;color:var(--ink-soft);font-family:var(--font-mono);">${escapeHtml(periodLabel)} · Записей: ${items.length} · Сумма: ${formatMoney(total)}</div>
         <button class="btn btn-primary" id="btn-add-expense">+ Добавить расход</button>
       </div>
       ${items.length === 0 ? `<div class="host-empty">Записей пока нет</div>` : `
@@ -5745,6 +5855,27 @@
     document.querySelectorAll('[data-bookview]').forEach(btn=>{
       btn.onclick = ()=>{ state.bookView = btn.dataset.bookview; render(); };
     });
+
+    const bookPrevBtn = document.getElementById('book-prev');
+    if(bookPrevBtn) bookPrevBtn.onclick = ()=>{
+      const c = state.bookCursor;
+      state.bookCursor = (state.bookMode==='year')
+        ? new Date(c.getFullYear()-1, c.getMonth(), 1)
+        : new Date(c.getFullYear(), c.getMonth()-1, 1);
+      render();
+    };
+    const bookNextBtn = document.getElementById('book-next');
+    if(bookNextBtn) bookNextBtn.onclick = ()=>{
+      const c = state.bookCursor;
+      state.bookCursor = (state.bookMode==='year')
+        ? new Date(c.getFullYear()+1, c.getMonth(), 1)
+        : new Date(c.getFullYear(), c.getMonth()+1, 1);
+      render();
+    };
+    const bookTodayBtn = document.getElementById('book-today');
+    if(bookTodayBtn) bookTodayBtn.onclick = ()=>{ state.bookCursor = new Date(); render(); };
+    const bookModeToggleBtn = document.getElementById('book-mode-toggle');
+    if(bookModeToggleBtn) bookModeToggleBtn.onclick = ()=>{ state.bookMode = state.bookMode==='year' ? 'month' : 'year'; render(); };
     const addIncomeBtn = document.getElementById('btn-add-income');
     if(addIncomeBtn) addIncomeBtn.onclick = ()=>{
       requireUnlock(()=>{
