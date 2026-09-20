@@ -5,9 +5,9 @@
 
 const path = require('path');
 const crypto = require('crypto');
+const https = require('https');
 const express = require('express');
 const webpush = require('web-push');
-const nodemailer = require('nodemailer');
 const {
   S3Client,
   GetObjectCommand,
@@ -34,23 +34,54 @@ if (!BUCKET || !ENDPOINT) {
 }
 
 // --- Ежедневный бэкап на почту ---
-const SMTP_HOST = process.env.SMTP_HOST;
-const SMTP_PORT = Number(process.env.SMTP_PORT || 465);
-const SMTP_USER = process.env.SMTP_USER;
-const SMTP_PASS = process.env.SMTP_PASS;
+// Отправляем через HTTP-API сервиса Resend, а не напрямую по SMTP: у облачных хостингов
+// (включая Timeweb App Platform) исходящие SMTP-порты (465/587) обычно заблокированы
+// в целях защиты от спама, а обычный HTTPS-запрос (443) через них проходит без проблем.
+const RESEND_API_KEY = process.env.RESEND_API_KEY;
 const BACKUP_EMAIL_TO = process.env.BACKUP_EMAIL_TO;
+// Адрес отправителя по умолчанию — тестовый адрес Resend, работает без подтверждения своего домена,
+// но только если BACKUP_EMAIL_TO совпадает с почтой, на которую зарегистрирован аккаунт Resend.
+const BACKUP_EMAIL_FROM = process.env.BACKUP_EMAIL_FROM || 'Расписание студии <onboarding@resend.dev>';
 const BACKUP_SEND_HOUR = Number(process.env.BACKUP_SEND_HOUR || 4); // час по времени сервера (UTC), в который отправлять
 
-let mailTransport = null;
-if (SMTP_HOST && SMTP_USER && SMTP_PASS && BACKUP_EMAIL_TO) {
-  mailTransport = nodemailer.createTransport({
-    host: SMTP_HOST,
-    port: SMTP_PORT,
-    secure: SMTP_PORT === 465,
-    auth: { user: SMTP_USER, pass: SMTP_PASS },
+const mailConfigured = !!(RESEND_API_KEY && BACKUP_EMAIL_TO);
+if (!mailConfigured) {
+  console.warn('[backup-email] Не заданы RESEND_API_KEY/BACKUP_EMAIL_TO — ежедневная отправка бэкапа на почту работать не будет, пока их не задать в переменных окружения.');
+}
+
+function sendViaResend({ subject, text, filename, jsonContent }) {
+  return new Promise((resolve, reject) => {
+    const payload = JSON.stringify({
+      from: BACKUP_EMAIL_FROM,
+      to: [BACKUP_EMAIL_TO],
+      subject,
+      text,
+      attachments: [{
+        filename,
+        content: Buffer.from(jsonContent, 'utf8').toString('base64'),
+      }],
+    });
+    const req = https.request({
+      hostname: 'api.resend.com',
+      path: '/emails',
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${RESEND_API_KEY}`,
+        'Content-Type': 'application/json',
+        'Content-Length': Buffer.byteLength(payload),
+      },
+    }, (res) => {
+      let body = '';
+      res.on('data', (chunk) => { body += chunk; });
+      res.on('end', () => {
+        if (res.statusCode >= 200 && res.statusCode < 300) resolve(body);
+        else reject(new Error(`Resend API ${res.statusCode}: ${body}`));
+      });
+    });
+    req.on('error', reject);
+    req.write(payload);
+    req.end();
   });
-} else {
-  console.warn('[backup-email] Не заданы SMTP_HOST/SMTP_USER/SMTP_PASS/BACKUP_EMAIL_TO — ежедневная отправка бэкапа на почту работать не будет, пока их не задать в переменных окружения.');
 }
 
 const s3 = new S3Client({
@@ -297,6 +328,7 @@ const BACKUP_KEY_MAP = {
   managerShifts: 'manager-shifts',
   suppliers: 'suppliers',
   stockReceipts: 'stock-receipts',
+  daysOff: 'days-off',
 };
 
 async function readSharedKeyRaw(key) {
@@ -319,21 +351,16 @@ async function buildServerSideBackup() {
 }
 
 async function sendDailyBackupEmail() {
-  if (!mailTransport) return { ok: false, reason: 'not_configured' };
+  if (!mailConfigured) return { ok: false, reason: 'not_configured' };
   const backup = await buildServerSideBackup();
   const dateLabel = new Date().toLocaleDateString('ru-RU', { day: '2-digit', month: '2-digit', year: 'numeric' });
   const eventsCount = Array.isArray(backup.events) ? backup.events.length : 0;
   const certsCount = Array.isArray(backup.certificates) ? backup.certificates.length : 0;
-  await mailTransport.sendMail({
-    from: SMTP_USER,
-    to: BACKUP_EMAIL_TO,
+  await sendViaResend({
     subject: `Расписание студии — резервная копия от ${dateLabel}`,
     text: `Автоматическая ежедневная резервная копия базы данных.\n\nМероприятий: ${eventsCount}\nСертификатов: ${certsCount}\n\nФайл во вложении — обычный JSON, его же принимает "Восстановить из файла" в разделе Экспорт.`,
-    attachments: [{
-      filename: `raspisanie-backup-${new Date().toISOString().slice(0, 10)}.json`,
-      content: JSON.stringify(backup, null, 2),
-      contentType: 'application/json',
-    }],
+    filename: `raspisanie-backup-${new Date().toISOString().slice(0, 10)}.json`,
+    jsonContent: JSON.stringify(backup, null, 2),
   });
   return { ok: true };
 }
@@ -354,7 +381,7 @@ app.post('/api/backup/send-now', async (req, res) => {
 // раз в сутки, в заданный час — проверяем каждый час, отправляли ли уже сегодня
 const EMAIL_BACKUP_MARKER_KEY = 'email-backup-last-sent';
 async function checkAndSendScheduledBackup() {
-  if (!mailTransport) return;
+  if (!mailConfigured) return;
   const now = new Date();
   if (now.getUTCHours() !== BACKUP_SEND_HOUR) return;
   const lastSentRaw = await readSharedKeyRaw(EMAIL_BACKUP_MARKER_KEY);
