@@ -3002,7 +3002,7 @@
           ${managerLine ? `<div class="cal-manager" title="Менеджер: ${escapeHtml(managerLine)}">👔 ${escapeHtml(managerLine)}</div>` : ''}
           ${dayOffEntries.length ? `<div class="cal-dayoff-line" title="Выходной: ${escapeHtml(dayOffEntries.map(x=>`${x.name} (${ROLE_LABELS[x.role]||x.role})`).join(', '))}">🚫 ${escapeHtml(dayOffEntries.map(x=>x.name).join(', '))}</div>` : ''}
           <div class="cal-events">
-            ${shown.map(e=>`<div class="cal-evt-chip" style="background:${statusColor(e.status)}">${isAll?spaceBadge(getSpace(e.spaceId),'xs'):''}<span class="t">${e.time}</span><span>${escapeHtml(e.title)}</span></div>`).join('')}
+            ${shown.map(e=>`<div class="cal-evt-chip" style="background:${statusColor(e.status)}">${isAll?spaceBadge(getSpace(e.spaceId),'xs'):''}<span class="t">${e.time}</span><span class="evt-title">${escapeHtml(e.title)}</span></div>`).join('')}
             ${extra>0?`<div class="cal-more">+${extra} ещё</div>`:''}
           </div>
         </div>
