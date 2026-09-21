@@ -764,6 +764,9 @@ const state = {
   taskFilterProjectIds:{work:new Set(), personal:new Set()},
   taskFilterNoProject:{work:false, personal:false},
   taskFilterStatus:'all',
+  taskFilterPriority:'all',
+  taskFilterPeriod:'all',
+  taskSortBy:'manual',
   projectsWork:[],
   blocksWork:[],
   auditLog:[],
@@ -3139,7 +3142,7 @@ function taskItemHtml(t, personal, opts){
   return `
     <div class="item ${t.status==='done'?'is-done':''}" data-task-row="${t.id}" data-depth="${depth}" style="${depth>0?`margin-left:${depth*24}px;border-left:2px solid var(--paper-line);`:''}">
       ${opts.bulkSelect && depth===0?`<input type="checkbox" class="task-check" data-bulk-select="${t.id}" ${opts.bulkSelected?'checked':''} title="Выбрать для массового действия">`:''}
-      ${depth===0?`<span class="drag-handle" data-drag-handle="${t.id}" title="Перетащить, чтобы изменить порядок">⠿</span>`:''}
+      ${depth===0 && opts.dragEnabled!==false?`<span class="drag-handle" data-drag-handle="${t.id}" title="Перетащить, чтобы изменить порядок">⠿</span>`:''}
       <input type="checkbox" class="task-check${checkInteractive?'':' task-check-locked'}" data-done="${t.id}" ${isChecked?'checked':''} ${checkInteractive?'':'disabled'} title="${checkTitle}">
       <div class="main">
         <div class="title">
@@ -3220,6 +3223,22 @@ function renderTaskBoard(el, personal){
         <option value="all" ${state.taskFilterStatus==='all'?'selected':''}>Любой статус</option>
         ${Object.entries(STATUSES).map(([k,v])=>`<option value="${k}" ${state.taskFilterStatus===k?'selected':''}>${v}</option>`).join('')}
       </select>
+      <select id="filtPriority">
+        <option value="all" ${state.taskFilterPriority==='all'?'selected':''}>Любой приоритет</option>
+        ${Object.entries(PRIORITIES).map(([k,v])=>`<option value="${k}" ${state.taskFilterPriority===k?'selected':''}>${v}</option>`).join('')}
+      </select>
+    </div>
+    <div class="cat-filters" style="margin-bottom:10px;">
+      <span class="subtitle" style="margin:0 2px 0 0;">Сортировка:</span>
+      <button class="cat-chip ${state.taskSortBy==='manual'?'':'off'}" data-sort-by="manual">Обычный порядок</button>
+      <button class="cat-chip ${state.taskSortBy==='priority'?'':'off'}" data-sort-by="priority">По приоритету</button>
+      <button class="cat-chip ${state.taskSortBy==='deadline'?'':'off'}" data-sort-by="deadline">По сроку</button>
+    </div>
+    <div class="cat-filters" style="margin-bottom:10px;">
+      <span class="subtitle" style="margin:0 2px 0 0;">Срок:</span>
+      <button class="cat-chip ${state.taskFilterPeriod==='all'?'':'off'}" data-period="all">Все</button>
+      <button class="cat-chip ${state.taskFilterPeriod==='week'?'':'off'}" data-period="week">На этой неделе</button>
+      <button class="cat-chip ${state.taskFilterPeriod==='month'?'':'off'}" data-period="month">В этом месяце</button>
     </div>
     <div id="delegatedSummary"></div>
     <div id="bulkActionBar"></div>
@@ -3305,6 +3324,9 @@ function renderTaskBoard(el, personal){
     });
   }
   el.querySelector('#filtStatus').onchange=(e)=>{ state.taskFilterStatus=e.target.value; render(); };
+  el.querySelector('#filtPriority').onchange=(e)=>{ state.taskFilterPriority=e.target.value; render(); };
+  el.querySelectorAll('[data-sort-by]').forEach(b=>b.onclick=()=>{ state.taskSortBy=b.dataset.sortBy; render(); });
+  el.querySelectorAll('[data-period]').forEach(b=>b.onclick=()=>{ state.taskFilterPeriod=b.dataset.period; render(); });
 
   const viewMode = personal ? 'assigned' : state.taskViewMode;
   let list = tasksFor(personal).slice();
@@ -3315,6 +3337,24 @@ function renderTaskBoard(el, personal){
     list = list.filter(t=>t.assigneeId===state.taskFilterEmployee);
   }
   if(state.taskFilterStatus!=='all') list = list.filter(t=>t.status===state.taskFilterStatus);
+  if(state.taskFilterPriority!=='all') list = list.filter(t=>(t.priority||'med')===state.taskFilterPriority);
+  if(state.taskFilterPeriod!=='all'){
+    // «На этой неделе» / «В этом месяце» — по дедлайну, чтобы после планёрки было видно,
+    // что именно согласовано и поставлено на ближайший срок.
+    const now = new Date();
+    let rangeStart, rangeEnd;
+    if(state.taskFilterPeriod==='week'){
+      const day = (now.getDay()+6)%7;
+      const monday = new Date(now); monday.setDate(now.getDate()-day);
+      const sunday = new Date(monday); sunday.setDate(monday.getDate()+6);
+      rangeStart = dateToISO(monday); rangeEnd = dateToISO(sunday);
+    } else {
+      const first = new Date(now.getFullYear(), now.getMonth(), 1);
+      const last = new Date(now.getFullYear(), now.getMonth()+1, 0);
+      rangeStart = dateToISO(first); rangeEnd = dateToISO(last);
+    }
+    list = list.filter(t=>t.deadline && t.deadline>=rangeStart && t.deadline<=rangeEnd);
+  }
   if(state.taskFilterNoProject[selKey]){
     list = list.filter(t=>!t.projectId);
   } else if(state.taskFilterProjectIds[selKey].size){
@@ -3346,14 +3386,25 @@ function renderTaskBoard(el, personal){
 
   const byId = {}; list.forEach(t=>byId[t.id]=t);
   const roots = list.filter(t=> !t.parentId || !byId[t.parentId]);
-  roots.sort((a,b)=> ((a.sortOrder||0) - (b.sortOrder||0)) || (a.deadline||'9999').localeCompare(b.deadline||'9999'));
+  // Сортировка списка: «Обычный порядок» — вручную (drag&drop), «По приоритету» — высокий → средний → низкий,
+  // «По сроку» — по ближайшему дедлайну. Приоритет/срок применяются и к подзадачам, чтобы порядок был согласованным.
+  const PRIORITY_RANK = {high:0, med:1, low:2};
+  function taskComparator(a,b){
+    if(state.taskSortBy==='priority'){
+      return (PRIORITY_RANK[a.priority]??1) - (PRIORITY_RANK[b.priority]??1) || (a.deadline||'9999').localeCompare(b.deadline||'9999');
+    } else if(state.taskSortBy==='deadline'){
+      return (a.deadline||'9999').localeCompare(b.deadline||'9999');
+    }
+    return ((a.sortOrder||0) - (b.sortOrder||0)) || (a.deadline||'9999').localeCompare(b.deadline||'9999');
+  }
+  roots.sort(taskComparator);
 
   function renderNode(t, depth){
-    const children = list.filter(c=>c.parentId===t.id).sort((a,b)=>(a.deadline||'9999').localeCompare(b.deadline||'9999'));
+    const children = list.filter(c=>c.parentId===t.id).sort(taskComparator);
     const allTasks = tasksFor(personal);
     const orphanParent = (t.parentId && !byId[t.parentId]) ? allTasks.find(x=>x.id===t.parentId) : null;
     const collapsed = state.collapsedTaskIds.has(t.id);
-    const html = taskItemHtml(t, personal, {depth, orphanParentName: orphanParent?orphanParent.title:null, childCount: children.length, collapsed, bulkSelect: state.bulkSelectMode && !personal, bulkSelected: state.bulkSelectedIds.has(t.id)});
+    const html = taskItemHtml(t, personal, {depth, orphanParentName: orphanParent?orphanParent.title:null, childCount: children.length, collapsed, bulkSelect: state.bulkSelectMode && !personal, bulkSelected: state.bulkSelectedIds.has(t.id), dragEnabled: state.taskSortBy==='manual'});
     if(collapsed || !children.length) return html;
     return html + children.map(c=>renderNode(c, depth+1)).join('');
   }
@@ -4878,6 +4929,44 @@ function renderTaskReport(el){
   const notDoneHtml = buildGroupedHtml(notDoneTasks, 'deadline', notDoneRowHtml) ||
     `<p class="subtitle" style="margin:0;">Не осталось незакрытых задач с истёкшим сроком за этот период 🎉</p>`;
 
+  // Процент выполнения = «Выполнено» / («Выполнено» + «Не выполнено, срок уже наступил»).
+  // Общий процент — в карточке сводки; по сотруднику/проекту — отдельным блоком, когда отчёт сгруппирован именно так.
+  const overallTotal = doneTasks.length + notDoneTasks.length;
+  const overallPct = overallTotal ? Math.round(doneTasks.length/overallTotal*100) : null;
+  function pctColor(pct){ return pct===null?'var(--ink-soft)':pct>=80?'var(--teal)':pct>=50?'var(--ochre)':'var(--brick)'; }
+  function computeCompletionByGroup(){
+    if(state.reportGroupBy!=='employee' && state.reportGroupBy!=='project') return null;
+    const keyFn = state.reportGroupBy==='employee' ? (t=>t.assigneeId||'none') : (t=>t.projectId||'none');
+    const labelFn = state.reportGroupBy==='employee'
+      ? (key=> key==='none' ? 'Без исполнителя' : empName(key))
+      : (key=> key==='none' ? 'Без проекта' : projectName(false,key));
+    const map = {};
+    doneTasks.forEach(t=>{ const k=keyFn(t); (map[k]=map[k]||{done:0,notDone:0}).done++; });
+    notDoneTasks.forEach(t=>{ const k=keyFn(t); (map[k]=map[k]||{done:0,notDone:0}).notDone++; });
+    return Object.entries(map).map(([k,v])=>({
+      key:k, label:labelFn(k), done:v.done, notDone:v.notDone, total:v.done+v.notDone,
+      pct: (v.done+v.notDone)>0 ? Math.round(v.done/(v.done+v.notDone)*100) : null,
+    })).sort((a,b)=>b.total-a.total);
+  }
+  const completionGroups = computeCompletionByGroup();
+  const completionHtml = (completionGroups && completionGroups.length) ? `
+    <h2 class="section-title" style="font-size:16px;">📊 Процент выполнения ${state.reportGroupBy==='employee'?'по сотрудникам':'по проектам'}</h2>
+    <div class="item-list" style="margin-bottom:20px;">
+      ${completionGroups.map(g=>`
+        <div class="item" style="flex-direction:column;align-items:stretch;gap:6px;">
+          <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;">
+            <span>${escapeHtml(g.label)}</span>
+            <span class="mono" style="font-weight:600;color:${pctColor(g.pct)};">${g.pct===null?'—':g.pct+'%'}</span>
+          </div>
+          <div style="height:8px;border-radius:4px;background:var(--paper-line);overflow:hidden;">
+            <div style="height:100%;width:${g.pct===null?0:g.pct}%;background:${pctColor(g.pct)};border-radius:4px;"></div>
+          </div>
+          <span class="subtitle" style="margin:0;font-size:11.5px;">Выполнено ${g.done} из ${g.total}${g.notDone?`, не выполнено: ${g.notDone}`:''}</span>
+        </div>
+      `).join('')}
+    </div>
+  ` : '';
+
   el.innerHTML = `
     <div class="field-row" style="align-items:flex-end;">
       <div class="field"><label>С какой даты</label><input type="date" id="rep_start" value="${state.reportStart}"></div>
@@ -4905,7 +4994,9 @@ function renderTaskReport(el){
       <div class="sum-card spent"><div class="label">С опозданием</div><div class="val mono">${lateTasks.length}</div></div>
       <div class="sum-card issued"><div class="label">Средний срок</div><div class="val mono">${avgDays!==null?avgDays.toFixed(1)+' дн.':'—'}</div></div>
       <div class="sum-card" style="background:var(--brick-bg,#F6E2E2);"><div class="label">Не выполнено</div><div class="val mono" style="color:var(--brick);">${notDoneTasks.length}</div></div>
+      <div class="sum-card"><div class="label">% выполнено</div><div class="val mono" style="color:${pctColor(overallPct)};">${overallPct===null?'—':overallPct+'%'}</div></div>
     </div>
+    ${completionHtml}
     <h2 class="section-title" style="font-size:16px;">✅ Выполнено</h2>
     ${doneHtml}
     <h2 class="section-title" style="font-size:16px;margin-top:24px;">❌ Не выполнено (срок уже наступил)</h2>
