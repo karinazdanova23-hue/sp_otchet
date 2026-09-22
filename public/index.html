@@ -1666,14 +1666,18 @@
     realPayments.forEach(p=>{
       const date = (p.date && p.date.trim()) ? p.date.trim() : (p.ts ? fmtDate(new Date(p.ts)) : event.date);
       const existing = state.incomes.find(i=> i.eventId===event.id && i.autoFromPayment && i.paymentId===p.id);
+      // если оплата привязана к конкретному гостю (см. "Гости по отдельности") — подписываем его в комментарии,
+      // чтобы в "Книге" было видно, кто именно заплатил, а не только общая сумма по мероприятию
+      const guestForPayment = p.guestId && Array.isArray(event.guestList) ? event.guestList.find(g=>g.id===p.guestId) : null;
+      const guestSuffix = guestForPayment && guestForPayment.name ? ` — ${guestForPayment.name}` : '';
       const entry = {
         id: existing ? existing.id : uid(),
         date, operation: 'Оплата', product: event.product || 'Мастер-класс',
         account: p.source || '', eventId: event.id, paymentId: p.id, amount: Number(p.amount)||0,
         masterName: '', itemSaleId: '', orderId: '',
-        comment: `Оплата по журналу: ${event.title || 'без названия'}`, autoFromPayment: true,
+        comment: `Оплата по журналу: ${event.title || 'без названия'}${guestSuffix}`, autoFromPayment: true,
       };
-      if(!existing || existing.date!==entry.date || existing.amount!==entry.amount || existing.account!==entry.account){
+      if(!existing || existing.date!==entry.date || existing.amount!==entry.amount || existing.account!==entry.account || existing.comment!==entry.comment){
         const idx = state.incomes.findIndex(i=>i.id===entry.id);
         if(idx>=0) state.incomes[idx] = entry; else state.incomes.push(entry);
         incomesChanged = true;
@@ -13322,10 +13326,6 @@
             <button type="button" class="add-evt-btn" id="btn-add-host">+ добавить ведущего</button>
           </div>
           <div class="field">
-            <label>Имя гостя <span style="font-weight:400;color:var(--ink-soft);">— вручную</span></label>
-            <input type="text" id="f-guest-name" value="${escapeHtml(ev.guestName||'')}" placeholder="Имя">
-          </div>
-          <div class="field">
             <label>Плательщик</label>
             <div class="status-select-wrap">
               <div class="payer-opt ${(ev.payerType||'individual')==='individual'?'active':''}" data-payer="individual">
@@ -13357,23 +13357,26 @@
             <label>Выручка (₽) — сумма полученных оплат</label>
             <input type="number" id="f-price" value="${ev.price!==undefined && ev.price!==null ? ev.price : ''}" min="0" step="100" placeholder="Например: 8000">
             <div id="price-journal-mismatch" style="display:none;color:var(--status-red);font-size:11.5px;margin-top:4px;"></div>
-            <div class="row2" style="margin-top:8px;">
-              <select id="payment-source">
-                <option value="Точка">Точка</option>
-                <option value="YCLIENTS">YCLIENTS</option>
-                <option value="Наличные">Наличные</option>
-                <option value="Сертификат">Сертификат</option>
-              </select>
-              <select id="payment-type">
-                <option value="advance">Предоплата</option>
-                <option value="balance">Остаток</option>
-              </select>
+            <div id="quick-payment-controls" style="display:none;">
+              <div class="row2" style="margin-top:8px;">
+                <select id="payment-source">
+                  <option value="Точка">Точка</option>
+                  <option value="YCLIENTS">YCLIENTS</option>
+                  <option value="Наличные">Наличные</option>
+                  <option value="Сертификат">Сертификат</option>
+                </select>
+                <select id="payment-type">
+                  <option value="advance">Предоплата</option>
+                  <option value="balance">Остаток</option>
+                </select>
+              </div>
+              <div style="display:flex;gap:8px;margin-top:8px;">
+                <input type="date" id="payment-add-date" value="${todayStr()}" style="border:1px solid var(--line-strong);border-radius:var(--radius);padding:8px 9px;font-family:var(--font-body);font-size:13px;background:var(--paper);">
+                <input type="number" id="payment-add-amount" placeholder="Например: 1000" step="100" style="flex:1;border:1px solid var(--line-strong);border-radius:var(--radius);padding:8px 9px;font-family:var(--font-body);font-size:13px;background:var(--paper);">
+                <button type="button" class="btn btn-ghost" id="btn-add-payment" style="white-space:nowrap;">+ Добавить оплату</button>
+              </div>
             </div>
-            <div style="display:flex;gap:8px;margin-top:8px;">
-              <input type="date" id="payment-add-date" value="${todayStr()}" style="border:1px solid var(--line-strong);border-radius:var(--radius);padding:8px 9px;font-family:var(--font-body);font-size:13px;background:var(--paper);">
-              <input type="number" id="payment-add-amount" placeholder="Например: 1000" step="100" style="flex:1;border:1px solid var(--line-strong);border-radius:var(--radius);padding:8px 9px;font-family:var(--font-body);font-size:13px;background:var(--paper);">
-              <button type="button" class="btn btn-ghost" id="btn-add-payment" style="white-space:nowrap;">+ Добавить оплату</button>
-            </div>
+            <div style="font-size:11.5px;color:var(--ink-soft);margin-top:8px;">Оплата вносится только через гостей — в разделе «Гости по отдельности» ниже. Даже если гость один, заведите его там.</div>
             <div id="payments-log" style="margin-top:6px;display:flex;flex-direction:column;gap:4px;"></div>
             <input type="hidden" id="f-payments" value='${escapeHtml(JSON.stringify(ev.payments||[]))}'>
             ${(()=>{
@@ -13385,7 +13388,7 @@
                 <div style="margin-top:4px;">${linkedIncomes.map(i=>`${formatDateText(i.date)} · ${escapeHtml(i.operation)} · ${formatMoney(i.amount||0)} · ${escapeHtml(i.account)}`).join('<br>')}</div>
               </div>`;
             })()}
-            <div style="margin-top:10px;padding:10px;border:1px dashed var(--line-strong);border-radius:var(--radius);">
+            <div id="quick-cert-controls" style="display:none;margin-top:10px;padding:10px;border:1px dashed var(--line-strong);border-radius:var(--radius);">
               <label style="display:block;font-size:11.5px;font-family:var(--font-mono);color:var(--ink-soft);margin-bottom:6px;">🎟 Оплатить сертификатом</label>
               <div style="display:flex;gap:8px;">
                 <input type="text" id="cert-attach-search" placeholder="Номер сертификата…" list="cert-attach-options" style="flex:1;border:1px solid var(--line-strong);border-radius:var(--radius);padding:8px 9px;font-family:var(--font-body);font-size:13px;background:var(--paper);">
@@ -13410,7 +13413,7 @@
           </div>
           <div class="field" id="guest-breakdown-field">
             <details id="guest-breakdown-details">
-              <summary style="cursor:pointer;font-size:13.5px;font-weight:600;color:var(--ink);"><span id="guest-breakdown-summary-text">Гости по отдельности${(ev.guestList&&ev.guestList.length)?` (${ev.guestList.length})`:''}</span> <span style="font-weight:400;color:var(--ink-soft);">— необязательно, если несколько человек платят порознь или кто-то платит за несколько мест</span></summary>
+              <summary style="cursor:pointer;font-size:13.5px;font-weight:600;color:var(--ink);"><span id="guest-breakdown-summary-text">Гости по отдельности${(ev.guestList&&ev.guestList.length)?` (${ev.guestList.length})`:''}</span> <span style="font-weight:400;color:var(--ink-soft);">— заводите каждого гостя здесь, у кого-то может быть несколько мест</span></summary>
               <div style="margin-top:10px;">
                 <div id="guest-list-container"></div>
                 <button type="button" class="btn btn-ghost" id="btn-add-guest" style="margin-top:4px;">+ Добавить гостя</button>
@@ -13855,7 +13858,13 @@
     const guestListHidden = overlay.querySelector('#f-guest-list');
     let guestListArr = [];
     try{ guestListArr = guestListHidden ? JSON.parse(guestListHidden.value || '[]') : []; }catch(e){ guestListArr = []; }
+    // старые мероприятия (до этого раздела) хранили имя гостя в отдельном поле, которого в форме больше нет —
+    // переносим его в список гостей один раз при открытии, чтобы имя не "потерялось" из вида
     function persistGuestList(){ if(guestListHidden) guestListHidden.value = JSON.stringify(guestListArr); }
+    if(guestListArr.length === 0 && state.modal.event && state.modal.event.guestName && state.modal.event.guestName.trim()){
+      guestListArr.push({ id: uid(), name: state.modal.event.guestName.trim(), seats: 1, phone: '', comment: '' });
+      persistGuestList();
+    }
     const priceInputForMismatch = overlay.querySelector('#f-price');
     if(priceInputForMismatch) priceInputForMismatch.addEventListener('input', ()=> updatePriceJournalMismatchHint());
 
@@ -13887,13 +13896,14 @@
       }).join('');
       updatePriceJournalMismatchHint();
       paymentsLogEl.querySelectorAll('.payment-del').forEach(btn=>{
-        btn.onclick = ()=>{
+        btn.onclick = async ()=>{
           const idx = parseInt(btn.dataset.idx);
           const removed = paymentsArr.splice(idx,1)[0];
           if(removed){
             const priceInput = overlay.querySelector('#f-price');
-            priceInput.value = Math.max(0, (parseInt(priceInput.value)||0) - (Number(removed.amount)||0));
+            priceInput.value = Math.max(0, (parseFloat(priceInput.value)||0) - (Number(removed.amount)||0));
             updateAwaitingHint();
+            if(removed.certRedemptionRef) await undoCertRedemption(removed.certRedemptionRef);
           }
           paymentsHidden.value = JSON.stringify(paymentsArr);
           renderPaymentsLog();
@@ -13958,8 +13968,9 @@
     }
 
     // гости по отдельности: имя + количество мест + свой сворачиваемый журнал оплат (использует тот же paymentsArr, помеченный guestId)
-    const GUEST_PAYMENT_SOURCES = ['Точка','YCLIENTS','Наличные','Сертификат'];
-
+    const GUEST_PAYMENT_SOURCES = ['Точка','YCLIENTS','Наличные'];
+    // какие вложенные <details> гостей раскрыты — чтобы форма не схлопывалась после каждой оплаты/списания
+    let openGuestDetailsIds = new Set();
     function syncGuestCountFromList(){
       const gInput = overlay.querySelector('#f-guests');
       if(!gInput) return;
@@ -13990,11 +14001,17 @@
         return `
         <div class="guest-block" data-gid="${g.id}" style="border:1px solid var(--line-strong);border-radius:var(--radius);padding:8px 10px;margin-bottom:8px;">
           <div style="display:flex;gap:8px;align-items:center;">
-            <input type="text" class="guest-name" data-gid="${g.id}" value="${escapeHtml(g.name||'')}" placeholder="Имя гостя" style="flex:1;min-width:0;border:1px solid var(--line-strong);border-radius:var(--radius);padding:6px 8px;font-family:var(--font-body);font-size:12.5px;">
-            <input type="number" class="guest-seats" data-gid="${g.id}" value="${g.seats||1}" min="1" step="1" title="Количество мест, за которые платит этот гость" style="width:62px;flex-shrink:0;border:1px solid var(--line-strong);border-radius:var(--radius);padding:6px 8px;font-family:var(--font-body);font-size:12.5px;">
+            <input type="text" class="guest-name" data-gid="${g.id}" value="${escapeHtml(g.name||'')}" placeholder="Имя гостя" style="flex:1;min-width:0;border:1px solid ${g.name&&g.name.trim()?'var(--line-strong)':'var(--status-red)'};border-radius:var(--radius);padding:6px 8px;font-family:var(--font-body);font-size:12.5px;">
+            <input type="number" class="guest-seats" data-gid="${g.id}" value="${g.seats||1}" min="1" step="1" title="Количество мест, за которые платит этот гость" style="width:52px;flex-shrink:0;border:1px solid var(--line-strong);border-radius:var(--radius);padding:6px 8px;font-family:var(--font-body);font-size:12.5px;">
             <button type="button" class="guest-remove" data-gid="${g.id}" title="Удалить гостя" style="background:none;border:none;color:var(--danger);cursor:pointer;font-size:16px;line-height:1;flex-shrink:0;">✕</button>
           </div>
-          <details style="margin-top:6px;">
+          <div style="display:flex;gap:8px;margin-top:6px;">
+            <input type="tel" class="guest-phone" data-gid="${g.id}" value="${escapeHtml(g.phone||'')}" placeholder="Телефон — необязательно" style="flex:1;min-width:0;border:1px solid var(--line-strong);border-radius:var(--radius);padding:6px 8px;font-family:var(--font-body);font-size:12.5px;">
+          </div>
+          <div style="margin-top:6px;">
+            <input type="text" class="guest-comment" data-gid="${g.id}" value="${escapeHtml(g.comment||'')}" placeholder="Комментарий — необязательно" style="width:100%;box-sizing:border-box;border:1px solid var(--line-strong);border-radius:var(--radius);padding:6px 8px;font-family:var(--font-body);font-size:12.5px;">
+          </div>
+          <details style="margin-top:6px;" ${openGuestDetailsIds.has(g.id)?'open':''}>
             <summary style="cursor:pointer;font-size:11.5px;color:var(--ink-soft);font-family:var(--font-mono);">Оплата: ${formatMoneyPrecise(gTotal)}${gPayments.length?' · '+gPayments.length+' плат.':''}</summary>
             <div style="margin-top:6px;">
               <div class="guest-payments-log" style="display:flex;flex-direction:column;gap:4px;margin-bottom:6px;">
@@ -14014,11 +14031,27 @@
                 <input type="number" class="guest-payment-amount" data-gid="${g.id}" placeholder="Сумма" step="0.01" style="width:100px;border:1px solid var(--line-strong);border-radius:var(--radius);padding:6px 8px;font-family:var(--font-body);font-size:12px;background:var(--paper);">
                 <button type="button" class="guest-add-payment" data-gid="${g.id}" style="white-space:nowrap;padding:6px 10px;border:1px solid var(--line-strong);border-radius:var(--radius);background:var(--white);cursor:pointer;font-size:12px;">+ Оплата</button>
               </div>
+              <div style="margin-top:8px;padding:8px;border:1px dashed var(--line-strong);border-radius:var(--radius);">
+                <label style="display:block;font-size:10.5px;font-family:var(--font-mono);color:var(--ink-soft);margin-bottom:5px;">🎟 Оплатить сертификатом</label>
+                <div style="display:flex;gap:6px;flex-wrap:wrap;">
+                  <input type="text" class="guest-cert-search" data-gid="${g.id}" placeholder="Номер сертификата…" list="cert-attach-options" style="flex:1;min-width:100px;border:1px solid var(--line-strong);border-radius:var(--radius);padding:6px 8px;font-family:var(--font-body);font-size:12px;background:var(--paper);">
+                  <input type="hidden" class="guest-cert-id" data-gid="${g.id}" value="">
+                  <input type="number" class="guest-cert-amount" data-gid="${g.id}" placeholder="Сумма" step="0.01" style="width:90px;border:1px solid var(--line-strong);border-radius:var(--radius);padding:6px 8px;font-family:var(--font-body);font-size:12px;background:var(--paper);">
+                  <button type="button" class="guest-cert-btn" data-gid="${g.id}" style="white-space:nowrap;padding:6px 10px;border:1px solid var(--line-strong);border-radius:var(--radius);background:var(--white);cursor:pointer;font-size:12px;">Списать</button>
+                </div>
+                <div class="guest-cert-hint" data-gid="${g.id}" style="font-size:10.5px;color:var(--ink-soft);margin-top:4px;"></div>
+              </div>
             </div>
           </details>
         </div>
         `;
       }).join('') || `<div style="font-size:12px;color:var(--ink-soft);margin-bottom:4px;">Пока нет отдельных гостей — нажмите «Добавить гостя», чтобы завести первого.</div>`;
+      overlay.querySelectorAll('.guest-block details').forEach(d=>{
+        d.ontoggle = ()=>{
+          const gid = d.closest('.guest-block').dataset.gid;
+          if(d.open) openGuestDetailsIds.add(gid); else openGuestDetailsIds.delete(gid);
+        };
+      });
       attachGuestBlockEvents();
     }
 
@@ -14027,6 +14060,7 @@
         inp.oninput = ()=>{
           const g = guestListArr.find(x=>x.id===inp.dataset.gid);
           if(g){ g.name = inp.value; persistGuestList(); }
+          inp.style.borderColor = inp.value.trim() ? 'var(--line-strong)' : 'var(--status-red)';
         };
       });
       overlay.querySelectorAll('.guest-seats').forEach(inp=>{
@@ -14035,10 +14069,22 @@
           if(g){ g.seats = Math.max(1, parseInt(inp.value)||1); persistGuestList(); syncGuestCountFromList(); }
         };
       });
+      overlay.querySelectorAll('.guest-phone').forEach(inp=>{
+        inp.oninput = ()=>{
+          const g = guestListArr.find(x=>x.id===inp.dataset.gid);
+          if(g){ g.phone = inp.value; persistGuestList(); }
+        };
+      });
+      overlay.querySelectorAll('.guest-comment').forEach(inp=>{
+        inp.oninput = ()=>{
+          const g = guestListArr.find(x=>x.id===inp.dataset.gid);
+          if(g){ g.comment = inp.value; persistGuestList(); }
+        };
+      });
       overlay.querySelectorAll('.guest-remove').forEach(btn=>{
         btn.onclick = ()=>{
           const gid = btn.dataset.gid;
-          const doRemove = ()=>{
+          const doRemove = async ()=>{
             guestListArr = guestListArr.filter(x=>x.id!==gid);
             const removedPayments = paymentsArr.filter(p=>p.guestId===gid);
             if(removedPayments.length){
@@ -14049,7 +14095,11 @@
               priceInput.value = Math.max(0, (parseFloat(priceInput.value)||0) - removedSum);
               renderPaymentsLog();
               updateAwaitingHint();
+              for(const p of removedPayments){
+                if(p.certRedemptionRef) await undoCertRedemption(p.certRedemptionRef);
+              }
             }
+            openGuestDetailsIds.delete(gid);
             persistGuestList();
             syncGuestCountFromList();
             renderGuestList();
@@ -14064,13 +14114,14 @@
         };
       });
       overlay.querySelectorAll('.guest-payment-del').forEach(btn=>{
-        btn.onclick = ()=>{
+        btn.onclick = async ()=>{
           const idx = parseInt(btn.dataset.idx);
           const removed = paymentsArr.splice(idx,1)[0];
           if(removed){
             const priceInput = overlay.querySelector('#f-price');
             priceInput.value = Math.max(0, (parseFloat(priceInput.value)||0) - (Number(removed.amount)||0));
             updateAwaitingHint();
+            if(removed.certRedemptionRef) await undoCertRedemption(removed.certRedemptionRef);
           }
           paymentsHidden.value = JSON.stringify(paymentsArr);
           renderPaymentsLog();
@@ -14107,6 +14158,33 @@
           updateAwaitingHint();
         };
       });
+      overlay.querySelectorAll('.guest-cert-search').forEach(inp=>{
+        inp.oninput = ()=>{
+          const gid = inp.dataset.gid;
+          const idHidden = overlay.querySelector(`.guest-cert-id[data-gid="${gid}"]`);
+          if(idHidden) idHidden.value = certAttachLabelToId[inp.value.trim()] || '';
+        };
+      });
+      overlay.querySelectorAll('.guest-cert-btn').forEach(btn=>{
+        btn.onclick = async ()=>{
+          const gid = btn.dataset.gid;
+          const searchInput = overlay.querySelector(`.guest-cert-search[data-gid="${gid}"]`);
+          const idHidden = overlay.querySelector(`.guest-cert-id[data-gid="${gid}"]`);
+          const amountInput = overlay.querySelector(`.guest-cert-amount[data-gid="${gid}"]`);
+          const hintEl = overlay.querySelector(`.guest-cert-hint[data-gid="${gid}"]`);
+          hintEl.textContent = '';
+          hintEl.style.color = 'var(--status-red)';
+          const resolved = resolveCertFromSearch(searchInput.value.trim(), idHidden ? idHidden.value : '');
+          if(resolved.error){ hintEl.textContent = resolved.error; return; }
+          const cert = resolved.cert;
+          const amount = Math.round((parseFloat(amountInput.value) || 0) * 100) / 100;
+          if(amount <= 0){ hintEl.textContent = 'Впишите сумму больше нуля.'; return; }
+          const remaining = certRemaining(cert);
+          if(amount > remaining){ hintEl.textContent = `У сертификата №${cert.number} остаток только ${formatMoney(remaining)}.`; return; }
+          openGuestDetailsIds.add(gid);
+          await performCertRedemption({cert, amount, guestId: gid});
+        };
+      });
     }
 
     const guestListContainerEl = overlay.querySelector('#guest-list-container');
@@ -14116,7 +14194,7 @@
       const addGuestBtn = overlay.querySelector('#btn-add-guest');
       if(addGuestBtn){
         addGuestBtn.onclick = ()=>{
-          guestListArr.push({ id: uid(), name: '', seats: 1 });
+          guestListArr.push({ id: uid(), name: '', seats: 1, phone: '', comment: '' });
           persistGuestList();
           syncGuestCountFromList();
           renderGuestList();
@@ -14170,55 +14248,86 @@
         certAttachIdHidden.value = certAttachLabelToId[val] || '';
       });
     }
+    // разыменование строки/id из поля поиска сертификата в конкретный объект сертификата —
+    // общая логика и для мероприятия целиком, и для оплаты сертификатом за отдельного гостя
+    function resolveCertFromSearch(searchVal, idHiddenVal){
+      let cert = idHiddenVal ? state.certificates.find(c=>c.id === idHiddenVal) : null;
+      if(!cert){
+        const numberMatch = searchVal.match(/^№?(\S+)/);
+        const numberStr = numberMatch ? numberMatch[1] : searchVal;
+        const matches = state.certificates.filter(c=> String(c.number) === numberStr);
+        if(matches.length > 1) return {error: `Есть несколько сертификатов №${numberStr} — выберите нужный из списка (по дате).`};
+        cert = matches[0];
+      }
+      if(!cert) return {error: 'Сертификат с таким номером не найден. Выберите его из списка.'};
+      return {cert};
+    }
+
+    // списание с сертификата в оплату мероприятия — опционально помечается конкретным гостем (guestId)
+    async function performCertRedemption({cert, amount, guestId}){
+      const dateVal = overlay.querySelector('#f-date') ? overlay.querySelector('#f-date').value : (state.modal.event.date || todayStr());
+      const redemption = { id: uid(), eventId: state.modal.event.id, date: dateVal || todayStr(), amount };
+      if(!Array.isArray(cert.redemptions)) cert.redemptions = [];
+      cert.redemptions.push(redemption);
+      cert.status = certRemaining(cert) <= 0 ? 'used' : 'partial';
+      const certIdx = state.certificates.findIndex(c=>c.id===cert.id);
+      if(certIdx>=0) state.certificates[certIdx] = cert;
+      await saveCertificates();
+      recordAction(`Сертификат №${cert.number} применён к мероприятию`, `${formatMoney(amount)}`);
+
+      const paymentEntry = {
+        id: uid(), amount, source: 'Сертификат', type: 'balance', date: dateVal || todayStr(), ts: new Date().toISOString(),
+        certRedemptionRef: cert.id + ':' + redemption.id,
+      };
+      if(guestId) paymentEntry.guestId = guestId;
+      paymentsArr.push(paymentEntry);
+      paymentsHidden.value = JSON.stringify(paymentsArr);
+      const priceInput = overlay.querySelector('#f-price');
+      priceInput.value = Math.round(((parseFloat(priceInput.value)||0) + amount) * 100) / 100;
+      priceInput.style.borderColor = '';
+      renderPaymentsLog();
+      updateAwaitingHint();
+      renderCertAttachSummary();
+      refreshCertAttachOptions();
+      if(guestId) renderGuestList();
+    }
+
+    // отмена списания при удалении оплаты, помеченной certRedemptionRef, — возвращает сумму на баланс сертификата
+    async function undoCertRedemption(ref){
+      if(!ref) return;
+      const [certId, redemptionId] = ref.split(':');
+      const cert = state.certificates.find(c=>c.id===certId);
+      if(!cert) return;
+      cert.redemptions = (cert.redemptions||[]).filter(r=>r.id!==redemptionId);
+      cert.status = certRemaining(cert) <= 0 ? 'used' : (cert.redemptions.length > 0 ? 'partial' : 'in_progress');
+      const certIdx = state.certificates.findIndex(c=>c.id===certId);
+      if(certIdx>=0) state.certificates[certIdx] = cert;
+      await saveCertificates();
+      renderCertAttachSummary();
+      refreshCertAttachOptions();
+    }
+
     if(attachCertBtn && certAttachSearch && certAttachAmount){
       attachCertBtn.onclick = async ()=>{
         certAttachHint.textContent = '';
         certAttachHint.style.color = 'var(--status-red)';
-        const searchVal = certAttachSearch.value.trim();
         // сначала пробуем точный выбор из списка (по id, надёжно различает дубли номеров),
         // и только если строка не совпала ни с одной подписью — терпимо ищем по номеру (сработает, если номер уникален)
-        let cert = certAttachIdHidden.value ? state.certificates.find(c=>c.id === certAttachIdHidden.value) : null;
-        if(!cert){
-          const numberMatch = searchVal.match(/^№?(\S+)/);
-          const numberStr = numberMatch ? numberMatch[1] : searchVal;
-          const matches = state.certificates.filter(c=> String(c.number) === numberStr);
-          if(matches.length > 1){ certAttachHint.textContent = `Есть несколько сертификатов №${numberStr} — выберите нужный из списка (по дате).`; return; }
-          cert = matches[0];
-        }
-        if(!cert){ certAttachHint.textContent = 'Сертификат с таким номером не найден. Выберите его из списка.'; return; }
+        const resolved = resolveCertFromSearch(certAttachSearch.value.trim(), certAttachIdHidden.value);
+        if(resolved.error){ certAttachHint.textContent = resolved.error; return; }
+        const cert = resolved.cert;
         const amount = parseInt(certAttachAmount.value) || 0;
         if(amount <= 0){ certAttachHint.textContent = 'Впишите сумму больше нуля.'; return; }
         const remaining = certRemaining(cert);
         if(amount > remaining){ certAttachHint.textContent = `У сертификата №${cert.number} остаток только ${formatMoney(remaining)}.`; return; }
 
-        const dateVal = overlay.querySelector('#f-date') ? overlay.querySelector('#f-date').value : (state.modal.event.date || todayStr());
-        const redemption = { id: uid(), eventId: state.modal.event.id, date: dateVal || todayStr(), amount };
-        if(!Array.isArray(cert.redemptions)) cert.redemptions = [];
-        cert.redemptions.push(redemption);
-        cert.status = certRemaining(cert) <= 0 ? 'used' : 'partial';
-        const certIdx = state.certificates.findIndex(c=>c.id===cert.id);
-        if(certIdx>=0) state.certificates[certIdx] = cert;
-        await saveCertificates();
-        recordAction(`Сертификат №${cert.number} применён к мероприятию`, `${formatMoney(amount)}`);
-
-        paymentsArr.push({
-          amount, source: 'Сертификат', type: 'balance', ts: new Date().toISOString(),
-          certRedemptionRef: cert.id + ':' + redemption.id,
-        });
-        paymentsHidden.value = JSON.stringify(paymentsArr);
-        const priceInput = overlay.querySelector('#f-price');
-        priceInput.value = (parseInt(priceInput.value)||0) + amount;
-        priceInput.style.borderColor = '';
-        renderPaymentsLog();
-        updateAwaitingHint();
+        await performCertRedemption({cert, amount});
 
         certAttachSearch.value = '';
         certAttachIdHidden.value = '';
         certAttachAmount.value = '';
         certAttachHint.style.color = 'var(--status-green)';
         certAttachHint.textContent = `Готово — списано ${formatMoney(amount)} с сертификата №${cert.number}.`;
-        renderCertAttachSummary();
-        refreshCertAttachOptions();
       };
     }
 
@@ -14403,7 +14512,16 @@
       const rentalBeforeRaw = overlay.querySelector('#f-rental-before').value;
       const rentalAfterRaw = overlay.querySelector('#f-rental-after').value;
       const notesVal = overlay.querySelector('#f-notes').value.trim();
-      const guestNameVal = overlay.querySelector('#f-guest-name').value.trim();
+      // "Гости по отдельности" теперь единственное место, где фиксируется, кто пришёл — считаем оттуда
+      const guestListForSave = guestListArr.map(g=>({
+        id: g.id, name: (g.name||'').trim(), seats: Math.max(1, parseInt(g.seats)||1),
+        phone: (g.phone||'').trim(), comment: (g.comment||'').trim(),
+      }));
+      const guestNameVal = guestListForSave.map(g=>g.name).filter(Boolean).join(', ');
+      // обязательно только имя у гостя, который уже добавлен (пустая строка "гость без имени" — ошибка);
+      // само по себе отсутствие гостей не блокирует сохранение — иначе старые мероприятия без разбивки
+      // по гостям и ещё не забронированные слоты "по расписанию" нельзя было бы сохранить вообще
+      const guestNamesMissing = guestListForSave.some(g=>!g.name);
       syncMaterialsItemsFromInputs();
       const cleanedMaterialsItems = materialsItemsDraft
         .map(m=>({name:(m.name||'').trim(), cost:(m.cost!==undefined&&m.cost!==null&&!isNaN(m.cost))?Number(m.cost):null, qty:(m.qty!==undefined&&m.qty!==null&&!isNaN(m.qty))?Number(m.qty):null, source:m.source==='master'?'master':'studio', payTo:m.source==='master'?(m.payTo||'').trim():'', expenseDate:(m.source==='master'&&m.payTo&&m.payTo.trim())?(m.expenseDate||'').trim():''}))
@@ -14434,7 +14552,12 @@
         const agreedPriceNegative = agreedPriceRawCheck !== '' && Number(agreedPriceRawCheck) < 0;
         if(agreedPriceNegative) markInvalid('f-agreed-price');
         if(!notesVal) markInvalid('f-notes');
-        if(!guestNameVal) markInvalid('f-guest-name');
+        if(guestNamesMissing){
+          const guestListEl = overlay.querySelector('#guest-list-container');
+          if(guestListEl){ guestListEl.style.boxShadow = 'inset 0 0 0 1.5px var(--danger)'; guestListEl.style.borderRadius = 'var(--radius)'; if(!firstInvalid) firstInvalid = guestListEl; }
+          const detailsEl = overlay.querySelector('#guest-breakdown-details');
+          if(detailsEl) detailsEl.open = true;
+        }
         const masterPayRawCheck = overlay.querySelector('#f-master-pay').value;
         const masterPayNegative = masterPayRawCheck !== '' && Number(masterPayRawCheck) < 0;
         if(masterPayNegative) markInvalid('f-master-pay');
@@ -14459,7 +14582,7 @@
           if(!dishesVal){ dishesMissing = true; if(dishesFieldEl) dishesFieldEl.style.boxShadow = 'inset 0 0 0 1.5px var(--danger)'; if(!firstInvalid) firstInvalid = dishesFieldEl; }
           else if(dishesVal === 'needed' && !dishesPaymentVal){ dishesMissing = true; if(dishesFieldEl) dishesFieldEl.style.boxShadow = 'inset 0 0 0 1.5px var(--danger)'; if(!firstInvalid) firstInvalid = dishesFieldEl; }
         }
-        if(!title || !hostVal || !dateVal || !timeVal || !durationVal || durationVal<=0 || guestsRaw==='' || priceRaw==='' || Number(priceRaw)<0 || agreedPriceNegative || masterPayNegative || additionalHostsNegative || materialsNegative || !notesVal || !guestNameVal || materialsMissing || dishesMissing){
+        if(!title || !hostVal || !dateVal || !timeVal || !durationVal || durationVal<=0 || guestsRaw==='' || priceRaw==='' || Number(priceRaw)<0 || agreedPriceNegative || masterPayNegative || additionalHostsNegative || materialsNegative || !notesVal || guestNamesMissing || materialsMissing || dishesMissing){
           showGapWarningBanner('Заполните все поля перед сохранением (для статуса «Слот» это необязательно). Себестоимость: добавьте хотя бы один материал с названием и суммой. Суммы (выручка, ЗП мастеру и со-ведущим, себестоимость) не могут быть отрицательными.');
           if(firstInvalid && firstInvalid.scrollIntoView) firstInvalid.scrollIntoView({block:'center', behavior:'smooth'});
           return;
@@ -14517,7 +14640,7 @@
         masterPay: overlay.querySelector('#f-master-pay').value !== '' ? parseInt(overlay.querySelector('#f-master-pay').value) : null,
         masterPayAuto: overlay.querySelector('#f-master-pay').dataset.auto === 'true',
         additionalHosts: finalAdditionalHosts,
-        guestName: overlay.querySelector('#f-guest-name').value.trim(),
+        guestName: guestNameVal,
         price: overlay.querySelector('#f-price').value !== '' ? parseInt(overlay.querySelector('#f-price').value) : null,
         agreedPrice: overlay.querySelector('#f-agreed-price').value !== '' ? parseInt(overlay.querySelector('#f-agreed-price').value) : null,
         materialsItems: cleanedMaterialsItems,
@@ -14530,7 +14653,7 @@
           act: overlay.querySelector('#f-doc-act').checked,
         },
         payments: (()=>{ try{ return JSON.parse(overlay.querySelector('#f-payments').value || '[]'); }catch(e){ return []; } })(),
-        guestList: (()=>{ const el = overlay.querySelector('#f-guest-list'); if(!el) return []; try{ return JSON.parse(el.value || '[]'); }catch(e){ return []; } })(),
+        guestList: guestListForSave,
         title: title,
         product: overlay.querySelector('#f-product').value || '',
         status: overlay.querySelector('#f-status').value || 'confirmed',
