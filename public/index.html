@@ -1271,6 +1271,13 @@
       else { state.hostsList = DEFAULT_HOSTS_LIST; await storageSetWithRetry('hosts-list', JSON.stringify(DEFAULT_HOSTS_LIST)); }
     }catch(e){ state.hostsList = DEFAULT_HOSTS_LIST; }
 
+    // свои категории расходов, которые кто-либо добавил прямо из формы расхода в "Книге" —
+    // общие на всех (хранятся на сервере), в дополнение к базовому списку EXPENSE_CATEGORIES
+    try{
+      const cec = await window.storage.get('custom-expense-categories', true);
+      state.customExpenseCategories = cec ? JSON.parse(cec.value) : [];
+    }catch(e){ state.customExpenseCategories = []; }
+
     try{
       const mpr = await window.storage.get('master-pay-rates', true);
       if(mpr){ state.masterPayRates = JSON.parse(mpr.value); }
@@ -2075,6 +2082,12 @@
   }
   async function saveEventTypes(){
     return storageSetWithRetry('event-types', JSON.stringify(state.eventTypes));
+  }
+  async function saveCustomExpenseCategories(){
+    return storageSetWithRetry('custom-expense-categories', JSON.stringify(state.customExpenseCategories||[]));
+  }
+  function allExpenseCategories(){
+    return [...EXPENSE_CATEGORIES, ...(state.customExpenseCategories||[])];
   }
   async function saveHostsList(){
     return storageSetWithRetry('hosts-list', JSON.stringify(state.hostsList));
@@ -4310,7 +4323,7 @@
     if(addItemSaleBtn) addItemSaleBtn.onclick = ()=>{
       requireUnlock(()=>{
         state.modal = {type:'item-sale', isNew:true, itemSale:{
-          id: uid(), date: todayStr(), masterName: '', revenue: null, comment: '',
+          id: uid(), date: todayStr(), masterName: '', revenue: null, source: INCOME_ACCOUNTS[0], comment: '',
         }};
         render();
       });
@@ -4603,7 +4616,7 @@
               <div class="cell">${x.date ? formatDateText(x.date) : '—'}</div>
               <div class="cell">${escapeHtml(x.masterName||'')}</div>
               <div class="amount">${x.revenue!==undefined&&x.revenue!==null ? formatMoney(x.revenue) : ''}</div>
-              <div class="cell" style="color:var(--ink-soft);font-size:12px;">${x.revenue?`мастер: ${formatMoney(Math.round(x.revenue*ITEM_SALE_MASTER_PCT/100))}`:''}</div>
+              <div class="cell" style="color:var(--ink-soft);font-size:12px;">${x.revenue?`мастер: ${formatMoney(Math.round(x.revenue*ITEM_SALE_MASTER_PCT/100))}`:''}${x.source?` · ${escapeHtml(x.source)}`:''}</div>
               <div class="reason">${escapeHtml(x.comment||'')}</div>
             </div>
           `).join('')}
@@ -5049,6 +5062,12 @@
             <input type="text" id="is-master" value="${escapeHtml(itemSale.masterName||'')}" placeholder="Начните вводить имя…" list="host-suggestions-itemsale">
             <datalist id="host-suggestions-itemsale">${state.hostsList.map(h=>`<option value="${escapeHtml(h)}">`).join('')}</datalist>
           </div>
+          <div class="field">
+            <label>Источник оплаты</label>
+            <select id="is-source">
+              ${INCOME_ACCOUNTS.map(a=>`<option value="${escapeHtml(a)}" ${(itemSale.source||INCOME_ACCOUNTS[0])===a?'selected':''}>${escapeHtml(a)}</option>`).join('')}
+            </select>
+          </div>
           <div id="is-split-preview" style="font-size:13px;font-family:var(--font-mono);color:var(--ink-soft);"></div>
           <div class="field">
             <label>Комментарий <span style="font-weight:400;color:var(--ink-soft);">— необязательно</span></label>
@@ -5090,8 +5109,14 @@
           return;
         }
       }
-      showConfirmDeletePopup('Удалить эту продажу изделия? Действие необратимо.', async ()=>{
-        state.itemSales = state.itemSales.filter(x=>x.id !== state.modal.itemSale.id);
+      const cascadesToIncome = !!state.modal.itemSale.incomeId;
+      showConfirmDeletePopup(`Удалить эту продажу изделия?${cascadesToIncome ? ' Связанный доход в «Книге» тоже удалится.' : ' Действие необратимо.'}`, async ()=>{
+        const saleToDelete = state.modal.itemSale;
+        state.itemSales = state.itemSales.filter(x=>x.id !== saleToDelete.id);
+        if(saleToDelete.incomeId){
+          state.incomes = state.incomes.filter(x=>x.id !== saleToDelete.incomeId);
+          await saveIncomes();
+        }
         await saveItemSales();
         state.modal = null; overlay.remove(); render();
       });
@@ -5115,6 +5140,7 @@
       const dateVal = overlay.querySelector('#is-date').value;
       const masterVal = overlay.querySelector('#is-master').value.trim();
       const revenueRaw = overlay.querySelector('#is-revenue').value;
+      const sourceVal = overlay.querySelector('#is-source').value;
       const commentVal = overlay.querySelector('#is-comment').value.trim();
 
       let firstInvalid = null;
@@ -5136,8 +5162,23 @@
         date: dateVal,
         masterName: masterVal,
         revenue: parseInt(revenueRaw),
+        source: sourceVal,
         comment: commentVal,
+        incomeId: state.modal.itemSale.incomeId || '',
       };
+
+      // связка с "Книга → Доходы", чтобы продажа изделия сразу попадала в общую книгу с источником оплаты,
+      // а не жила отдельно только в разделе "Изделия" (как раньше)
+      const incomeEntry = {
+        id: updated.incomeId || uid(), date: updated.date, operation: INCOME_OPERATIONS[0], product: 'Изделие',
+        account: sourceVal, eventId: '', amount: updated.revenue, masterName: masterVal, masterShare: null,
+        itemSaleId: updated.id, orderId: '', comment: updated.comment || `Продажа изделия — ${masterVal}`,
+      };
+      updated.incomeId = incomeEntry.id;
+      const incIdx = state.incomes.findIndex(x=>x.id===incomeEntry.id);
+      if(incIdx >= 0) state.incomes[incIdx] = incomeEntry; else state.incomes.push(incomeEntry);
+      await saveIncomes();
+
       const idx = state.itemSales.findIndex(x=>x.id===updated.id);
       if(idx >= 0) state.itemSales[idx] = updated; else state.itemSales.push(updated);
       await saveItemSales();
@@ -5849,7 +5890,7 @@
               <div class="cell">${e.date ? formatDateText(e.date) : '—'}</div>
               <div class="cell">${escapeHtml(e.category||'')}${e.ownerOnly?' <span title="Из «Ручные расходы» — редактируется там, видно только владельцу" style="opacity:.55;">🔒</span>':''}${e.category==='Материалы'&&e.direction?'<br><span style="color:var(--ink-soft);font-size:11px;">'+escapeHtml(e.direction)+'</span>':''}${e.category==='Зарплата'&&e.master?'<br><span style="color:var(--ink-soft);font-size:11px;">'+escapeHtml(e.master)+'</span>':''}</div>
               <div class="cell">${escapeHtml(e.source||'')}</div>
-              <div class="amount">${e.amount!==undefined&&e.amount!==null ? formatMoney(e.amount) : ''}</div>
+              <div class="amount">${e.amount!==undefined&&e.amount!==null ? formatMoneyPrecise(e.amount) : ''}</div>
               <div class="cell">${escapeHtml(e.responsible||'')}</div>
               <div class="comment">${escapeHtml(e.comment||'')}</div>
             </div>
@@ -5898,6 +5939,17 @@
       row.onclick = ()=>{
         const i = state.incomes.find(x=>x.id===row.dataset.iid);
         if(!i) return;
+        // доход от продажи сертификата — редактируем и удаляем через карточку сертификата,
+        // иначе при удалении прямо здесь сертификат в "Базе сертификатов" остаётся осиротевшим
+        // (и наоборот — приходится удалять в двух местах отдельно)
+        const linkedCert = state.certificates.find(c=>c.incomeId===i.id);
+        if(linkedCert){
+          requireUnlock(()=>{
+            state.modal = {type:'certificate', isNew:false, cert:{...linkedCert}};
+            render();
+          });
+          return;
+        }
         requireUnlock(()=>{
           state.modal = {type:'income', isNew:false, income:{...i}};
           render();
@@ -6045,8 +6097,9 @@
           return;
         }
       }
-      const cascades = state.modal.income.itemSaleId || state.modal.income.orderId;
-      showConfirmDeletePopup(`Удалить этот доход?${cascades ? ' Связанная запись в «Изделиях»/«Заказе» также удалится.' : ' Действие необратимо.'}`, async ()=>{
+      const linkedCertForDelete = state.certificates.find(c=>c.incomeId===state.modal.income.id);
+      const cascades = state.modal.income.itemSaleId || state.modal.income.orderId || linkedCertForDelete;
+      showConfirmDeletePopup(`Удалить этот доход?${cascades ? ' Связанная запись в «Изделиях»/«Заказе»/«Сертификатах» также удалится.' : ' Действие необратимо.'}`, async ()=>{
       state.incomes = state.incomes.filter(x=>x.id !== state.modal.income.id);
       if(state.modal.income.itemSaleId){
         state.itemSales = state.itemSales.filter(x=>x.id !== state.modal.income.itemSaleId);
@@ -6055,6 +6108,12 @@
       if(state.modal.income.orderId){
         state.orders = state.orders.filter(x=>x.id !== state.modal.income.orderId);
         await saveOrders();
+      }
+      // подстраховка — обычно доход сертификата открывается и удаляется через карточку сертификата (см. клик по строке в "Книге"),
+      // но если он всё же удалён отсюда, не оставляем сертификат "осиротевшим" со ссылкой на несуществующий доход
+      if(linkedCertForDelete){
+        state.certificates = state.certificates.filter(x=>x.id !== linkedCertForDelete.id);
+        await saveCertificates();
       }
       await saveIncomes();
       state.modal = null; overlay.remove(); render();
@@ -6136,7 +6195,7 @@
 
       // синхронизация с "Для менеджеров → Изделия"
       if(productVal === 'Изделие'){
-        const saleEntry = { id: updated.itemSaleId || uid(), date: updated.date, masterName: masterVal, revenue: updated.amount, comment: updated.comment };
+        const saleEntry = { id: updated.itemSaleId || uid(), date: updated.date, masterName: masterVal, revenue: updated.amount, source: accountVal, comment: updated.comment, incomeId: updated.id };
         updated.itemSaleId = saleEntry.id;
         const saleIdx = state.itemSales.findIndex(x=>x.id===saleEntry.id);
         if(saleIdx >= 0) state.itemSales[saleIdx] = saleEntry; else state.itemSales.push(saleEntry);
@@ -6183,13 +6242,14 @@
             </div>
             <div class="field">
               <label>Сумма (₽)</label>
-              <input type="number" id="ex-amount" value="${expense.amount!==undefined&&expense.amount!==null?expense.amount:''}" min="0" step="100" placeholder="Например: 5000">
+              <input type="number" id="ex-amount" value="${expense.amount!==undefined&&expense.amount!==null?expense.amount:''}" min="0" step="0.01" placeholder="Например: 5000 или 5000.50">
             </div>
           </div>
           <div class="field">
             <label>Категория</label>
             <select id="ex-category">
-              ${EXPENSE_CATEGORIES.map(c=>`<option value="${escapeHtml(c)}" ${expense.category===c?'selected':''}>${escapeHtml(c)}</option>`).join('')}
+              ${allExpenseCategories().map(c=>`<option value="${escapeHtml(c)}" ${expense.category===c?'selected':''}>${escapeHtml(c)}</option>`).join('')}
+              <option value="__add_new__">+ Добавить свою категорию…</option>
             </select>
           </div>
           <div class="field" id="expense-direction-field" style="display:${expense.category==='Материалы'?'block':'none'};">
@@ -6265,11 +6325,32 @@
 
     const categorySelect = overlay.querySelector('#ex-category');
     if(categorySelect){
-      categorySelect.onchange = ()=>{
+      const applyFieldVisibility = ()=>{
         const directionField = overlay.querySelector('#expense-direction-field');
         if(directionField) directionField.style.display = (categorySelect.value === 'Материалы') ? 'block' : 'none';
         const masterField = overlay.querySelector('#expense-master-field');
         if(masterField) masterField.style.display = (categorySelect.value === 'Зарплата') ? 'block' : 'none';
+      };
+      categorySelect.onchange = async ()=>{
+        if(categorySelect.value === '__add_new__'){
+          const name = (window.prompt('Название новой категории расходов:', '') || '').trim();
+          if(!name){
+            categorySelect.value = (state.modal.expense && state.modal.expense.category) || EXPENSE_CATEGORIES[0];
+            applyFieldVisibility();
+            return;
+          }
+          const exists = allExpenseCategories().some(c=>c.toLowerCase()===name.toLowerCase());
+          if(!exists){
+            state.customExpenseCategories = [...(state.customExpenseCategories||[]), name];
+            await saveCustomExpenseCategories();
+          }
+          const addOption = categorySelect.querySelector('option[value="__add_new__"]');
+          const newOption = document.createElement('option');
+          newOption.value = name; newOption.textContent = name;
+          categorySelect.insertBefore(newOption, addOption);
+          categorySelect.value = name;
+        }
+        applyFieldVisibility();
       };
     }
 
@@ -6351,7 +6432,7 @@
         direction: categoryVal==='Материалы' ? directionVal : '',
         master: categoryVal==='Зарплата' ? masterVal : '',
         source: sourceVal,
-        amount: parseInt(amountRaw),
+        amount: Math.round(Number(amountRaw) * 100) / 100, // округляем только до копеек, а не до целых рублей
         responsible: responsibleVal,
         eventId: overlay.querySelector('#ex-event').value || '',
         comment: commentVal,
@@ -6393,7 +6474,7 @@
         <div class="modal-body">
           <div class="field">
             <label>Номер</label>
-            <input type="number" id="c-number" value="${cert.number}" min="1" step="1">
+            <input type="text" id="c-number" value="${escapeHtml(String(cert.number!==undefined&&cert.number!==null?cert.number:''))}" placeholder="Например: 102 или СП-2026-015">
           </div>
           <div class="row2">
             <div class="field">
@@ -6724,7 +6805,7 @@
 
       const updated = {
         id: previousCert.id,
-        number: parseInt(numberRaw) || previousCert.number,
+        number: numberRaw.trim() || previousCert.number,
         channel: channelVal,
         certType: certTypeVal,
         certKind: certKindVal,
@@ -7801,6 +7882,16 @@
 
   function formatMoney(n){
     return Math.round(n).toLocaleString('ru-RU') + ' ₽';
+  }
+  // как formatMoney, но не прячет копейки, если они есть (для расходов, где теперь можно их вводить) —
+  // на круглых суммах выглядит точно так же, как обычный formatMoney
+  function formatMoneyPrecise(n){
+    const num = Number(n);
+    if(!isFinite(num)) return '';
+    const rounded = Math.round(num * 100) / 100;
+    const hasKopecks = Math.abs(rounded - Math.round(rounded)) > 0.001;
+    if(!hasKopecks) return formatMoney(rounded);
+    return rounded.toLocaleString('ru-RU', {minimumFractionDigits:2, maximumFractionDigits:2}) + ' ₽';
   }
 
   // ---------- закупки: списание за период и прогноз потребности ----------
@@ -13317,6 +13408,16 @@
               </div>`;
             })()}
           </div>
+          <div class="field" id="guest-breakdown-field">
+            <details id="guest-breakdown-details">
+              <summary style="cursor:pointer;font-size:13.5px;font-weight:600;color:var(--ink);"><span id="guest-breakdown-summary-text">Гости по отдельности${(ev.guestList&&ev.guestList.length)?` (${ev.guestList.length})`:''}</span> <span style="font-weight:400;color:var(--ink-soft);">— необязательно, если несколько человек платят порознь или кто-то платит за несколько мест</span></summary>
+              <div style="margin-top:10px;">
+                <div id="guest-list-container"></div>
+                <button type="button" class="btn btn-ghost" id="btn-add-guest" style="margin-top:4px;">+ Добавить гостя</button>
+                <input type="hidden" id="f-guest-list" value='${escapeHtml(JSON.stringify(ev.guestList||[]))}'>
+              </div>
+            </details>
+          </div>
           <div class="field">
             <label>Прогнозная выручка</label>
             <input type="number" id="f-agreed-price" value="${ev.agreedPrice!==undefined && ev.agreedPrice!==null ? ev.agreedPrice : ''}" min="0" step="100" placeholder="Например: 10000">
@@ -13751,6 +13852,10 @@
     const paymentsLogEl = overlay.querySelector('#payments-log');
     let paymentsArr = [];
     try{ paymentsArr = JSON.parse(paymentsHidden.value || '[]'); }catch(e){ paymentsArr = []; }
+    const guestListHidden = overlay.querySelector('#f-guest-list');
+    let guestListArr = [];
+    try{ guestListArr = guestListHidden ? JSON.parse(guestListHidden.value || '[]') : []; }catch(e){ guestListArr = []; }
+    function persistGuestList(){ if(guestListHidden) guestListHidden.value = JSON.stringify(guestListArr); }
     const priceInputForMismatch = overlay.querySelector('#f-price');
     if(priceInputForMismatch) priceInputForMismatch.addEventListener('input', ()=> updatePriceJournalMismatchHint());
 
@@ -13771,12 +13876,15 @@
 
     function renderPaymentsLog(){
       if(!paymentsLogEl) return;
-      paymentsLogEl.innerHTML = paymentsArr.map((p,i)=>`
+      paymentsLogEl.innerHTML = paymentsArr.map((p,i)=>{
+        const guestForPayment = p.guestId ? guestListArr.find(g=>g.id===p.guestId) : null;
+        return `
         <div class="payment-log-row" data-idx="${i}" style="display:flex;justify-content:space-between;align-items:center;font-size:12px;color:var(--ink-soft);font-family:var(--font-mono);">
-          <span>+${formatMoney(p.amount)}${p.source?' · '+escapeHtml(p.source):''}${p.type?' · '+(PAYMENT_TYPE_LABEL[p.type]||p.type):''}${p.date?' · '+formatDateText(p.date):(p.ts?' · '+new Date(p.ts).toLocaleString('ru-RU',{day:'numeric',month:'short',hour:'2-digit',minute:'2-digit'}):'')}</span>
+          <span>+${formatMoneyPrecise(p.amount)}${guestForPayment?' · '+escapeHtml(guestForPayment.name||'гость'):''}${p.source?' · '+escapeHtml(p.source):''}${p.type?' · '+(PAYMENT_TYPE_LABEL[p.type]||p.type):''}${p.date?' · '+formatDateText(p.date):(p.ts?' · '+new Date(p.ts).toLocaleString('ru-RU',{day:'numeric',month:'short',hour:'2-digit',minute:'2-digit'}):'')}</span>
           <button type="button" class="payment-del" data-idx="${i}" style="background:none;border:none;color:var(--danger);cursor:pointer;font-size:11px;font-family:var(--font-body);">убрать</button>
         </div>
-      `).join('');
+      `;
+      }).join('');
       updatePriceJournalMismatchHint();
       paymentsLogEl.querySelectorAll('.payment-del').forEach(btn=>{
         btn.onclick = ()=>{
@@ -13784,11 +13892,12 @@
           const removed = paymentsArr.splice(idx,1)[0];
           if(removed){
             const priceInput = overlay.querySelector('#f-price');
-            priceInput.value = Math.max(0, (parseInt(priceInput.value)||0) - removed.amount);
+            priceInput.value = Math.max(0, (parseInt(priceInput.value)||0) - (Number(removed.amount)||0));
             updateAwaitingHint();
           }
           paymentsHidden.value = JSON.stringify(paymentsArr);
           renderPaymentsLog();
+          renderGuestList();
         };
       });
     }
@@ -13820,7 +13929,13 @@
     if(addPaymentBtn && paymentAmountInput){
       const doAdd = ()=>{
         const amount = parseInt(paymentAmountInput.value) || 0;
-        if(amount <= 0) return;
+        if(amount <= 0){
+          // раньше здесь был просто return — кнопка выглядела "не работает", если забыли ввести сумму
+          paymentAmountInput.style.borderColor = 'var(--status-red)';
+          paymentAmountInput.focus();
+          return;
+        }
+        paymentAmountInput.style.borderColor = '';
         paymentsArr.push({
           id: uid(),
           amount,
@@ -13839,6 +13954,178 @@
       };
       addPaymentBtn.onclick = doAdd;
       paymentAmountInput.onkeydown = (e)=>{ if(e.key==='Enter'){ e.preventDefault(); doAdd(); } };
+      paymentAmountInput.oninput = ()=>{ paymentAmountInput.style.borderColor = ''; };
+    }
+
+    // гости по отдельности: имя + количество мест + свой сворачиваемый журнал оплат (использует тот же paymentsArr, помеченный guestId)
+    const GUEST_PAYMENT_SOURCES = ['Точка','YCLIENTS','Наличные','Сертификат'];
+
+    function syncGuestCountFromList(){
+      const gInput = overlay.querySelector('#f-guests');
+      if(!gInput) return;
+      if(guestListArr.length > 0){
+        const totalSeats = guestListArr.reduce((s,g)=> s + (Math.max(1, parseInt(g.seats)||1)), 0);
+        gInput.value = totalSeats;
+        gInput.readOnly = true;
+        gInput.style.background = 'var(--paper-2)';
+        gInput.title = 'Считается автоматически по гостям ниже';
+        gInput.dispatchEvent(new Event('input', {bubbles:true}));
+      } else {
+        gInput.readOnly = false;
+        gInput.style.background = '';
+        gInput.title = '';
+      }
+    }
+
+    function renderGuestList(){
+      const container = overlay.querySelector('#guest-list-container');
+      if(!container) return;
+      const summaryEl = overlay.querySelector('#guest-breakdown-summary-text');
+      if(summaryEl){
+        summaryEl.textContent = 'Гости по отдельности' + (guestListArr.length ? ` (${guestListArr.length})` : '');
+      }
+      container.innerHTML = guestListArr.map(g=>{
+        const gPayments = paymentsArr.filter(p=>p.guestId===g.id);
+        const gTotal = gPayments.reduce((s,p)=> s + (Number(p.amount)||0), 0);
+        return `
+        <div class="guest-block" data-gid="${g.id}" style="border:1px solid var(--line-strong);border-radius:var(--radius);padding:8px 10px;margin-bottom:8px;">
+          <div style="display:flex;gap:8px;align-items:center;">
+            <input type="text" class="guest-name" data-gid="${g.id}" value="${escapeHtml(g.name||'')}" placeholder="Имя гостя" style="flex:1;min-width:0;border:1px solid var(--line-strong);border-radius:var(--radius);padding:6px 8px;font-family:var(--font-body);font-size:12.5px;">
+            <input type="number" class="guest-seats" data-gid="${g.id}" value="${g.seats||1}" min="1" step="1" title="Количество мест, за которые платит этот гость" style="width:62px;flex-shrink:0;border:1px solid var(--line-strong);border-radius:var(--radius);padding:6px 8px;font-family:var(--font-body);font-size:12.5px;">
+            <button type="button" class="guest-remove" data-gid="${g.id}" title="Удалить гостя" style="background:none;border:none;color:var(--danger);cursor:pointer;font-size:16px;line-height:1;flex-shrink:0;">✕</button>
+          </div>
+          <details style="margin-top:6px;">
+            <summary style="cursor:pointer;font-size:11.5px;color:var(--ink-soft);font-family:var(--font-mono);">Оплата: ${formatMoneyPrecise(gTotal)}${gPayments.length?' · '+gPayments.length+' плат.':''}</summary>
+            <div style="margin-top:6px;">
+              <div class="guest-payments-log" style="display:flex;flex-direction:column;gap:4px;margin-bottom:6px;">
+                ${gPayments.map(p=>{
+                  const idx = paymentsArr.indexOf(p);
+                  return `<div style="display:flex;justify-content:space-between;align-items:center;font-size:11.5px;color:var(--ink-soft);font-family:var(--font-mono);">
+                    <span>+${formatMoneyPrecise(p.amount)}${p.source?' · '+escapeHtml(p.source):''}${p.date?' · '+formatDateText(p.date):''}</span>
+                    <button type="button" class="guest-payment-del" data-idx="${idx}" style="background:none;border:none;color:var(--danger);cursor:pointer;font-size:11px;font-family:var(--font-body);">убрать</button>
+                  </div>`;
+                }).join('') || `<span style="font-size:11.5px;color:var(--ink-soft);">Пока нет оплат</span>`}
+              </div>
+              <div style="display:flex;gap:6px;flex-wrap:wrap;">
+                <input type="date" class="guest-payment-date" data-gid="${g.id}" value="${todayStr()}" style="border:1px solid var(--line-strong);border-radius:var(--radius);padding:6px 8px;font-family:var(--font-body);font-size:12px;background:var(--paper);">
+                <select class="guest-payment-source" data-gid="${g.id}" style="border:1px solid var(--line-strong);border-radius:var(--radius);padding:6px 8px;font-family:var(--font-body);font-size:12px;background:var(--paper);">
+                  ${GUEST_PAYMENT_SOURCES.map(s=>`<option value="${escapeHtml(s)}">${escapeHtml(s)}</option>`).join('')}
+                </select>
+                <input type="number" class="guest-payment-amount" data-gid="${g.id}" placeholder="Сумма" step="0.01" style="width:100px;border:1px solid var(--line-strong);border-radius:var(--radius);padding:6px 8px;font-family:var(--font-body);font-size:12px;background:var(--paper);">
+                <button type="button" class="guest-add-payment" data-gid="${g.id}" style="white-space:nowrap;padding:6px 10px;border:1px solid var(--line-strong);border-radius:var(--radius);background:var(--white);cursor:pointer;font-size:12px;">+ Оплата</button>
+              </div>
+            </div>
+          </details>
+        </div>
+        `;
+      }).join('') || `<div style="font-size:12px;color:var(--ink-soft);margin-bottom:4px;">Пока нет отдельных гостей — нажмите «Добавить гостя», чтобы завести первого.</div>`;
+      attachGuestBlockEvents();
+    }
+
+    function attachGuestBlockEvents(){
+      overlay.querySelectorAll('.guest-name').forEach(inp=>{
+        inp.oninput = ()=>{
+          const g = guestListArr.find(x=>x.id===inp.dataset.gid);
+          if(g){ g.name = inp.value; persistGuestList(); }
+        };
+      });
+      overlay.querySelectorAll('.guest-seats').forEach(inp=>{
+        inp.onchange = ()=>{
+          const g = guestListArr.find(x=>x.id===inp.dataset.gid);
+          if(g){ g.seats = Math.max(1, parseInt(inp.value)||1); persistGuestList(); syncGuestCountFromList(); }
+        };
+      });
+      overlay.querySelectorAll('.guest-remove').forEach(btn=>{
+        btn.onclick = ()=>{
+          const gid = btn.dataset.gid;
+          const doRemove = ()=>{
+            guestListArr = guestListArr.filter(x=>x.id!==gid);
+            const removedPayments = paymentsArr.filter(p=>p.guestId===gid);
+            if(removedPayments.length){
+              const removedSum = removedPayments.reduce((s,p)=> s + (Number(p.amount)||0), 0);
+              paymentsArr = paymentsArr.filter(p=>p.guestId!==gid);
+              paymentsHidden.value = JSON.stringify(paymentsArr);
+              const priceInput = overlay.querySelector('#f-price');
+              priceInput.value = Math.max(0, (parseFloat(priceInput.value)||0) - removedSum);
+              renderPaymentsLog();
+              updateAwaitingHint();
+            }
+            persistGuestList();
+            syncGuestCountFromList();
+            renderGuestList();
+          };
+          const g = guestListArr.find(x=>x.id===gid);
+          const gPaymentsCount = paymentsArr.filter(p=>p.guestId===gid).length;
+          if(gPaymentsCount > 0 && typeof showConfirmDeletePopup === 'function'){
+            showConfirmDeletePopup(`Удалить гостя «${escapeHtml(g&&g.name?g.name:'без имени')}»? Его оплаты (${gPaymentsCount}) тоже удалятся, а выручка мероприятия уменьшится.`, doRemove);
+          } else {
+            doRemove();
+          }
+        };
+      });
+      overlay.querySelectorAll('.guest-payment-del').forEach(btn=>{
+        btn.onclick = ()=>{
+          const idx = parseInt(btn.dataset.idx);
+          const removed = paymentsArr.splice(idx,1)[0];
+          if(removed){
+            const priceInput = overlay.querySelector('#f-price');
+            priceInput.value = Math.max(0, (parseFloat(priceInput.value)||0) - (Number(removed.amount)||0));
+            updateAwaitingHint();
+          }
+          paymentsHidden.value = JSON.stringify(paymentsArr);
+          renderPaymentsLog();
+          renderGuestList();
+        };
+      });
+      overlay.querySelectorAll('.guest-add-payment').forEach(btn=>{
+        btn.onclick = ()=>{
+          const gid = btn.dataset.gid;
+          const amountInput = overlay.querySelector(`.guest-payment-amount[data-gid="${gid}"]`);
+          const sourceSelect = overlay.querySelector(`.guest-payment-source[data-gid="${gid}"]`);
+          const dateInput = overlay.querySelector(`.guest-payment-date[data-gid="${gid}"]`);
+          const amount = Math.round((parseFloat(amountInput.value) || 0) * 100) / 100;
+          if(amount <= 0){
+            amountInput.style.borderColor = 'var(--status-red)';
+            amountInput.focus();
+            return;
+          }
+          amountInput.style.borderColor = '';
+          paymentsArr.push({
+            id: uid(),
+            amount,
+            source: sourceSelect ? sourceSelect.value : '',
+            guestId: gid,
+            date: (dateInput && dateInput.value) ? dateInput.value : todayStr(),
+            ts: new Date().toISOString(),
+          });
+          paymentsHidden.value = JSON.stringify(paymentsArr);
+          const priceInput = overlay.querySelector('#f-price');
+          priceInput.value = Math.round(((parseFloat(priceInput.value)||0) + amount) * 100) / 100;
+          priceInput.style.borderColor = '';
+          renderPaymentsLog();
+          renderGuestList();
+          updateAwaitingHint();
+        };
+      });
+    }
+
+    const guestListContainerEl = overlay.querySelector('#guest-list-container');
+    if(guestListContainerEl){
+      renderGuestList();
+      syncGuestCountFromList();
+      const addGuestBtn = overlay.querySelector('#btn-add-guest');
+      if(addGuestBtn){
+        addGuestBtn.onclick = ()=>{
+          guestListArr.push({ id: uid(), name: '', seats: 1 });
+          persistGuestList();
+          syncGuestCountFromList();
+          renderGuestList();
+          const detailsEl = overlay.querySelector('#guest-breakdown-details');
+          if(detailsEl) detailsEl.open = true;
+          const lastNameInput = overlay.querySelectorAll('.guest-name');
+          if(lastNameInput.length) lastNameInput[lastNameInput.length-1].focus();
+        };
+      }
     }
 
     function renderCertAttachSummary(){
@@ -14243,6 +14530,7 @@
           act: overlay.querySelector('#f-doc-act').checked,
         },
         payments: (()=>{ try{ return JSON.parse(overlay.querySelector('#f-payments').value || '[]'); }catch(e){ return []; } })(),
+        guestList: (()=>{ const el = overlay.querySelector('#f-guest-list'); if(!el) return []; try{ return JSON.parse(el.value || '[]'); }catch(e){ return []; } })(),
         title: title,
         product: overlay.querySelector('#f-product').value || '',
         status: overlay.querySelector('#f-status').value || 'confirmed',
