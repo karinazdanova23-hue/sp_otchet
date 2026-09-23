@@ -1182,6 +1182,9 @@
   // отмечать себя выходным в календаре могут менеджеры, ассистент, старший администратор и руководитель —
   // каждый только сам за себя (см. canDayOffEntryBeRemovedByMe)
   function roleCanMarkDayOff(role){ return ['manager','assistant','admin','owner'].includes(role); }
+  // метку "Остаток" (сколько ещё должны заплатить за мероприятие) видят все роли, кроме мастера —
+  // у мастера открывается отдельная урезанная модалка без финансовых полей (см. quick-host)
+  function roleCanSeeGuestBalances(role){ return role !== 'master'; }
   function canAccessView(view){
     if(!state.currentRole) return false; // без входа теперь не видно вообще ничего
     if(view==='calendar' || view==='host' || view==='today') return true;
@@ -3019,7 +3022,10 @@
           ${managerLine ? `<div class="cal-manager" title="Менеджер: ${escapeHtml(managerLine)}">👔 ${escapeHtml(managerLine)}</div>` : ''}
           ${dayOffEntries.length ? `<div class="cal-dayoff-line" title="Выходной: ${escapeHtml(dayOffEntries.map(x=>`${x.name} (${ROLE_LABELS[x.role]||x.role})`).join(', '))}">🚫 ${escapeHtml(dayOffEntries.map(x=>x.name).join(', '))}</div>` : ''}
           <div class="cal-events">
-            ${shown.map(e=>`<div class="cal-evt-chip" style="background:${statusColor(e.status)}">${isAll?spaceBadge(getSpace(e.spaceId),'xs'):''}<span class="t">${e.time}</span><span class="evt-title">${escapeHtml(e.title)}</span></div>`).join('')}
+            ${shown.map(e=>{
+              const remainder = roleCanSeeGuestBalances(state.currentRole) ? eventRemainderTotal(e) : 0;
+              return `<div class="cal-evt-chip" style="background:${statusColor(e.status)}">${isAll?spaceBadge(getSpace(e.spaceId),'xs'):''}<span class="t">${e.time}</span><span class="evt-title">${escapeHtml(e.title)}</span>${remainder>0?`<span class="evt-remainder" title="Остаток к оплате: ${formatMoney(remainder)}">💳${formatMoney(remainder)}</span>`:''}</div>`;
+            }).join('')}
             ${extra>0?`<div class="cal-more">+${extra} ещё</div>`:''}
           </div>
         </div>
@@ -8077,6 +8083,27 @@
     const agreed = (e.agreedPrice!==undefined && e.agreedPrice!==null && !isNaN(e.agreedPrice)) ? Number(e.agreedPrice) : 0;
     return Math.max(0, Math.max(price, agreed) - eventCertRedeemedTotal(e));
   }
+  // полная ожидаемая сумма по мероприятию (максимум из "Выручки" и "Согласованной суммы"), без вычета сертификатов —
+  // используется только для метки "Остаток", в отличие от eventRevenueForecast (для аналитики)
+  function eventTotalExpected(e){
+    const price = (e.price!==undefined && e.price!==null && !isNaN(e.price)) ? Number(e.price) : 0;
+    const agreed = (e.agreedPrice!==undefined && e.agreedPrice!==null && !isNaN(e.agreedPrice)) ? Number(e.agreedPrice) : 0;
+    return Math.max(price, agreed);
+  }
+  // сколько по мероприятию уже реально получено — "живые" деньги (поле "Выручка") плюс оплаты сертификатами
+  // (сертификатные оплаты не увеличивают "Выручку", см. performCertRedemption, поэтому прибавляются отдельно)
+  function eventReceivedTotal(e){
+    const price = (e.price!==undefined && e.price!==null && !isNaN(e.price)) ? Number(e.price) : 0;
+    return price + eventCertRedeemedTotal(e);
+  }
+  // остаток к оплате по мероприятию в целом — прогнозная сумма минус то, что уже реально получено
+  function eventRemainderTotal(e){
+    return Math.max(0, eventTotalExpected(e) - eventReceivedTotal(e));
+  }
+  // сколько уже оплатил конкретный гость (наличные/Точка/YCLIENTS + списания сертификатом на его имя)
+  function guestPaidTotal(e, guestId){
+    return (Array.isArray(e.payments) ? e.payments : []).filter(p=>p.guestId===guestId).reduce((s,p)=> s + (Number(p.amount)||0), 0);
+  }
   function eventProfitForecast(e){
     return eventRevenueForecast(e) - eventMaterialsCost(e) - eventTotalMasterPay(e);
   }
@@ -13077,6 +13104,7 @@
                 <div class="time"><span class="chip-dot" style="background:${statusColor(e.status)};display:inline-block;margin-right:6px;"></span>${e.time}${e.duration?' · '+formatDuration(e.duration):''}${(e.guests!==undefined&&e.guests!==null&&e.guests!=='')?' · 👤 '+e.guests:''}</div>
                 <div class="title">${escapeHtml(e.title)}</div>
                 ${isAll ? `<div class="host" style="display:flex;align-items:center;gap:6px;">${spaceBadge(getSpace(e.spaceId),'sm')}${escapeHtml(getSpace(e.spaceId).name)} · ${escapeHtml(allHostNamesDisplay(e))}${e.product?' · '+escapeHtml(e.product):''}${showsDishesAndRental(e.status)&&e.dishes?' · 🍽 '+(e.dishes==='needed'?'нужна посуда':'без посуды'):''}${rentalSuffix(e)}${legalSuffix(e)}</div>` : `<div class="host">${escapeHtml(allHostNamesDisplay(e))}${e.product?' · '+escapeHtml(e.product):''}${showsDishesAndRental(e.status)&&e.dishes?' · 🍽 '+(e.dishes==='needed'?'нужна посуда':'без посуды'):''}${rentalSuffix(e)}${legalSuffix(e)}</div>`}
+                ${e.notes ? `<div class="notes" title="${escapeHtml(e.notes)}">💬 ${escapeHtml(e.notes)}</div>` : ''}
               </div>
               <div style="display:flex;flex-direction:column;gap:6px;flex-shrink:0;">
                 <button class="quick-host-btn" data-eid="${e.id}" title="Сменить мастера (без кода)">✎ мастер</button>
@@ -13902,7 +13930,7 @@
     // переносим его в список гостей один раз при открытии, чтобы имя не "потерялось" из вида
     function persistGuestList(){ if(guestListHidden) guestListHidden.value = JSON.stringify(guestListArr); }
     if(guestListArr.length === 0 && state.modal.event && state.modal.event.guestName && state.modal.event.guestName.trim()){
-      guestListArr.push({ id: uid(), name: state.modal.event.guestName.trim(), seats: 1, items: 1, phone: '', comment: '' });
+      guestListArr.push({ id: uid(), name: state.modal.event.guestName.trim(), seats: 1, items: 1, phone: '', comment: '', expected: null });
       persistGuestList();
     }
     const priceInputForMismatch = overlay.querySelector('#f-price');
@@ -14069,9 +14097,14 @@
       }
       const titleElForItems = overlay.querySelector('#f-title');
       const showItemsPerGuest = !!(titleElForItems && isCeramicsEvent(titleElForItems.value));
+      // "Ожидаемая сумма" на гостя нужна только когда гостей несколько — если гость один, у него и так
+      // вся согласованная сумма мероприятия (см. #f-agreed-price / #awaiting-hint)
+      const showExpectedPerGuest = roleCanSeeGuestBalances(state.currentRole) && guestListArr.length > 1;
       container.innerHTML = guestListArr.map(g=>{
         const gPayments = paymentsArr.filter(p=>p.guestId===g.id);
         const gTotal = gPayments.reduce((s,p)=> s + (Number(p.amount)||0), 0);
+        const gExpected = (g.expected!==undefined && g.expected!==null && g.expected!=='' && !isNaN(g.expected)) ? Number(g.expected) : null;
+        const gRemainder = gExpected!==null ? Math.max(0, gExpected - gTotal) : null;
         return `
         <div class="guest-block" data-gid="${g.id}" style="border:1px solid var(--line-strong);border-radius:var(--radius);padding:8px 10px;margin-bottom:8px;">
           <div style="display:flex;gap:8px;align-items:center;">
@@ -14081,6 +14114,10 @@
             <button type="button" class="guest-remove" data-gid="${g.id}" title="Удалить гостя" style="background:none;border:none;color:var(--danger);cursor:pointer;font-size:16px;line-height:1;flex-shrink:0;">✕</button>
           </div>
           ${showItemsPerGuest ? `<div style="font-size:10px;color:var(--ink-soft);margin-top:2px;">место(а) · изделий</div>` : ''}
+          ${showExpectedPerGuest ? `<div style="display:flex;gap:8px;align-items:center;margin-top:6px;">
+            <label style="font-size:10.5px;color:var(--ink-soft);font-family:var(--font-mono);white-space:nowrap;">Ожидаем с гостя:</label>
+            <input type="number" class="guest-expected" data-gid="${g.id}" value="${gExpected!==null?gExpected:''}" min="0" step="0.01" placeholder="Например: 5000" style="width:110px;border:1px solid var(--line-strong);border-radius:var(--radius);padding:6px 8px;font-family:var(--font-body);font-size:12.5px;">
+          </div>` : ''}
           <div style="display:flex;gap:8px;margin-top:6px;">
             <input type="tel" class="guest-phone" data-gid="${g.id}" value="${escapeHtml(g.phone||'')}" placeholder="Телефон — необязательно" style="flex:1;min-width:0;border:1px solid var(--line-strong);border-radius:var(--radius);padding:6px 8px;font-family:var(--font-body);font-size:12.5px;">
           </div>
@@ -14088,7 +14125,7 @@
             <input type="text" class="guest-comment" data-gid="${g.id}" value="${escapeHtml(g.comment||'')}" placeholder="Комментарий — необязательно" style="width:100%;box-sizing:border-box;border:1px solid var(--line-strong);border-radius:var(--radius);padding:6px 8px;font-family:var(--font-body);font-size:12.5px;">
           </div>
           <details style="margin-top:6px;" ${openGuestDetailsIds.has(g.id)?'open':''}>
-            <summary style="cursor:pointer;font-size:11.5px;color:var(--ink-soft);font-family:var(--font-mono);">Оплата: ${formatMoneyPrecise(gTotal)}${gPayments.length?' · '+gPayments.length+' плат.':''}</summary>
+            <summary style="cursor:pointer;font-size:11.5px;color:var(--ink-soft);font-family:var(--font-mono);">Оплата: ${formatMoneyPrecise(gTotal)}${gPayments.length?' · '+gPayments.length+' плат.':''}${gRemainder!==null ? ` · Остаток: <span style="color:${gRemainder>0?'var(--status-red)':'var(--status-green)'};">${formatMoneyPrecise(gRemainder)}</span>` : ''}</summary>
             <div style="margin-top:6px;">
               <div class="guest-payments-log" style="display:flex;flex-direction:column;gap:4px;margin-bottom:6px;">
                 ${gPayments.map(p=>{
@@ -14149,6 +14186,17 @@
         inp.onchange = ()=>{
           const g = guestListArr.find(x=>x.id===inp.dataset.gid);
           if(g){ g.items = Math.max(0, parseInt(inp.value)||0); persistGuestList(); syncItemsCountFromList(); }
+        };
+      });
+      overlay.querySelectorAll('.guest-expected').forEach(inp=>{
+        inp.onchange = ()=>{
+          const g = guestListArr.find(x=>x.id===inp.dataset.gid);
+          if(g){
+            const v = parseFloat(inp.value);
+            g.expected = (inp.value!=='' && !isNaN(v)) ? Math.round(v*100)/100 : null;
+            persistGuestList();
+            renderGuestList();
+          }
         };
       });
       overlay.querySelectorAll('.guest-phone').forEach(inp=>{
@@ -14281,7 +14329,7 @@
       const addGuestBtn = overlay.querySelector('#btn-add-guest');
       if(addGuestBtn){
         addGuestBtn.onclick = ()=>{
-          guestListArr.push({ id: uid(), name: '', seats: 1, items: 1, phone: '', comment: '' });
+          guestListArr.push({ id: uid(), name: '', seats: 1, items: 1, phone: '', comment: '', expected: null });
           persistGuestList();
           syncGuestCountFromList();
           renderGuestList();
@@ -14611,6 +14659,7 @@
         id: g.id, name: (g.name||'').trim(), seats: Math.max(1, parseInt(g.seats)||1),
         items: (g.items!==undefined && g.items!==null && !isNaN(parseInt(g.items))) ? Math.max(0, parseInt(g.items)) : 1,
         phone: (g.phone||'').trim(), comment: (g.comment||'').trim(),
+        expected: (g.expected!==undefined && g.expected!==null && g.expected!=='' && !isNaN(g.expected)) ? Math.round(Number(g.expected)*100)/100 : null,
       }));
       const guestNameVal = guestListForSave.map(g=>g.name).filter(Boolean).join(', ');
       // обязательно только имя у гостя, который уже добавлен (пустая строка "гость без имени" — ошибка);
