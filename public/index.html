@@ -3022,10 +3022,7 @@
           ${managerLine ? `<div class="cal-manager" title="Менеджер: ${escapeHtml(managerLine)}">👔 ${escapeHtml(managerLine)}</div>` : ''}
           ${dayOffEntries.length ? `<div class="cal-dayoff-line" title="Выходной: ${escapeHtml(dayOffEntries.map(x=>`${x.name} (${ROLE_LABELS[x.role]||x.role})`).join(', '))}">🚫 ${escapeHtml(dayOffEntries.map(x=>x.name).join(', '))}</div>` : ''}
           <div class="cal-events">
-            ${shown.map(e=>{
-              const remainder = roleCanSeeGuestBalances(state.currentRole) ? eventRemainderTotal(e) : 0;
-              return `<div class="cal-evt-chip" style="background:${statusColor(e.status)}">${isAll?spaceBadge(getSpace(e.spaceId),'xs'):''}<span class="t">${e.time}</span><span class="evt-title">${escapeHtml(e.title)}</span>${remainder>0?`<span class="evt-remainder" title="Остаток к оплате: ${formatMoney(remainder)}">💳${formatMoney(remainder)}</span>`:''}</div>`;
-            }).join('')}
+            ${shown.map(e=>`<div class="cal-evt-chip" style="background:${statusColor(e.status)}">${isAll?spaceBadge(getSpace(e.spaceId),'xs'):''}<span class="t">${e.time}</span><span class="evt-title">${escapeHtml(e.title)}</span></div>`).join('')}
             ${extra>0?`<div class="cal-more">+${extra} ещё</div>`:''}
           </div>
         </div>
@@ -13097,6 +13094,7 @@
           ${evts.length ? evts.map(e=>{
             const w = warnMap[e.id];
             const warnHtml = w ? `<div class="gap-warning">⚠ ${w.gap < 0 ? `Наложение по времени с «${escapeHtml(w.prevTitle)}» на ${Math.abs(w.gap)} мин` : `Перерыв с «${escapeHtml(w.prevTitle)}» всего ${w.gap} мин (меньше ${MIN_GAP_MINUTES})`}</div>` : '';
+            const remainder = roleCanSeeGuestBalances(state.currentRole) ? eventRemainderTotal(e) : 0;
             return `
             ${warnHtml}
             <div class="day-evt" data-eid="${e.id}">
@@ -13105,6 +13103,7 @@
                 <div class="title">${escapeHtml(e.title)}</div>
                 ${isAll ? `<div class="host" style="display:flex;align-items:center;gap:6px;">${spaceBadge(getSpace(e.spaceId),'sm')}${escapeHtml(getSpace(e.spaceId).name)} · ${escapeHtml(allHostNamesDisplay(e))}${e.product?' · '+escapeHtml(e.product):''}${showsDishesAndRental(e.status)&&e.dishes?' · 🍽 '+(e.dishes==='needed'?'нужна посуда':'без посуды'):''}${rentalSuffix(e)}${legalSuffix(e)}</div>` : `<div class="host">${escapeHtml(allHostNamesDisplay(e))}${e.product?' · '+escapeHtml(e.product):''}${showsDishesAndRental(e.status)&&e.dishes?' · 🍽 '+(e.dishes==='needed'?'нужна посуда':'без посуды'):''}${rentalSuffix(e)}${legalSuffix(e)}</div>`}
                 ${e.notes ? `<div class="notes" title="${escapeHtml(e.notes)}">💬 ${escapeHtml(e.notes)}</div>` : ''}
+                ${remainder>0 ? `<div class="notes" style="color:var(--status-red);">💳 Остаток: ${formatMoney(remainder)}</div>` : ''}
               </div>
               <div style="display:flex;flex-direction:column;gap:6px;flex-shrink:0;">
                 <button class="quick-host-btn" data-eid="${e.id}" title="Сменить мастера (без кода)">✎ мастер</button>
