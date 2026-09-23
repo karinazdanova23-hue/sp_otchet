@@ -13512,6 +13512,10 @@
             }
           }
         }
+        // керамика включает поле "изделий" у каждого гостя по отдельности — перерисовываем блоки гостей,
+        // чтобы поле появилось/исчезло, и пересчитываем сумму изделий по гостям
+        if(typeof renderGuestList === 'function') renderGuestList();
+        if(typeof syncItemsCountFromList === 'function') syncItemsCountFromList();
         const pickupField = overlay.querySelector('#pickup-field');
         if(pickupField) pickupField.style.display = isPickupTrackedEvent(titleInput.value) ? 'block' : 'none';
       });
@@ -13862,7 +13866,7 @@
     // переносим его в список гостей один раз при открытии, чтобы имя не "потерялось" из вида
     function persistGuestList(){ if(guestListHidden) guestListHidden.value = JSON.stringify(guestListArr); }
     if(guestListArr.length === 0 && state.modal.event && state.modal.event.guestName && state.modal.event.guestName.trim()){
-      guestListArr.push({ id: uid(), name: state.modal.event.guestName.trim(), seats: 1, phone: '', comment: '' });
+      guestListArr.push({ id: uid(), name: state.modal.event.guestName.trim(), seats: 1, items: 1, phone: '', comment: '' });
       persistGuestList();
     }
     const priceInputForMismatch = overlay.querySelector('#f-price');
@@ -13986,6 +13990,30 @@
         gInput.style.background = '';
         gInput.title = '';
       }
+      syncItemsCountFromList();
+    }
+
+    // для керамики — сумма изделий по каждому гостю (кто-то делает 1 изделие, кто-то 2) в общее поле "изделий"
+    function syncItemsCountFromList(){
+      const itemsInput = overlay.querySelector('#f-items-count');
+      if(!itemsInput) return;
+      const titleEl = overlay.querySelector('#f-title');
+      const ceramics = titleEl && isCeramicsEvent(titleEl.value);
+      if(ceramics && guestListArr.length > 0){
+        const totalItems = guestListArr.reduce((s,g)=>{
+          const v = (g.items!==undefined && g.items!==null && !isNaN(parseInt(g.items))) ? Math.max(0, parseInt(g.items)) : 1;
+          return s + v;
+        }, 0);
+        itemsInput.value = totalItems;
+        itemsInput.dataset.auto = 'true';
+        itemsInput.readOnly = true;
+        itemsInput.style.background = 'var(--paper-2)';
+        itemsInput.title = 'Считается автоматически по изделиям у каждого гостя ниже';
+      } else if(ceramics){
+        itemsInput.readOnly = false;
+        itemsInput.style.background = '';
+        itemsInput.title = '';
+      }
     }
 
     function renderGuestList(){
@@ -13995,6 +14023,8 @@
       if(summaryEl){
         summaryEl.textContent = 'Гости по отдельности' + (guestListArr.length ? ` (${guestListArr.length})` : '');
       }
+      const titleElForItems = overlay.querySelector('#f-title');
+      const showItemsPerGuest = !!(titleElForItems && isCeramicsEvent(titleElForItems.value));
       container.innerHTML = guestListArr.map(g=>{
         const gPayments = paymentsArr.filter(p=>p.guestId===g.id);
         const gTotal = gPayments.reduce((s,p)=> s + (Number(p.amount)||0), 0);
@@ -14003,8 +14033,10 @@
           <div style="display:flex;gap:8px;align-items:center;">
             <input type="text" class="guest-name" data-gid="${g.id}" value="${escapeHtml(g.name||'')}" placeholder="Имя гостя" style="flex:1;min-width:0;border:1px solid ${g.name&&g.name.trim()?'var(--line-strong)':'var(--status-red)'};border-radius:var(--radius);padding:6px 8px;font-family:var(--font-body);font-size:12.5px;">
             <input type="number" class="guest-seats" data-gid="${g.id}" value="${g.seats||1}" min="1" step="1" title="Количество мест, за которые платит этот гость" style="width:52px;flex-shrink:0;border:1px solid var(--line-strong);border-radius:var(--radius);padding:6px 8px;font-family:var(--font-body);font-size:12.5px;">
+            <input type="number" class="guest-items" data-gid="${g.id}" value="${(g.items!==undefined&&g.items!==null)?g.items:1}" min="0" step="1" title="Сколько изделий сделал этот гость" style="width:52px;flex-shrink:0;display:${showItemsPerGuest?'block':'none'};border:1px solid var(--line-strong);border-radius:var(--radius);padding:6px 8px;font-family:var(--font-body);font-size:12.5px;">
             <button type="button" class="guest-remove" data-gid="${g.id}" title="Удалить гостя" style="background:none;border:none;color:var(--danger);cursor:pointer;font-size:16px;line-height:1;flex-shrink:0;">✕</button>
           </div>
+          ${showItemsPerGuest ? `<div style="font-size:10px;color:var(--ink-soft);margin-top:2px;">место(а) · изделий</div>` : ''}
           <div style="display:flex;gap:8px;margin-top:6px;">
             <input type="tel" class="guest-phone" data-gid="${g.id}" value="${escapeHtml(g.phone||'')}" placeholder="Телефон — необязательно" style="flex:1;min-width:0;border:1px solid var(--line-strong);border-radius:var(--radius);padding:6px 8px;font-family:var(--font-body);font-size:12.5px;">
           </div>
@@ -14067,6 +14099,12 @@
         inp.onchange = ()=>{
           const g = guestListArr.find(x=>x.id===inp.dataset.gid);
           if(g){ g.seats = Math.max(1, parseInt(inp.value)||1); persistGuestList(); syncGuestCountFromList(); }
+        };
+      });
+      overlay.querySelectorAll('.guest-items').forEach(inp=>{
+        inp.onchange = ()=>{
+          const g = guestListArr.find(x=>x.id===inp.dataset.gid);
+          if(g){ g.items = Math.max(0, parseInt(inp.value)||0); persistGuestList(); syncItemsCountFromList(); }
         };
       });
       overlay.querySelectorAll('.guest-phone').forEach(inp=>{
@@ -14194,7 +14232,7 @@
       const addGuestBtn = overlay.querySelector('#btn-add-guest');
       if(addGuestBtn){
         addGuestBtn.onclick = ()=>{
-          guestListArr.push({ id: uid(), name: '', seats: 1, phone: '', comment: '' });
+          guestListArr.push({ id: uid(), name: '', seats: 1, items: 1, phone: '', comment: '' });
           persistGuestList();
           syncGuestCountFromList();
           renderGuestList();
@@ -14515,6 +14553,7 @@
       // "Гости по отдельности" теперь единственное место, где фиксируется, кто пришёл — считаем оттуда
       const guestListForSave = guestListArr.map(g=>({
         id: g.id, name: (g.name||'').trim(), seats: Math.max(1, parseInt(g.seats)||1),
+        items: (g.items!==undefined && g.items!==null && !isNaN(parseInt(g.items))) ? Math.max(0, parseInt(g.items)) : 1,
         phone: (g.phone||'').trim(), comment: (g.comment||'').trim(),
       }));
       const guestNameVal = guestListForSave.map(g=>g.name).filter(Boolean).join(', ');
