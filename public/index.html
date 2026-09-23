@@ -1170,7 +1170,7 @@
   // права: кто видит "Для менеджеров"/"Книгу" (менеджер, маркетолог и выше), кто видит "Аналитику" (ассистент/админ и выше), кто видит "Чистую прибыль" (только руководитель)
   function roleCanAccessManagersTab(role){ return ['manager','marketer','assistant','admin','owner'].includes(role); }
   function roleCanAccessBook(role){ return ['manager','marketer','assistant','admin','owner'].includes(role); }
-  function roleCanAccessAnalytics(role){ return ['assistant','admin','owner'].includes(role); }
+  function roleCanAccessAnalytics(role){ return ['manager','assistant','admin','owner'].includes(role); }
   // менеджер и маркетолог не видят полную "Аналитику", но им нужно окно с выполнением плана (без прибыли и прочих финансовых деталей)
   function roleCanSeePlanProgress(role){ return ['manager','marketer'].includes(role); }
   // администраторы (роль "hostess", отображается как "Администратор") продают сертификаты и изделия,
@@ -4493,6 +4493,9 @@
       ${soldWithoutEventCount>0 ? `<div style="font-size:12.5px;color:var(--status-red);margin-bottom:16px;">⚠ ${soldWithoutEventCount} «проданных» заявок без привязки к мероприятию — откройте заявку и укажите, какое мероприятие создано.</div>` : ''}
 
       ${total>0 ? `
+      <details style="margin-bottom:20px;">
+        <summary style="cursor:pointer;font-size:13px;font-weight:600;color:var(--ink);font-family:var(--font-mono);padding:6px 0;">📊 Детализация конверсии — по срокам, источникам и продуктам</summary>
+        <div style="margin-top:10px;">
       <div class="analytics-section">
         <h4>Насколько заранее планируют мероприятие</h4>
         <div style="font-size:11.5px;color:var(--ink-soft);font-family:var(--font-mono);margin-bottom:8px;">Сравнение поля «Месяц мероприятия» с текущим месяцем (${escapeHtml(currentMonthName)}).</div>
@@ -4547,6 +4550,8 @@
           </div>
         `).join('')}
       </div>
+        </div>
+      </details>
       ` : ''}
 
       <div class="cert-toolbar">
@@ -6008,7 +6013,7 @@
             </div>
             <div class="field">
               <label>Сумма (₽)</label>
-              <input type="number" id="i-amount" value="${income.amount!==undefined&&income.amount!==null?income.amount:''}" min="0" step="100" placeholder="Например: 5000">
+              <input type="number" id="i-amount" value="${income.amount!==undefined&&income.amount!==null?income.amount:''}" min="0" step="0.01" placeholder="Например: 5000 или 5000.50">
             </div>
           </div>
           <div class="row2">
@@ -6189,7 +6194,7 @@
         product: productVal,
         account: accountVal,
         eventId: overlay.querySelector('#i-event').value || '',
-        amount: parseInt(amountRaw),
+        amount: Math.round(Number(amountRaw) * 100) / 100, // округляем только до копеек, а не до целых рублей
         masterName: productVal==='Изделие' ? masterVal : (productVal==='Заказ' ? orderMasterVal : ''),
         masterShare: productVal==='Заказ' ? parseInt(orderShareRaw) : null,
         itemSaleId: state.modal.income.itemSaleId || '',
@@ -6754,8 +6759,6 @@
         if(el){ el.style.borderColor = 'var(--danger)'; if(!firstInvalid) firstInvalid = el; }
       };
       if(numberRaw === '') markInvalid('c-number');
-      const duplicateNumber = numberRaw !== '' && state.certificates.some(c=> String(c.number)===String(numberRaw).trim() && c.id !== state.modal.cert.id);
-      if(duplicateNumber) markInvalid('c-number');
       if(!channelVal) markInvalid('c-channel');
       if(!certTypeVal) markInvalid('c-type');
       if(!dateVal) markInvalid('c-date');
@@ -6792,9 +6795,8 @@
         if(remainingEl && !firstInvalid) firstInvalid = remainingEl;
       }
 
-      if(numberRaw==='' || duplicateNumber || !channelVal || !certTypeVal || !dateVal || amountRaw==='' || Number(amountRaw)<0 || !ownerNameVal || !ownerContactVal || !commentVal || specificMissing || redemptionsMissing || redemptionsIncomplete || redemptionBeforeSale || overspent){
+      if(numberRaw==='' || !channelVal || !certTypeVal || !dateVal || amountRaw==='' || Number(amountRaw)<0 || !ownerNameVal || !ownerContactVal || !commentVal || specificMissing || redemptionsMissing || redemptionsIncomplete || redemptionBeforeSale || overspent){
         let msg = 'Заполните все поля перед сохранением сертификата. Сумма не может быть отрицательной.';
-        if(duplicateNumber) msg = `Сертификат с номером «${numberRaw}» уже существует — впишите другой номер.`;
         if(redemptionBeforeSale) msg = 'Дата списания не может быть раньше даты продажи сертификата.';
         if(redemptionsMissing) msg = 'Статус «Использован»/«Частично использован» — добавьте хотя бы одно списание.';
         else if(redemptionsIncomplete) msg = 'Заполните мероприятие, дату и сумму в каждой строке списания.';
@@ -7485,7 +7487,10 @@
     }
 
     if(state.modal.type === 'day'){ attachDayModalEvents(overlay, state.modal.date); }
-    else if(state.modal.type === 'event'){ attachEventModalEvents(overlay); }
+    else if(state.modal.type === 'event'){
+      if(state.currentRole === 'hostess'){ lockdownEventModalForViewing(overlay); }
+      else { attachEventModalEvents(overlay); }
+    }
     else if(state.modal.type === 'code'){ attachCodeModalEvents(overlay); }
     else if(state.modal.type === 'role-login'){ attachRoleLoginModalEvents(overlay); }
     else if(state.modal.type === 'code-settings'){ attachCodeSettingsModalEvents(overlay); }
@@ -7884,19 +7889,18 @@
     };
   }
 
+  // показывает копейки, только если они реально есть в сумме (в т.ч. в посчитанном итоге/сумме по аналитике) —
+  // на круглых суммах выглядит как обычно, без ",00" на конце
   function formatMoney(n){
-    return Math.round(n).toLocaleString('ru-RU') + ' ₽';
-  }
-  // как formatMoney, но не прячет копейки, если они есть (для расходов, где теперь можно их вводить) —
-  // на круглых суммах выглядит точно так же, как обычный formatMoney
-  function formatMoneyPrecise(n){
     const num = Number(n);
     if(!isFinite(num)) return '';
     const rounded = Math.round(num * 100) / 100;
     const hasKopecks = Math.abs(rounded - Math.round(rounded)) > 0.001;
-    if(!hasKopecks) return formatMoney(rounded);
+    if(!hasKopecks) return Math.round(rounded).toLocaleString('ru-RU') + ' ₽';
     return rounded.toLocaleString('ru-RU', {minimumFractionDigits:2, maximumFractionDigits:2}) + ' ₽';
   }
+  // оставлена для обратной совместимости вызовов в коде — теперь то же самое, что formatMoney
+  function formatMoneyPrecise(n){ return formatMoney(n); }
 
   // ---------- закупки: списание за период и прогноз потребности ----------
   function materialUsageStats(days){
@@ -8061,11 +8065,17 @@
     const revenue = (e.price!==undefined && e.price!==null && !isNaN(e.price)) ? Number(e.price) : 0;
     return revenue - eventMaterialsCost(e) - eventTotalMasterPay(e);
   }
-  // прогнозная выручка мероприятия — полная ожидаемая сумма (включает уже внесённую предоплату), используется в аналитике как "факт"
+  // сумма, списанная по сертификатам в оплату этого мероприятия — эти деньги уже стали выручкой студии
+  // в момент продажи сертификата, поэтому нигде не считаются "выручкой мероприятия" повторно
+  function eventCertRedeemedTotal(e){
+    return (Array.isArray(e.payments) ? e.payments : []).filter(p=>p.certRedemptionRef).reduce((s,p)=> s + (Number(p.amount)||0), 0);
+  }
+  // прогнозная выручка мероприятия — полная ожидаемая сумма (включает уже внесённую предоплату), используется в аналитике как "факт";
+  // сертификатная часть вычитается, чтобы не задваивать её с выручкой от продажи сертификата (см. "Сводка по годам")
   function eventRevenueForecast(e){
     const price = (e.price!==undefined && e.price!==null && !isNaN(e.price)) ? Number(e.price) : 0;
     const agreed = (e.agreedPrice!==undefined && e.agreedPrice!==null && !isNaN(e.agreedPrice)) ? Number(e.agreedPrice) : 0;
-    return Math.max(price, agreed);
+    return Math.max(0, Math.max(price, agreed) - eventCertRedeemedTotal(e));
   }
   function eventProfitForecast(e){
     return eventRevenueForecast(e) - eventMaterialsCost(e) - eventTotalMasterPay(e);
@@ -13074,7 +13084,7 @@
               </div>
             </div>
           `;}).join('') : `<div style="color:var(--ink-soft);font-size:13.5px;">На этот день пока ничего не запланировано</div>`}
-          ${state.currentRole !== 'master' ? `<button class="add-evt-btn" id="btn-add-evt">+ добавить мероприятие</button>` : `<button class="add-evt-btn" id="btn-add-slot">+ добавить слот</button>`}
+          ${state.currentRole === 'hostess' ? '' : state.currentRole !== 'master' ? `<button class="add-evt-btn" id="btn-add-evt">+ добавить мероприятие</button>` : `<button class="add-evt-btn" id="btn-add-slot">+ добавить слот</button>`}
         </div>
       </div>
     `;
@@ -13490,6 +13500,32 @@
     `;
   }
 
+  // администратор (роль "hostess") открывает мероприятие только на просмотр — без права что-либо
+  // редактировать: все поля дизейблятся нативно, а не через кнопку "Сохранить" (иначе некоторые
+  // действия, например списание сертификата, сохранились бы в базу мгновенно, до всякого "Сохранить")
+  function lockdownEventModalForViewing(overlay){
+    overlay.querySelectorAll('input, select, textarea').forEach(el=>{ el.disabled = true; });
+    overlay.querySelectorAll('button').forEach(btn=>{
+      if(btn.id === 'btn-cancel' || btn.classList.contains('modal-close')) return;
+      btn.disabled = true;
+    });
+    // кастомные "пилюли"-переключатели (статус, посуда, плательщик и т.п.) — не настоящие кнопки,
+    // поэтому blocked отдельно через pointer-events
+    overlay.querySelectorAll('.status-select-wrap > div').forEach(el=>{
+      el.style.pointerEvents = 'none';
+      el.style.opacity = '0.65';
+    });
+    const cancelBtn = overlay.querySelector('#btn-cancel');
+    if(cancelBtn) cancelBtn.onclick = ()=>{ state.modal = null; overlay.remove(); };
+    const actionsEl = overlay.querySelector('.modal-actions');
+    if(actionsEl){
+      const noteEl = document.createElement('div');
+      noteEl.style.cssText = 'font-size:12px;color:var(--ink-soft);width:100%;text-align:center;margin-top:4px;';
+      noteEl.textContent = '👁 Только просмотр — редактирование мероприятий недоступно для этой роли';
+      actionsEl.insertAdjacentElement('afterend', noteEl);
+    }
+  }
+
   function attachEventModalEvents(overlay){
     const cancelBtn = overlay.querySelector('#btn-cancel');
     if(cancelBtn) cancelBtn.onclick = ()=>{ state.modal = null; overlay.remove(); };
@@ -13876,7 +13912,8 @@
       const hintEl = overlay.querySelector('#price-journal-mismatch');
       if(!hintEl) return;
       if(paymentsArr.length === 0){ hintEl.style.display = 'none'; return; }
-      const journalSum = paymentsArr.reduce((s,p)=> s + (Number(p.amount)||0), 0);
+      // сертификатные оплаты не входят в "Выручку" — сверяем журнал с полем только по "живым" оплатам
+      const journalSum = paymentsArr.filter(p=>!p.certRedemptionRef).reduce((s,p)=> s + (Number(p.amount)||0), 0);
       const priceInput = overlay.querySelector('#f-price');
       const priceVal = priceInput.value === '' ? 0 : Number(priceInput.value);
       if(priceVal !== journalSum){
@@ -13904,8 +13941,11 @@
           const idx = parseInt(btn.dataset.idx);
           const removed = paymentsArr.splice(idx,1)[0];
           if(removed){
-            const priceInput = overlay.querySelector('#f-price');
-            priceInput.value = Math.max(0, (parseFloat(priceInput.value)||0) - (Number(removed.amount)||0));
+            // сертификатные оплаты не увеличивали "Выручку" — значит и убирать их не нужно
+            if(!removed.certRedemptionRef){
+              const priceInput = overlay.querySelector('#f-price');
+              priceInput.value = Math.max(0, (parseFloat(priceInput.value)||0) - (Number(removed.amount)||0));
+            }
             updateAwaitingHint();
             if(removed.certRedemptionRef) await undoCertRedemption(removed.certRedemptionRef);
           }
@@ -13922,8 +13962,12 @@
       if(!hint) return;
       const priceVal = parseInt(overlay.querySelector('#f-price').value) || 0;
       const agreedVal = parseInt(overlay.querySelector('#f-agreed-price').value) || 0;
+      // сертификатные оплаты не входят в "Выручку" (#f-price), но для гостя они всё равно закрывают
+      // задолженность — иначе полностью оплаченное сертификатом мероприятие ошибочно показывало бы "Ждём ещё"
+      const certPaidVal = paymentsArr.filter(p=>p.certRedemptionRef).reduce((s,p)=> s + (Number(p.amount)||0), 0);
+      const receivedVal = priceVal + certPaidVal;
       if(agreedVal > 0){
-        const remain = agreedVal - priceVal;
+        const remain = agreedVal - receivedVal;
         if(remain > 0){ hint.textContent = `Ждём ещё: ${formatMoney(remain)}`; hint.style.color = 'var(--status-red)'; }
         else if(remain < 0){ hint.textContent = `Переплата: ${formatMoney(-remain)}`; hint.style.color = 'var(--status-blue)'; }
         else { hint.textContent = 'Оплачено полностью'; hint.style.color = 'var(--status-green)'; }
@@ -14126,7 +14170,9 @@
             guestListArr = guestListArr.filter(x=>x.id!==gid);
             const removedPayments = paymentsArr.filter(p=>p.guestId===gid);
             if(removedPayments.length){
-              const removedSum = removedPayments.reduce((s,p)=> s + (Number(p.amount)||0), 0);
+              // из "Выручки" вычитаем только "живые" (не сертификатные) оплаты этого гостя — сертификатные
+              // в неё и не добавлялись
+              const removedSum = removedPayments.filter(p=>!p.certRedemptionRef).reduce((s,p)=> s + (Number(p.amount)||0), 0);
               paymentsArr = paymentsArr.filter(p=>p.guestId!==gid);
               paymentsHidden.value = JSON.stringify(paymentsArr);
               const priceInput = overlay.querySelector('#f-price');
@@ -14156,8 +14202,11 @@
           const idx = parseInt(btn.dataset.idx);
           const removed = paymentsArr.splice(idx,1)[0];
           if(removed){
-            const priceInput = overlay.querySelector('#f-price');
-            priceInput.value = Math.max(0, (parseFloat(priceInput.value)||0) - (Number(removed.amount)||0));
+            // сертификатные оплаты не увеличивали "Выручку" — значит и убирать их не нужно
+            if(!removed.certRedemptionRef){
+              const priceInput = overlay.querySelector('#f-price');
+              priceInput.value = Math.max(0, (parseFloat(priceInput.value)||0) - (Number(removed.amount)||0));
+            }
             updateAwaitingHint();
             if(removed.certRedemptionRef) await undoCertRedemption(removed.certRedemptionRef);
           }
@@ -14320,9 +14369,16 @@
       if(guestId) paymentEntry.guestId = guestId;
       paymentsArr.push(paymentEntry);
       paymentsHidden.value = JSON.stringify(paymentsArr);
-      const priceInput = overlay.querySelector('#f-price');
-      priceInput.value = Math.round(((parseFloat(priceInput.value)||0) + amount) * 100) / 100;
-      priceInput.style.borderColor = '';
+      // оплата сертификатом НЕ увеличивает "Выручку" мероприятия — эти деньги уже стали доходом студии
+      // в момент продажи сертификата, а не сейчас; иначе получилось бы задвоение и в самом мероприятии,
+      // и в аналитике (см. mCertSalesRevenue в годовой сводке).
+      // но поле "Выручка" обязательно к заполнению при сохранении — если оно ещё пустое (мероприятие целиком
+      // оплачивается сертификатом, живых денег нет), проставляем туда 0, а не оставляем пустым
+      const priceInputForCert = overlay.querySelector('#f-price');
+      if(priceInputForCert && priceInputForCert.value === ''){
+        priceInputForCert.value = 0;
+        priceInputForCert.style.borderColor = '';
+      }
       renderPaymentsLog();
       updateAwaitingHint();
       renderCertAttachSummary();
