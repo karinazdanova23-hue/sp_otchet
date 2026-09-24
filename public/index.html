@@ -4955,10 +4955,11 @@
             <input type="date" id="l-sale-date" value="${lead.saleDate||''}">
           </div>
           <div class="field" id="lead-event-field" style="display:${lead.sold?'block':'none'};">
-            <label>Какое мероприятие создано <span style="font-weight:400;color:var(--ink-soft);">— необязательно, но полезно для сверки</span></label>
+            <label>Какое мероприятие создано</label>
             <input type="text" id="l-event-search" placeholder="Начните вводить дату, название или пространство…" list="l-event-options" value="${escapeHtml(lead.eventId ? (eventSelectOptions().find(o=>o.id===lead.eventId)?.label || '') : '')}">
             <datalist id="l-event-options">${eventSelectOptions().map(o=>`<option value="${escapeHtml(o.label)}">`).join('')}</datalist>
             <input type="hidden" id="l-event" value="${lead.eventId||''}">
+            <div style="font-size:11.5px;color:var(--ink-soft);margin-top:6px;">Заявка со статусом «Продано» обязательно должна быть связана с мероприятием — для сверки конверсии.</div>
           </div>
           <div class="modal-actions">
             <div>${!isNew ? `<button class="btn-danger" id="btn-del-lead">Удалить</button>` : '<span></span>'}</div>
@@ -5047,6 +5048,7 @@
       const revenueRaw = overlay.querySelector('#l-revenue').value;
       const soldVal = overlay.querySelector('#l-sold').checked;
       const saleDateVal = overlay.querySelector('#l-sale-date').value;
+      const leadEventVal = overlay.querySelector('#l-event').value || '';
 
       let firstInvalid = null;
       const markInvalid = (id)=>{
@@ -5061,8 +5063,12 @@
       if(revenueRaw === '') markInvalid('l-revenue');
       const saleDateMissing = soldVal && !saleDateVal;
       if(saleDateMissing) markInvalid('l-sale-date');
-      if(!dateVal || !contactVal || !monthVal || !sourceVal || !productVal || revenueRaw==='' || saleDateMissing){
-        showGapWarningBanner(saleDateMissing ? 'Заявка отмечена как «Продано» — укажите дату продажи.' : 'Заполните все поля перед сохранением заявки — включая номер/ник гостя.');
+      // заявка со статусом "Продано" обязательно должна быть привязана к мероприятию — иначе конверсию
+      // потом невозможно сверить с реальным расписанием
+      const leadEventMissing = soldVal && !leadEventVal;
+      if(leadEventMissing) markInvalid('l-event-search');
+      if(!dateVal || !contactVal || !monthVal || !sourceVal || !productVal || revenueRaw==='' || saleDateMissing || leadEventMissing){
+        showGapWarningBanner(leadEventMissing ? 'Заявка отмечена как «Продано» — выберите мероприятие, которое из неё создано.' : saleDateMissing ? 'Заявка отмечена как «Продано» — укажите дату продажи.' : 'Заполните все поля перед сохранением заявки — включая номер/ник гостя.');
         if(firstInvalid && firstInvalid.scrollIntoView) firstInvalid.scrollIntoView({block:'center', behavior:'smooth'});
         return;
       }
@@ -5078,7 +5084,7 @@
         revenue: parseInt(revenueRaw),
         sold: soldVal,
         saleDate: soldVal ? saleDateVal : '',
-        eventId: soldVal ? (overlay.querySelector('#l-event').value || '') : '',
+        eventId: soldVal ? leadEventVal : '',
       };
       const idx = state.leads.findIndex(x=>x.id===updated.id);
       if(idx >= 0) state.leads[idx] = updated; else state.leads.push(updated);
