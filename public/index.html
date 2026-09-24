@@ -865,10 +865,10 @@
     if(!r || typeof r !== 'object') return false;
     return !!(r.source && r.source.trim() && r.professions && r.professions.trim() && r.rating);
   }
-  // мастер может заполнять отчёт только по мероприятиям, где он сам ведущий (основной или дополнительный);
-  // все остальные роли — без ограничений (как и раньше)
+  // заполнять отчёт мастера может только сам мастер, и только по мероприятиям, где он ведущий
+  // (основной или дополнительный) — по просьбе владелицы у остальных ролей эта возможность убрана
   function isMyEventForReport(e){
-    if(state.currentRole !== 'master') return true;
+    if(state.currentRole !== 'master') return false;
     const norm = s => (s||'').trim().toLowerCase();
     const myName = state.loggedInMasterName;
     return norm(e.host)===norm(myName) || (e.additionalHosts||[]).some(h=>norm(h.name)===norm(myName));
@@ -1116,6 +1116,9 @@
   function pad(n){ return n<10 ? '0'+n : ''+n; }
   function fmtDate(d){ return d.getFullYear()+'-'+pad(d.getMonth()+1)+'-'+pad(d.getDate()); }
   function todayStr(){ return fmtDate(new Date()); }
+  // по просьбе владелицы отчёты мастеров по мероприятиям временно не обязательны — с 1 октября 2026,
+  // когда запускается отдельное приложение для мастеров, напоминания и пометки "не сдано" включаются снова
+  function reportsRequiredNow(){ return todayStr() >= '2026-10-01'; }
   function parseDate(s){ const [y,m,d]=s.split('-').map(Number); return new Date(y,m-1,d); }
   function formatDateText(dateStr){
     if(!dateStr) return '';
@@ -1205,7 +1208,8 @@
   const DEFAULT_ROLE_CODES = { hostess:'1111', master:'2222', manager:'3333', marketer:'6666', assistant:'4444', admin:'5555', owner:'0000' };
   // права: кто видит "Для менеджеров"/"Книгу" (менеджер, маркетолог и выше), кто видит "Аналитику" (ассистент/админ и выше), кто видит "Чистую прибыль" (только руководитель)
   function roleCanAccessManagersTab(role){ return ['manager','marketer','assistant','admin','owner'].includes(role); }
-  function roleCanAccessBook(role){ return ['manager','marketer','assistant','admin','owner'].includes(role); }
+  // маркетологу по просьбе владелицы закрыт доступ ко всем финансам, включая "Книгу"
+  function roleCanAccessBook(role){ return ['manager','assistant','admin','owner'].includes(role); }
   function roleCanAccessAnalytics(role){ return ['manager','assistant','admin','owner'].includes(role); }
   // менеджер и маркетолог не видят полную "Аналитику", но им нужно окно с выполнением плана (без прибыли и прочих финансовых деталей)
   function roleCanSeePlanProgress(role){ return ['manager','marketer'].includes(role); }
@@ -1220,7 +1224,11 @@
   function roleCanMarkDayOff(role){ return ['manager','assistant','admin','owner'].includes(role); }
   // метку "Остаток" (сколько ещё должны заплатить за мероприятие) видят все роли, кроме мастера —
   // у мастера открывается отдельная урезанная модалка без финансовых полей (см. quick-host)
-  function roleCanSeeGuestBalances(role){ return role !== 'master'; }
+  function roleCanSeeGuestBalances(role){ return role !== 'master' && role !== 'marketer'; }
+  // денежные поля в карточке мероприятия ("Выручка"/"Прогнозная выручка") скрыты для мастера
+  // (он их и так почти никогда не видит — открывает урезанную модалку) и для маркетолога
+  // (по просьбе владелицы у него нет доступа ни к каким финансам)
+  function financeHiddenInEventModal(){ return state.currentRole === 'master' || state.currentRole === 'marketer'; }
   function canAccessView(view){
     if(!state.currentRole) return false; // без входа теперь не видно вообще ничего
     if(view==='calendar' || view==='host' || view==='today') return true;
@@ -2753,12 +2761,12 @@
                 </div>
               </div>
 
-              ${remain > 0 ? `
+              ${(remain > 0 && roleCanSeeGuestBalances(state.currentRole)) ? `
                 <div class="today-remain-alert">⚠ ОСТАТОК ОПЛАТЫ: ${formatMoney(remain)} — не забыть взять с гостя</div>
               ` : ''}
 
               <div class="today-details">
-                ${price>0 || agreed>0 ? `<div class="today-detail-row"><b>Оплата:</b> получено ${formatMoney(price)}${agreed>0?` из ${formatMoney(agreed)}`:''}</div>` : ''}
+                ${(roleCanSeeGuestBalances(state.currentRole) && (price>0 || agreed>0)) ? `<div class="today-detail-row"><b>Оплата:</b> получено ${formatMoney(price)}${agreed>0?` из ${formatMoney(agreed)}`:''}</div>` : ''}
                 ${showsDishesAndRental(e.status) && e.dishes ? `<div class="today-detail-row"><b>Посуда:</b> ${e.dishes==='needed'?'нужна':'без посуды'}</div>` : ''}
                 ${rentalSuffix(e) ? `<div class="today-detail-row"><b>Аренда:</b> ${rentalSuffix(e).replace(' · ⏱ ','')}</div>` : ''}
                 ${e.payerType==='legal' ? `<div class="today-detail-row"><b>Плательщик:</b> Юр.лицо — ${escapeHtml(e.companyName||'без названия')}${missing.length?` <span style="color:var(--status-red);">(не хватает: ${missing.join(', ')})</span>`:' <span style="color:var(--status-green);">(документы в порядке)</span>'}</div>` : ''}
@@ -2803,7 +2811,7 @@
     const cutoff = new Date(); cutoff.setDate(cutoff.getDate()-14);
     const cutoffStr = fmtDate(cutoff);
     const missingReports = state.events.filter(e=> e.host && e.host.trim() && e.date && e.date>=cutoffStr && e.date<=today && !hasMasterReport(e)).length;
-    if(missingReports > 0) alerts.push({icon:'📝', text:`Не сдано отчётов за 2 недели: ${missingReports}`});
+    if(missingReports > 0 && reportsRequiredNow() && !['manager','assistant'].includes(state.currentRole)) alerts.push({icon:'📝', text:`Не сдано отчётов за 2 недели: ${missingReports}`});
 
     return alerts;
   }
@@ -4038,6 +4046,18 @@
   }
 
   function renderCertificatesView(){
+    // маркетологу открыта только "Конверсия" — это единственный раздел здесь, связанный с её работой
+    // (источники и продукт по заявкам); остальное (сертификаты, ЗП, возвраты, изделия, заказы, выдача) —
+    // финансовое и закрыто по просьбе владелицы
+    if(state.currentRole === 'marketer'){
+      state.certView = 'conversion';
+      const marketerSubTabsHtml = `
+        <div class="cert-subtabs">
+          <button data-certview="conversion" class="active">Конверсия</button>
+        </div>
+      `;
+      return marketerSubTabsHtml + renderConversionView();
+    }
     // администратор (роль "hostess") видит здесь только "Сертификаты" и "Изделия" — то, что он сам продаёт;
     // остальные вкладки (корректировки ЗП, возвраты, конверсия, заказы, выдача) остаются только у менеджеров и выше
     const isHostessLimited = state.currentRole === 'hostess';
@@ -4110,7 +4130,9 @@
     });
     const summaryYears = Object.keys(summaryByYear).sort((a,b)=> b.localeCompare(a));
     if(!state.certSummaryExpandedYears) state.certSummaryExpandedYears = new Set([todayStr().slice(0,4)]);
-    const monthlyHtml = allMonths.length ? `
+    // администратор (роль "hostess") видит отдельные сертификаты и их остатки, но не общую сумму по месяцам/годам —
+    // это агрегированная финансовая цифра, закрыта по просьбе владелицы
+    const monthlyHtml = (allMonths.length && state.currentRole !== 'hostess') ? `
       <div class="analytics-section" style="margin-bottom:20px;">
         <h4>Сумма сертификатов по месяцам</h4>
         <div style="font-size:11px;color:var(--ink-soft);font-family:var(--font-mono);margin-bottom:8px;">Сумма — только продажи; маркетинговые сертификаты в неё не входят и показаны отдельно.</div>
@@ -4633,15 +4655,20 @@
     });
     const byMasterList = Object.entries(byMaster).sort((a,b)=>b[1]-a[1]);
     const maxMaster = Math.max(1, ...byMasterList.map(x=>x[1]));
+    // администратор (роль "hostess") видит отдельные продажи, но не общие суммы/разбивку по мастерам —
+    // это агрегированные финансовые цифры, закрыты по просьбе владелицы
+    const showItemSalesTotals = state.currentRole !== 'hostess';
 
     return navHtml + `
+      ${showItemSalesTotals ? `
       <div class="analytics-summary" style="margin-bottom:20px;">
         <div class="summary-card"><div class="num" style="font-size:20px;">${formatMoney(totalRevenue)}</div><div class="label">Выручка от продажи изделий</div></div>
         <div class="summary-card"><div class="num" style="font-size:20px;color:var(--accent);">${formatMoney(totalMasterShare)}</div><div class="label">Мастерам (${ITEM_SALE_MASTER_PCT}%)</div></div>
         <div class="summary-card" style="border-left:4px solid var(--status-green);"><div class="num" style="font-size:20px;color:var(--status-green);">${formatMoney(totalStudioShare)}</div><div class="label">В прибыль студии (${ITEM_SALE_STUDIO_PCT}%)</div></div>
       </div>
+      ` : ''}
 
-      ${byMasterList.length ? `
+      ${(byMasterList.length && showItemSalesTotals) ? `
       <div class="analytics-section">
         <h4>Выручка по мастерам</h4>
         ${byMasterList.map(([name,rev])=>`
@@ -10309,8 +10336,8 @@
 `;
 
     const analyticsPanel_reports = `      <div class="analytics-section">
-        <h4 style="color:${missingReportEvts.length>0?'var(--status-red)':'inherit'};">Отчёты мастеров ${reportableEvts.length ? `(${reportableEvts.length - missingReportEvts.length} из ${reportableEvts.length} сдано)` : ''}</h4>
-        <div style="font-size:11.5px;color:var(--ink-soft);font-family:var(--font-mono);margin-bottom:8px;">Учитываются мероприятия с указанным мастером, дата которых уже наступила.</div>
+        <h4 style="color:${(missingReportEvts.length>0 && reportsRequiredNow())?'var(--status-red)':'inherit'};">Отчёты мастеров ${reportableEvts.length ? `(${reportableEvts.length - missingReportEvts.length} из ${reportableEvts.length} сдано)` : ''}</h4>
+        <div style="font-size:11.5px;color:var(--ink-soft);font-family:var(--font-mono);margin-bottom:8px;">Учитываются мероприятия с указанным мастером, дата которых уже наступила.${!reportsRequiredNow() ? ' До 1 октября заполнение отчётов необязательно — это просто справочная сводка.' : ''}</div>
         ${reportableEvts.length === 0 ? `<div style="color:var(--ink-soft);font-size:13px;">В этом месяце пока нет прошедших мероприятий с мастером.</div>` : (
           missingReportEvts.length === 0
           ? `<div style="color:var(--status-green);font-size:13px;">✓ Все отчёты сданы.</div>`
@@ -10649,7 +10676,7 @@
           <button class="nav-btn" id="an-next">›</button>
         </div>
       </div>
-      ${myMissingReports.length > 0 ? `
+      ${(myMissingReports.length > 0 && reportsRequiredNow()) ? `
         <div class="analytics-section" style="border:1px solid var(--status-red);">
           <h4 style="color:var(--status-red);">📝 Не сдано отчётов: ${myMissingReports.length}</h4>
           <div style="font-size:12px;color:var(--ink-soft);margin-bottom:8px;">Нажмите на мероприятие, чтобы заполнить отчёт.</div>
@@ -11128,6 +11155,14 @@
       render();
     };
     overlay.querySelector('#shift-save').onclick = async ()=>{
+      // мастерам редактировать смены администраторов нельзя (кнопка для них и не показывается —
+      // это подстраховка на случай прямого обращения к модалке)
+      if(state.currentRole === 'master'){
+        overlay.remove();
+        state.modal = {type:'day', date: shiftDate};
+        render();
+        return;
+      }
       let name = selectEl.value;
       if(name === '__custom__'){
         name = overlay.querySelector('#shift-name-custom').value.trim();
@@ -11198,6 +11233,12 @@
       render();
     };
     overlay.querySelector('#manager-shift-save').onclick = async ()=>{
+      if(state.currentRole === 'master' || state.currentRole === 'admin'){
+        overlay.remove();
+        state.modal = {type:'day', date: shiftDate};
+        render();
+        return;
+      }
       let name = selectEl.value;
       if(name === '__custom__'){
         name = overlay.querySelector('#manager-shift-name-custom').value.trim();
@@ -13579,7 +13620,7 @@
             <div class="shift-row">
               <span class="shift-time">${s.label}</span>
               <span class="shift-name ${entry?'':'empty'}">${entry ? escapeHtml(entry.name) + actualLabel : 'не назначено'}${extra>0?` <span style="color:var(--status-blue);">+${extra%1===0?extra:extra.toFixed(1)} ч</span>`:''}</span>
-              <button class="shift-edit-btn" data-date="${dateStr}" data-shift="${s.key}">✎</button>
+              ${state.currentRole !== 'master' ? `<button class="shift-edit-btn" data-date="${dateStr}" data-shift="${s.key}">✎</button>` : ''}
             </div>
           `;
         }).join('')}
@@ -13595,7 +13636,7 @@
         <div class="shift-block-title">График менеджеров</div>
         <div class="shift-row">
           <span class="shift-name ${name?'':'empty'}">${name ? escapeHtml(name) : 'не назначено'}</span>
-          <button class="manager-shift-edit-btn" data-date="${dateStr}">✎</button>
+          ${(state.currentRole !== 'master' && state.currentRole !== 'admin') ? `<button class="manager-shift-edit-btn" data-date="${dateStr}">✎</button>` : ''}
         </div>
       </div>
     `;
@@ -13971,9 +14012,9 @@
               </label>
             </div>
           </div>
-          <div class="field">
+          <div class="field" style="${financeHiddenInEventModal()?'display:none;':''}">
             <label>Выручка (₽) — сумма полученных оплат</label>
-            <input type="number" id="f-price" value="${ev.price!==undefined && ev.price!==null ? ev.price : ''}" min="0" step="100" placeholder="Например: 8000">
+            <input type="number" id="f-price" value="${financeHiddenInEventModal() ? '' : (ev.price!==undefined && ev.price!==null ? ev.price : '')}" min="0" step="100" placeholder="Например: 8000" ${financeHiddenInEventModal()?'disabled':''}>
             <div id="price-journal-mismatch" style="display:none;color:var(--status-red);font-size:11.5px;margin-top:4px;"></div>
             <div id="quick-payment-controls" style="display:none;">
               <div class="row2" style="margin-top:8px;">
@@ -14039,9 +14080,9 @@
               </div>
             </details>
           </div>
-          <div class="field">
+          <div class="field" style="${financeHiddenInEventModal()?'display:none;':''}">
             <label>Прогнозная выручка</label>
-            <input type="number" id="f-agreed-price" value="${ev.agreedPrice!==undefined && ev.agreedPrice!==null ? ev.agreedPrice : ''}" min="0" step="100" placeholder="Например: 10000">
+            <input type="number" id="f-agreed-price" value="${financeHiddenInEventModal() ? '' : (ev.agreedPrice!==undefined && ev.agreedPrice!==null ? ev.agreedPrice : '')}" min="0" step="100" placeholder="Например: 10000" ${financeHiddenInEventModal()?'disabled':''}>
             <div id="awaiting-hint" style="font-size:12px;margin-top:6px;font-family:var(--font-mono);"></div>
           </div>
           <div class="field">
@@ -14066,32 +14107,34 @@
             <label>Заметки</label>
             <textarea id="f-notes" placeholder="Доп. детали и т.п.">${escapeHtml(ev.notes||'')}</textarea>
           </div>
-          <div class="field" style="border-top:1px solid var(--line); padding-top:16px;">
+          <!-- заполнять отчёт мастера может только сам мастер (через свою отдельную кнопку "📝 отчёт") —
+               в общей карточке мероприятия этот блок для остальных ролей скрыт и не содержит данных -->
+          <div class="field" style="border-top:1px solid var(--line); padding-top:16px; ${state.currentRole!=='master'?'display:none;':''}">
             <label style="font-family:var(--font-display);font-size:15px;font-weight:600;color:var(--ink);margin-bottom:10px;">Отчёт мастера</label>
           </div>
-          <div class="field">
+          <div class="field" style="${state.currentRole!=='master'?'display:none;':''}">
             <label>1. Откуда гости узнали про СП</label>
-            <input type="text" id="f-report-source" value="${escapeHtml((ev.masterReport&&typeof ev.masterReport==='object')?(ev.masterReport.source||''):'')}" placeholder="Например: Инста" list="f-report-source-options">
+            <input type="text" id="f-report-source" value="${state.currentRole!=='master' ? '' : escapeHtml((ev.masterReport&&typeof ev.masterReport==='object')?(ev.masterReport.source||''):'')}" placeholder="Например: Инста" list="f-report-source-options">
             <datalist id="f-report-source-options">${LEAD_SOURCES.map(s=>`<option value="${escapeHtml(s)}">`).join('')}</datalist>
           </div>
-          <div class="field">
+          <div class="field" style="${state.currentRole!=='master'?'display:none;':''}">
             <label>2. Профессии гостей</label>
-            <input type="text" id="f-report-professions" value="${escapeHtml((ev.masterReport&&typeof ev.masterReport==='object')?(ev.masterReport.professions||''):'')}" placeholder="Например: врач, дизайнер, студентка">
+            <input type="text" id="f-report-professions" value="${state.currentRole!=='master' ? '' : escapeHtml((ev.masterReport&&typeof ev.masterReport==='object')?(ev.masterReport.professions||''):'')}" placeholder="Например: врач, дизайнер, студентка">
           </div>
-          <div class="field">
+          <div class="field" style="${state.currentRole!=='master'?'display:none;':''}">
             <label>3. Уникальное на МК <span style="font-weight:400;color:var(--ink-soft);">— необязательно</span></label>
-            <textarea id="f-report-unique" placeholder="Сообщили о беременности, сделали предложение и т.д.">${escapeHtml((ev.masterReport&&typeof ev.masterReport==='object')?(ev.masterReport.unique||''):'')}</textarea>
+            <textarea id="f-report-unique" placeholder="Сообщили о беременности, сделали предложение и т.д.">${state.currentRole!=='master' ? '' : escapeHtml((ev.masterReport&&typeof ev.masterReport==='object')?(ev.masterReport.unique||''):'')}</textarea>
           </div>
-          <div class="field">
+          <div class="field" style="${state.currentRole!=='master'?'display:none;':''}">
             <label>4. Оценка МК по 5-балльной шкале</label>
             <div class="rating-scale">
-              ${[1,2,3,4,5].map(n=>`<button type="button" class="rating-btn f-rating-btn" data-rating="${n}" ${((ev.masterReport&&typeof ev.masterReport==='object'&&ev.masterReport.rating===n))?'style="background:var(--ink);color:var(--white);border-color:var(--ink);"':''}>${n}</button>`).join('')}
+              ${[1,2,3,4,5].map(n=>`<button type="button" class="rating-btn f-rating-btn" data-rating="${n}" ${(state.currentRole==='master' && ev.masterReport&&typeof ev.masterReport==='object'&&ev.masterReport.rating===n)?'style="background:var(--ink);color:var(--white);border-color:var(--ink);"':''}>${n}</button>`).join('')}
             </div>
-            <input type="hidden" id="f-report-rating" value="${(ev.masterReport&&typeof ev.masterReport==='object')?(ev.masterReport.rating||''):''}">
+            <input type="hidden" id="f-report-rating" value="${state.currentRole!=='master' ? '' : ((ev.masterReport&&typeof ev.masterReport==='object')?(ev.masterReport.rating||''):'')}">
           </div>
-          <div class="field">
+          <div class="field" style="${state.currentRole!=='master'?'display:none;':''}">
             <label>5. Расшифровка оценки <span style="font-weight:400;color:var(--ink-soft);">— обязательно, если оценка ниже 5</span></label>
-            <textarea id="f-report-rating-comment" placeholder="Что именно было некомфортно...">${escapeHtml((ev.masterReport&&typeof ev.masterReport==='object')?(ev.masterReport.ratingComment||''):'')}</textarea>
+            <textarea id="f-report-rating-comment" placeholder="Что именно было некомфортно...">${state.currentRole!=='master' ? '' : escapeHtml((ev.masterReport&&typeof ev.masterReport==='object')?(ev.masterReport.ratingComment||''):'')}</textarea>
           </div>
           <div class="modal-actions">
             <div style="display:flex;gap:8px;">
@@ -14169,6 +14212,13 @@
     const masterPayInput = overlay.querySelector('#f-master-pay');
     const spaceSelect = overlay.querySelector('#f-space');
     const hostInputEl = overlay.querySelector('#f-host');
+    // ведущего мастера может поменять только тот, кто сейчас сам ведёт это мероприятие (может переставить
+    // себя на другого), но не может трогать чужие записи — например, поменять Ольгу на кого-то другого
+    if(hostInputEl && state.currentRole === 'master' && state.modal.event && state.modal.event.host && state.modal.event.host !== state.loggedInMasterName){
+      hostInputEl.disabled = true;
+      hostInputEl.title = 'Изменить ведущего может только тот, кто сейчас ведёт это мероприятие';
+      hostInputEl.style.background = 'var(--paper-2)';
+    }
     if(guestsInput && masterPayInput){
       guestsInput.addEventListener('input', ()=>{
         if(masterPayInput.dataset.auto === 'true'){
@@ -15227,12 +15277,19 @@
 
       const title = overlay.querySelector('#f-title').value.trim();
       const productVal = overlay.querySelector('#f-product').value;
-      const hostVal = overlay.querySelector('#f-host').value.trim();
+      // подстраховка на случай обхода отключённого поля: мастер, который сейчас не ведёт это мероприятие,
+      // никак не может поменять ведущего — даже если в поле что-то оказалось (см. блокировку поля выше)
+      const hostFieldLockedForMaster = state.currentRole === 'master' && state.modal.event && state.modal.event.host && state.modal.event.host !== state.loggedInMasterName;
+      const hostVal = hostFieldLockedForMaster ? state.modal.event.host : overlay.querySelector('#f-host').value.trim();
       const dateVal = overlay.querySelector('#f-date').value;
       const timeVal = overlay.querySelector('#f-time').value;
       const durationVal = parseInt(overlay.querySelector('#f-duration').value) || 0;
       const guestsRaw = overlay.querySelector('#f-guests').value;
-      const priceRaw = overlay.querySelector('#f-price').value;
+      // мастер не видит и не вводит денежные поля мероприятия — при сохранении сохраняем прежние суммы как есть
+      const priceFieldLockedForMaster = financeHiddenInEventModal();
+      const priceRaw = priceFieldLockedForMaster
+        ? (state.modal.event.price!==undefined && state.modal.event.price!==null ? String(state.modal.event.price) : '')
+        : overlay.querySelector('#f-price').value;
       const statusVal = overlay.querySelector('#f-status').value || 'confirmed';
       const dishesVal = overlay.querySelector('#f-dishes').value;
       const dishesPaymentVal = overlay.querySelector('#f-dishes-payment').value;
@@ -15276,9 +15333,9 @@
         if(!timeVal) markInvalid('f-time');
         if(!durationVal || durationVal<=0) markInvalid('f-duration');
         if(guestsRaw === '') markInvalid('f-guests');
-        if(priceRaw === '' || Number(priceRaw) < 0) markInvalid('f-price');
-        const agreedPriceRawCheck = overlay.querySelector('#f-agreed-price').value;
-        const agreedPriceNegative = agreedPriceRawCheck !== '' && Number(agreedPriceRawCheck) < 0;
+        if(!priceFieldLockedForMaster && (priceRaw === '' || Number(priceRaw) < 0)) markInvalid('f-price');
+        const agreedPriceRawCheck = priceFieldLockedForMaster ? '' : overlay.querySelector('#f-agreed-price').value;
+        const agreedPriceNegative = !priceFieldLockedForMaster && agreedPriceRawCheck !== '' && Number(agreedPriceRawCheck) < 0;
         if(agreedPriceNegative) markInvalid('f-agreed-price');
         if(!notesVal) markInvalid('f-notes');
         if(guestNamesMissing){
@@ -15370,8 +15427,12 @@
         masterPayAuto: overlay.querySelector('#f-master-pay').dataset.auto === 'true',
         additionalHosts: finalAdditionalHosts,
         guestName: guestNameVal,
-        price: overlay.querySelector('#f-price').value !== '' ? parseInt(overlay.querySelector('#f-price').value) : null,
-        agreedPrice: overlay.querySelector('#f-agreed-price').value !== '' ? parseInt(overlay.querySelector('#f-agreed-price').value) : null,
+        price: priceFieldLockedForMaster
+          ? (state.modal.event.price!==undefined && state.modal.event.price!==null ? state.modal.event.price : null)
+          : (overlay.querySelector('#f-price').value !== '' ? parseInt(overlay.querySelector('#f-price').value) : null),
+        agreedPrice: priceFieldLockedForMaster
+          ? (state.modal.event.agreedPrice!==undefined && state.modal.event.agreedPrice!==null ? state.modal.event.agreedPrice : null)
+          : (overlay.querySelector('#f-agreed-price').value !== '' ? parseInt(overlay.querySelector('#f-agreed-price').value) : null),
         materialsItems: cleanedMaterialsItems,
         pickupItems: cleanedPickupItems,
         payerType: overlay.querySelector('#f-payer-type').value || 'individual',
