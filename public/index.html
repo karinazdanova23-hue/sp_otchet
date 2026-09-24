@@ -702,13 +702,13 @@
   // вместимость по ФИКСИРОВАННОМУ id пространства (не зависит от того, как его переименовали)
   const SPACE_CAPACITY = { s1:8, s2:10, s3:14, s4:16, s5:null };
 
-  const STATUS_LABEL = { confirmed: 'По расписанию', tentative: 'Частник', marketing: 'Маркетинг', offsite: 'Выезд', slot: 'Слот' };
+  const STATUS_LABEL = { confirmed: 'По расписанию', tentative: 'Частник', marketing: 'Маркетинг', offsite: 'Выезд', slot: 'Слот', cancelled: 'Отменено' };
   // ЗП менеджеров: единая на всех (не привязана к конкретному сотруднику) — оклад + проценты от выручки студии за месяц
   const MANAGER_SALARY_BASE = 10000;
   const MANAGER_SALARY_PCT_TENTATIVE = 0.03; // % от выручки "Частник"
   const MANAGER_SALARY_PCT_CONFIRMED = 0.01; // % от выручки "По расписанию"
   const MANAGER_SALARY_PCT_CERTS = 0.01;     // % от суммы проданных сертификатов
-  const STATUS_COLOR_VAR = { confirmed: '--status-green', tentative: '--status-red', marketing: '--status-blue', offsite: '--status-purple', slot: '--status-cyan' };
+  const STATUS_COLOR_VAR = { confirmed: '--status-green', tentative: '--status-red', marketing: '--status-blue', offsite: '--status-purple', slot: '--status-cyan', cancelled: '--ink-soft' };
   function statusColor(status){ return 'var(' + (STATUS_COLOR_VAR[status] || '--status-green') + ')'; }
   function showsDishesAndRental(status){ return status === 'tentative' || status === 'marketing'; }
   function isCeramicsEvent(title){
@@ -740,7 +740,7 @@
 
   const CERT_CHANNELS = ['Лично','ТГ','ВК','Инста','Сайт','Макс'];
   const CERT_TYPES = ['Электронный','Печатный'];
-  const CERT_STATUS_LABEL = { in_progress: 'В процессе', partial: 'Частично использован', used: 'Использован' };
+  const CERT_STATUS_LABEL = { in_progress: 'В процессе', partial: 'Частично использован', used: 'Использован', refunded: 'Возвращён' };
 
   const REFUND_SOURCES = ['YCLIENTS', 'Точка'];
   const REFUND_STATUS_LABEL = { in_progress: 'В процессе', refunded: 'Возвращено' };
@@ -1145,13 +1145,49 @@
     if(!e) return 'мероприятие удалено';
     return `${e.title||'без названия'} (${formatDateText(e.date)})`;
   }
+  function linkedRefundGuestLabel(eventId, guestId){
+    const e = state.events.find(x=>x.id===eventId);
+    const g = e && Array.isArray(e.guestList) ? e.guestList.find(x=>x.id===guestId) : null;
+    return g ? (g.name || 'без имени') : 'гость удалён';
+  }
+  // список сертификатов для привязки возврата — только непогашенные полностью и ещё не возвращённые
+  // (частично использованный тоже можно вернуть на неиспользованный остаток)
+  function certSelectOptions(){
+    return [...state.certificates]
+      .filter(c=> c.status !== 'refunded')
+      .sort((a,b)=> (b.saleDate||'').localeCompare(a.saleDate||''))
+      .map(c=> ({ id: c.id, label: certPickerLabel(c) }));
+  }
+  function linkedCertLabel(certId){
+    const c = state.certificates.find(x=>x.id===certId);
+    if(!c) return 'сертификат удалён';
+    return `№${c.number} — ${c.ownerName||'без имени'}`;
+  }
   function certSpentTotal(c){
     if(!Array.isArray(c.redemptions)) return 0;
     return c.redemptions.reduce((s,r)=> s + ((r.amount!==undefined&&r.amount!==null&&!isNaN(r.amount))?Number(r.amount):0), 0);
   }
   function certRemaining(c){
+    // возвращённый сертификат больше нельзя списывать — деньги за него уже вернули гостю
+    if(c.status === 'refunded') return 0;
     const total = (c.amount!==undefined&&c.amount!==null&&!isNaN(c.amount))?Number(c.amount):0;
     return total - certSpentTotal(c);
+  }
+  // возврат сертификата целиком (деньги за него отдали гостю обратно) — сам сертификат помечается
+  // возвращённым и больше недоступен для списания (см. certRemaining)
+  function markCertRefunded(cert, refundId){
+    if(!cert) return;
+    cert.status = 'refunded';
+    cert.refundRef = refundId;
+  }
+  // отмена/перенос привязанного возврата — возвращаем сертификату тот статус, который был бы у него
+  // без возврата, по факту уже сделанных списаний (сам возврат к этому моменту уже отвязан)
+  function restoreCertStatusAfterRefundUndo(cert){
+    if(!cert) return;
+    const spent = certSpentTotal(cert);
+    const total = (cert.amount!==undefined&&cert.amount!==null&&!isNaN(cert.amount))?Number(cert.amount):0;
+    cert.status = spent <= 0 ? 'in_progress' : (spent >= total ? 'used' : 'partial');
+    delete cert.refundRef;
   }
   // подпись сертификата для выбора из списка — номер один и тот же может встречаться у нескольких
   // сертификатов (например, после импорта), поэтому дата обязательно входит в подпись, чтобы различить их
@@ -1861,10 +1897,11 @@
   }
 
   function buildRefundsCsv(){
-    const header = ['Дата заявки','Сумма (₽)','Дата платежа','Причина','Статус','Источник','ФИО','Номер счёта','Банк','БИК'];
+    const header = ['Дата заявки','Сумма (₽)','Дата платежа','Причина','Статус','Источник','ФИО','Номер счёта','Банк','БИК','Мероприятие','Гость','Сертификат'];
     const rows = [...state.refunds].sort((a,b)=>(b.requestDate||'').localeCompare(a.requestDate||'')).map(r=>[
       r.requestDate||'', r.amount!==undefined&&r.amount!==null?r.amount:'', r.paymentDate||'', r.reason||'',
-      REFUND_STATUS_LABEL[r.status||'in_progress'], r.source||'', r.fullName||'', r.accountNumber||'', r.bank||'', r.bik||''
+      REFUND_STATUS_LABEL[r.status||'in_progress'], r.source||'', r.fullName||'', r.accountNumber||'', r.bank||'', r.bik||'',
+      r.eventId ? linkedEventLabel(r.eventId) : '', (r.eventId && r.guestId) ? linkedRefundGuestLabel(r.eventId, r.guestId) : '', r.certId ? linkedCertLabel(r.certId) : ''
     ]);
     const lines = [header, ...rows].map(r=>r.map(csvEscape).join(';'));
     return '\uFEFF' + lines.join('\r\n');
@@ -4210,7 +4247,7 @@
               <div class="cell">${r.paymentDate ? formatDateText(r.paymentDate) : '—'}</div>
               <div class="cell">${escapeHtml(r.source||'')}</div>
               <div><span class="cert-badge ${r.status==='refunded'?'used':'in_progress'}">${REFUND_STATUS_LABEL[r.status||'in_progress']}</span></div>
-              <div class="reason">${escapeHtml(r.reason||'')}${r.source==='Точка'&&r.fullName?' · '+escapeHtml(r.fullName):''}</div>
+              <div class="reason">${escapeHtml(r.reason||'')}${r.source==='Точка'&&r.fullName?' · '+escapeHtml(r.fullName):''}${r.eventId?' <span style="color:var(--ink-soft);font-size:11px;">🔗 '+escapeHtml(linkedEventLabel(r.eventId))+(r.guestId?' — '+escapeHtml(linkedRefundGuestLabel(r.eventId, r.guestId)):'')+'</span>':''}${r.certId?' <span style="color:var(--ink-soft);font-size:11px;">🎟 '+escapeHtml(linkedCertLabel(r.certId))+'</span>':''}</div>
             </div>
           `).join('')}
         </div>
@@ -4289,7 +4326,7 @@
       requireUnlock(()=>{
         state.modal = {type:'refund', isNew:true, refund:{
           id: uid(), requestDate: todayStr(), amount: null, paymentDate: '', reason: '',
-          status: 'in_progress', source: REFUND_SOURCES[0], eventId: '', fullName: '', accountNumber: '', bank: '', bik: '',
+          status: 'in_progress', source: REFUND_SOURCES[0], linkType: 'event', eventId: '', guestId: '', certId: '', fullName: '', accountNumber: '', bank: '', bik: '',
         }};
         render();
       });
@@ -6551,7 +6588,11 @@
               <div class="dishes-opt ${cert.status==='used'?'active':''}" data-certstatus="used">
                 <span class="dot" style="background:var(--status-green)"></span>Использован
               </div>
+              <div class="dishes-opt ${cert.status==='refunded'?'active':''}" data-certstatus="refunded">
+                <span class="dot" style="background:var(--status-red)"></span>Возвращён
+              </div>
             </div>
+            ${cert.status==='refunded' ? `<div style="font-size:11.5px;color:var(--ink-soft);margin-top:6px;">Обычно проставляется автоматически из раздела «Возвраты» — при привязке возврата к этому сертификату.</div>` : ''}
             <input type="hidden" id="c-status" value="${cert.status||'in_progress'}">
           </div>
           <div class="field" id="cert-redemptions-field" style="display:${(cert.status==='used'||cert.status==='partial')?'block':'none'};">
@@ -6906,7 +6947,13 @@
   }
 
   function renderRefundModal(refund, isNew){
-    const isTochka = refund.source === 'Точка';
+    // тип возврата определяет весь дальнейший алгоритм заполнения формы:
+    // "мероприятие" — обязательно выбрать и мероприятие, и конкретного человека в нём;
+    // "сертификат" — обязательно выбрать сертификат, источник всегда "Точка", и сразу нужны реквизиты для перевода
+    const linkType = refund.linkType === 'cert' ? 'cert' : 'event';
+    const isEventType = linkType === 'event';
+    const isCertType = linkType === 'cert';
+    const isTochka = isCertType ? true : (refund.source === 'Точка');
     return `
       <div class="modal">
         <div class="modal-head">
@@ -6924,17 +6971,9 @@
               <input type="number" id="r-amount" value="${refund.amount!==undefined&&refund.amount!==null?refund.amount:''}" min="0" step="100" placeholder="Например: 5000">
             </div>
           </div>
-          <div class="row2">
-            <div class="field">
-              <label>Дата платежа</label>
-              <input type="date" id="r-payment-date" value="${refund.paymentDate||''}">
-            </div>
-            <div class="field">
-              <label>Источник</label>
-              <select id="r-source">
-                ${REFUND_SOURCES.map(s=>`<option value="${escapeHtml(s)}" ${refund.source===s?'selected':''}>${escapeHtml(s)}</option>`).join('')}
-              </select>
-            </div>
+          <div class="field">
+            <label>Дата платежа</label>
+            <input type="date" id="r-payment-date" value="${refund.paymentDate||''}">
           </div>
           <div class="field">
             <label>Причина возврата</label>
@@ -6953,11 +6992,46 @@
             <input type="hidden" id="r-status" value="${refund.status||'in_progress'}">
           </div>
           <div class="field">
-            <label>Привязать к мероприятию <span style="font-weight:400;color:var(--ink-soft);">— необязательно</span></label>
-            <input type="text" id="r-event-search" placeholder="Начните вводить дату, название или пространство…" list="r-event-options" value="${escapeHtml(refund.eventId ? (eventSelectOptions().find(o=>o.id===refund.eventId)?.label || '') : '')}">
-            <datalist id="r-event-options">${eventSelectOptions().map(o=>`<option value="${escapeHtml(o.label)}">`).join('')}</datalist>
-            <input type="hidden" id="r-event" value="${refund.eventId||''}">
-            <div style="font-size:11.5px;color:var(--ink-soft);margin-top:6px;">Если статус «Возвращено» — сумма автоматически вычтется из выручки привязанного мероприятия.</div>
+            <label>Что возвращаем</label>
+            <div class="status-select-wrap">
+              <div class="dishes-opt ${isEventType?'active':''}" data-refundtype="event">
+                <span class="dot" style="background:var(--status-blue)"></span>Мероприятие
+              </div>
+              <div class="dishes-opt ${isCertType?'active':''}" data-refundtype="cert">
+                <span class="dot" style="background:var(--status-purple)"></span>Сертификат
+              </div>
+            </div>
+            <input type="hidden" id="r-type" value="${linkType}">
+          </div>
+          <div id="refund-event-block" style="display:${isEventType?'block':'none'};">
+            <div class="field">
+              <label>Мероприятие</label>
+              <input type="text" id="r-event-search" placeholder="Начните вводить дату, название или пространство…" list="r-event-options" value="${escapeHtml(refund.eventId ? (eventSelectOptions().find(o=>o.id===refund.eventId)?.label || '') : '')}">
+              <datalist id="r-event-options">${eventSelectOptions().map(o=>`<option value="${escapeHtml(o.label)}">`).join('')}</datalist>
+              <input type="hidden" id="r-event" value="${refund.eventId||''}">
+              <div style="font-size:11.5px;color:var(--ink-soft);margin-top:6px;">Если статус «Возвращено» — сумма автоматически вычтется из выручки этого мероприятия.</div>
+            </div>
+            <div class="field">
+              <label>Кому из гостей возвращаем</label>
+              <select id="r-guest"><option value="">Сначала выберите мероприятие…</option></select>
+              <div style="font-size:11.5px;color:var(--ink-soft);margin-top:6px;">Отменится запись именно этого гостя — остальные гости мероприятия не затрагиваются (само мероприятие пометится «Отменено» только если так вернули уже всех гостей).</div>
+            </div>
+            <div class="field">
+              <label>Источник</label>
+              <select id="r-source">
+                ${REFUND_SOURCES.map(s=>`<option value="${escapeHtml(s)}" ${refund.source===s?'selected':''}>${escapeHtml(s)}</option>`).join('')}
+              </select>
+            </div>
+          </div>
+          <div id="refund-cert-block" style="display:${isCertType?'block':'none'};">
+            <div class="field">
+              <label>Сертификат</label>
+              <input type="text" id="r-cert-search" placeholder="Начните вводить номер или имя владельца…" list="r-cert-options" value="${escapeHtml((()=>{ if(!refund.certId) return ''; const linkedCert = state.certificates.find(c=>c.id===refund.certId); return linkedCert ? certPickerLabel(linkedCert) : 'сертификат удалён'; })())}">
+              <datalist id="r-cert-options">${certSelectOptions().map(o=>`<option value="${escapeHtml(o.label)}">`).join('')}</datalist>
+              <input type="hidden" id="r-cert" value="${refund.certId||''}">
+              <div style="font-size:11.5px;color:var(--ink-soft);margin-top:6px;">Если статус «Возвращено» — сертификат будет отмечен как возвращённый и станет недоступен для списания.</div>
+            </div>
+            <div style="font-size:11.5px;color:var(--ink-soft);margin:-4px 0 10px;">Возврат по сертификату всегда оформляется через Точку — ниже сразу реквизиты для перевода.</div>
           </div>
           <div class="field" id="refund-tochka-field" style="display:${isTochka?'block':'none'};">
             <label>Реквизиты для возврата (Точка)</label>
@@ -6987,11 +7061,43 @@
     refundEventOptions.forEach(o=>{ refundLabelToId[o.label] = o.id; });
     const refundEventSearchInput = overlay.querySelector('#r-event-search');
     const refundEventHidden = overlay.querySelector('#r-event');
+
+    // селектор "кому из гостей возвращаем" — при типе "мероприятие" выбор человека обязателен.
+    // если у мероприятия только один гость (или список гостей ещё не заведён отдельно, а есть только
+    // общее имя) — выбираем его сам, без действий пользователя; если гостей несколько — заставляем
+    // выбрать явно, без варианта "не выбрано"
+    const refundGuestSelect = overlay.querySelector('#r-guest');
+    function refreshRefundGuestOptions(){
+      if(!refundGuestSelect) return;
+      const evId = refundEventHidden.value;
+      const ev = evId ? state.events.find(e=>e.id===evId) : null;
+      if(!ev){
+        refundGuestSelect.innerHTML = '<option value="">Сначала выберите мероприятие…</option>';
+        return;
+      }
+      const guests = Array.isArray(ev.guestList) ? ev.guestList : [];
+      const keepVal = (state.modal.refund.eventId === evId) ? (state.modal.refund.guestId||'') : '';
+      if(guests.length === 0){
+        // у мероприятия ещё нет отдельного списка гостей — предложим единственный вариант по общему
+        // имени/названию; при сохранении для него автоматически заведётся запись в списке гостей
+        const soloLabel = ev.guestName ? ev.guestName : 'Гость мероприятия';
+        refundGuestSelect.innerHTML = `<option value="__solo__" selected>${escapeHtml(soloLabel)}</option>`;
+        return;
+      }
+      if(guests.length === 1){
+        refundGuestSelect.innerHTML = `<option value="${guests[0].id}" selected>${escapeHtml(guests[0].name||'без имени')}</option>`;
+        return;
+      }
+      refundGuestSelect.innerHTML = '<option value="">— выберите гостя —</option>' +
+        guests.map(g=>`<option value="${g.id}" ${g.id===keepVal?'selected':''}>${escapeHtml(g.name||'без имени')}${g.refunded?' (уже возвращено)':''}</option>`).join('');
+    }
+    refreshRefundGuestOptions();
+
     if(refundEventSearchInput && refundEventHidden){
       refundEventSearchInput.addEventListener('input', ()=>{
         const val = refundEventSearchInput.value.trim();
-        if(val === ''){ refundEventHidden.value = ''; refundEventSearchInput.style.borderColor = ''; return; }
-        if(refundLabelToId[val]){ refundEventHidden.value = refundLabelToId[val]; refundEventSearchInput.style.borderColor = ''; }
+        if(val === ''){ refundEventHidden.value = ''; refundEventSearchInput.style.borderColor = ''; refreshRefundGuestOptions(); return; }
+        if(refundLabelToId[val]){ refundEventHidden.value = refundLabelToId[val]; refundEventSearchInput.style.borderColor = ''; refreshRefundGuestOptions(); }
       });
       refundEventSearchInput.addEventListener('blur', ()=>{
         const val = refundEventSearchInput.value.trim();
@@ -6999,16 +7105,63 @@
           refundEventSearchInput.value = '';
           refundEventHidden.value = '';
         }
+        refreshRefundGuestOptions();
       });
     }
 
+    // привязка возврата к сертификату — та же логика поиска, что и для мероприятия выше; при редактировании
+    // уже привязанного возврата список для поиска дополняем самим этим сертификатом, даже если он уже
+    // отмечен возвращённым (иначе поле не находило бы совпадение и сбрасывалось при потере фокуса)
+    const currentlyLinkedCert = overlay.querySelector('#r-cert') && overlay.querySelector('#r-cert').value
+      ? state.certificates.find(c=>c.id===overlay.querySelector('#r-cert').value) : null;
+    const refundCertOptions = certSelectOptions();
+    if(currentlyLinkedCert && !refundCertOptions.some(o=>o.id===currentlyLinkedCert.id)){
+      refundCertOptions.push({ id: currentlyLinkedCert.id, label: certPickerLabel(currentlyLinkedCert) });
+    }
+    const refundCertLabelToId = {};
+    refundCertOptions.forEach(o=>{ refundCertLabelToId[o.label] = o.id; });
+    const refundCertSearchInput = overlay.querySelector('#r-cert-search');
+    const refundCertHidden = overlay.querySelector('#r-cert');
+    if(refundCertSearchInput && refundCertHidden){
+      refundCertSearchInput.addEventListener('input', ()=>{
+        const val = refundCertSearchInput.value.trim();
+        if(val === ''){ refundCertHidden.value = ''; refundCertSearchInput.style.borderColor = ''; return; }
+        if(refundCertLabelToId[val]){ refundCertHidden.value = refundCertLabelToId[val]; refundCertSearchInput.style.borderColor = ''; }
+      });
+      refundCertSearchInput.addEventListener('blur', ()=>{
+        const val = refundCertSearchInput.value.trim();
+        if(val !== '' && !refundCertLabelToId[val]){
+          refundCertSearchInput.value = '';
+          refundCertHidden.value = '';
+        }
+      });
+    }
+
+    const refundTypeHidden = overlay.querySelector('#r-type');
+    const refundEventBlock = overlay.querySelector('#refund-event-block');
+    const refundCertBlock = overlay.querySelector('#refund-cert-block');
+    const tochkaField = overlay.querySelector('#refund-tochka-field');
+    function updateTochkaFieldVisibility(){
+      if(!tochkaField) return;
+      const isCert = refundTypeHidden.value === 'cert';
+      tochkaField.style.display = (isCert || sourceSelect.value === 'Точка') ? 'block' : 'none';
+    }
     const sourceSelect = overlay.querySelector('#r-source');
     if(sourceSelect){
-      sourceSelect.onchange = ()=>{
-        const tochkaField = overlay.querySelector('#refund-tochka-field');
-        if(tochkaField) tochkaField.style.display = (sourceSelect.value === 'Точка') ? 'block' : 'none';
-      };
+      sourceSelect.onchange = updateTochkaFieldVisibility;
     }
+    overlay.querySelectorAll('[data-refundtype]').forEach(opt=>{
+      opt.onclick = ()=>{
+        overlay.querySelectorAll('[data-refundtype]').forEach(o=>o.classList.remove('active'));
+        opt.classList.add('active');
+        refundTypeHidden.value = opt.dataset.refundtype;
+        const isEvent = opt.dataset.refundtype === 'event';
+        if(refundEventBlock) refundEventBlock.style.display = isEvent ? 'block' : 'none';
+        if(refundCertBlock) refundCertBlock.style.display = isEvent ? 'none' : 'block';
+        updateTochkaFieldVisibility();
+      };
+    });
+    updateTochkaFieldVisibility();
 
     overlay.querySelectorAll('[data-refundstatus]').forEach(opt=>{
       opt.onclick = ()=>{
@@ -7027,10 +7180,17 @@
           return;
         }
       }
-      const hasLink = !!state.modal.refund.eventId;
-      showConfirmDeletePopup(`Удалить эту запись о возврате?${hasLink ? ' Выручка привязанного мероприятия также вернётся к прежней сумме.' : ' Действие необратимо.'}`, async ()=>{
+      const hasLink = !!state.modal.refund.eventId || !!state.modal.refund.certId;
+      showConfirmDeletePopup(`Удалить эту запись о возврате?${hasLink ? ' Мероприятие или сертификат, привязанные к нему, тоже вернутся к прежнему состоянию.' : ' Действие необратимо.'}`, async ()=>{
         const refundToDelete = state.modal.refund;
         state.refunds = state.refunds.filter(x=>x.id !== refundToDelete.id);
+        if(refundToDelete.certId){
+          const linkedCert = state.certificates.find(c=>c.id===refundToDelete.certId);
+          if(linkedCert && linkedCert.refundRef === refundToDelete.id){
+            restoreCertStatusAfterRefundUndo(linkedCert);
+            await saveCertificates();
+          }
+        }
         if(refundToDelete.eventId){
           const ev = state.events.find(e=>e.id===refundToDelete.eventId);
           if(ev && Array.isArray(ev.payments)){
@@ -7043,6 +7203,11 @@
                 // (чтобы прогнозная выручка в "Чистой прибыли" тоже учитывала возврат) — восстанавливаем и её
                 if(ev.agreedPrice!==undefined && ev.agreedPrice!==null && !isNaN(ev.agreedPrice)){
                   ev.agreedPrice = Number(ev.agreedPrice) + restoreAmt;
+                }
+                // если возврат был привязан к конкретному гостю — снимаем с него пометку "возврат"
+                if(p.guestId && Array.isArray(ev.guestList)){
+                  const g = ev.guestList.find(x=>x.id===p.guestId);
+                  if(g && g.refundRef === refundToDelete.id){ g.refunded = false; delete g.refundRef; }
                 }
                 return false;
               }
@@ -7081,7 +7246,10 @@
       const paymentDateVal = overlay.querySelector('#r-payment-date').value;
       const reasonVal = overlay.querySelector('#r-reason').value.trim();
       const statusVal = overlay.querySelector('#r-status').value || 'in_progress';
-      const source = overlay.querySelector('#r-source').value;
+      const typeVal = overlay.querySelector('#r-type').value === 'cert' ? 'cert' : 'event';
+      // возврат по сертификату всегда идёт через "Точку" — выбор источника для него не показывается,
+      // а реквизиты обязательны в любом случае
+      const source = typeVal === 'cert' ? 'Точка' : overlay.querySelector('#r-source').value;
       const fullNameVal = overlay.querySelector('#r-fullname').value.trim();
       const accountVal = overlay.querySelector('#r-account').value.trim();
       const bankVal = overlay.querySelector('#r-bank').value.trim();
@@ -7104,12 +7272,39 @@
         if(!bikVal){ tochkaMissing = true; markInvalid('r-bik'); }
       }
 
-      // возврат не может быть больше, чем реально получено на привязанном мероприятии
-      const linkedEventIdForCheck = overlay.querySelector('#r-event').value || '';
+      // при типе "мероприятие" обязательны и само мероприятие, и конкретный человек
+      const linkedEventIdForCheck = typeVal === 'event' ? (overlay.querySelector('#r-event').value || '') : '';
+      let eventMissing = false, guestMissing = false;
+      let linkedGuestIdForCheck = '';
+      if(typeVal === 'event'){
+        if(!linkedEventIdForCheck){ eventMissing = true; markInvalid('r-event-search'); }
+        linkedGuestIdForCheck = refundGuestSelect.value || '';
+        if(linkedEventIdForCheck && !linkedGuestIdForCheck){ guestMissing = true; markInvalid('r-guest'); }
+      }
+      // при типе "сертификат" обязателен сам сертификат
+      const linkedCertIdForCheck = typeVal === 'cert' ? (overlay.querySelector('#r-cert').value || '') : '';
+      let certMissing = false;
+      if(typeVal === 'cert' && !linkedCertIdForCheck){ certMissing = true; markInvalid('r-cert-search'); }
+
+      let linkedEv = linkedEventIdForCheck ? state.events.find(e=>e.id===linkedEventIdForCheck) : null;
+      const evGuests = (linkedEv && Array.isArray(linkedEv.guestList)) ? linkedEv.guestList : [];
+      const isMultiGuest = evGuests.length > 1;
+
+      // возврат не может быть больше, чем реально получено на привязанном мероприятии (а если гостей
+      // несколько — не больше, чем реально получено именно от выбранного гостя)
       let refundExceedsReceived = false;
-      if(linkedEventIdForCheck && amountRaw !== ''){
-        const linkedEv = state.events.find(e=>e.id===linkedEventIdForCheck);
-        if(linkedEv){
+      if(linkedEv && amountRaw !== ''){
+        if(isMultiGuest && linkedGuestIdForCheck){
+          const guestPaid = (Array.isArray(linkedEv.payments)?linkedEv.payments:[]).filter(p=>p.guestId===linkedGuestIdForCheck).reduce((s,p)=> s + (Number(p.amount)||0), 0);
+          const alreadyRefundedForGuest = state.refunds
+            .filter(r=> r.eventId===linkedEventIdForCheck && r.guestId===linkedGuestIdForCheck && r.id!==state.modal.refund.id && r.status==='refunded')
+            .reduce((s,r)=> s + (Number(r.amount)||0), 0);
+          const guestReceivedAvailable = guestPaid + alreadyRefundedForGuest;
+          if(Number(amountRaw) > guestReceivedAvailable){
+            refundExceedsReceived = true;
+            markInvalid('r-amount');
+          }
+        } else {
           const alreadyRefundedElsewhere = state.refunds
             .filter(r=> r.eventId===linkedEventIdForCheck && r.id!==state.modal.refund.id && r.status==='refunded')
             .reduce((s,r)=> s + (Number(r.amount)||0), 0);
@@ -7121,12 +7316,43 @@
         }
       }
 
-      if(!requestDateVal || amountRaw==='' || Number(amountRaw)<0 || !paymentDateVal || !reasonVal || tochkaMissing || refundExceedsReceived){
-        showGapWarningBanner(refundExceedsReceived
-          ? `Сумма возврата больше, чем реально получено на этом мероприятии (доступно к возврату: ${(state.events.find(e=>e.id===linkedEventIdForCheck)?.price||0) + state.refunds.filter(r=> r.eventId===linkedEventIdForCheck && r.id!==state.modal.refund.id && r.status==='refunded').reduce((s,r)=> s + (Number(r.amount)||0), 0)} ₽).`
+      // возврат не может быть больше остатка привязанного сертификата (если гость уже что-то списал с него —
+      // вернуть можно только неиспользованную часть)
+      let refundExceedsCertRemaining = false;
+      if(linkedCertIdForCheck && amountRaw !== ''){
+        const linkedCert = state.certificates.find(c=>c.id===linkedCertIdForCheck);
+        if(linkedCert){
+          const certRemainingAvailable = certRemaining(linkedCert) + (linkedCert.refundRef===state.modal.refund.id ? Number(state.modal.refund.amount)||0 : 0);
+          if(Number(amountRaw) > certRemainingAvailable){
+            refundExceedsCertRemaining = true;
+            markInvalid('r-amount');
+          }
+        }
+      }
+
+      if(!requestDateVal || amountRaw==='' || Number(amountRaw)<0 || !paymentDateVal || !reasonVal || tochkaMissing || refundExceedsReceived || refundExceedsCertRemaining || eventMissing || guestMissing || certMissing){
+        showGapWarningBanner(eventMissing
+          ? 'Выберите мероприятие, за которое оформляется возврат.'
+          : guestMissing
+          ? 'Выберите, кому из гостей возвращаем.'
+          : certMissing
+          ? 'Выберите сертификат, за который оформляется возврат.'
+          : refundExceedsReceived
+          ? `Сумма возврата больше, чем реально получено (доступно к возврату: ${(isMultiGuest && linkedGuestIdForCheck ? ((linkedEv&&Array.isArray(linkedEv.payments)?linkedEv.payments:[]).filter(p=>p.guestId===linkedGuestIdForCheck).reduce((s,p)=>s+(Number(p.amount)||0),0)) : (linkedEv?.price||0)) + state.refunds.filter(r=> r.eventId===linkedEventIdForCheck && (isMultiGuest?r.guestId===linkedGuestIdForCheck:true) && r.id!==state.modal.refund.id && r.status==='refunded').reduce((s,r)=> s + (Number(r.amount)||0), 0)} ₽).`
+          : refundExceedsCertRemaining
+          ? `Сумма возврата больше остатка на сертификате.`
           : 'Заполните все поля перед сохранением возврата. Сумма не может быть отрицательной.');
         if(firstInvalid && firstInvalid.scrollIntoView) firstInvalid.scrollIntoView({block:'center', behavior:'smooth'});
         return;
+      }
+
+      // если у мероприятия ещё не было отдельного списка гостей (старая запись) — заводим его прямо
+      // сейчас на основе общего имени, чтобы у возврата был реальный человек, на которого можно сослаться
+      if(linkedEv && linkedGuestIdForCheck === '__solo__'){
+        if(!Array.isArray(linkedEv.guestList)) linkedEv.guestList = [];
+        const soloGuest = { id: uid(), name: (linkedEv.guestName||'Гость мероприятия').trim() || 'Гость мероприятия', seats: linkedEv.guests||1, items: 1, phone: '', comment: '', expected: null };
+        linkedEv.guestList.push(soloGuest);
+        linkedGuestIdForCheck = soloGuest.id;
       }
 
       const previousRefund = state.modal.refund;
@@ -7138,7 +7364,10 @@
         reason: reasonVal,
         status: statusVal,
         source: source,
-        eventId: overlay.querySelector('#r-event').value || '',
+        linkType: typeVal,
+        eventId: linkedEventIdForCheck,
+        guestId: typeVal === 'event' ? linkedGuestIdForCheck : '',
+        certId: linkedCertIdForCheck,
         fullName: source==='Точка' ? fullNameVal : '',
         accountNumber: source==='Точка' ? accountVal : '',
         bank: source==='Точка' ? bankVal : '',
@@ -7159,21 +7388,66 @@
             const restoreAmt = Math.abs(p.amount||0);
             ev.price = (ev.price||0) + restoreAmt;
             if(ev.agreedPrice!==undefined && ev.agreedPrice!==null && !isNaN(ev.agreedPrice)) ev.agreedPrice = Number(ev.agreedPrice) + restoreAmt;
+            // если этот платёж-возврат был привязан к конкретному гостю — снимаем с гостя пометку "возврат"
+            if(p.guestId && Array.isArray(ev.guestList)){
+              const g = ev.guestList.find(x=>x.id===p.guestId);
+              if(g && g.refundRef === updated.id){ g.refunded = false; delete g.refundRef; }
+            }
             return false;
           }
           return true;
         });
         if(eventId === updated.eventId && updated.status === 'refunded'){
-          ev.payments.push({ amount: -updated.amount, source:'Возврат', type:'refund', ts: Date.now(), refundRef: updated.id });
+          ev.payments.push({ amount: -updated.amount, source:'Возврат', type:'refund', ts: Date.now(), refundRef: updated.id, guestId: updated.guestId || undefined });
           ev.price = Math.max(0, (ev.price||0) - updated.amount);
           // "Согласованная цена" тоже уменьшается — иначе "Чистая прибыль" считает прогнозную выручку
           // как max(цена, согласованная цена) и при указанной согласованной цене продолжит игнорировать возврат
           if(ev.agreedPrice!==undefined && ev.agreedPrice!==null && !isNaN(ev.agreedPrice)){
             ev.agreedPrice = Math.max(0, Number(ev.agreedPrice) - updated.amount);
           }
+          // если возврат оформлен на конкретного гостя — помечаем именно его запись как "возврат",
+          // остальных гостей в мероприятии это не трогает
+          let allGuestsNowRefunded = true;
+          if(updated.guestId && Array.isArray(ev.guestList)){
+            const g = ev.guestList.find(x=>x.id===updated.guestId);
+            if(g){ g.refunded = true; g.refundRef = updated.id; }
+            allGuestsNowRefunded = ev.guestList.every(x=>x.refunded === true);
+          }
+          // если этим возвратом гостю (или гостям — при возврате по мероприятию в целом) вернули всё, что
+          // успели внести (предоплату целиком) — считаем мероприятие несостоявшимся и помечаем "Отменено".
+          // Но если гостей несколько и возврат оформлен только одному из них — отменяем всё мероприятие,
+          // только когда ТАК возвращены уже все гости (иначе остальные ещё могут прийти/доплатить).
+          // "Согласованную цену" намеренно НЕ обнуляем — она уже уменьшена симметрично выше и должна
+          // остаться восстанавливаемой (если возврат потом удалят/отменят); то, что отменённое мероприятие
+          // не должно считаться в прогнозной выручке и не должно больше показывать "Ждём ещё", обеспечивается
+          // отдельно, по статусу — см. eventRevenueForecast, eventRemainderTotal и updateAwaitingHint
+          if(ev.price <= 0 && allGuestsNowRefunded){
+            ev.status = 'cancelled';
+          }
         }
         if(ev.payments.length !== before || (eventId === updated.eventId && updated.status === 'refunded')) anyRefundEventChanged = true;
       });
+
+      // синхронизация с привязанным сертификатом — возвращённый сертификат больше нельзя списывать
+      // (см. certRemaining); отвязка/смена привязки или снятие статуса "Возвращено" возвращают ему
+      // тот статус, который был бы у него без этого возврата
+      const prevRefundCertId = previousRefund.certId || '';
+      const affectedRefundCertIds = new Set([prevRefundCertId, updated.certId].filter(Boolean));
+      let anyCertChanged = false;
+      affectedRefundCertIds.forEach(certId=>{
+        const cert = state.certificates.find(c=>c.id===certId);
+        if(!cert) return;
+        if(cert.refundRef === updated.id && !(certId === updated.certId && updated.status === 'refunded')){
+          restoreCertStatusAfterRefundUndo(cert);
+          anyCertChanged = true;
+        }
+        if(certId === updated.certId && updated.status === 'refunded' && cert.refundRef !== updated.id){
+          markCertRefunded(cert, updated.id);
+          anyCertChanged = true;
+        }
+      });
+      if(anyCertChanged) await saveCertificates();
+
       if(anyRefundEventChanged) await saveEvents();
       // возврат меняет цену/журнал платежей мероприятия — подтягиваем "Книгу" (и грубую авто-запись, если журнала нет),
       // иначе "Книга" останется на сумме до возврата и сверка "Календарь vs Книга" покажет ложное расхождение
@@ -8074,8 +8348,11 @@
     return (Array.isArray(e.payments) ? e.payments : []).filter(p=>p.certRedemptionRef).reduce((s,p)=> s + (Number(p.amount)||0), 0);
   }
   // прогнозная выручка мероприятия — полная ожидаемая сумма (включает уже внесённую предоплату), используется в аналитике как "факт";
-  // сертификатная часть вычитается, чтобы не задваивать её с выручкой от продажи сертификата (см. "Сводка по годам")
+  // сертификатная часть вычитается, чтобы не задваивать её с выручкой от продажи сертификата (см. "Сводка по годам").
+  // отменённое мероприятие (см. статус "cancelled") в выручку не считается вовсе, даже если в полях
+  // "Выручка"/"Согласованная сумма" остались ненулевые значения (например, возврат вернули не полностью)
   function eventRevenueForecast(e){
+    if(e.status === 'cancelled') return 0;
     const price = (e.price!==undefined && e.price!==null && !isNaN(e.price)) ? Number(e.price) : 0;
     const agreed = (e.agreedPrice!==undefined && e.agreedPrice!==null && !isNaN(e.agreedPrice)) ? Number(e.agreedPrice) : 0;
     return Math.max(0, Math.max(price, agreed) - eventCertRedeemedTotal(e));
@@ -8093,8 +8370,10 @@
     const price = (e.price!==undefined && e.price!==null && !isNaN(e.price)) ? Number(e.price) : 0;
     return price + eventCertRedeemedTotal(e);
   }
-  // остаток к оплате по мероприятию в целом — прогнозная сумма минус то, что уже реально получено
+  // остаток к оплате по мероприятию в целом — прогнозная сумма минус то, что уже реально получено.
+  // у отменённого мероприятия остатка никогда нет — деньги с него уже никто не ждёт
   function eventRemainderTotal(e){
+    if(e.status === 'cancelled') return 0;
     return Math.max(0, eventTotalExpected(e) - eventReceivedTotal(e));
   }
   // сколько уже оплатил конкретный гость (наличные/Точка/YCLIENTS + списания сертификатом на его имя)
@@ -8251,7 +8530,7 @@
         const mEventsRevenue = mEvts.reduce((s,e)=> s + eventRevenueForecast(e), 0);
         const mProfit = mEvts.reduce((s,e)=> s + eventProfitForecast(e), 0);
         const mItemSalesRevenue = state.itemSales.filter(x=>x.date && x.date.startsWith(ym)).reduce((s,x)=> s + ((x.revenue!==undefined&&x.revenue!==null&&!isNaN(x.revenue))?Number(x.revenue):0), 0);
-        const mCertSalesRevenue = state.certificates.filter(c=>c.purpose==='sale' && c.saleDate && c.saleDate.startsWith(ym)).reduce((s,c)=> s + ((c.amount!==undefined&&c.amount!==null&&!isNaN(c.amount))?Number(c.amount):0), 0);
+        const mCertSalesRevenue = state.certificates.filter(c=>c.purpose==='sale' && c.status!=='refunded' && c.saleDate && c.saleDate.startsWith(ym)).reduce((s,c)=> s + ((c.amount!==undefined&&c.amount!==null&&!isNaN(c.amount))?Number(c.amount):0), 0);
         const mOrdersRevenue = state.orders.filter(x=>x.date && x.date.startsWith(ym)).reduce((s,x)=> s + ((x.revenue!==undefined&&x.revenue!==null&&!isNaN(x.revenue))?Number(x.revenue):0), 0);
         const mFullRevenue = mEventsRevenue + mItemSalesRevenue + mCertSalesRevenue + mOrdersRevenue;
         const mLeads = state.leads.filter(l=> l.requestDate && l.requestDate.startsWith(ym));
@@ -8397,7 +8676,7 @@
     // единая сводка по всей выручке бизнеса за месяц (мероприятия + сертификаты + "Книга")
     const monthYm = cursor.getFullYear()+'-'+pad(cursor.getMonth()+1);
     const certMonthSales = state.certificates
-      .filter(c=> c.saleDate && c.saleDate.startsWith(monthYm) && c.purpose !== 'marketing')
+      .filter(c=> c.saleDate && c.saleDate.startsWith(monthYm) && c.purpose !== 'marketing' && c.status !== 'refunded')
       .reduce((s,c)=> s + ((c.amount!==undefined&&c.amount!==null&&!isNaN(c.amount))?Number(c.amount):0), 0);
     const incomesMonthTotal = state.incomes
       .filter(i=> i.date && i.date.startsWith(monthYm))
@@ -8409,8 +8688,10 @@
       return d && d.startsWith(monthYm) && r.status === 'refunded';
     });
     const refundsLinkedAmount = monthRefunds.filter(r=>r.eventId).reduce((s,r)=> s + ((r.amount!==undefined&&r.amount!==null&&!isNaN(r.amount))?Number(r.amount):0), 0);
-    const refundsUnlinkedAmount = monthRefunds.filter(r=>!r.eventId).reduce((s,r)=> s + ((r.amount!==undefined&&r.amount!==null&&!isNaN(r.amount))?Number(r.amount):0), 0);
-    const refundsTotalAmount = refundsLinkedAmount + refundsUnlinkedAmount;
+    // возврат сертификата тоже уже учтён — сумма продажи сертификата исключена из certMonthSales выше
+    const refundsCertLinkedAmount = monthRefunds.filter(r=>!r.eventId && r.certId).reduce((s,r)=> s + ((r.amount!==undefined&&r.amount!==null&&!isNaN(r.amount))?Number(r.amount):0), 0);
+    const refundsUnlinkedAmount = monthRefunds.filter(r=>!r.eventId && !r.certId).reduce((s,r)=> s + ((r.amount!==undefined&&r.amount!==null&&!isNaN(r.amount))?Number(r.amount):0), 0);
+    const refundsTotalAmount = refundsLinkedAmount + refundsCertLinkedAmount + refundsUnlinkedAmount;
 
     // ЧИСТАЯ ПРИБЫЛЬ (только для владельца) = Выручка − Расходы
     // Выручка = мероприятия + изделия + сертификаты + заказы
@@ -9823,7 +10104,7 @@
         <div class="stat-row"><div class="stat-label" style="color:var(--ink-soft);">Сертификаты — погашено в этом месяце</div><div style="flex:1;font-family:var(--font-mono);font-size:13px;color:var(--ink-soft);">${formatMoney(certUsedThisMonth)} <span style="font-size:11px;">— не входит в итог, деньги уже учтены при продаже</span></div></div>
         <div class="stat-row"><div class="stat-label" style="color:var(--status-red);">Непогашено по проданным сертификатам</div><div style="flex:1;font-family:var(--font-mono);font-size:13px;color:var(--status-red);">${formatMoney(certOutstandingSale)} <span style="font-size:11px;">— ${certOutstandingSaleCount} шт., это студия ещё должна отдать услугами</span></div></div>
         ${certOutstandingMarketingCount>0?`<div class="stat-row"><div class="stat-label" style="color:var(--ink-soft);">Непогашено по маркетинговым сертификатам</div><div style="flex:1;font-family:var(--font-mono);font-size:13px;color:var(--ink-soft);">${formatMoney(certOutstandingMarketing)} <span style="font-size:11px;">— ${certOutstandingMarketingCount} шт., деньги не платились, но услуга ещё не оказана</span></div></div>`:''}
-        <div class="stat-row"><div class="stat-label" style="color:${refundsUnlinkedAmount>0?'var(--status-red)':'var(--ink-soft)'};">Возвраты за месяц</div><div style="flex:1;font-family:var(--font-mono);font-size:13px;color:${refundsUnlinkedAmount>0?'var(--status-red)':'var(--ink-soft)'};">−${formatMoney(refundsTotalAmount)} <span style="font-size:11px;">${refundsLinkedAmount>0?'(из них '+formatMoney(refundsLinkedAmount)+' уже учтено в выручке мероприятий)':''}${refundsUnlinkedAmount>0?' ⚠ '+formatMoney(refundsUnlinkedAmount)+' — без привязки к мероприятию, нигде больше не вычтено':''}</span></div></div>
+        <div class="stat-row"><div class="stat-label" style="color:${refundsUnlinkedAmount>0?'var(--status-red)':'var(--ink-soft)'};">Возвраты за месяц</div><div style="flex:1;font-family:var(--font-mono);font-size:13px;color:${refundsUnlinkedAmount>0?'var(--status-red)':'var(--ink-soft)'};">−${formatMoney(refundsTotalAmount)} <span style="font-size:11px;">${refundsLinkedAmount>0?'(из них '+formatMoney(refundsLinkedAmount)+' уже учтено в выручке мероприятий)':''}${refundsCertLinkedAmount>0?' (из них '+formatMoney(refundsCertLinkedAmount)+' уже учтено в выручке сертификатов)':''}${refundsUnlinkedAmount>0?' ⚠ '+formatMoney(refundsUnlinkedAmount)+' — без привязки к мероприятию или сертификату, нигде больше не вычтено':''}</span></div></div>
       </div>
       ` : ''}
 
@@ -12411,7 +12692,7 @@
       .filter(x=> x.date && x.date.startsWith(ym))
       .reduce((s,x)=> s + ((x.revenue!==undefined&&x.revenue!==null&&!isNaN(x.revenue))?Number(x.revenue):0), 0);
     const npCertSalesRevenue = state.certificates
-      .filter(c=> c.saleDate && c.saleDate.startsWith(ym) && c.purpose !== 'marketing')
+      .filter(c=> c.saleDate && c.saleDate.startsWith(ym) && c.purpose !== 'marketing' && c.status !== 'refunded')
       .reduce((s,c)=> s + ((c.amount!==undefined&&c.amount!==null&&!isNaN(c.amount))?Number(c.amount):0), 0);
     const npOrdersRevenue = state.orders
       .filter(x=> x.date && x.date.startsWith(ym))
@@ -13283,6 +13564,9 @@
               <div class="status-opt ${ev.status==='slot'?'active':''}" data-status="slot">
                 <span class="dot" style="background:var(--status-cyan)"></span>Слот
               </div>
+              <div class="status-opt ${ev.status==='cancelled'?'active':''}" data-status="cancelled">
+                <span class="dot" style="background:var(--ink-soft)"></span>Отменено
+              </div>
             </div>
             <input type="hidden" id="f-status" value="${ev.status||'confirmed'}">
           </div>
@@ -13987,6 +14271,9 @@
     function updateAwaitingHint(){
       const hint = overlay.querySelector('#awaiting-hint');
       if(!hint) return;
+      // отменённое мероприятие никогда не "ждёт ещё" денег — оно не состоится
+      const statusForHint = overlay.querySelector('#f-status') ? overlay.querySelector('#f-status').value : '';
+      if(statusForHint === 'cancelled'){ hint.textContent = ''; return; }
       const priceVal = parseInt(overlay.querySelector('#f-price').value) || 0;
       const agreedVal = parseInt(overlay.querySelector('#f-agreed-price').value) || 0;
       // сертификатные оплаты не входят в "Выручку" (#f-price), но для гостя они всё равно закрывают
@@ -14103,9 +14390,10 @@
         const gPayments = paymentsArr.filter(p=>p.guestId===g.id);
         const gTotal = gPayments.reduce((s,p)=> s + (Number(p.amount)||0), 0);
         const gExpected = (g.expected!==undefined && g.expected!==null && g.expected!=='' && !isNaN(g.expected)) ? Number(g.expected) : null;
-        const gRemainder = gExpected!==null ? Math.max(0, gExpected - gTotal) : null;
+        const gRemainder = g.refunded ? 0 : (gExpected!==null ? Math.max(0, gExpected - gTotal) : null);
         return `
-        <div class="guest-block" data-gid="${g.id}" style="border:1px solid var(--line-strong);border-radius:var(--radius);padding:8px 10px;margin-bottom:8px;">
+        <div class="guest-block" data-gid="${g.id}" style="border:1px solid ${g.refunded?'var(--status-red)':'var(--line-strong)'};border-radius:var(--radius);padding:8px 10px;margin-bottom:8px;">
+          ${g.refunded ? `<div style="font-size:11px;color:var(--status-red);font-family:var(--font-mono);margin-bottom:6px;">💳 Оформлен возврат этому гостю</div>` : ''}
           <div style="display:flex;gap:8px;align-items:center;">
             <input type="text" class="guest-name" data-gid="${g.id}" value="${escapeHtml(g.name||'')}" placeholder="Имя гостя" style="flex:1;min-width:0;border:1px solid ${g.name&&g.name.trim()?'var(--line-strong)':'var(--status-red)'};border-radius:var(--radius);padding:6px 8px;font-family:var(--font-body);font-size:12.5px;">
             <input type="number" class="guest-seats" data-gid="${g.id}" value="${g.seats||1}" min="1" step="1" title="Количество мест, за которые платит этот гость" style="width:52px;flex-shrink:0;border:1px solid var(--line-strong);border-radius:var(--radius);padding:6px 8px;font-family:var(--font-body);font-size:12.5px;">
@@ -14484,6 +14772,7 @@
       if(statusValue === 'offsite' && spaceSelect && state.spaces.find(s=>s.id==='s5')){
         spaceSelect.value = 's5'; // выездные мероприятия по умолчанию идут в пространство "Выезд"
       }
+      if(typeof updateAwaitingHint === 'function') updateAwaitingHint();
     }
 
     overlay.querySelectorAll('.status-opt').forEach(opt=>{
