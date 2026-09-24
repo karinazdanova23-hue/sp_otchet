@@ -5878,6 +5878,284 @@
     `;
   }
 
+  // -------------------- сверка выписки Точка Банка с "Книгой" --------------------
+  // Разбор CSV-выписки: определяем разделитель (запятая/точка с запятой/таб), поддерживаем значения
+  // в кавычках. Формат экспорта у разных банков отличается, поэтому колонки "дата"/"сумма"/"назначение"
+  // пользователь выбирает сам из уже распознанных заголовков — жёстко зашитых колонок Точка Банка нет.
+  function parseCsvText(text){
+    text = text.replace(/^﻿/, ''); // BOM
+    const lines = text.split(/\r\n|\n|\r/).filter(l=>l.trim()!=='');
+    if(!lines.length) return { headers: [], rows: [] };
+    const sample = lines[0];
+    const delim = (sample.split(';').length >= sample.split(',').length) ? ';' : ',';
+    function parseLine(line){
+      const out = [];
+      let cur = '', inQuotes = false;
+      for(let i=0;i<line.length;i++){
+        const ch = line[i];
+        if(inQuotes){
+          if(ch === '"'){
+            if(line[i+1] === '"'){ cur += '"'; i++; } else { inQuotes = false; }
+          } else { cur += ch; }
+        } else {
+          if(ch === '"'){ inQuotes = true; }
+          else if(ch === delim){ out.push(cur); cur = ''; }
+          else { cur += ch; }
+        }
+      }
+      out.push(cur);
+      return out.map(c=>c.trim());
+    }
+    const headers = parseLine(lines[0]);
+    const rows = lines.slice(1).map(parseLine).filter(r=> r.some(c=>c!==''));
+    return { headers, rows };
+  }
+  // распознаём дату в самых частых форматах банковских выписок: ДД.ММ.ГГГГ (с временем или без) и ГГГГ-ММ-ДД
+  function parseFlexibleDate(str){
+    if(!str) return '';
+    str = String(str).trim();
+    let m = str.match(/^(\d{2})\.(\d{2})\.(\d{4})/);
+    if(m) return `${m[3]}-${m[2]}-${m[1]}`;
+    m = str.match(/^(\d{4})-(\d{2})-(\d{2})/);
+    if(m) return `${m[1]}-${m[2]}-${m[3]}`;
+    return '';
+  }
+  // сумма в банковских выписках часто идёт с пробелами-разделителями тысяч и запятой как десятичным
+  // разделителем (например "12 500,00" или "12500.00") — приводим к обычному числу
+  function parseFlexibleAmount(str){
+    if(str===undefined || str===null) return NaN;
+    let s = String(str).replace(/[\s ]/g,'').replace(/[^\d,.\-]/g,'');
+    if(s==='') return NaN;
+    if(s.includes(',') && s.includes('.')) s = s.replace(/,/g,'');
+    else s = s.replace(',', '.');
+    const n = parseFloat(s);
+    return isNaN(n) ? NaN : n;
+  }
+  function guessColumnIndex(headers, keywords){
+    for(let i=0;i<headers.length;i++){
+      const h = (headers[i]||'').toLowerCase();
+      if(keywords.some(k=>h.includes(k))) return i;
+    }
+    return -1;
+  }
+  function renderTochkaReconcileModal(m){
+    if(!m.result){
+      const hasRows = Array.isArray(m.rows) && m.rows.length > 0;
+      return `
+        <div class="modal" style="max-width:640px;">
+          <div class="modal-head">
+            <h3>Сверка с Точка Банком</h3>
+            <button class="modal-close">×</button>
+          </div>
+          <div class="modal-body">
+            <div style="font-size:12.5px;color:var(--ink-soft);margin-bottom:14px;line-height:1.5;">
+              Загрузите выписку по счёту из Точка Банка в формате CSV (в личном кабинете банка — «Выгрузить» → CSV, кодировка UTF-8). Приложение сравнит поступления из выписки с тем, что уже записано в «Книге», и покажет расхождения — ничего не изменится и не запишется автоматически.
+            </div>
+            <div class="field">
+              <label>Файл выписки (.csv)</label>
+              <input type="file" id="tk-file" accept=".csv,text/csv">
+            </div>
+            ${hasRows ? `
+              <div style="font-size:12px;color:var(--ink-soft);margin:12px 0 6px;">Распознано строк: ${m.rows.length}. Укажите, какие колонки за что отвечают:</div>
+              <div class="row2">
+                <div class="field">
+                  <label>Колонка «Дата»</label>
+                  <select id="tk-col-date">
+                    ${m.headers.map((h,i)=>`<option value="${i}" ${m.colDate===i?'selected':''}>${escapeHtml(h||'(колонка '+(i+1)+')')}</option>`).join('')}
+                  </select>
+                </div>
+                <div class="field">
+                  <label>Колонка «Сумма»</label>
+                  <select id="tk-col-amount">
+                    ${m.headers.map((h,i)=>`<option value="${i}" ${m.colAmount===i?'selected':''}>${escapeHtml(h||'(колонка '+(i+1)+')')}</option>`).join('')}
+                  </select>
+                </div>
+              </div>
+              <div class="field">
+                <label>Колонка «Назначение платежа» <span style="font-weight:400;color:var(--ink-soft);">— необязательно, для наглядности</span></label>
+                <select id="tk-col-desc">
+                  <option value="-1" ${m.colDesc===-1?'selected':''}>— не указывать —</option>
+                  ${m.headers.map((h,i)=>`<option value="${i}" ${m.colDesc===i?'selected':''}>${escapeHtml(h||'(колонка '+(i+1)+')')}</option>`).join('')}
+                </select>
+              </div>
+              <div class="field">
+                <label style="display:flex;align-items:center;gap:8px;cursor:pointer;font-weight:400;">
+                  <input type="checkbox" id="tk-positive-only" ${m.positiveOnly?'checked':''} style="width:16px;height:16px;">Считать только положительные суммы (поступления) — если в выписке одной колонкой идут и приход, и расход
+                </label>
+              </div>
+              <div style="font-size:11.5px;color:var(--ink-soft);margin-top:4px;">Пример первой строки: ${m.rows[0] ? m.rows[0].map(escapeHtml).join(' · ') : ''}</div>
+            ` : ''}
+          </div>
+          <div class="modal-actions">
+            <div><span></span></div>
+            <div style="display:flex;gap:8px;">
+              <button class="btn btn-ghost" id="btn-cancel-tk">Отмена</button>
+              ${hasRows ? `<button class="btn btn-primary" id="btn-tk-reconcile" ${(m.colDate<0||m.colAmount<0)?'disabled':''}>Сверить</button>` : ''}
+            </div>
+          </div>
+        </div>
+      `;
+    }
+    const r = m.result;
+    return `
+      <div class="modal" style="max-width:680px;">
+        <div class="modal-head">
+          <h3>Результат сверки — ${escapeHtml(r.periodLabel)}</h3>
+          <button class="modal-close">×</button>
+        </div>
+        <div class="modal-body">
+          <div class="analytics-summary" style="margin-bottom:18px;">
+            <div class="summary-card"><div class="num" style="font-size:18px;color:var(--status-green);">${r.matched.length}</div><div class="label">Совпало · ${formatMoney(r.matchedSum)}</div></div>
+            <div class="summary-card" style="border-left:4px solid var(--status-red);"><div class="num" style="font-size:18px;color:var(--status-red);">${r.unmatchedBank.length}</div><div class="label">Есть в выписке, нет в «Книге» · ${formatMoney(r.unmatchedBankSum)}</div></div>
+            <div class="summary-card" style="border-left:4px solid var(--status-blue);"><div class="num" style="font-size:18px;color:var(--status-blue);">${r.unmatchedBook.length}</div><div class="label">Есть в «Книге» (счёт «Точка»), нет в выписке · ${formatMoney(r.unmatchedBookSum)}</div></div>
+          </div>
+
+          <h4 style="margin:0 0 8px;">Есть в выписке, но нет в «Книге» (${r.unmatchedBank.length})</h4>
+          ${r.unmatchedBank.length ? `
+            <div class="cert-list" style="margin-bottom:18px;">
+              ${r.unmatchedBank.map(row=>`
+                <div class="refund-row">
+                  <div class="cell">${row.date ? formatDateText(row.date) : '(дата не распознана)'}</div>
+                  <div class="amount">${formatMoney(row.amount)}</div>
+                  <div class="reason">${escapeHtml(row.desc||'')}</div>
+                </div>
+              `).join('')}
+            </div>
+          ` : `<div class="host-empty" style="margin-bottom:18px;">Все поступления из выписки уже отражены в «Книге».</div>`}
+
+          <h4 style="margin:0 0 8px;">Есть в «Книге» (счёт «Точка»), но нет в выписке (${r.unmatchedBook.length})</h4>
+          ${r.unmatchedBook.length ? `
+            <div class="cert-list">
+              ${r.unmatchedBook.map(i=>`
+                <div class="refund-row" data-iid="${i.id}">
+                  <div class="cell">${i.date ? formatDateText(i.date) : '—'}</div>
+                  <div class="amount">${formatMoney(i.amount)}</div>
+                  <div class="reason">${escapeHtml(i.comment||i.product||'')}</div>
+                </div>
+              `).join('')}
+            </div>
+          ` : `<div class="host-empty">Все записи «Книги» по счёту «Точка» за этот период нашли пару в выписке.</div>`}
+          <div style="font-size:11px;color:var(--ink-soft);margin-top:12px;">Сверка ничего не меняет в данных — это только отчёт. Записи «Книги» открываются кликом как обычно.</div>
+        </div>
+        <div class="modal-actions">
+          <div><span></span></div>
+          <div style="display:flex;gap:8px;">
+            <button class="btn btn-ghost" id="btn-tk-back">‹ Назад к загрузке</button>
+            <button class="btn btn-primary" id="btn-tk-close">Готово</button>
+          </div>
+        </div>
+      </div>
+    `;
+  }
+
+  function attachTochkaReconcileModalEvents(overlay){
+    const cancelBtn = overlay.querySelector('#btn-cancel-tk');
+    if(cancelBtn) cancelBtn.onclick = ()=>{ state.modal = null; overlay.remove(); };
+    const closeBtn2 = overlay.querySelector('#btn-tk-close');
+    if(closeBtn2) closeBtn2.onclick = ()=>{ state.modal = null; overlay.remove(); render(); };
+    const backBtn = overlay.querySelector('#btn-tk-back');
+    if(backBtn) backBtn.onclick = ()=>{ state.modal.result = null; render(); };
+
+    const fileInput = overlay.querySelector('#tk-file');
+    if(fileInput){
+      fileInput.addEventListener('change', ()=>{
+        const file = fileInput.files && fileInput.files[0];
+        if(!file) return;
+        const reader = new FileReader();
+        reader.onload = ()=>{
+          const { headers, rows } = parseCsvText(String(reader.result||''));
+          state.modal.headers = headers;
+          state.modal.rows = rows;
+          state.modal.colDate = guessColumnIndex(headers, ['дата','date']);
+          state.modal.colAmount = guessColumnIndex(headers, ['сумма','приход','зачисление','amount','credit']);
+          state.modal.colDesc = guessColumnIndex(headers, ['назначение','описание','комментарий','purpose','назнач']);
+          state.modal.result = null;
+          render();
+        };
+        reader.onerror = ()=>{ showGapWarningBanner('Не удалось прочитать файл. Убедитесь, что это CSV.'); };
+        reader.readAsText(file, 'utf-8');
+      });
+    }
+
+    const colDateSel = overlay.querySelector('#tk-col-date');
+    if(colDateSel) colDateSel.onchange = ()=>{ state.modal.colDate = parseInt(colDateSel.value); };
+    const colAmountSel = overlay.querySelector('#tk-col-amount');
+    if(colAmountSel) colAmountSel.onchange = ()=>{ state.modal.colAmount = parseInt(colAmountSel.value); };
+    const colDescSel = overlay.querySelector('#tk-col-desc');
+    if(colDescSel) colDescSel.onchange = ()=>{ state.modal.colDesc = parseInt(colDescSel.value); };
+    const posOnlyChk = overlay.querySelector('#tk-positive-only');
+    if(posOnlyChk) posOnlyChk.onchange = ()=>{ state.modal.positiveOnly = posOnlyChk.checked; };
+
+    const reconcileBtn = overlay.querySelector('#btn-tk-reconcile');
+    if(reconcileBtn) reconcileBtn.onclick = ()=>{
+      const m = state.modal;
+      // разбираем строки выписки в удобный вид, пропуская те, где не распознались дата или сумма
+      const bankRows = [];
+      m.rows.forEach(r=>{
+        const date = parseFlexibleDate(r[m.colDate]);
+        let amount = parseFlexibleAmount(r[m.colAmount]);
+        if(isNaN(amount)) return;
+        if(m.positiveOnly && amount <= 0) return;
+        if(!m.positiveOnly) amount = Math.abs(amount);
+        if(amount <= 0) return;
+        const desc = m.colDesc>=0 ? (r[m.colDesc]||'') : '';
+        bankRows.push({ date, amount: Math.round(amount), desc });
+      });
+      if(!bankRows.length){
+        showGapWarningBanner('Не нашлось ни одной строки с положительной суммой и распознанной датой — проверьте выбор колонок.');
+        return;
+      }
+      const dates = bankRows.map(r=>r.date).filter(Boolean).sort();
+      const minDate = dates[0], maxDate = dates[dates.length-1];
+      const periodLabel = (minDate && maxDate) ? `${formatDateText(minDate)} — ${formatDateText(maxDate)}` : 'выписка';
+
+      // книжные записи по счёту "Точка" в диапазоне дат выписки (с запасом в 3 дня на случай зачисления
+      // на следующий день) — их и пытаемся сопоставить
+      const bookCandidates = state.incomes.filter(i=> i.account === 'Точка' && i.date && (!minDate || i.date >= shiftDateStr(minDate,-3)) && (!maxDate || i.date <= shiftDateStr(maxDate,3)));
+      const usedBook = new Set();
+      const matched = [];
+      let matchedSum = 0;
+      const unmatchedBank = [];
+      bankRows.forEach(br=>{
+        const candidate = bookCandidates.find(i=> !usedBook.has(i.id) && Math.round(Number(i.amount)||0) === br.amount && i.date && br.date && Math.abs(dateDiffDays(i.date, br.date)) <= 3);
+        if(candidate){
+          usedBook.add(candidate.id);
+          matched.push({ bank: br, book: candidate });
+          matchedSum += br.amount;
+        } else {
+          unmatchedBank.push(br);
+        }
+      });
+      const unmatchedBook = bookCandidates.filter(i=>!usedBook.has(i.id));
+
+      state.modal.result = {
+        periodLabel,
+        matched, matchedSum,
+        unmatchedBank, unmatchedBankSum: unmatchedBank.reduce((s,r)=>s+r.amount,0),
+        unmatchedBook, unmatchedBookSum: unmatchedBook.reduce((s,i)=> s+((Number(i.amount)||0)),0),
+      };
+      render();
+    };
+
+    overlay.querySelectorAll('.refund-row[data-iid]').forEach(row=>{
+      row.onclick = ()=>{
+        const i = state.incomes.find(x=>x.id===row.dataset.iid);
+        if(!i) return;
+        state.modal = { type:'income', isNew:false, income: {...i} };
+        render();
+      };
+    });
+  }
+  function shiftDateStr(dateStr, days){
+    const d = new Date(dateStr+'T00:00:00');
+    d.setDate(d.getDate()+days);
+    return fmtDate(d);
+  }
+  function dateDiffDays(a, b){
+    const da = new Date(a+'T00:00:00'), db = new Date(b+'T00:00:00');
+    return Math.round((da - db) / 86400000);
+  }
+
   function renderIncomesView(period){
     const inPeriod = period ? period.inPeriod : (()=>true);
     const periodLabel = period ? period.periodLabel : '';
@@ -5886,7 +6164,10 @@
     return `
       <div class="cert-toolbar">
         <div style="font-size:12px;color:var(--ink-soft);font-family:var(--font-mono);">${escapeHtml(periodLabel)} · Записей: ${items.length} · Сумма: ${formatMoney(total)}</div>
-        <button class="btn btn-primary" id="btn-add-income">+ Добавить доход</button>
+        <div style="display:flex;gap:8px;">
+          <button class="btn btn-ghost" id="btn-tochka-reconcile">📥 Сверка с Точка</button>
+          <button class="btn btn-primary" id="btn-add-income">+ Добавить доход</button>
+        </div>
       </div>
       ${items.length === 0 ? `<div class="host-empty">Записей пока нет</div>` : `
         <div class="cert-list">
@@ -5987,6 +6268,13 @@
           id: uid(), date: todayStr(), operation: INCOME_OPERATIONS[0], product: INCOME_PRODUCTS[0],
           account: INCOME_ACCOUNTS[0], amount: null, comment: '', eventId: '', masterName: '', itemSaleId: '', orderId: '',
         }};
+        render();
+      });
+    };
+    const tochkaReconcileBtn = document.getElementById('btn-tochka-reconcile');
+    if(tochkaReconcileBtn) tochkaReconcileBtn.onclick = ()=>{
+      requireUnlock(()=>{
+        state.modal = { type:'tochka-reconcile', headers: [], rows: [], colDate: -1, colAmount: -1, colDesc: -1, positiveOnly: true, result: null };
         render();
       });
     };
@@ -7756,6 +8044,8 @@
       overlay.innerHTML = renderSupplierModal();
     } else if(state.modal.type === 'stock-receipt'){
       overlay.innerHTML = renderStockReceiptModal();
+    } else if(state.modal.type === 'tochka-reconcile'){
+      overlay.innerHTML = renderTochkaReconcileModal(state.modal);
     }
     document.body.appendChild(overlay);
 
@@ -7806,6 +8096,7 @@
     else if(state.modal.type === 'content-post'){ attachContentPostModalEvents(overlay); }
     else if(state.modal.type === 'supplier-entry'){ attachSupplierModalEvents(overlay); }
     else if(state.modal.type === 'stock-receipt'){ attachStockReceiptModalEvents(overlay); }
+    else if(state.modal.type === 'tochka-reconcile'){ attachTochkaReconcileModalEvents(overlay); }
   }
 
   function renderRoleLoginModal(){
