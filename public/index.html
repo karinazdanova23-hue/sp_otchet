@@ -733,6 +733,8 @@
   const PRODUCTS = ['День рождения','Свадьба','Свидание','Девичник','Корпоратив','Детский МК','Мастер-класс','Аренда'];
   // продукт "Аренда" — сдаём пространство без своего мастера, поэтому ведущего можно не выбирать
   const PRODUCTS_WITHOUT_HOST = ['Аренда'];
+  // условная "вместимость" месяца в мероприятиях, для % заполняемости (см. "📊 Заполняемость" и "Отчёт дня")
+  const MONTH_CAPACITY_EVENTS = 200;
 
   const DEFAULT_HOSTS_LIST = [
     'Ира Керамика','Василена','Оксана Хост','Даша Тафтинг','Олюсик','Ольга','Наташа',
@@ -5837,8 +5839,10 @@
     const inPeriod = period ? period.inPeriod : (()=>true);
     const mode = period ? period.mode : 'month';
     const periodLabel = period ? period.periodLabel : '';
+    const isOwnerBA = state.currentRole === 'owner';
     const incomesP = state.incomes.filter(i=>inPeriod(i.date));
-    const expensesP = state.expenses.filter(e=>inPeriod(e.date));
+    // «Аренда»/«Зарплата» — видно только руководителю, как и в списке расходов
+    const expensesP = state.expenses.filter(e=>inPeriod(e.date) && (isOwnerBA || (!e.ownerOnly && e.category!=='Аренда' && e.category!=='Зарплата')));
 
     const totalIncome = incomesP.reduce((s,i)=> s + ((i.amount!==undefined&&i.amount!==null&&!isNaN(i.amount))?Number(i.amount):0), 0);
     const totalExpense = expensesP.reduce((s,e)=> s + ((e.amount!==undefined&&e.amount!==null&&!isNaN(e.amount))?Number(e.amount):0), 0);
@@ -6292,7 +6296,8 @@
     const inPeriod = period ? period.inPeriod : (()=>true);
     const periodLabel = period ? period.periodLabel : '';
     const isOwner = state.currentRole === 'owner';
-    const expensesP = state.expenses.filter(e=>inPeriod(e.date) && (isOwner || !e.ownerOnly));
+    // «Аренда»/«Зарплата» — видно только руководителю (та же чувствительная инфа, что и в «Ручных расходах»)
+    const expensesP = state.expenses.filter(e=>inPeriod(e.date) && (isOwner || (!e.ownerOnly && e.category!=='Аренда' && e.category!=='Зарплата')));
     const items = [...expensesP].sort((a,b)=> (b.date||'').localeCompare(a.date||''));
     const total = items.reduce((s,e)=> s + ((e.amount!==undefined&&e.amount!==null&&!isNaN(e.amount))?Number(e.amount):0), 0);
 
@@ -8112,6 +8117,8 @@
       overlay.innerHTML = renderAnalyticsPanelModal(state.modal.panel);
     } else if(state.modal.type === 'plan-edit'){
       overlay.innerHTML = renderPlanEditModal();
+    } else if(state.modal.type === 'daily-report'){
+      overlay.innerHTML = renderDailyReportModal();
     } else if(state.modal.type === 'netprofit-edit'){
       overlay.innerHTML = renderNetProfitEditModal();
     } else if(state.modal.type === 'netprofit-calc'){
@@ -8181,6 +8188,7 @@
     else if(state.modal.type === 'master-tariff'){ attachMasterTariffModalEvents(overlay); }
     else if(state.modal.type === 'analytics-panel'){ attachAnalyticsPanelModalEvents(overlay); }
     else if(state.modal.type === 'plan-edit'){ attachPlanEditModalEvents(overlay); }
+    else if(state.modal.type === 'daily-report'){ attachDailyReportModalEvents(overlay); }
     else if(state.modal.type === 'netprofit-edit'){ attachNetProfitEditModalEvents(overlay); }
     else if(state.modal.type === 'netprofit-calc'){ attachNetProfitCalcModalEvents(overlay); }
     else if(state.modal.type === 'yearsummary-edit'){ attachYearSummaryEditModalEvents(overlay); }
@@ -8530,7 +8538,7 @@
     return {
       total: evts.length,
       totalRevenue, totalProfit, totalGuests,
-      occupancyPct: Math.round(occupied/200*100),
+      occupancyPct: Math.round(occupied/MONTH_CAPACITY_EVENTS*100),
       productRevenue,
     };
   }
@@ -8783,11 +8791,187 @@
     return eventRevenueForecast(e) - eventMaterialsCost(e) - eventTotalMasterPay(e);
   }
 
+  // ---------- «Отчёт дня» — тот самый текстовый отчёт, который раньше собирали вручную ----------
+  // категория продукта → подпись отчёта; «Выездные» определяется отдельно, по месту, а не по продукту —
+  // проверяется первым, поэтому выездной день рождения попадёт в «Выездные», а не в «Дни рождения»
+  const DAILY_REPORT_PRODUCT_CAT = {'День рождения':'Дни рождения','Корпоратив':'Корпоративы','Детский МК':'Детские','Свидание':'Свидания','Девичник':'Девичники'};
+  const DAILY_REPORT_LEAD_CATS = ['Дни рождения','Корпоративы','Детские','Свидания','Девичники','Выездные','Заказ','Другое'];
+  const DAILY_REPORT_PRIVATE_CATS = ['Дни рождения','Детские','Корпоративы','Девичники','Свидания','Другое','Выездные'];
+  function dailyReportLeadCategory(l){
+    if((l.location||'in_studio')==='offsite') return 'Выездные';
+    if(l.product && DAILY_REPORT_PRODUCT_CAT[l.product]) return DAILY_REPORT_PRODUCT_CAT[l.product];
+    return 'Другое';
+  }
+  function dailyReportEventCategory(e){
+    if(e.status==='offsite') return 'Выездные';
+    if(e.product && DAILY_REPORT_PRODUCT_CAT[e.product]) return DAILY_REPORT_PRODUCT_CAT[e.product];
+    return 'Другое';
+  }
+  // прибыль по записи «Заказы» (Книга → «Заказ» и «Изделие», это одна строка отчёта — прямые продажи вне
+  // мероприятий). «Заказ»: masterShare — сумма ЗП мастеру в рублях (не процент), см. attachIncomeModalEvents.
+  // «Изделие»: студии остаётся ITEM_SALE_STUDIO_PCT от суммы, остальное — доля мастера, изготовившего изделие.
+  function orderIncomeProfit(i){
+    const amount = (i.amount!==undefined && i.amount!==null && !isNaN(i.amount)) ? Number(i.amount) : 0;
+    if(i.product==='Изделие') return amount * ITEM_SALE_STUDIO_PCT/100;
+    const share = (i.masterShare!==undefined && i.masterShare!==null && !isNaN(i.masterShare)) ? Number(i.masterShare) : 0;
+    return Math.max(0, amount - share);
+  }
+  function computeDailyReport(dateStr){
+    const ym = dateStr.slice(0,7);
+    const plan = (state.monthlyPlans && state.monthlyPlans[ym]) || {};
+
+    // ЗАЯВКИ — «шт» за сам день, «%» — нарастающим итогом с начала месяца по этот день включительно, к плану на месяц
+    const leadsToday = state.leads.filter(l=>l.requestDate===dateStr);
+    const leadsMonthToDate = state.leads.filter(l=>l.requestDate && l.requestDate.startsWith(ym) && l.requestDate<=dateStr);
+    const leadsByCatToday = {};
+    DAILY_REPORT_LEAD_CATS.forEach(c=>{ leadsByCatToday[c]=0; });
+    leadsToday.forEach(l=>{ const cat=dailyReportLeadCategory(l); leadsByCatToday[cat]=(leadsByCatToday[cat]||0)+1; });
+    const leadsTodayCount = leadsToday.length;
+    const leadsPlanPct = (plan.leadsCount!==undefined && plan.leadsCount!==null && plan.leadsCount>0) ? Math.round(leadsMonthToDate.length/plan.leadsCount*100) : null;
+
+    // ВЫРУЧКА — четыре потока: Частные (все продукты, кроме «Мастер-класс»), Расписание («Мастер-класс»),
+    // Заказы (Книга → «Заказ»), Сертификаты (продажи сертификатов)
+    const eventsToday = state.events.filter(e=>e.date===dateStr);
+    const eventsMonthToDate = state.events.filter(e=>e.date && e.date.startsWith(ym) && e.date<=dateStr);
+    const isSchedule = e => e.product==='Мастер-класс';
+
+    const privateEventsToday = eventsToday.filter(e=>!isSchedule(e));
+    const scheduleEventsToday = eventsToday.filter(isSchedule);
+    const privateRevenueToday = privateEventsToday.reduce((s,e)=>s+eventRevenueForecast(e),0);
+    const scheduleRevenueToday = scheduleEventsToday.reduce((s,e)=>s+eventRevenueForecast(e),0);
+    const privateRevenueMTD = eventsMonthToDate.filter(e=>!isSchedule(e)).reduce((s,e)=>s+eventRevenueForecast(e),0);
+    const scheduleRevenueMTD = eventsMonthToDate.filter(isSchedule).reduce((s,e)=>s+eventRevenueForecast(e),0);
+
+    const isOrderLike = i => i.product==='Заказ' || i.product==='Изделие';
+    const ordersToday = state.incomes.filter(i=>i.date===dateStr && isOrderLike(i));
+    const ordersMTD = state.incomes.filter(i=>i.date && i.date.startsWith(ym) && i.date<=dateStr && isOrderLike(i));
+    const ordersRevenueToday = ordersToday.reduce((s,i)=>s+((i.amount!==undefined&&i.amount!==null&&!isNaN(i.amount))?Number(i.amount):0),0);
+    const ordersRevenueMTD = ordersMTD.reduce((s,i)=>s+((i.amount!==undefined&&i.amount!==null&&!isNaN(i.amount))?Number(i.amount):0),0);
+
+    const certsToday = state.certificates.filter(c=>c.saleDate===dateStr && c.purpose!=='marketing' && c.status!=='refunded');
+    const certsMTD = state.certificates.filter(c=>c.saleDate && c.saleDate.startsWith(ym) && c.saleDate<=dateStr && c.purpose!=='marketing' && c.status!=='refunded');
+    const certsRevenueToday = certsToday.reduce((s,c)=>s+((c.amount!==undefined&&c.amount!==null&&!isNaN(c.amount))?Number(c.amount):0),0);
+    const certsRevenueMTD = certsMTD.reduce((s,c)=>s+((c.amount!==undefined&&c.amount!==null&&!isNaN(c.amount))?Number(c.amount):0),0);
+
+    const revenueToday = privateRevenueToday + scheduleRevenueToday + ordersRevenueToday + certsRevenueToday;
+    const revenueMTD = privateRevenueMTD + scheduleRevenueMTD + ordersRevenueMTD + certsRevenueMTD;
+    const revenuePlanPct = (plan.revenue!==undefined && plan.revenue!==null && plan.revenue>0) ? Math.round(revenueMTD/plan.revenue*100) : null;
+
+    const privateByCatToday = {};
+    DAILY_REPORT_PRIVATE_CATS.forEach(c=>{ privateByCatToday[c]=0; });
+    privateEventsToday.forEach(e=>{ const cat=dailyReportEventCategory(e); privateByCatToday[cat]=(privateByCatToday[cat]||0)+eventRevenueForecast(e); });
+
+    // ПРИБЫЛЬ — по мероприятиям (выручка минус материалы и ЗП мастерам), плюс заказы (за вычетом доли мастера),
+    // плюс сертификаты целиком (у них нет своей себестоимости — общие расходы студии сюда не входят,
+    // это только «Выполнение плана», не «Чистая прибыль» за месяц)
+    const eventsProfitToday = eventsToday.reduce((s,e)=>s+eventProfitForecast(e),0);
+    const eventsProfitMTD = eventsMonthToDate.reduce((s,e)=>s+eventProfitForecast(e),0);
+    const ordersProfitToday = ordersToday.reduce((s,i)=>s+orderIncomeProfit(i),0);
+    const ordersProfitMTD = ordersMTD.reduce((s,i)=>s+orderIncomeProfit(i),0);
+    const profitToday = eventsProfitToday + certsRevenueToday + ordersProfitToday;
+    const profitMTD = eventsProfitMTD + certsRevenueMTD + ordersProfitMTD;
+    const profitPlanPct = (plan.profit!==undefined && plan.profit!==null && plan.profit>0) ? Math.round(profitMTD/plan.profit*100) : null;
+
+    // Конверсия — по дате заявки; «месяц» — весь месяц целиком (как во вкладке «Конверсия»), «день» — только этот день
+    const soldToday = leadsToday.filter(l=>l.sold).length;
+    const convDayPct = leadsTodayCount>0 ? Math.round(soldToday/leadsTodayCount*100) : null;
+    const leadsMonthAll = state.leads.filter(l=>l.requestDate && l.requestDate.startsWith(ym));
+    const soldMonthAll = leadsMonthAll.filter(l=>l.sold).length;
+    const convMonthPct = leadsMonthAll.length>0 ? Math.round(soldMonthAll/leadsMonthAll.length*100) : null;
+
+    const rentabilityPct = revenueMTD>0 ? Math.round(profitMTD/revenueMTD*100) : null;
+
+    // % ЗАПОЛНЯЕМОСТИ — как в панели «📊 Заполняемость»: весь месяц целиком (включая уже забронированные
+    // будущие даты), а не только до сегодня — это ответ на вопрос «насколько заполнен месяц», а не «как мы
+    // продвинулись». Выезды не считаются — у них нет ограничения по месту в студии.
+    const eventsWholeMonth = state.events.filter(e=>e.date && e.date.startsWith(ym));
+    const occupiedCount = eventsWholeMonth.filter(e=>e.status!=='offsite').length;
+    const occupancyPct = Math.round(occupiedCount/MONTH_CAPACITY_EVENTS*100);
+
+    // СРЕДНИЙ ЧЕК — выручка мероприятий (без сертификатов/заказов) на гостя, нарастающим итогом за месяц —
+    // как в «Сводке по годам». За один день цифра слишком случайная (1-2 мероприятия), поэтому не по дню.
+    const eventsRevenueMTD = privateRevenueMTD + scheduleRevenueMTD;
+    const guestsMTD = eventsMonthToDate.reduce((s,e)=> s + ((e.guests!==undefined&&e.guests!==null&&!isNaN(e.guests))?Number(e.guests):0), 0);
+    const avgCheck = guestsMTD>0 ? Math.round(eventsRevenueMTD/guestsMTD) : null;
+
+    // ЧИСТАЯ ПРИБЫЛЬ — только для владельца, та же формула, что в панели «🔒 Чистая прибыль».
+    // Это прогноз на ВЕСЬ месяц целиком, а не «на сегодня» — аренда и оклады не делятся по дням,
+    // поэтому день здесь ни на что не влияет, в отличие от остальных строк отчёта.
+    let netProfitMonth = null;
+    if(state.currentRole === 'owner'){
+      const snap = computeNetProfitSnapshot(ym);
+      const npManual = (state.netProfitManual && state.netProfitManual[ym]) || {};
+      const npRent = (npManual.rent!==undefined && npManual.rent!==null) ? Number(npManual.rent) : 0;
+      const npStaffTotal = (npManual.staff||[]).reduce((s,x)=> s + (Number(x.amount)||0), 0);
+      const npCustomTotal = (npManual.customExpenses||[]).reduce((s,x)=> s + (Number(x.amount)||0), 0);
+      const npTotalExpensesM = snap.npMaterialsCost + snap.npMarketingCost + snap.npOtherLedgerCost + snap.npMastersSalary + snap.npHostessSalary + snap.npManagerSalary + npRent + npStaffTotal + npCustomTotal;
+      netProfitMonth = snap.npTotalRevenue - npTotalExpensesM;
+    }
+
+    return {
+      dateStr, ym, plan,
+      leadsTodayCount, leadsByCatToday, leadsPlanPct,
+      revenueToday, revenuePlanPct,
+      privateRevenueToday, privateByCatToday, scheduleRevenueToday, ordersRevenueToday, certsRevenueToday,
+      profitToday, profitPlanPct,
+      convDayPct, convMonthPct, rentabilityPct,
+      occupancyPct, avgCheck,
+      netProfitMonth,
+    };
+  }
+  function pctStr(pct){ return pct===null ? '—' : pct+'%'; }
+  function shareStr(part, whole){ return whole>0 ? Math.round(part/whole*100)+'%' : '0%'; }
+  function rubStr(n){ return Math.round(n||0).toLocaleString('ru-RU'); }
+  function buildDailyReportText(dateStr){
+    const d = computeDailyReport(dateStr);
+    const dateLabel = formatDateText(dateStr);
+    const lines = [];
+    lines.push(`${dateLabel}🍁`);
+    lines.push('');
+    lines.push(`▫️ЗАЯВКИ ${d.leadsTodayCount} шт (${pctStr(d.leadsPlanPct)} от выполнения плана)`);
+    lines.push('');
+    DAILY_REPORT_LEAD_CATS.forEach(cat=>{
+      lines.push(`- ${cat} ${d.leadsByCatToday[cat]||0} шт (${shareStr(d.leadsByCatToday[cat]||0, d.leadsTodayCount)})`);
+    });
+    lines.push('');
+    lines.push('——');
+    lines.push('');
+    lines.push(`▫️ВЫРУЧКА: ${rubStr(d.revenueToday)} руб. (${pctStr(d.revenuePlanPct)} от плана)`);
+    lines.push('');
+    lines.push(`▫️ПРИБЫЛЬ: ${rubStr(d.profitToday)} руб. (${pctStr(d.profitPlanPct)})`);
+    if(d.netProfitMonth !== null){
+      lines.push('');
+      lines.push(`🔒 Чистая прибыль (весь ${MONTHS[parseDate(d.dateStr).getMonth()]}, прогноз): ${rubStr(d.netProfitMonth)} руб.`);
+    }
+    lines.push('');
+    lines.push(`▪️Частные: ${rubStr(d.privateRevenueToday)} руб. (${shareStr(d.privateRevenueToday, d.revenueToday)}):`);
+    lines.push('');
+    DAILY_REPORT_PRIVATE_CATS.forEach(cat=>{
+      lines.push(`- ${cat} ${rubStr(d.privateByCatToday[cat]||0)} руб. (${shareStr(d.privateByCatToday[cat]||0, d.privateRevenueToday)})`);
+    });
+    lines.push('');
+    lines.push(`▪️Расписание ${rubStr(d.scheduleRevenueToday)} руб. (${shareStr(d.scheduleRevenueToday, d.revenueToday)})`);
+    lines.push('');
+    lines.push(`▪️Заказы ${rubStr(d.ordersRevenueToday)} руб. (${shareStr(d.ordersRevenueToday, d.revenueToday)})`);
+    lines.push('');
+    lines.push(`▪️Сертификаты ${rubStr(d.certsRevenueToday)} руб. (${shareStr(d.certsRevenueToday, d.revenueToday)})`);
+    lines.push('');
+    lines.push('———');
+    lines.push(`Конверсия дня: ${pctStr(d.convDayPct)} (продажи/заявки)`);
+    lines.push(`Конверсия (месяц): ${pctStr(d.convMonthPct)} (продажи/заявки)`);
+    lines.push(`Рентабельность: ${pctStr(d.rentabilityPct)}`);
+    lines.push(`% заполняемости (месяц): ${d.occupancyPct}%`);
+    lines.push(`Средний чек (месяц): ${d.avgCheck===null ? '—' : rubStr(d.avgCheck)+' руб.'}`);
+    return lines.join('\n');
+  }
+
   function renderAnalytics(){
     const cursor = state.analyticsCursor;
     // "старший администратор" видит аналитику, но без денежных показателей — только операционные вещи
     // (заполняемость, планы по количеству, отчёты и т.п.); финансовые вкладки/суммы скрыты для этой роли
     const isAdminFinRestricted = state.currentRole === 'admin';
+    // «Отчёт дня» — сводка с выручкой/прибылью, доступна только ролям, которым вообще видны финансы
+    const canSeeDailyReport = !['master','marketer','admin'].includes(state.currentRole);
     const monthLabel = MONTHS[cursor.getMonth()] + ' ' + cursor.getFullYear();
     const evts = getMonthEvents(cursor);
     const total = evts.length;
@@ -8795,7 +8979,6 @@
     Object.keys(STATUS_LABEL).forEach(k=>statusCounts[k]=0);
     evts.forEach(e=>{ const s = e.status || 'confirmed'; statusCounts[s] = (statusCounts[s]||0)+1; });
     const totalGuests = evts.reduce((sum,e)=> sum + ((e.guests!==undefined && e.guests!==null && !isNaN(e.guests)) ? Number(e.guests) : 0), 0);
-    const MONTH_CAPACITY_EVENTS = 200;
     const occupiedCount = evts.filter(e=>e.status!=='offsite').length; // выезды не занимают пространство студии
     const occupancyPct = Math.round(occupiedCount/MONTH_CAPACITY_EVENTS*100);
 
@@ -9121,6 +9304,12 @@
     const npMarketingCost = state.expenses
       .filter(e=> e.date && e.date.startsWith(monthYm) && !e.eventId && e.category === 'Маркетинг')
       .reduce((s,e)=> s + ((e.amount!==undefined&&e.amount!==null&&!isNaN(e.amount))?Number(e.amount):0), 0);
+    // остальные категории из "Книги → Расходы" (Инвентарь, Декор, Логистика, Продукты и т.п., включая свои) —
+    // "Аренда"/"Зарплата" туда не входят: для них уже есть ручное поле "Аренда" и автосчёт ЗП ниже, те же
+    // суммы задвоились бы. Расходы, привязанные к конкретному мероприятию, тоже не берём — они уже в "Материалы" выше.
+    const npOtherLedgerCost = state.expenses
+      .filter(e=> e.date && e.date.startsWith(monthYm) && !e.eventId && !['Маркетинг','Аренда','Зарплата'].includes(e.category))
+      .reduce((s,e)=> s + ((e.amount!==undefined&&e.amount!==null&&!isNaN(e.amount))?Number(e.amount):0), 0);
     const npMastersBasePay = evts.reduce((s,e)=> s + eventTotalMasterPay(e), 0);
     const npMastersItemShare = state.itemSales
       .filter(x=> x.date && x.date.startsWith(monthYm))
@@ -9164,7 +9353,7 @@
     const npCustomList = npManual.customExpenses || [];
     const npCustomTotal = npCustomList.reduce((s,x)=> s + (Number(x.amount)||0), 0);
 
-    const npTotalExpenses = npMaterialsCost + npMarketingCost + npMastersSalary + npHostessSalary + npManagerSalary + npRent + npStaffTotal + npCustomTotal;
+    const npTotalExpenses = npMaterialsCost + npMarketingCost + npOtherLedgerCost + npMastersSalary + npHostessSalary + npManagerSalary + npRent + npStaffTotal + npCustomTotal;
     const netProfit = npTotalRevenue - npTotalExpenses;
     // разбивка для финмодели ("из чего состоит выручка/расходы") — доли считаются от выручки месяца
     const npRevenueRows = [
@@ -9176,6 +9365,7 @@
     const npExpenseRows = [
       {label:'Материалы', amount: npMaterialsCost},
       {label:'Маркетинг', amount: npMarketingCost},
+      {label:'Прочие расходы (Книга)', amount: npOtherLedgerCost},
       {label:'ЗП мастеров', amount: npMastersSalary},
       {label:'ЗП админов', amount: npHostessSalary},
       {label:'ЗП менеджеров (авто)', amount: npManagerSalary},
@@ -9562,6 +9752,7 @@
             <button class="btn btn-ghost analytics-panel-btn" data-panel="auditlog">📜 Журнал действий</button>
             <button class="btn btn-ghost analytics-panel-btn" data-panel="integrity" style="${(state.eventsIntegrityAlerts&&state.eventsIntegrityAlerts.length>0)?'border-color:var(--status-red);color:var(--status-red);':''}">🛡 Сохранность расписания</button>
             <button class="btn btn-ghost analytics-panel-btn" data-panel="marketing">📣 Маркетинг</button>
+            ${canSeeDailyReport ? `<button class="btn btn-ghost" id="btn-daily-report">📋 Отчёт дня</button>` : ''}
           </div>
         </div>
         ${(!isAdminFinRestricted && (certOutstandingSaleCount>0 || certOutstandingMarketingCount>0)) ? `
@@ -10546,6 +10737,7 @@
             <button class="btn btn-ghost analytics-panel-btn" data-panel="auditlog">📜 Журнал действий</button>
             <button class="btn btn-ghost analytics-panel-btn" data-panel="integrity" style="${(state.eventsIntegrityAlerts&&state.eventsIntegrityAlerts.length>0)?'border-color:var(--status-red);color:var(--status-red);':''}">🛡 Сохранность расписания</button>
             <button class="btn btn-ghost analytics-panel-btn" data-panel="marketing">📣 Маркетинг</button>
+            ${canSeeDailyReport ? `<button class="btn btn-ghost" id="btn-daily-report">📋 Отчёт дня</button>` : ''}
           <button class="btn btn-ghost owner-panel-btn" data-panel="netprofit" style="border-color:#6B4A1E;color:#6B4A1E;">🔒 Чистая прибыль</button>
             <button class="btn btn-ghost owner-panel-btn" data-panel="netprofit-calc" style="border-color:#6B4A1E;color:#6B4A1E;">🧮 Калькулятор плана</button>
             <button class="btn btn-ghost owner-panel-btn" data-panel="cashflow" style="border-color:#6B4A1E;color:#6B4A1E;">💵 Кэшфлоу</button>
@@ -10916,6 +11108,12 @@
     const editPlanBtn = document.getElementById('btn-edit-plan');
     if(editPlanBtn) editPlanBtn.onclick = ()=>{
       state.modal = {type:'plan-edit'};
+      render();
+    };
+    const dailyReportBtn = document.getElementById('btn-daily-report');
+    if(dailyReportBtn) dailyReportBtn.onclick = ()=>{
+      if(!state.dailyReportDate) state.dailyReportDate = todayStr();
+      state.modal = {type:'daily-report'};
       render();
     };
   }
@@ -13173,8 +13371,20 @@
     }
     const npManagerSalary = computeManagerSalaryForMonth(ym).total;
 
+    // расходы из «Книги → Расходы»: «Маркетинг» — отдельной строкой (как и раньше), «Аренда»/«Зарплата» —
+    // не берём совсем, для них уже есть свои места (ручное поле «Аренда» и автосчёт ЗП выше) — те же суммы
+    // задвоились бы. Остальные категории (Инвентарь, Декор, Логистика, Продукты и т.п., включая свои) —
+    // одной строкой «Прочие расходы». Расходы, привязанные к конкретному мероприятию (eventId), не берём —
+    // они уже учтены в себестоимости этого мероприятия (materialsItems) выше.
+    const npMarketingCost = state.expenses
+      .filter(e=> e.date && e.date.startsWith(ym) && !e.eventId && e.category === 'Маркетинг')
+      .reduce((s,e)=> s + ((e.amount!==undefined&&e.amount!==null&&!isNaN(e.amount))?Number(e.amount):0), 0);
+    const npOtherLedgerCost = state.expenses
+      .filter(e=> e.date && e.date.startsWith(ym) && !e.eventId && !['Маркетинг','Аренда','Зарплата'].includes(e.category))
+      .reduce((s,e)=> s + ((e.amount!==undefined&&e.amount!==null&&!isNaN(e.amount))?Number(e.amount):0), 0);
+
     return { npEventsRevenue, npItemSalesRevenue, npCertSalesRevenue, npOrdersRevenue, npTotalRevenue,
-      npMaterialsCost, npMastersSalary, npHostessSalary, npManagerSalary };
+      npMaterialsCost, npMastersSalary, npHostessSalary, npManagerSalary, npMarketingCost, npOtherLedgerCost };
   }
 
   function renderCalcAmountRows(list, cls){
@@ -13402,6 +13612,61 @@
     return state.events
       .filter(e=> e.date && e.date.startsWith(ym) && e.product === product)
       .reduce((s,e)=> s + eventRevenueForecast(e), 0);
+  }
+
+  function renderDailyReportModal(){
+    const dateStr = state.dailyReportDate || todayStr();
+    const text = buildDailyReportText(dateStr);
+    return `
+      <div class="modal" style="max-width:480px;">
+        <div class="modal-head">
+          <h3>📋 Отчёт дня</h3>
+          <button class="modal-close">×</button>
+        </div>
+        <div class="modal-body">
+          <div class="field">
+            <label>Дата</label>
+            <input type="date" id="dr-date" value="${dateStr}">
+          </div>
+          <div style="font-size:11.5px;color:var(--ink-soft);font-family:var(--font-mono);margin-top:-6px;">«Шт»/«руб.» — цифры за сам этот день. Проценты у ЗАЯВОК и у ВЫРУЧКИ/ПРИБЫЛИ — нарастающим итогом с начала месяца по эту дату, относительно месячного плана. Остальные проценты в скобках — доля от суммы строкой выше. «Чистая прибыль» (видна только руководителю), «% заполняемости» и «Средний чек» — тоже про весь месяц целиком, а не про этот день: заполняемость показывает, насколько заполнен месяц (включая уже забронированные будущие даты), а средний чек за один день слишком случаен, поэтому считается нарастающим итогом с начала месяца.</div>
+          <textarea id="dr-text" readonly style="width:100%;box-sizing:border-box;min-height:420px;font-family:var(--font-mono);font-size:13px;line-height:1.5;border:1px solid var(--line-strong);border-radius:var(--radius);padding:10px 12px;resize:vertical;background:var(--paper-2);">${escapeHtml(text)}</textarea>
+          <div class="modal-actions">
+            <span></span>
+            <div style="display:flex;gap:8px;">
+              <button class="btn btn-ghost" id="dr-close">Закрыть</button>
+              <button class="btn btn-primary" id="dr-copy">📋 Скопировать</button>
+            </div>
+          </div>
+        </div>
+      </div>
+    `;
+  }
+  function attachDailyReportModalEvents(overlay){
+    const dateInput = overlay.querySelector('#dr-date');
+    if(dateInput) dateInput.addEventListener('change', ()=>{
+      state.dailyReportDate = dateInput.value || todayStr();
+      state.modal = {type:'daily-report'};
+      render();
+    });
+    const closeBtn = overlay.querySelector('#dr-close');
+    if(closeBtn) closeBtn.onclick = ()=>{ state.modal = null; overlay.remove(); };
+    const copyBtn = overlay.querySelector('#dr-copy');
+    if(copyBtn) copyBtn.onclick = async ()=>{
+      const text = overlay.querySelector('#dr-text').value;
+      try{
+        if(navigator.clipboard && navigator.clipboard.writeText){
+          await navigator.clipboard.writeText(text);
+        } else {
+          const ta = overlay.querySelector('#dr-text');
+          ta.removeAttribute('readonly'); ta.select();
+          document.execCommand('copy');
+          ta.setAttribute('readonly', 'readonly');
+        }
+        showToast('Отчёт скопирован');
+      }catch(e){
+        showToast('Не удалось скопировать — выделите текст вручную');
+      }
+    };
   }
 
   function renderPlanCustomRows(list){
