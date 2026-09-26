@@ -1037,6 +1037,8 @@
     events: null,
     view: 'calendar', // calendar | host
     activeSpaceId: 's1',
+    calFilterDirection: '',
+    calFilterHost: '',
     cursor: new Date(new Date().getFullYear(), new Date().getMonth(), 1),
     modal: null, // {type: 'day', date} | {type:'event', event, isNew} | {type:'code'} | {type:'code-settings'}
     activeHost: null,
@@ -2521,6 +2523,29 @@
     });
     return Array.from(set).sort((a,b)=>a.localeCompare(b,'ru'));
   }
+  // «Направление» мероприятия для фильтра в календаре: отдельное поле, если его заполнили,
+  // иначе — название (у большинства мероприятий название и так выбирается из «Видов мероприятий»,
+  // так что старые записи без явного направления тоже нормально фильтруются).
+  function eventDirection(e){
+    return (e.direction && e.direction.trim()) || e.title || '';
+  }
+  // Список направлений для выпадающего списка в фильтре: все настроенные «Виды мероприятий»
+  // плюс любые направления/названия, которые реально встречаются в мероприятиях (на случай старых
+  // или произвольных значений, которых уже нет в текущем справочнике видов).
+  function allDirectionsInUse(){
+    const set = new Set();
+    (state.eventTypes||[]).forEach(t=>{ if(t.name) set.add(t.name); });
+    state.events.forEach(e=>{ const d = eventDirection(e); if(d) set.add(d); });
+    return Array.from(set).sort((a,b)=>a.localeCompare(b,'ru'));
+  }
+  function calendarFilterMatch(e){
+    if(state.calFilterDirection && eventDirection(e) !== state.calFilterDirection) return false;
+    if(state.calFilterHost){
+      const names = eventHostsWithPay(e).map(h=>h.name);
+      if(!names.includes(state.calFilterHost)) return false;
+    }
+    return true;
+  }
   function hostSelectOptions(currentHost){
     const list = [...state.hostsList];
     if(currentHost && currentHost.trim() && !list.includes(currentHost.trim())){
@@ -3057,7 +3082,7 @@
       const dStr = fmtDate(d);
       const inMonth = d.getMonth() === month;
       const isToday = dStr === todayStr();
-      const evts = eventsFor(state.activeSpaceId, dStr);
+      const evts = eventsFor(state.activeSpaceId, dStr).filter(calendarFilterMatch);
       const shown = evts.slice(0,3);
       const extra = evts.length - shown.length;
       const hasWarning = Object.keys(computeGapWarnings(evts)).length > 0;
@@ -3079,7 +3104,21 @@
       if(i%7===6 && i > 34) break;
     }
 
-    const scopedEvts = state.events.filter(e=> isAll || e.spaceId===state.activeSpaceId);
+    const scopedEvts = state.events.filter(e=> (isAll || e.spaceId===state.activeSpaceId) && calendarFilterMatch(e));
+    const filterActive = !!(state.calFilterDirection || state.calFilterHost);
+    const filters = `
+      <div class="cal-filters" style="display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin-bottom:12px;">
+        <select id="cal-filter-direction" style="padding:7px 10px;border:1px solid var(--line-strong);border-radius:var(--radius);font-size:12.5px;background:var(--white);">
+          <option value="">Все направления</option>
+          ${allDirectionsInUse().map(d=>`<option value="${escapeHtml(d)}" ${state.calFilterDirection===d?'selected':''}>${escapeHtml(d)}</option>`).join('')}
+        </select>
+        <select id="cal-filter-host" style="padding:7px 10px;border:1px solid var(--line-strong);border-radius:var(--radius);font-size:12.5px;background:var(--white);">
+          <option value="">Все сотрудники</option>
+          ${allHosts().map(h=>`<option value="${escapeHtml(h)}" ${state.calFilterHost===h?'selected':''}>${escapeHtml(h)}</option>`).join('')}
+        </select>
+        ${filterActive ? `<button class="btn btn-ghost" id="cal-filter-reset" style="font-size:12px;padding:6px 12px;">✕ Сбросить фильтр</button>` : ''}
+      </div>
+    `;
     const legend = `
       <div class="status-legend">
         ${Object.keys(STATUS_LABEL).map(key=>{
@@ -3102,6 +3141,7 @@
           <button class="nav-btn" id="btn-next">›</button>
         </div>
       </div>
+      ${filters}
       ${legend}
       <div class="cal-grid-wrap">
         <div class="cal-grid">
@@ -8054,6 +8094,13 @@
     document.querySelectorAll('.cal-cell').forEach(c=>{
       c.onclick = ()=>{ state.modal = {type:'day', date: c.dataset.date}; render(); };
     });
+
+    const dirFilter = document.getElementById('cal-filter-direction');
+    const hostFilter = document.getElementById('cal-filter-host');
+    if(dirFilter) dirFilter.onchange = ()=>{ state.calFilterDirection = dirFilter.value; render(); };
+    if(hostFilter) hostFilter.onchange = ()=>{ state.calFilterHost = hostFilter.value; render(); };
+    const filterReset = document.getElementById('cal-filter-reset');
+    if(filterReset) filterReset.onclick = ()=>{ state.calFilterDirection = ''; state.calFilterHost = ''; render(); };
   }
 
   function attachHostEvents(){
@@ -14324,6 +14371,14 @@
             <div style="font-size:11px;color:var(--ink-soft);margin-top:4px;">Нет нужного вида в списке? Добавьте его в «📋 Виды мероприятий» в шапке — тогда он появится здесь.</div>
           </div>
           <div class="field">
+            <label>Направление (для фильтра в календаре)</label>
+            <select id="f-direction">
+              <option value="">— как название —</option>
+              ${Array.from(new Set([...(ev.direction?[ev.direction]:[]), ...state.eventTypes.map(t=>t.name)])).sort((a,b)=>a.localeCompare(b,'ru')).map(t=>`<option value="${escapeHtml(t)}" ${ev.direction===t?'selected':''}>${escapeHtml(t)}</option>`).join('')}
+            </select>
+            <div style="font-size:11px;color:var(--ink-soft);margin-top:4px;">По умолчанию направление совпадает с названием. Меняйте только если хотите, чтобы в фильтре календаря это мероприятие числилось под другим направлением.</div>
+          </div>
+          <div class="field">
             <label>Количество человек</label>
             <input type="number" id="f-guests" value="${ev.guests!==undefined && ev.guests!==null ? ev.guests : ''}" min="0" step="1" placeholder="Например: 8">
           </div>
@@ -15647,6 +15702,7 @@
         pickupItems: [],
         payments: [],
         title: src.title,
+        direction: src.direction || '',
         product: src.product,
         status: src.status === 'slot' ? 'slot' : 'confirmed',
         dishes: '',
@@ -15860,6 +15916,7 @@
         payments: (()=>{ try{ return JSON.parse(overlay.querySelector('#f-payments').value || '[]'); }catch(e){ return []; } })(),
         guestList: guestListForSave,
         title: title,
+        direction: overlay.querySelector('#f-direction') ? (overlay.querySelector('#f-direction').value || '') : (state.modal.event.direction || ''),
         product: overlay.querySelector('#f-product').value || '',
         status: overlay.querySelector('#f-status').value || 'confirmed',
         dishes: overlay.querySelector('#f-dishes').value || '',
