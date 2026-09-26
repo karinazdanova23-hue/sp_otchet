@@ -730,7 +730,9 @@
     return fmtDate(d);
   }
 
-  const PRODUCTS = ['День рождения','Свадьба','Свидание','Девичник','Корпоратив','Детский МК','Мастер-класс'];
+  const PRODUCTS = ['День рождения','Свадьба','Свидание','Девичник','Корпоратив','Детский МК','Мастер-класс','Аренда'];
+  // продукт "Аренда" — сдаём пространство без своего мастера, поэтому ведущего можно не выбирать
+  const PRODUCTS_WITHOUT_HOST = ['Аренда'];
 
   const DEFAULT_HOSTS_LIST = [
     'Ира Керамика','Василена','Оксана Хост','Даша Тафтинг','Олюсик','Ольга','Наташа',
@@ -3502,6 +3504,7 @@
             <datalist id="ms-event-options">${marketingEventOptions.map(o=>`<option value="${escapeHtml(o.label)}">`).join('')}</datalist>
             <input type="hidden" id="ms-event" value="${m.eventId||''}">
             <div style="font-size:11.5px;color:var(--ink-soft);margin-top:4px;" id="ms-event-hint">${m.direction==='Блогеры' ? 'Показаны все мероприятия — привяжите то, которое реально пришло по этому блогеру, тогда окупаемость посчитается по настоящей выручке.' : 'Показаны только мероприятия со статусом «Маркетинг» — например, съёмки или розыгрыши.'}</div>
+            <div id="ms-blogger-guest-section" style="margin-top:10px;display:${m.direction==='Блогеры'?'block':'none'};"></div>
           </div>
           <div class="field">
             <label>Комментарий</label>
@@ -3526,7 +3529,75 @@
     const eventHintEl = overlay.querySelector('#ms-event-hint');
     const eventSearchInput = overlay.querySelector('#ms-event-search');
     const eventHidden = overlay.querySelector('#ms-event');
+    const bloggerGuestSection = overlay.querySelector('#ms-blogger-guest-section');
     let labelToId = {};
+
+    // блогер, который приходит бесплатно — становится отдельным гостем внутри привязанного мероприятия,
+    // с пометкой "блогер" и без ожидаемой оплаты; себестоимость МК при этом остаётся на студии как обычно
+    function currentBloggerGuestInfo(){
+      const ms = state.modal.marketingSpend;
+      if(!ms.bloggerGuestId || !ms.bloggerGuestEventId) return null;
+      const ev = state.events.find(e=>e.id===ms.bloggerGuestEventId);
+      if(!ev || !Array.isArray(ev.guestList)) return null;
+      const g = ev.guestList.find(x=>x.id===ms.bloggerGuestId);
+      if(!g) return null;
+      return { ev, g };
+    }
+    function refreshBloggerGuestSection(){
+      if(!bloggerGuestSection) return;
+      const isBloggerDirection = directionSelect.value === 'Блогеры';
+      bloggerGuestSection.style.display = isBloggerDirection ? 'block' : 'none';
+      if(!isBloggerDirection) return;
+      const selectedEventId = eventHidden.value;
+      const info = currentBloggerGuestInfo();
+      if(info && info.ev.id === selectedEventId){
+        bloggerGuestSection.innerHTML = `
+          <div style="font-size:12px;color:var(--status-blue);display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
+            🎥 Добавлен как гость этого мероприятия (без оплаты)
+            <button type="button" class="btn btn-ghost" id="btn-remove-blogger-guest" style="padding:4px 10px;font-size:11.5px;">Убрать</button>
+          </div>
+        `;
+      } else if(!selectedEventId){
+        bloggerGuestSection.innerHTML = `<div style="font-size:11.5px;color:var(--ink-soft);">Сначала привяжите мероприятие выше, чтобы добавить блогера туда гостем.</div>`;
+      } else {
+        bloggerGuestSection.innerHTML = `
+          <button type="button" class="btn btn-ghost" id="btn-add-blogger-guest">🎥 Добавить блогера как гостя этого мероприятия</button>
+          <div style="font-size:11px;color:var(--ink-soft);margin-top:4px;">Гость появится в карточке мероприятия с пометкой «Блогер» и без ожидаемой оплаты.</div>
+        `;
+      }
+      const addBtn = overlay.querySelector('#btn-add-blogger-guest');
+      if(addBtn) addBtn.onclick = async ()=>{
+        const targetEventId = eventHidden.value;
+        if(!targetEventId) return;
+        const ev = state.events.find(e=>e.id===targetEventId);
+        if(!ev) return;
+        // если блогер уже был гостем в другом (ранее привязанном) мероприятии — убираем его оттуда
+        const staleInfo = currentBloggerGuestInfo();
+        if(staleInfo && staleInfo.ev.id !== targetEventId){
+          staleInfo.ev.guestList = (staleInfo.ev.guestList||[]).filter(x=>x.id!==staleInfo.g.id);
+          await saveEvents();
+        }
+        if(!Array.isArray(ev.guestList)) ev.guestList = [];
+        const bloggerName = overlay.querySelector('#ms-blogger-handle').value.trim() || 'Блогер';
+        const newGuest = { id: uid(), name: bloggerName, seats: 1, items: 1, phone:'', comment:'Блогер — приходит бесплатно', expected: 0, isBlogger: true };
+        ev.guestList.push(newGuest);
+        await saveEvents();
+        state.modal.marketingSpend.bloggerGuestId = newGuest.id;
+        state.modal.marketingSpend.bloggerGuestEventId = targetEventId;
+        recordAction('Блогер добавлен гостем в мероприятие');
+        refreshBloggerGuestSection();
+      };
+      const removeBtn = overlay.querySelector('#btn-remove-blogger-guest');
+      if(removeBtn) removeBtn.onclick = async ()=>{
+        if(info){
+          info.ev.guestList = (info.ev.guestList||[]).filter(x=>x.id!==info.g.id);
+          await saveEvents();
+        }
+        state.modal.marketingSpend.bloggerGuestId = '';
+        state.modal.marketingSpend.bloggerGuestEventId = '';
+        refreshBloggerGuestSection();
+      };
+    }
 
     function refreshEventOptions(){
       const isBlogger = directionSelect.value === 'Блогеры';
@@ -3547,23 +3618,27 @@
       }
     }
     refreshEventOptions();
+    refreshBloggerGuestSection();
 
     directionSelect.onchange = ()=>{
       bloggerField.style.display = directionSelect.value === 'Блогеры' ? 'block' : 'none';
       refreshEventOptions();
+      refreshBloggerGuestSection();
     };
 
     if(eventSearchInput && eventHidden){
       eventSearchInput.addEventListener('input', ()=>{
         const val = eventSearchInput.value.trim();
-        if(val === ''){ eventHidden.value = ''; return; }
+        if(val === ''){ eventHidden.value = ''; refreshBloggerGuestSection(); return; }
         if(labelToId[val]) eventHidden.value = labelToId[val];
+        refreshBloggerGuestSection();
       });
       eventSearchInput.addEventListener('blur', ()=>{
         const val = eventSearchInput.value.trim();
         if(val !== '' && !labelToId[val]){
           eventSearchInput.value = '';
           eventHidden.value = '';
+          refreshBloggerGuestSection();
         }
       });
     }
@@ -4080,8 +4155,7 @@
         ${!hideRefundsConversion ? `<button data-certview="conversion" class="${state.certView==='conversion'?'active':''}">Конверсия</button>` : ''}
         <button data-certview="item-sales" class="${state.certView==='item-sales'?'active':''}">Изделия</button>
         ${!isHostessLimited ? `<button data-certview="orders" class="${state.certView==='orders'?'active':''}">Заказ</button>` : ''}
-        <!-- Экран "Выдача" убран: смола и тафтинг теперь отслеживаются в приложении "Керамика · трекер изделий". -->
-        ${false && !isHostessLimited ? `<button data-certview="pickups" class="${state.certView==='pickups'?'active':''}">Выдача</button>` : ''}
+        ${!isHostessLimited ? `<button data-certview="pickups" class="${state.certView==='pickups'?'active':''}">Выдача</button>` : ''}
       </div>
     `;
     if(state.certView === 'refunds'){
@@ -8738,6 +8812,15 @@
     const legalIncomplete = legalEvts.filter(e=>missingDocs(e).length > 0);
     const legalComplete = legalEvts.length - legalIncomplete.length;
 
+    // переделки — гости, которых пригласили бесплатно, потому что изделие не выжило при обжиге
+    const redoRows = [];
+    evts.forEach(e=>{
+      (e.guestList||[]).forEach(g=>{
+        if(g.isRedo) redoRows.push({ event: e, guest: g });
+      });
+    });
+    redoRows.sort((a,b)=> (b.event.date+b.event.time).localeCompare(a.event.date+a.event.time));
+
     // отчёты мастеров — контроль, у каких мероприятий с мастером нет отчёта
     const reportableEvts = evts.filter(e=> e.host && e.host.trim() && e.date <= todayStr());
     const missingReportEvts = reportableEvts.filter(e=> !hasMasterReport(e))
@@ -10388,7 +10471,20 @@
         </div>
       </div>
     `;
-    state.analyticsPanels = { plan: analyticsPanel_plan, occupancy: analyticsPanel_occupancy, days: analyticsPanel_days, ceramics: analyticsPanel_ceramics, guests: analyticsPanel_guests, legal: analyticsPanel_legal, reports: analyticsPanel_reports, netprofit: analyticsPanel_netprofit, cashflow: analyticsPanel_cashflow, yearsummary: analyticsPanel_yearsummary, auditlog: analyticsPanel_auditlog, marketing: analyticsPanel_marketing, integrity: renderEventsIntegrityPanel() };
+    const analyticsPanel_redo = `
+      <div class="analytics-section">
+        <h4 style="color:${redoRows.length>0?'var(--status-cyan)':'inherit'};">Переделки за месяц: ${redoRows.length}</h4>
+        <div style="font-size:11.5px;color:var(--ink-soft);font-family:var(--font-mono);margin-bottom:10px;">Гости, которых пригласили бесплатно, потому что изделие не выжило при обжиге на предыдущем МК.</div>
+        ${redoRows.length === 0 ? `<div style="color:var(--ink-soft);font-size:13px;">В этом месяце переделок нет.</div>` : redoRows.map(row=>`
+          <div class="stat-row" style="align-items:flex-start;">
+            <div class="stat-label" style="width:100%;flex:1;">
+              <b>${escapeHtml(row.guest.name)}</b> — ${escapeHtml(row.event.title)} ${spaceBadge(getSpace(row.event.spaceId),'xs')} · ${formatDateText(row.event.date)}
+              <div style="color:var(--status-cyan);font-size:12.5px;margin-top:2px;">🔁 Переделка изделия с: ${escapeHtml(linkedEventLabel(row.guest.redoOriginalEventId))}</div>
+            </div>
+          </div>
+        `).join('')}
+      </div>`;
+    state.analyticsPanels = { plan: analyticsPanel_plan, occupancy: analyticsPanel_occupancy, days: analyticsPanel_days, ceramics: analyticsPanel_ceramics, guests: analyticsPanel_guests, legal: analyticsPanel_legal, reports: analyticsPanel_reports, redo: analyticsPanel_redo, netprofit: analyticsPanel_netprofit, cashflow: analyticsPanel_cashflow, yearsummary: analyticsPanel_yearsummary, auditlog: analyticsPanel_auditlog, marketing: analyticsPanel_marketing, integrity: renderEventsIntegrityPanel() };
 
     const fullHtml = `
       <div class="cal-nav">
@@ -10445,6 +10541,7 @@
           <button class="btn btn-ghost analytics-panel-btn" data-panel="guests">👥 Гости (продукты/направления/ведущие/пространства)</button>
           <button class="btn btn-ghost analytics-panel-btn" data-panel="legal">📄 Документы юрлиц</button>
           <button class="btn btn-ghost analytics-panel-btn" data-panel="reports">📝 Отчёты мастеров</button>
+          <button class="btn btn-ghost analytics-panel-btn" data-panel="redo" style="${redoRows.length>0?'border-color:var(--status-cyan);color:var(--status-cyan);':''}">🔁 Переделки</button>
           <button class="btn btn-ghost analytics-panel-btn" data-panel="yearsummary">📆 Сводка по годам</button>
             <button class="btn btn-ghost analytics-panel-btn" data-panel="auditlog">📜 Журнал действий</button>
             <button class="btn btn-ghost analytics-panel-btn" data-panel="integrity" style="${(state.eventsIntegrityAlerts&&state.eventsIntegrityAlerts.length>0)?'border-color:var(--status-red);color:var(--status-red);':''}">🛡 Сохранность расписания</button>
@@ -13955,8 +14052,11 @@
           </div>
           <div class="field">
             <label>Название</label>
-            <input type="text" id="f-title" value="${escapeHtml(ev.title)}" placeholder="Например: Керамика" list="title-suggestions">
-            <datalist id="title-suggestions">${Array.from(new Set([...state.eventTypes.map(t=>t.name), ...allTitles()])).map(t=>`<option value="${escapeHtml(t)}">`).join('')}</datalist>
+            <select id="f-title">
+              <option value="" ${!ev.title?'selected':''}>— выберите вид —</option>
+              ${Array.from(new Set([...(ev.title?[ev.title]:[]), ...state.eventTypes.map(t=>t.name)])).sort((a,b)=>a.localeCompare(b,'ru')).map(t=>`<option value="${escapeHtml(t)}" ${ev.title===t?'selected':''}>${escapeHtml(t)}</option>`).join('')}
+            </select>
+            <div style="font-size:11px;color:var(--ink-soft);margin-top:4px;">Нет нужного вида в списке? Добавьте его в «📋 Виды мероприятий» в шапке — тогда он появится здесь.</div>
           </div>
           <div class="field">
             <label>Количество человек</label>
@@ -13966,13 +14066,13 @@
             <label>Изделий изготовлено (шт) <span style="font-weight:400;color:var(--ink-soft);">— обычно равно числу гостей, но кто-то мог сделать 2</span></label>
             <input type="number" id="f-items-count" data-auto="${ev.itemsCountAuto===false?'false':'true'}" value="${ev.itemsCount!==undefined&&ev.itemsCount!==null?ev.itemsCount:(ev.guests||'')}" min="0" step="1">
           </div>
-          <div class="field" id="pickup-field" style="display:${isPickupTrackedEvent(ev.title) && (ev.pickupItems||[]).length>0 ? 'block' : 'none'};">
-            <label>Выдача изделий <span style="font-weight:400;color:var(--ink-soft);">— старые записи, оставлены только для истории</span></label>
+          <div class="field" id="pickup-field" style="display:${isPickupTrackedEvent(ev.title)?'block':'none'};">
+            <label>Выдача изделий <span style="font-weight:400;color:var(--ink-soft);">— изделие сохнет и забирается позже</span></label>
             <div id="pickup-items-list">${renderPickupItemRows(ev.pickupItems||[])}</div>
-            <div style="font-size:12px;color:var(--ink-soft);margin-top:6px;">Смола и тафтинг теперь отслеживаются в приложении «Керамика · трекер изделий» — новые изделия добавляйте там, здесь больше не нужно.</div>
+            <button type="button" class="add-evt-btn" id="btn-add-pickup">+ добавить изделие на выдачу</button>
           </div>
           <div class="field">
-            <label>Ведущий</label>
+            <label>Ведущий <span id="f-host-optional-hint" style="font-weight:400;color:var(--ink-soft);display:${PRODUCTS_WITHOUT_HOST.includes(ev.product)?'inline':'none'};">— необязательно для продукта «Аренда»</span></label>
             <input type="text" id="f-host" value="${escapeHtml(ev.host||'')}" placeholder="Начните вводить имя…" list="host-suggestions">
             <datalist id="host-suggestions">${hostSelectOptions(ev.host).map(h=>`<option value="${escapeHtml(h)}">`).join('')}</datalist>
           </div>
@@ -14740,8 +14840,10 @@
         const gExpected = (g.expected!==undefined && g.expected!==null && g.expected!=='' && !isNaN(g.expected)) ? Number(g.expected) : null;
         const gRemainder = g.refunded ? 0 : (gExpected!==null ? Math.max(0, gExpected - gTotal) : null);
         return `
-        <div class="guest-block" data-gid="${g.id}" style="border:1px solid ${g.refunded?'var(--status-red)':'var(--line-strong)'};border-radius:var(--radius);padding:8px 10px;margin-bottom:8px;">
+        <div class="guest-block" data-gid="${g.id}" style="border:1px solid ${g.refunded?'var(--status-red)':(g.isBlogger?'var(--status-blue)':(g.isRedo?'var(--status-cyan)':'var(--line-strong)'))};border-radius:var(--radius);padding:8px 10px;margin-bottom:8px;">
           ${g.refunded ? `<div style="font-size:11px;color:var(--status-red);font-family:var(--font-mono);margin-bottom:6px;">💳 Оформлен возврат этому гостю</div>` : ''}
+          ${g.isBlogger ? `<div style="font-size:11px;color:var(--status-blue);font-family:var(--font-mono);margin-bottom:6px;">🎥 Блогер — приходит бесплатно, без ожидаемой оплаты</div>` : ''}
+          ${g.isRedo ? `<div style="font-size:11px;color:var(--status-cyan);font-family:var(--font-mono);margin-bottom:6px;">🔁 Переделка — приходит бесплатно, изделие не выжило при обжиге</div>` : ''}
           <div style="display:flex;gap:8px;align-items:center;">
             <input type="text" class="guest-name" data-gid="${g.id}" value="${escapeHtml(g.name||'')}" placeholder="Имя гостя" style="flex:1;min-width:0;border:1px solid ${g.name&&g.name.trim()?'var(--line-strong)':'var(--status-red)'};border-radius:var(--radius);padding:6px 8px;font-family:var(--font-body);font-size:12.5px;">
             <input type="number" class="guest-seats" data-gid="${g.id}" value="${g.seats||1}" min="1" step="1" title="Количество мест, за которые платит этот гость" style="width:52px;flex-shrink:0;border:1px solid var(--line-strong);border-radius:var(--radius);padding:6px 8px;font-family:var(--font-body);font-size:12.5px;">
@@ -14749,7 +14851,18 @@
             <button type="button" class="guest-remove" data-gid="${g.id}" title="Удалить гостя" style="background:none;border:none;color:var(--danger);cursor:pointer;font-size:16px;line-height:1;flex-shrink:0;">✕</button>
           </div>
           ${showItemsPerGuest ? `<div style="font-size:10px;color:var(--ink-soft);margin-top:2px;">место(а) · изделий</div>` : ''}
-          ${showExpectedPerGuest ? `<div style="display:flex;gap:8px;align-items:center;margin-top:6px;">
+          ${!g.isBlogger ? `<div style="margin-top:6px;">
+            <label style="display:flex;align-items:center;gap:5px;font-size:11px;color:var(--ink-soft);font-family:var(--font-mono);cursor:pointer;width:fit-content;">
+              <input type="checkbox" class="guest-redo-toggle" data-gid="${g.id}" ${g.isRedo?'checked':''} style="width:14px;height:14px;">
+              🔁 Переделка — приходит бесплатно, изделие не выжило
+            </label>
+          </div>` : ''}
+          ${g.isRedo ? `<div style="margin-top:6px;">
+            <input type="text" class="guest-redo-event-search" data-gid="${g.id}" placeholder="К какому мероприятию — дата или название…" list="guest-redo-event-options-${g.id}" value="${g.redoOriginalEventId ? escapeHtml(linkedEventLabel(g.redoOriginalEventId)) : ''}" style="width:100%;box-sizing:border-box;border:1px solid ${g.redoOriginalEventId?'var(--line-strong)':'var(--status-red)'};border-radius:var(--radius);padding:6px 8px;font-family:var(--font-body);font-size:12.5px;">
+            <datalist id="guest-redo-event-options-${g.id}">${eventSelectOptions().filter(o=>o.id!==(state.modal.event&&state.modal.event.id)).map(o=>`<option value="${escapeHtml(o.label)}">`).join('')}</datalist>
+            <input type="hidden" class="guest-redo-event-id" data-gid="${g.id}" value="${g.redoOriginalEventId||''}">
+          </div>` : ''}
+          ${(showExpectedPerGuest && !g.isBlogger && !g.isRedo) ? `<div style="display:flex;gap:8px;align-items:center;margin-top:6px;">
             <label style="font-size:10.5px;color:var(--ink-soft);font-family:var(--font-mono);white-space:nowrap;">Ожидаем с гостя:</label>
             <input type="number" class="guest-expected" data-gid="${g.id}" value="${gExpected!==null?gExpected:''}" min="0" step="0.01" placeholder="Например: 5000" style="width:110px;border:1px solid var(--line-strong);border-radius:var(--radius);padding:6px 8px;font-family:var(--font-body);font-size:12.5px;">
           </div>` : ''}
@@ -14833,6 +14946,35 @@
             renderGuestList();
           }
         };
+      });
+      overlay.querySelectorAll('.guest-redo-toggle').forEach(cb=>{
+        cb.onchange = ()=>{
+          const g = guestListArr.find(x=>x.id===cb.dataset.gid);
+          if(g){
+            g.isRedo = cb.checked;
+            if(cb.checked){ g.expected = 0; } else { g.redoOriginalEventId = ''; }
+            persistGuestList();
+            renderGuestList();
+          }
+        };
+      });
+      overlay.querySelectorAll('.guest-redo-event-search').forEach(inp=>{
+        inp.addEventListener('input', ()=>{
+          const gid = inp.dataset.gid;
+          const hidden = overlay.querySelector(`.guest-redo-event-id[data-gid="${gid}"]`);
+          const g = guestListArr.find(x=>x.id===gid);
+          const opt = eventSelectOptions().find(o=>o.label===inp.value);
+          if(opt){
+            if(hidden) hidden.value = opt.id;
+            if(g) g.redoOriginalEventId = opt.id;
+            inp.style.borderColor = 'var(--line-strong)';
+          } else {
+            if(hidden) hidden.value = '';
+            if(g) g.redoOriginalEventId = '';
+            inp.style.borderColor = 'var(--status-red)';
+          }
+          persistGuestList();
+        });
       });
       overlay.querySelectorAll('.guest-phone').forEach(inp=>{
         inp.oninput = ()=>{
@@ -15140,6 +15282,8 @@
         if(PRIVATE_PRODUCTS.includes(productSelectForAuto.value) && currentStatus === 'confirmed'){
           setEventStatus('tentative');
         }
+        const hostOptionalHint = overlay.querySelector('#f-host-optional-hint');
+        if(hostOptionalHint) hostOptionalHint.style.display = PRODUCTS_WITHOUT_HOST.includes(productSelectForAuto.value) ? 'inline' : 'none';
       });
     }
 
@@ -15302,13 +15446,17 @@
         id: g.id, name: (g.name||'').trim(), seats: Math.max(1, parseInt(g.seats)||1),
         items: (g.items!==undefined && g.items!==null && !isNaN(parseInt(g.items))) ? Math.max(0, parseInt(g.items)) : 1,
         phone: (g.phone||'').trim(), comment: (g.comment||'').trim(),
-        expected: (g.expected!==undefined && g.expected!==null && g.expected!=='' && !isNaN(g.expected)) ? Math.round(Number(g.expected)*100)/100 : null,
+        expected: (g.isBlogger || g.isRedo) ? 0 : ((g.expected!==undefined && g.expected!==null && g.expected!=='' && !isNaN(g.expected)) ? Math.round(Number(g.expected)*100)/100 : null),
+        isBlogger: !!g.isBlogger,
+        isRedo: !!g.isRedo,
+        redoOriginalEventId: g.isRedo ? (g.redoOriginalEventId||'') : '',
       }));
       const guestNameVal = guestListForSave.map(g=>g.name).filter(Boolean).join(', ');
       // обязательно только имя у гостя, который уже добавлен (пустая строка "гость без имени" — ошибка);
       // само по себе отсутствие гостей не блокирует сохранение — иначе старые мероприятия без разбивки
       // по гостям и ещё не забронированные слоты "по расписанию" нельзя было бы сохранить вообще
       const guestNamesMissing = guestListForSave.some(g=>!g.name);
+      const redoEventMissing = guestListForSave.some(g=>g.isRedo && !g.redoOriginalEventId);
       syncMaterialsItemsFromInputs();
       const cleanedMaterialsItems = materialsItemsDraft
         .map(m=>({name:(m.name||'').trim(), cost:(m.cost!==undefined&&m.cost!==null&&!isNaN(m.cost))?Number(m.cost):null, qty:(m.qty!==undefined&&m.qty!==null&&!isNaN(m.qty))?Number(m.qty):null, source:m.source==='master'?'master':'studio', payTo:m.source==='master'?(m.payTo||'').trim():'', expenseDate:(m.source==='master'&&m.payTo&&m.payTo.trim())?(m.expenseDate||'').trim():''}))
@@ -15329,7 +15477,7 @@
           if(el){ el.style.borderColor = 'var(--danger)'; if(!firstInvalid) firstInvalid = el; }
         };
         if(!title) markInvalid('f-title');
-        if(!hostVal) markInvalid('f-host');
+        if(!hostVal && !PRODUCTS_WITHOUT_HOST.includes(productVal)) markInvalid('f-host');
         if(!dateVal) markInvalid('f-date');
         if(!timeVal) markInvalid('f-time');
         if(!durationVal || durationVal<=0) markInvalid('f-duration');
@@ -15339,7 +15487,7 @@
         const agreedPriceNegative = !priceFieldLockedForMaster && agreedPriceRawCheck !== '' && Number(agreedPriceRawCheck) < 0;
         if(agreedPriceNegative) markInvalid('f-agreed-price');
         if(!notesVal) markInvalid('f-notes');
-        if(guestNamesMissing){
+        if(guestNamesMissing || redoEventMissing){
           const guestListEl = overlay.querySelector('#guest-list-container');
           if(guestListEl){ guestListEl.style.boxShadow = 'inset 0 0 0 1.5px var(--danger)'; guestListEl.style.borderRadius = 'var(--radius)'; if(!firstInvalid) firstInvalid = guestListEl; }
           const detailsEl = overlay.querySelector('#guest-breakdown-details');
@@ -15369,8 +15517,9 @@
           if(!dishesVal){ dishesMissing = true; if(dishesFieldEl) dishesFieldEl.style.boxShadow = 'inset 0 0 0 1.5px var(--danger)'; if(!firstInvalid) firstInvalid = dishesFieldEl; }
           else if(dishesVal === 'needed' && !dishesPaymentVal){ dishesMissing = true; if(dishesFieldEl) dishesFieldEl.style.boxShadow = 'inset 0 0 0 1.5px var(--danger)'; if(!firstInvalid) firstInvalid = dishesFieldEl; }
         }
-        if(!title || !hostVal || !dateVal || !timeVal || !durationVal || durationVal<=0 || guestsRaw==='' || priceRaw==='' || Number(priceRaw)<0 || agreedPriceNegative || masterPayNegative || additionalHostsNegative || materialsNegative || !notesVal || guestNamesMissing || materialsMissing || dishesMissing){
-          showGapWarningBanner('Заполните все поля перед сохранением (для статуса «Слот» это необязательно). Себестоимость: добавьте хотя бы один материал с названием и суммой. Суммы (выручка, ЗП мастеру и со-ведущим, себестоимость) не могут быть отрицательными.');
+        const hostMissing = !hostVal && !PRODUCTS_WITHOUT_HOST.includes(productVal);
+        if(!title || hostMissing || !dateVal || !timeVal || !durationVal || durationVal<=0 || guestsRaw==='' || priceRaw==='' || Number(priceRaw)<0 || agreedPriceNegative || masterPayNegative || additionalHostsNegative || materialsNegative || !notesVal || guestNamesMissing || redoEventMissing || materialsMissing || dishesMissing){
+          showGapWarningBanner(redoEventMissing ? 'У гостя отмечена «Переделка» — укажите, к какому мероприятию это относится.' : 'Заполните все поля перед сохранением (для статуса «Слот» это необязательно). Себестоимость: добавьте хотя бы один материал с названием и суммой. Суммы (выручка, ЗП мастеру и со-ведущим, себестоимость) не могут быть отрицательными.');
           if(firstInvalid && firstInvalid.scrollIntoView) firstInvalid.scrollIntoView({block:'center', behavior:'smooth'});
           return;
         }
