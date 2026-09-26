@@ -4080,7 +4080,8 @@
         ${!hideRefundsConversion ? `<button data-certview="conversion" class="${state.certView==='conversion'?'active':''}">Конверсия</button>` : ''}
         <button data-certview="item-sales" class="${state.certView==='item-sales'?'active':''}">Изделия</button>
         ${!isHostessLimited ? `<button data-certview="orders" class="${state.certView==='orders'?'active':''}">Заказ</button>` : ''}
-        ${!isHostessLimited ? `<button data-certview="pickups" class="${state.certView==='pickups'?'active':''}">Выдача</button>` : ''}
+        <!-- Экран "Выдача" убран: смола и тафтинг теперь отслеживаются в приложении "Керамика · трекер изделий". -->
+        ${false && !isHostessLimited ? `<button data-certview="pickups" class="${state.certView==='pickups'?'active':''}">Выдача</button>` : ''}
       </div>
     `;
     if(state.certView === 'refunds'){
@@ -13965,10 +13966,10 @@
             <label>Изделий изготовлено (шт) <span style="font-weight:400;color:var(--ink-soft);">— обычно равно числу гостей, но кто-то мог сделать 2</span></label>
             <input type="number" id="f-items-count" data-auto="${ev.itemsCountAuto===false?'false':'true'}" value="${ev.itemsCount!==undefined&&ev.itemsCount!==null?ev.itemsCount:(ev.guests||'')}" min="0" step="1">
           </div>
-          <div class="field" id="pickup-field" style="display:${isPickupTrackedEvent(ev.title)?'block':'none'};">
-            <label>Выдача изделий <span style="font-weight:400;color:var(--ink-soft);">— изделие сохнет и забирается позже</span></label>
+          <div class="field" id="pickup-field" style="display:${isPickupTrackedEvent(ev.title) && (ev.pickupItems||[]).length>0 ? 'block' : 'none'};">
+            <label>Выдача изделий <span style="font-weight:400;color:var(--ink-soft);">— старые записи, оставлены только для истории</span></label>
             <div id="pickup-items-list">${renderPickupItemRows(ev.pickupItems||[])}</div>
-            <button type="button" class="add-evt-btn" id="btn-add-pickup">+ добавить изделие на выдачу</button>
+            <div style="font-size:12px;color:var(--ink-soft);margin-top:6px;">Смола и тафтинг теперь отслеживаются в приложении «Керамика · трекер изделий» — новые изделия добавляйте там, здесь больше не нужно.</div>
           </div>
           <div class="field">
             <label>Ведущий</label>
