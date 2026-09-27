@@ -11362,7 +11362,7 @@
       if(!listEl) return;
       try{
         const res = await fetch('/api/backup/snapshots');
-        if(!res.ok) throw new Error('bad status');
+        if(!res.ok) throw new Error('http-' + res.status);
         const data = await res.json();
         const snaps = (data.snapshots || []);
         if(!listEl.isConnected) return; // модалку уже закрыли, пока грузился список
@@ -11386,7 +11386,13 @@
           };
         });
       }catch(e){
-        if(listEl.isConnected) listEl.innerHTML = '<div style="color:var(--danger);">Не удалось загрузить список снимков — попробуйте обновить страницу.</div>';
+        // http-404 обычно значит, что на сервере ещё старая версия index.js (без этого раздела) —
+        // тогда самого адреса /api/backup/snapshots там нет. Показываем причину, чтобы было видно,
+        // что дело не в интерфейсе, а в том, что сервер не обновлён.
+        const reason = (e && e.message === 'http-404')
+          ? 'на сервере пока старая версия (файл index.js ещё не обновлён — обновите его отдельно от index.html и передеплойте)'
+          : (e && e.message ? 'код ошибки: ' + escapeHtml(e.message) : 'сервер не ответил');
+        if(listEl.isConnected) listEl.innerHTML = `<div style="color:var(--danger);">Не удалось загрузить список снимков (${reason}).</div>`;
       }
     })();
     const pushThresholdBtn = overlay.querySelector('#btn-save-push-threshold');
