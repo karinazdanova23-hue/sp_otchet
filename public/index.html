@@ -1352,6 +1352,9 @@
     if(!eventsLoaded){
       state.events = [];
     }
+    // отправная точка для безопасного слияния при сохранении (см. saveEvents/saveCollectionMerged) —
+    // снимок того, что было получено с сервера при открытии, ДО каких-либо локальных правок в этой вкладке
+    state._eventsBaseline = JSON.parse(JSON.stringify(state.events));
     if(eventsLoaded){
       // подгружаем прошлый снимок ДО проверки — иначе проверке не с чем будет сравнивать
       try{
@@ -1532,6 +1535,38 @@
       const ms = await window.storage.get('manager-shifts', true);
       state.managerShifts = ms ? JSON.parse(ms.value) : {};
     }catch(e){ state.managerShifts = {}; }
+
+    // отправные точки для безопасного слияния при сохранении (см. saveCollectionMerged/saveMapMerged/
+    // saveSetMerged) — снимок того, что было получено с сервера при открытии, ДО каких-либо локальных
+    // правок в этой вкладке; без этого следующий save() не сможет отличить "я это изменил" от
+    // "это уже было" и рисковал бы либо затереть чужое, либо не сохранить своё
+    state._eventTypesBaseline = JSON.parse(JSON.stringify(state.eventTypes));
+    state._hostsListBaseline = state.hostsList.slice();
+    state._customExpenseCategoriesBaseline = (state.customExpenseCategories||[]).slice();
+    state._masterPayRatesBaseline = JSON.parse(JSON.stringify(state.masterPayRates));
+    state._masterPayOverridesBaseline = JSON.parse(JSON.stringify(state.masterPayOverrides));
+    state._materialsCatalogBaseline = JSON.parse(JSON.stringify(state.materialsCatalog));
+    state._itemSalesBaseline = JSON.parse(JSON.stringify(state.itemSales));
+    state._ordersBaseline = JSON.parse(JSON.stringify(state.orders));
+    state._salaryAdjustmentsBaseline = JSON.parse(JSON.stringify(state.salaryAdjustments));
+    state._monthlyPlansBaseline = JSON.parse(JSON.stringify(state.monthlyPlans));
+    state._netProfitManualBaseline = JSON.parse(JSON.stringify(state.netProfitManual));
+    state._yearSummaryManualBaseline = JSON.parse(JSON.stringify(state.yearSummaryManual));
+    state._auditLogBaseline = JSON.parse(JSON.stringify(state.auditLog));
+    state._closedMonthsBaseline = state.closedMonths.slice();
+    state._marketingSpendBaseline = JSON.parse(JSON.stringify(state.marketingSpend));
+    state._suppliersBaseline = JSON.parse(JSON.stringify(state.suppliers));
+    state._stockReceiptsBaseline = JSON.parse(JSON.stringify(state.stockReceipts));
+    state._daysOffBaseline = JSON.parse(JSON.stringify(state.daysOff));
+    state._marketingPlansBaseline = JSON.parse(JSON.stringify(state.marketingPlans));
+    state._contentPostsBaseline = JSON.parse(JSON.stringify(state.contentPosts));
+    state._certificatesBaseline = JSON.parse(JSON.stringify(state.certificates));
+    state._refundsBaseline = JSON.parse(JSON.stringify(state.refunds));
+    state._incomesBaseline = JSON.parse(JSON.stringify(state.incomes));
+    state._expensesBaseline = JSON.parse(JSON.stringify(state.expenses));
+    state._leadsBaseline = JSON.parse(JSON.stringify(state.leads));
+    state._hostessShiftsBaseline = JSON.parse(JSON.stringify(state.hostessShifts));
+    state._managerShiftsBaseline = JSON.parse(JSON.stringify(state.managerShifts));
 
     // демо-данные для тестирования отключены — реальный запуск начинается с чистой базы
     // await seedDemo30Once();
@@ -2213,50 +2248,203 @@
   async function saveSpaces(){
     return storageSetWithRetry('spaces-config', JSON.stringify(state.spaces));
   }
-  async function saveEvents(){
+  // ============================================================================================
+  // Безопасное сохранение при одновременной работе нескольких человек.
+  //
+  // Проблема, которую это решает: раньше каждая функция saveX() отправляла на сервер ВЕСЬ раздел
+  // целиком (весь список мероприятий/заявок/расходов и т.д.) таким, каким он был в памяти именно
+  // этого браузера. Если два человека одновременно открыли приложение, у каждого — свой слегка
+  // устаревший снимок. Когда один из них сохранял что-либо (даже не трогая чужие записи), его
+  // устаревшая копия целиком перезаписывала сервер — и всё, что второй добавил за это время,
+  // бесследно исчезало. Это и произошло 26.09 с мероприятиями менеджера.
+  //
+  // Решение — три варианта слияния в зависимости от формы данных, вместо "отправить всё целиком":
+  //  - saveCollectionMerged  — списки объектов с уникальным ключом (id, либо имя для справочников):
+  //    отправляется только то, что реально изменилось в этой вкладке (создано/изменено/удалено),
+  //    и накладывается поверх самой свежей версии с сервера.
+  //  - saveMapMerged — объекты-словари вида {дата: значение} (смены, планы по месяцам и т.п.):
+  //    та же идея, но по ключам словаря, а не по массиву.
+  //  - saveSetMerged — простые списки значений (список мастеров, закрытые месяцы и т.п.):
+  //    объединение множеств вместо перезаписи всего списка.
+  // ============================================================================================
+  function diffForMerge(baseline, current, keyFn){
+    const kf = keyFn || (x=>x.id);
+    const baseMap = new Map((baseline||[]).filter(Boolean).map(x=>[kf(x), x]));
+    const curMap = new Map((current||[]).filter(Boolean).map(x=>[kf(x), x]));
+    const upserts = [];
+    curMap.forEach((item, key)=>{
+      const b = baseMap.get(key);
+      if(!b || JSON.stringify(b) !== JSON.stringify(item)) upserts.push(item);
+    });
+    const deletes = [];
+    baseMap.forEach((b, key)=>{ if(!curMap.has(key)) deletes.push(key); });
+    return { upserts, deletes };
+  }
+  async function saveCollectionMerged(storageKey, currentArray, baselineArray, applyMerged, keyFn){
+    const kf = keyFn || (x=>x.id);
+    const { upserts, deletes } = diffForMerge(baselineArray, currentArray, kf);
+    let serverArray;
+    try{
+      const res = await window.storage.get(storageKey, true);
+      serverArray = res ? JSON.parse(res.value) : [];
+    }catch(e){
+      // сервер недоступен для сверки — сохраняем как раньше (весь локальный список), чтобы хотя бы
+      // не потерять то, что успели ввести именно в этой вкладке; безопасное слияние тут невозможно
+      await storageSetWithRetry(storageKey, JSON.stringify(currentArray));
+      applyMerged(currentArray);
+      return;
+    }
+    const deleteSet = new Set(deletes);
+    const map = new Map(serverArray.filter(Boolean).filter(x=>!deleteSet.has(kf(x))).map(x=>[kf(x), x]));
+    upserts.forEach(x=>{ map.set(kf(x), x); });
+    const finalArr = Array.from(map.values());
+    await storageSetWithRetry(storageKey, JSON.stringify(finalArr));
+    applyMerged(finalArr);
+  }
+  async function saveMapMerged(storageKey, currentMap, baselineMap, applyMerged){
+    const cur = currentMap || {};
+    const base = baselineMap || {};
+    const upsertKeys = Object.keys(cur).filter(k => !(k in base) || JSON.stringify(base[k]) !== JSON.stringify(cur[k]));
+    const deleteKeys = Object.keys(base).filter(k => !(k in cur));
+    let serverMap;
+    try{
+      const res = await window.storage.get(storageKey, true);
+      serverMap = res ? JSON.parse(res.value) : {};
+    }catch(e){
+      await storageSetWithRetry(storageKey, JSON.stringify(cur));
+      applyMerged(cur);
+      return;
+    }
+    const finalMap = { ...serverMap };
+    deleteKeys.forEach(k=>{ delete finalMap[k]; });
+    upsertKeys.forEach(k=>{ finalMap[k] = cur[k]; });
+    await storageSetWithRetry(storageKey, JSON.stringify(finalMap));
+    applyMerged(finalMap);
+  }
+  async function saveSetMerged(storageKey, currentArray, baselineArray, applyMerged){
+    const cur = currentArray || [];
+    const base = baselineArray || [];
+    const curSet = new Set(cur);
+    const baseSet = new Set(base);
+    const added = cur.filter(x => !baseSet.has(x));
+    const removed = base.filter(x => !curSet.has(x));
+    let serverArray;
+    try{
+      const res = await window.storage.get(storageKey, true);
+      serverArray = res ? JSON.parse(res.value) : [];
+    }catch(e){
+      await storageSetWithRetry(storageKey, JSON.stringify(cur));
+      applyMerged(cur);
+      return;
+    }
+    const removedSet = new Set(removed);
+    const finalSet = new Set(serverArray.filter(x=>!removedSet.has(x)));
+    added.forEach(x=> finalSet.add(x));
+    const finalArr = Array.from(finalSet);
+    await storageSetWithRetry(storageKey, JSON.stringify(finalArr));
+    applyMerged(finalArr);
+  }
+  // Сырое сохранение без слияния — используется ТОЛЬКО для намеренной ПОЛНОЙ замены данных
+  // (кнопка "Восстановить из файла" → "Заменить текущие данные"), где слияние было бы неправильным:
+  // там весь смысл в том, чтобы заменить всё содержимое файлом целиком.
+  async function saveRaw(storageKey, value){
+    return storageSetWithRetry(storageKey, JSON.stringify(value));
+  }
+  async function saveEventsRaw(){
     return storageSetWithRetry('events', JSON.stringify(state.events));
   }
+  async function saveEvents(){
+    await saveCollectionMerged('events', state.events, state._eventsBaseline, (finalArr)=>{
+      state.events = finalArr;
+      state._eventsBaseline = JSON.parse(JSON.stringify(finalArr));
+    });
+  }
+  function normName(s){ return (s||'').trim().toLowerCase(); }
   async function saveEventTypes(){
-    return storageSetWithRetry('event-types', JSON.stringify(state.eventTypes));
+    await saveCollectionMerged('event-types', state.eventTypes, state._eventTypesBaseline, (finalArr)=>{
+      state.eventTypes = finalArr;
+      state._eventTypesBaseline = JSON.parse(JSON.stringify(finalArr));
+    }, x=>normName(x.name));
   }
   async function saveCustomExpenseCategories(){
-    return storageSetWithRetry('custom-expense-categories', JSON.stringify(state.customExpenseCategories||[]));
+    await saveSetMerged('custom-expense-categories', state.customExpenseCategories||[], state._customExpenseCategoriesBaseline, (finalArr)=>{
+      state.customExpenseCategories = finalArr;
+      state._customExpenseCategoriesBaseline = finalArr.slice();
+    });
   }
   function allExpenseCategories(){
     return [...EXPENSE_CATEGORIES, ...(state.customExpenseCategories||[])];
   }
   async function saveHostsList(){
-    return storageSetWithRetry('hosts-list', JSON.stringify(state.hostsList));
+    await saveSetMerged('hosts-list', state.hostsList, state._hostsListBaseline, (finalArr)=>{
+      state.hostsList = finalArr;
+      state._hostsListBaseline = finalArr.slice();
+    });
   }
   async function saveMasterPayRates(){
-    return storageSetWithRetry('master-pay-rates', JSON.stringify(state.masterPayRates));
+    await saveMapMerged('master-pay-rates', state.masterPayRates, state._masterPayRatesBaseline, (finalMap)=>{
+      state.masterPayRates = finalMap;
+      state._masterPayRatesBaseline = JSON.parse(JSON.stringify(finalMap));
+    });
   }
   async function saveMasterPayOverrides(){
-    return storageSetWithRetry('master-pay-overrides', JSON.stringify(state.masterPayOverrides));
+    await saveMapMerged('master-pay-overrides', state.masterPayOverrides, state._masterPayOverridesBaseline, (finalMap)=>{
+      state.masterPayOverrides = finalMap;
+      state._masterPayOverridesBaseline = JSON.parse(JSON.stringify(finalMap));
+    });
   }
   async function saveMaterialsCatalog(){
-    return storageSetWithRetry('materials-catalog', JSON.stringify(state.materialsCatalog));
+    await saveCollectionMerged('materials-catalog', state.materialsCatalog, state._materialsCatalogBaseline, (finalArr)=>{
+      state.materialsCatalog = finalArr;
+      state._materialsCatalogBaseline = JSON.parse(JSON.stringify(finalArr));
+    }, x=>normName(x.name));
   }
   async function saveItemSales(){
-    return storageSetWithRetry('item-sales', JSON.stringify(state.itemSales));
+    await saveCollectionMerged('item-sales', state.itemSales, state._itemSalesBaseline, (finalArr)=>{
+      state.itemSales = finalArr;
+      state._itemSalesBaseline = JSON.parse(JSON.stringify(finalArr));
+    });
   }
   async function saveOrders(){
-    return storageSetWithRetry('orders', JSON.stringify(state.orders));
+    await saveCollectionMerged('orders', state.orders, state._ordersBaseline, (finalArr)=>{
+      state.orders = finalArr;
+      state._ordersBaseline = JSON.parse(JSON.stringify(finalArr));
+    });
   }
   async function saveSalaryAdjustments(){
-    return storageSetWithRetry('salary-adjustments', JSON.stringify(state.salaryAdjustments));
+    await saveCollectionMerged('salary-adjustments', state.salaryAdjustments, state._salaryAdjustmentsBaseline, (finalArr)=>{
+      state.salaryAdjustments = finalArr;
+      state._salaryAdjustmentsBaseline = JSON.parse(JSON.stringify(finalArr));
+    });
   }
   async function saveMonthlyPlans(){
-    return storageSetWithRetry('monthly-plans', JSON.stringify(state.monthlyPlans));
+    await saveMapMerged('monthly-plans', state.monthlyPlans, state._monthlyPlansBaseline, (finalMap)=>{
+      state.monthlyPlans = finalMap;
+      state._monthlyPlansBaseline = JSON.parse(JSON.stringify(finalMap));
+    });
   }
   async function saveNetProfitManual(){
-    return storageSetWithRetry('net-profit-manual', JSON.stringify(state.netProfitManual));
+    await saveMapMerged('net-profit-manual', state.netProfitManual, state._netProfitManualBaseline, (finalMap)=>{
+      state.netProfitManual = finalMap;
+      state._netProfitManualBaseline = JSON.parse(JSON.stringify(finalMap));
+    });
   }
   async function saveYearSummaryManual(){
-    return storageSetWithRetry('year-summary-manual', JSON.stringify(state.yearSummaryManual));
+    await saveMapMerged('year-summary-manual', state.yearSummaryManual, state._yearSummaryManualBaseline, (finalMap)=>{
+      state.yearSummaryManual = finalMap;
+      state._yearSummaryManualBaseline = JSON.parse(JSON.stringify(finalMap));
+    });
   }
   async function saveAuditLog(){
-    return storageSetWithRetry('audit-log', JSON.stringify(state.auditLog));
+    // журнал действий пополняется очень часто (почти на каждое сохранение где угодно в приложении) —
+    // здесь тоже безопасное слияние по ключу "время+роль+действие", чтобы параллельные записи
+    // от разных людей не затирали друг друга, а складывались в общую историю
+    await saveCollectionMerged('audit-log', state.auditLog, state._auditLogBaseline, (finalArr)=>{
+      finalArr.sort((a,b)=> (a.ts||'').localeCompare(b.ts||''));
+      if(finalArr.length > 1000) finalArr = finalArr.slice(-1000);
+      state.auditLog = finalArr;
+      state._auditLogBaseline = JSON.parse(JSON.stringify(finalArr));
+    }, x=>`${x.ts}|${x.role}|${x.action}|${x.detail||''}`);
   }
   async function saveEventsIntegritySnapshot(){
     return storageSetWithRetry('events-integrity-snapshot', JSON.stringify(state.eventsIntegritySnapshot));
@@ -2348,19 +2536,34 @@
     `;
   }
   async function saveClosedMonths(){
-    return storageSetWithRetry('closed-months', JSON.stringify(state.closedMonths));
+    await saveSetMerged('closed-months', state.closedMonths, state._closedMonthsBaseline, (finalArr)=>{
+      state.closedMonths = finalArr;
+      state._closedMonthsBaseline = finalArr.slice();
+    });
   }
   async function saveMarketingSpend(){
-    return storageSetWithRetry('marketing-spend', JSON.stringify(state.marketingSpend));
+    await saveCollectionMerged('marketing-spend', state.marketingSpend, state._marketingSpendBaseline, (finalArr)=>{
+      state.marketingSpend = finalArr;
+      state._marketingSpendBaseline = JSON.parse(JSON.stringify(finalArr));
+    });
   }
   async function saveSuppliers(){
-    return storageSetWithRetry('suppliers', JSON.stringify(state.suppliers));
+    await saveCollectionMerged('suppliers', state.suppliers, state._suppliersBaseline, (finalArr)=>{
+      state.suppliers = finalArr;
+      state._suppliersBaseline = JSON.parse(JSON.stringify(finalArr));
+    });
   }
   async function saveStockReceipts(){
-    return storageSetWithRetry('stock-receipts', JSON.stringify(state.stockReceipts));
+    await saveCollectionMerged('stock-receipts', state.stockReceipts, state._stockReceiptsBaseline, (finalArr)=>{
+      state.stockReceipts = finalArr;
+      state._stockReceiptsBaseline = JSON.parse(JSON.stringify(finalArr));
+    });
   }
   async function saveDaysOff(){
-    return storageSetWithRetry('days-off', JSON.stringify(state.daysOff));
+    await saveCollectionMerged('days-off', state.daysOff, state._daysOffBaseline, (finalArr)=>{
+      state.daysOff = finalArr;
+      state._daysOffBaseline = JSON.parse(JSON.stringify(finalArr));
+    });
   }
   function dayOffEntriesFor(dateStr){
     return (state.daysOff||[]).filter(x=>x.date===dateStr);
@@ -2435,10 +2638,16 @@
     };
   }
   async function saveMarketingPlans(){
-    return storageSetWithRetry('marketing-plans', JSON.stringify(state.marketingPlans));
+    await saveMapMerged('marketing-plans', state.marketingPlans, state._marketingPlansBaseline, (finalMap)=>{
+      state.marketingPlans = finalMap;
+      state._marketingPlansBaseline = JSON.parse(JSON.stringify(finalMap));
+    });
   }
   async function saveContentPosts(){
-    return storageSetWithRetry('content-posts', JSON.stringify(state.contentPosts));
+    await saveCollectionMerged('content-posts', state.contentPosts, state._contentPostsBaseline, (finalArr)=>{
+      state.contentPosts = finalArr;
+      state._contentPostsBaseline = JSON.parse(JSON.stringify(finalArr));
+    });
   }
   async function syncStockReceiptExpense(receipt){
     // каждый приход на склад отражается расходом в "Книге" (категория "Материалы"),
@@ -2487,25 +2696,46 @@
     saveAuditLog(); // не ждём — не критично для основного действия пользователя
   }
   async function saveCertificates(){
-    return storageSetWithRetry('certificates', JSON.stringify(state.certificates));
+    await saveCollectionMerged('certificates', state.certificates, state._certificatesBaseline, (finalArr)=>{
+      state.certificates = finalArr;
+      state._certificatesBaseline = JSON.parse(JSON.stringify(finalArr));
+    });
   }
   async function saveRefunds(){
-    return storageSetWithRetry('refunds', JSON.stringify(state.refunds));
+    await saveCollectionMerged('refunds', state.refunds, state._refundsBaseline, (finalArr)=>{
+      state.refunds = finalArr;
+      state._refundsBaseline = JSON.parse(JSON.stringify(finalArr));
+    });
   }
   async function saveIncomes(){
-    return storageSetWithRetry('incomes', JSON.stringify(state.incomes));
+    await saveCollectionMerged('incomes', state.incomes, state._incomesBaseline, (finalArr)=>{
+      state.incomes = finalArr;
+      state._incomesBaseline = JSON.parse(JSON.stringify(finalArr));
+    });
   }
   async function saveExpenses(){
-    return storageSetWithRetry('expenses', JSON.stringify(state.expenses));
+    await saveCollectionMerged('expenses', state.expenses, state._expensesBaseline, (finalArr)=>{
+      state.expenses = finalArr;
+      state._expensesBaseline = JSON.parse(JSON.stringify(finalArr));
+    });
   }
   async function saveLeads(){
-    return storageSetWithRetry('leads', JSON.stringify(state.leads));
+    await saveCollectionMerged('leads', state.leads, state._leadsBaseline, (finalArr)=>{
+      state.leads = finalArr;
+      state._leadsBaseline = JSON.parse(JSON.stringify(finalArr));
+    });
   }
   async function saveHostessShifts(){
-    return storageSetWithRetry('hostess-shifts', JSON.stringify(state.hostessShifts));
+    await saveMapMerged('hostess-shifts', state.hostessShifts, state._hostessShiftsBaseline, (finalMap)=>{
+      state.hostessShifts = finalMap;
+      state._hostessShiftsBaseline = JSON.parse(JSON.stringify(finalMap));
+    });
   }
   async function saveManagerShifts(){
-    return storageSetWithRetry('manager-shifts', JSON.stringify(state.managerShifts));
+    await saveMapMerged('manager-shifts', state.managerShifts, state._managerShiftsBaseline, (finalMap)=>{
+      state.managerShifts = finalMap;
+      state._managerShiftsBaseline = JSON.parse(JSON.stringify(finalMap));
+    });
   }
 
   let toastHideTimer = null;
@@ -11514,34 +11744,45 @@
     importBtn.onclick = ()=>{
       if(!pendingImportData) return;
       requireAdminUnlock(async ()=>{
-        if(Array.isArray(pendingImportData.spaces)){ state.spaces = pendingImportData.spaces; await saveSpaces(); }
-        if(Array.isArray(pendingImportData.events)){ state.events = pendingImportData.events; await saveEvents(); }
-        if(Array.isArray(pendingImportData.certificates)){ state.certificates = pendingImportData.certificates; await saveCertificates(); }
-        if(Array.isArray(pendingImportData.refunds)){ state.refunds = pendingImportData.refunds; await saveRefunds(); }
-        if(Array.isArray(pendingImportData.leads)){ state.leads = pendingImportData.leads; await saveLeads(); }
-        if(Array.isArray(pendingImportData.incomes)){ state.incomes = pendingImportData.incomes; await saveIncomes(); }
-        if(Array.isArray(pendingImportData.expenses)){ state.expenses = pendingImportData.expenses; await saveExpenses(); }
-        if(Array.isArray(pendingImportData.eventTypes)){ state.eventTypes = pendingImportData.eventTypes; await saveEventTypes(); }
-        if(Array.isArray(pendingImportData.hostsList)){ state.hostsList = pendingImportData.hostsList; await saveHostsList(); }
-        if(Array.isArray(pendingImportData.materialsCatalog)){ state.materialsCatalog = pendingImportData.materialsCatalog; await saveMaterialsCatalog(); }
-        if(Array.isArray(pendingImportData.itemSales)){ state.itemSales = pendingImportData.itemSales; await saveItemSales(); }
-        if(Array.isArray(pendingImportData.orders)){ state.orders = pendingImportData.orders; await saveOrders(); }
-        if(Array.isArray(pendingImportData.salaryAdjustments)){ state.salaryAdjustments = pendingImportData.salaryAdjustments; await saveSalaryAdjustments(); }
-        if(pendingImportData.masterPayRates){ state.masterPayRates = pendingImportData.masterPayRates; await saveMasterPayRates(); }
-        if(pendingImportData.masterPayOverrides){ state.masterPayOverrides = pendingImportData.masterPayOverrides; await saveMasterPayOverrides(); }
-        if(pendingImportData.monthlyPlans){ state.monthlyPlans = pendingImportData.monthlyPlans; await saveMonthlyPlans(); }
-        if(pendingImportData.hostessShifts){ state.hostessShifts = pendingImportData.hostessShifts; await saveHostessShifts(); }
-        if(pendingImportData.managerShifts){ state.managerShifts = pendingImportData.managerShifts; await saveManagerShifts(); }
-        if(pendingImportData.netProfitManual){ state.netProfitManual = pendingImportData.netProfitManual; await saveNetProfitManual(); }
-        if(pendingImportData.yearSummaryManual){ state.yearSummaryManual = pendingImportData.yearSummaryManual; await saveYearSummaryManual(); }
-        if(Array.isArray(pendingImportData.auditLog)){ state.auditLog = pendingImportData.auditLog; await saveAuditLog(); }
-        if(Array.isArray(pendingImportData.closedMonths)){ state.closedMonths = pendingImportData.closedMonths; await saveClosedMonths(); }
-        if(Array.isArray(pendingImportData.marketingSpend)){ state.marketingSpend = pendingImportData.marketingSpend; await saveMarketingSpend(); }
-        if(pendingImportData.marketingPlans){ state.marketingPlans = pendingImportData.marketingPlans; await saveMarketingPlans(); }
-        if(Array.isArray(pendingImportData.contentPosts)){ state.contentPosts = pendingImportData.contentPosts; await saveContentPosts(); }
-        if(Array.isArray(pendingImportData.suppliers)){ state.suppliers = pendingImportData.suppliers; await saveSuppliers(); }
-        if(Array.isArray(pendingImportData.stockReceipts)){ state.stockReceipts = pendingImportData.stockReceipts; await saveStockReceipts(); }
-        if(Array.isArray(pendingImportData.daysOff)){ state.daysOff = pendingImportData.daysOff; await saveDaysOff(); }
+        // ПОЛНАЯ замена — намеренно в обход безопасного слияния (см. saveRaw): весь смысл этой кнопки
+        // в том, чтобы заменить содержимое разделов файлом целиком, а не смёрджить с тем, что на сервере.
+        // После записи сразу обновляем и локальную "отправную точку" слияния (_xBaseline), чтобы
+        // следующее обычное сохранение в этой же вкладке не восприняло только что загруженные данные
+        // как "локальные изменения к отмене".
+        const rawReplace = async (stateKey, storageKey, baselineKey, value)=>{
+          state[stateKey] = value;
+          await saveRaw(storageKey, value);
+          state[baselineKey] = JSON.parse(JSON.stringify(value));
+        };
+        if(Array.isArray(pendingImportData.spaces)) await rawReplace('spaces', 'spaces-config', '_spacesBaseline', pendingImportData.spaces);
+        if(Array.isArray(pendingImportData.events)) await rawReplace('events', 'events', '_eventsBaseline', pendingImportData.events);
+        if(Array.isArray(pendingImportData.certificates)) await rawReplace('certificates', 'certificates', '_certificatesBaseline', pendingImportData.certificates);
+        if(Array.isArray(pendingImportData.refunds)) await rawReplace('refunds', 'refunds', '_refundsBaseline', pendingImportData.refunds);
+        if(Array.isArray(pendingImportData.leads)) await rawReplace('leads', 'leads', '_leadsBaseline', pendingImportData.leads);
+        if(Array.isArray(pendingImportData.incomes)) await rawReplace('incomes', 'incomes', '_incomesBaseline', pendingImportData.incomes);
+        if(Array.isArray(pendingImportData.expenses)) await rawReplace('expenses', 'expenses', '_expensesBaseline', pendingImportData.expenses);
+        if(Array.isArray(pendingImportData.eventTypes)) await rawReplace('eventTypes', 'event-types', '_eventTypesBaseline', pendingImportData.eventTypes);
+        if(Array.isArray(pendingImportData.hostsList)) await rawReplace('hostsList', 'hosts-list', '_hostsListBaseline', pendingImportData.hostsList);
+        if(Array.isArray(pendingImportData.materialsCatalog)) await rawReplace('materialsCatalog', 'materials-catalog', '_materialsCatalogBaseline', pendingImportData.materialsCatalog);
+        if(Array.isArray(pendingImportData.itemSales)) await rawReplace('itemSales', 'item-sales', '_itemSalesBaseline', pendingImportData.itemSales);
+        if(Array.isArray(pendingImportData.orders)) await rawReplace('orders', 'orders', '_ordersBaseline', pendingImportData.orders);
+        if(Array.isArray(pendingImportData.salaryAdjustments)) await rawReplace('salaryAdjustments', 'salary-adjustments', '_salaryAdjustmentsBaseline', pendingImportData.salaryAdjustments);
+        if(pendingImportData.masterPayRates) await rawReplace('masterPayRates', 'master-pay-rates', '_masterPayRatesBaseline', pendingImportData.masterPayRates);
+        if(pendingImportData.masterPayOverrides) await rawReplace('masterPayOverrides', 'master-pay-overrides', '_masterPayOverridesBaseline', pendingImportData.masterPayOverrides);
+        if(pendingImportData.monthlyPlans) await rawReplace('monthlyPlans', 'monthly-plans', '_monthlyPlansBaseline', pendingImportData.monthlyPlans);
+        if(pendingImportData.hostessShifts) await rawReplace('hostessShifts', 'hostess-shifts', '_hostessShiftsBaseline', pendingImportData.hostessShifts);
+        if(pendingImportData.managerShifts) await rawReplace('managerShifts', 'manager-shifts', '_managerShiftsBaseline', pendingImportData.managerShifts);
+        if(pendingImportData.netProfitManual) await rawReplace('netProfitManual', 'net-profit-manual', '_netProfitManualBaseline', pendingImportData.netProfitManual);
+        if(pendingImportData.yearSummaryManual) await rawReplace('yearSummaryManual', 'year-summary-manual', '_yearSummaryManualBaseline', pendingImportData.yearSummaryManual);
+        if(Array.isArray(pendingImportData.auditLog)) await rawReplace('auditLog', 'audit-log', '_auditLogBaseline', pendingImportData.auditLog);
+        if(Array.isArray(pendingImportData.closedMonths)) await rawReplace('closedMonths', 'closed-months', '_closedMonthsBaseline', pendingImportData.closedMonths);
+        if(Array.isArray(pendingImportData.marketingSpend)) await rawReplace('marketingSpend', 'marketing-spend', '_marketingSpendBaseline', pendingImportData.marketingSpend);
+        if(pendingImportData.marketingPlans) await rawReplace('marketingPlans', 'marketing-plans', '_marketingPlansBaseline', pendingImportData.marketingPlans);
+        if(Array.isArray(pendingImportData.contentPosts)) await rawReplace('contentPosts', 'content-posts', '_contentPostsBaseline', pendingImportData.contentPosts);
+        if(Array.isArray(pendingImportData.suppliers)) await rawReplace('suppliers', 'suppliers', '_suppliersBaseline', pendingImportData.suppliers);
+        if(Array.isArray(pendingImportData.stockReceipts)) await rawReplace('stockReceipts', 'stock-receipts', '_stockReceiptsBaseline', pendingImportData.stockReceipts);
+        if(Array.isArray(pendingImportData.daysOff)) await rawReplace('daysOff', 'days-off', '_daysOffBaseline', pendingImportData.daysOff);
+        if(Array.isArray(pendingImportData.customExpenseCategories)) await rawReplace('customExpenseCategories', 'custom-expense-categories', '_customExpenseCategoriesBaseline', pendingImportData.customExpenseCategories);
         pendingImportData = null;
         recordAction('Данные восстановлены');
         state.modal = null;
@@ -16179,7 +16420,6 @@
       await syncEventPaymentsToBook(updated);
       const dayEvts = state.events.filter(e=>e.date===updated.date && e.spaceId===updated.spaceId);
       const warns = computeGapWarnings(dayEvts);
-      recordAction('Мероприятие сохранено');
       state.modal = null; overlay.remove(); render();
       if(warns[updated.id]){
         const w = warns[updated.id];
