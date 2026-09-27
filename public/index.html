@@ -11330,6 +11330,15 @@
             <div id="import-status" style="font-size:12.5px; color: var(--ink-soft); margin-top:8px;"></div>
             <button class="btn btn-danger" id="btn-do-import" style="display:none; margin-top:10px; background:var(--danger); color:#fff;">Заменить текущие данные</button>
           </div>
+
+          <div style="border-top:1px solid var(--line); margin-top:6px; padding-top:16px;">
+            <label style="display:block; font-size:11.5px; font-family: var(--font-mono); color: var(--ink-soft); margin-bottom:8px;">Добрать недостающие мероприятия из файла (требует иной доступ)</label>
+            <div style="font-size:12px;color:var(--ink-soft);margin-bottom:10px;">Безопасный режим: сравнивает мероприятия из выбранного файла (бэкап/снимок) с текущими и добавляет только те, которых сейчас нет. Ничего не заменяет и не удаляет — остальные данные (в т.ч. чужие правки) не трогаются.</div>
+            <input type="file" id="f-import-missing" accept="application/json" style="font-size:13px;">
+            <div id="import-missing-status" style="font-size:12.5px; color: var(--ink-soft); margin-top:8px;"></div>
+            <div id="import-missing-list" style="margin-top:10px;"></div>
+            <button class="btn btn-danger" id="btn-do-import-missing" style="display:none; margin-top:10px; background:var(--danger); color:#fff;">Добавить отмеченные мероприятия</button>
+          </div>
         </div>
       </div>
     `;
@@ -11537,6 +11546,72 @@
         recordAction('Данные восстановлены');
         state.modal = null;
         render();
+      });
+    };
+
+    // ---------- добор недостающих мероприятий (безопасное добавление, без замены) ----------
+    const missingFileInput = overlay.querySelector('#f-import-missing');
+    const missingStatusEl = overlay.querySelector('#import-missing-status');
+    const missingListEl = overlay.querySelector('#import-missing-list');
+    const missingBtn = overlay.querySelector('#btn-do-import-missing');
+    let pendingMissingEvents = [];
+
+    if(missingFileInput) missingFileInput.onchange = ()=>{
+      const file = missingFileInput.files[0];
+      if(!file) return;
+      const reader = new FileReader();
+      reader.onload = ()=>{
+        try{
+          const data = JSON.parse(reader.result);
+          if(!Array.isArray(data.events)) throw new Error('bad shape');
+          const currentIds = new Set(state.events.map(e=>e.id));
+          const missing = data.events.filter(e=> e && e.id && !currentIds.has(e.id));
+          pendingMissingEvents = missing;
+          if(!missing.length){
+            missingStatusEl.textContent = `Файл прочитан (мероприятий: ${data.events.length}, дата экспорта: ${data.exportedAt ? new Date(data.exportedAt).toLocaleString('ru-RU') : '—'}). Все мероприятия из файла уже есть в текущих данных — добавлять нечего.`;
+            missingStatusEl.style.color = 'var(--ink-soft)';
+            missingListEl.innerHTML = '';
+            missingBtn.style.display = 'none';
+            return;
+          }
+          missingStatusEl.textContent = `Файл прочитан (дата экспорта: ${data.exportedAt ? new Date(data.exportedAt).toLocaleString('ru-RU') : '—'}). Найдено мероприятий, которых нет в текущих данных: ${missing.length}. Отметьте, что добавить:`;
+          missingStatusEl.style.color = 'var(--ink-soft)';
+          missingListEl.innerHTML = missing.map((e,i)=>{
+            const dateLabel = e.date ? formatDateText(e.date) : '—';
+            const who = e.guestName && e.guestName !== '-' ? e.guestName : (e.companyName || '');
+            return `<label style="display:flex; gap:8px; align-items:flex-start; font-size:12.5px; padding:6px 0; border-bottom:1px solid var(--line);">
+              <input type="checkbox" class="missing-ev-check" data-idx="${i}" checked style="margin-top:2px;">
+              <span><b>${escapeHtml(dateLabel)} ${escapeHtml(e.time||'')}</b> — ${escapeHtml(e.title||'без названия')}${e.product?` (${escapeHtml(e.product)})`:''}, ведёт: ${escapeHtml(e.host||'—')}${who?`, гость: ${escapeHtml(who)}`:''}</span>
+            </label>`;
+          }).join('');
+          missingBtn.style.display = 'inline-block';
+        }catch(e){
+          pendingMissingEvents = [];
+          missingStatusEl.textContent = 'Не удалось прочитать файл — это не корректный JSON-экспорт этого приложения.';
+          missingStatusEl.style.color = 'var(--danger)';
+          missingListEl.innerHTML = '';
+          missingBtn.style.display = 'none';
+        }
+      };
+      reader.readAsText(file);
+    };
+
+    if(missingBtn) missingBtn.onclick = ()=>{
+      const checked = [...overlay.querySelectorAll('.missing-ev-check')].filter(c=>c.checked).map(c=>parseInt(c.dataset.idx));
+      const toAdd = pendingMissingEvents.filter((e,i)=> checked.includes(i));
+      if(!toAdd.length) return;
+      requireAdminUnlock(async ()=>{
+        const currentIds = new Set(state.events.map(e=>e.id));
+        const reallyAdded = toAdd.filter(e=>!currentIds.has(e.id));
+        state.events = state.events.concat(reallyAdded);
+        await saveEvents();
+        reallyAdded.forEach(e=>{
+          recordAction('Мероприятие восстановлено из файла', `«${e.title||'без названия'}» — ${e.date||''} ${e.time||''}`.trim());
+        });
+        pendingMissingEvents = [];
+        state.modal = null;
+        render();
+        showGapWarningBanner(`Добавлено мероприятий: ${reallyAdded.length}.`);
       });
     };
   }
@@ -15776,6 +15851,7 @@
       }
       showConfirmDeletePopup(`Удалить мероприятие «${escapeHtml(state.modal.event.title||'без названия')}»? Это уберёт и все связанные данные (платежи, себестоимость, привязанные сертификаты). Действие необратимо.`, async ()=>{
       const eventToDelete = state.modal.event;
+      recordAction('Мероприятие удалено', `«${eventToDelete.title||'без названия'}» — ${eventToDelete.date||''} ${eventToDelete.time||''}`.trim());
       state.events = state.events.filter(x=>x.id !== eventToDelete.id);
       // восстанавливаем остатки материалов, списанных этим мероприятием
       let catalogChanged = false;
@@ -16059,6 +16135,7 @@
       };
       const idx = state.events.findIndex(x=>x.id===updated.id);
       const previousMaterialsItems = idx >= 0 ? (state.events[idx].materialsItems || []) : [];
+      recordAction(idx >= 0 ? 'Мероприятие изменено' : 'Мероприятие создано', `«${updated.title||'без названия'}» — ${updated.date||''} ${updated.time||''}`.trim());
       if(idx >= 0) state.events[idx] = updated; else state.events.push(updated);
       if(!state.modal.keepAll) state.activeSpaceId = updated.spaceId;
 
