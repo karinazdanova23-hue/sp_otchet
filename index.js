@@ -281,20 +281,6 @@ app.post('/api/push/send', async (req, res) => {
   }
 });
 
-// статический фронтенд
-app.use(express.static(path.join(__dirname, 'public'), {
-  setHeaders: (res, filePath) => {
-    // index.html — код всего приложения, он должен обновляться сразу же после каждого деплоя,
-    // а не браться из кэша браузера на телефонах сотрудников
-    if (filePath.endsWith('index.html') || filePath.endsWith('sw.js')) {
-      res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
-    }
-  },
-}));
-app.get('*', (req, res) => {
-  res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
-  res.sendFile(path.join(__dirname, 'public', 'index.html'));
-});
 
 // --- Сборка и отправка полного бэкапа на почту раз в сутки ---
 
@@ -472,6 +458,21 @@ app.get('/api/backup/snapshots/:slot', async (req, res) => {
     console.error('GET /api/backup/snapshots/:slot error:', err);
     res.status(500).json({ error: 'read_failed' });
   }
+});
+
+// статический фронтенд
+app.use(express.static(path.join(__dirname, 'public'), {
+  setHeaders: (res, filePath) => {
+    // index.html — код всего приложения, он должен обновляться сразу же после каждого деплоя,
+    // а не браться из кэша браузера на телефонах сотрудников
+    if (filePath.endsWith('index.html') || filePath.endsWith('sw.js')) {
+      res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
+    }
+  },
+}));
+app.get('*', (req, res) => {
+  res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
+  res.sendFile(path.join(__dirname, 'public', 'index.html'));
 });
 
 app.listen(PORT, () => {
