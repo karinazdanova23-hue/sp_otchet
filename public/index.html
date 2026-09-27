@@ -20,29 +20,29 @@
 
 <style>
   :root{
-    --paper:#EDE7DC;
-    --paper-2:#E3DBCC;
-    --ink:#2A2520;
-    --ink-soft:#6B6156;
-    --line: rgba(42,37,32,0.14);
-    --line-strong: rgba(42,37,32,0.28);
-    --accent:#3D4F5C;
-    --accent-2:#3D4F5C;
-    --white:#FBF9F4;
-    --danger:#A34A3E;
+    --paper:#F2ECDD;
+    --paper-2:#C9BCA0;
+    --ink:#171512;
+    --ink-soft:#6B6656;
+    --line: rgba(0,0,0,0.14);
+    --line-strong: rgba(0,0,0,0.30);
+    --accent:#75804F;
+    --accent-2:#E8B84B;
+    --white:#FFFFFF;
+    --danger:#A3402F;
 
-    --glaze-1:#C08A3E;
-    --glaze-2:#8B5D6B;
-    --glaze-3:#6E8B6A;
-    --glaze-4:#4A7C82;
+    --glaze-1:#E8B84B;
+    --glaze-2:#75804F;
+    --glaze-3:#8C8C8C;
+    --glaze-4:#171512;
 
-    --status-green:#5C7A4A;
-    --status-green-bg:#5C7A4A;
+    --status-green:#75804F;
+    --status-green-bg:#75804F;
     --status-red:#A3402F;
     --status-red-bg:#A3402F;
-    --status-blue:#3D6FA8;
-    --status-purple:#7A5296;
-    --status-cyan:#4FA8C9;
+    --status-blue:#5A6E86;
+    --status-purple:#8C8C8C;
+    --status-cyan:#E8B84B;
 
     --radius: 3px;
     --font-display: 'Fraunces', serif;
@@ -176,13 +176,13 @@
   /* ---------- calendar ---------- */
   .cal-nav{
     display:flex; align-items:center; justify-content: space-between;
-    margin-bottom: 14px;
+    margin-bottom: 14px; flex-wrap: wrap; gap: 10px 14px;
   }
   .cal-nav .month-label{
     font-family: var(--font-display); font-size: 21px; font-weight: 600;
     text-transform: capitalize;
   }
-  .cal-nav-btns{ display:flex; gap:8px; align-items:center;}
+  .cal-nav-btns{ display:flex; gap:8px; align-items:center; flex-wrap: wrap; min-width:0; }
   .nav-btn{
     border: 1px solid var(--line-strong); background: var(--white);
     width: 32px; height: 32px; border-radius: var(--radius);
@@ -197,13 +197,19 @@
   }
   .today-btn:hover{ color: var(--ink); border-color: var(--ink);}
 
+  /* сетка календаря всегда ровно по ширине своего блока (7 колонок по 1fr, без минимальной ширины) —
+     воскресенье (последняя колонка) поэтому всегда видно на экране целиком, без горизонтальной прокрутки,
+     при любой ширине окна браузера и любом масштабе страницы; длинные названия мероприятий обрезаются
+     многоточием внутри колонки (см. .evt-title), а не раздувают её */
+  .cal-grid-wrap{ overflow-x: auto; width: 100%; }
   .cal-grid{
-    display:grid; grid-template-columns: repeat(7, 1fr);
+    display:grid; grid-template-columns: repeat(7, minmax(0, 1fr));
     border-top: 1px solid var(--line-strong); border-left: 1px solid var(--line-strong);
     background: var(--line-strong);
     gap: 1px;
     border-radius: var(--radius);
     overflow: hidden;
+    width: 100%;
   }
   .cal-dow{
     background: var(--paper-2); padding: 7px 9px; font-size: 11px;
@@ -214,6 +220,7 @@
     background: var(--white); min-height: 104px; padding: 7px 8px;
     cursor:pointer; position:relative; transition: background .12s ease;
     display:flex; flex-direction:column; gap:4px;
+    min-width: 0; /* иначе длинные названия мероприятий раздувают колонку и сетка вылезает за экран */
   }
   .cal-cell:hover{ background: #F5F1E8; }
   .cal-cell.other-month{ background: var(--paper); opacity: 0.55; }
@@ -221,19 +228,32 @@
   .cal-daynum{ font-family: var(--font-mono); font-size: 12.5px; color: var(--ink-soft); }
   .cal-cell.today .cal-daynum{ color: var(--ink); font-weight: 600; }
   .cal-warn-icon{ font-size: 11px; margin-left: 3px; }
+  .cal-dayoff-marks{ display:inline-flex; gap:3px; margin-left: 4px; vertical-align: middle; }
+  .cal-dayoff-x{ display:inline-flex; align-items:center; justify-content:center; width:15px; height:15px; border-radius:50%; background:var(--status-red); color:#fff; font-size:9.5px; font-weight:700; cursor:default; }
   .cal-hostess{
     font-size: 10px; color: var(--ink-soft); font-family: var(--font-mono);
     white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
     margin: -1px 0 3px;
   }
-  .cal-events{ display:flex; flex-direction:column; gap: 3px; overflow:hidden; }
+  .cal-manager{
+    font-size: 10px; color: var(--status-blue); font-family: var(--font-mono);
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+    margin: -1px 0 3px;
+  }
+  .cal-dayoff-line{
+    font-size: 10px; color: var(--status-red); font-family: var(--font-mono);
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+    margin: -1px 0 3px;
+  }
+  .cal-events{ display:flex; flex-direction:column; gap: 3px; overflow:hidden; min-width: 0; }
   .cal-evt-chip{
     font-size: 11px; padding: 2.5px 5px; border-radius: 2px;
     color: var(--white); font-weight: 500;
-    white-space: nowrap; overflow:hidden; text-overflow: ellipsis;
-    display:flex; gap:5px; align-items:baseline;
+    white-space: nowrap; overflow:hidden;
+    display:flex; gap:5px; align-items:baseline; min-width: 0;
   }
-  .cal-evt-chip .t{ font-family: var(--font-mono); font-size: 10px; opacity: 0.9; }
+  .cal-evt-chip .t{ font-family: var(--font-mono); font-size: 10px; opacity: 0.9; flex-shrink: 0; }
+  .cal-evt-chip .evt-title{ overflow:hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
   .cal-more{ font-size: 10.5px; color: var(--ink-soft); font-family: var(--font-mono); padding-left: 2px; }
   .chip-dot{
     width: 6px; height: 6px; border-radius: 50%; flex-shrink: 0;
@@ -339,7 +359,7 @@
   .cert-badge.in_progress{ background: #FBEFD9; color: #8A5A1E; }
   .cert-badge.partial{ background: #DCE7F0; color: var(--accent); }
   .cert-badge.used{ background: #E3EEE0; color: var(--status-green); }
-  .cert-badge.refunded{ background: #E3EEE0; color: var(--status-green); }
+  .cert-badge.refunded{ background: #F3E1DE; color: var(--status-red); }
 
   .cert-subtabs{ display:flex; flex-wrap:wrap; gap:2px; background: var(--paper-2); border: 1px solid var(--line-strong); border-radius: var(--radius); padding: 3px; margin-bottom: 18px; width:100%; max-width:fit-content; }
   .cert-subtabs button{ border:none; background:transparent; padding: 8px 16px; font-size: 13px; font-weight: 500; color: var(--ink-soft); cursor:pointer; border-radius:2px; }
@@ -354,6 +374,17 @@
   .refund-row .cell{ font-size: 13px; }
   .refund-row .amount{ font-family: var(--font-mono); font-size: 13px; }
   .refund-row .reason{ font-size: 12px; color: var(--ink-soft); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+
+  /* ---------- закупки (поставщики + остатки) ---------- */
+  .proc-supplier-row{ grid-template-columns: 1fr 1fr 160px 60px 1fr 1.3fr; }
+  .proc-receipt-row{ grid-template-columns: 100px 1fr 90px 100px 1fr 1.2fr; }
+  .proc-row{
+    display:grid; grid-template-columns: 1fr 100px 120px 140px 130px;
+    align-items:center; gap: 12px; padding: 10px 4px;
+    border-bottom: 1px solid var(--line); font-size: 13px;
+  }
+  .proc-row.head{ font-size: 11px; color: var(--ink-soft); font-family: var(--font-mono); text-transform: uppercase; letter-spacing: 0.03em; border-bottom: 1px solid var(--line-strong); padding-bottom: 8px; }
+  .proc-row-6{ grid-template-columns: 1fr 90px 70px 110px 130px 110px; }
 
   .lead-row{
     display:grid; grid-template-columns: 90px 90px 90px 80px 90px 80px 90px 40px;
@@ -447,6 +478,7 @@
   .day-evt .left .time{ font-family: var(--font-mono); font-size: 12.5px; color: var(--ink-soft); }
   .day-evt .left .title{ font-size: 14px; font-weight: 500; margin-top: 2px; }
   .day-evt .left .host{ font-size: 12px; color: var(--ink-soft); margin-top: 2px; }
+  .day-evt .left .notes{ font-size: 12px; color: var(--ink-soft); margin-top: 2px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
   .quick-host-btn{
     flex-shrink:0; border: 1px solid var(--line-strong); background: var(--white);
     padding: 6px 10px; border-radius: var(--radius); font-size: 11.5px; color: var(--ink-soft);
@@ -568,11 +600,11 @@
   .shift-row .shift-time{ font-family: var(--font-mono); font-size: 12.5px; color: var(--ink-soft); min-width: 100px; }
   .shift-row .shift-name{ flex:1; font-size: 13.5px; font-weight: 500; }
   .shift-row .shift-name.empty{ color: var(--ink-soft); font-weight: 400; font-style: italic; }
-  .shift-edit-btn{
+  .shift-edit-btn, .manager-shift-edit-btn{
     border: 1px solid var(--line-strong); background: var(--white); border-radius: var(--radius);
     padding: 4px 9px; font-size: 11px; color: var(--ink-soft); cursor:pointer; font-family: var(--font-mono);
   }
-  .shift-edit-btn:hover{ border-color: var(--ink); color: var(--ink); }
+  .shift-edit-btn:hover, .manager-shift-edit-btn:hover{ border-color: var(--ink); color: var(--ink); }
   .gap-warning{
     font-size: 11.5px; color: #8A5A1E; background: #FBEFD9; border: 1px solid #E8CE9E;
     border-radius: 3px; padding: 5px 9px; margin: -2px 0 6px; font-family: var(--font-mono);
@@ -631,13 +663,59 @@
   }
 
   @media (max-width: 620px){
-    .app{ padding: 18px 14px 60px; }
+    .app{ padding: 14px 12px 60px; }
     .cal-cell{ min-height: 74px; padding: 5px 5px; }
     .host-row{ grid-template-columns: 1fr; gap: 4px; }
+
+    /* ---------- поля ввода: минимум 16px, иначе iOS Safari сам зумит страницу при фокусе на поле ---------- */
+    .field input, .field select, .field textarea,
+    .mi-row input, .pk-row input, .et-row .et-name, .et-row .et-duration,
+    #global-search-input, input[type="text"], input[type="number"], input[type="date"],
+    input[type="time"], input[type="tel"], input[type="password"], select, textarea{
+      font-size: 16px;
+    }
     .host-row .date, .host-row .time{ display:inline; margin-right: 10px; }
     .row2{ grid-template-columns: 1fr; }
     .today-remain-alert, .today-details{ margin-left: 0; margin-top: 10px; }
     .today-page{ padding: 16px 12px 40px; }
+
+    /* ---------- header / toolbar: compact on phones ---------- */
+    .app-header{ align-items: stretch; padding-bottom: 12px; margin-bottom: 14px; gap: 10px; }
+    .app-title{ font-size: 22px; }
+    .app-sub{ display: none; }
+    .header-actions{ width: 100%; gap: 8px; }
+    .global-search-wrap{ width: 100%; order: -1; }
+    #global-search-input{ width: 100% !important; box-sizing: border-box; }
+
+    .view-switch{
+      flex-wrap: nowrap; overflow-x: auto; -webkit-overflow-scrolling: touch;
+      max-width: 100%; width: 100%; scrollbar-width: none;
+    }
+    .view-switch::-webkit-scrollbar{ display:none; }
+    .view-switch button{ flex-shrink: 0; padding: 7px 12px; font-size: 12.5px; white-space: nowrap; }
+
+    .app-header .lock-btn{ padding: 7px 10px; font-size: 11.5px; }
+
+    /* ---------- calendar nav ---------- */
+    .cal-nav{ margin-bottom: 10px; }
+    .cal-nav .month-label{ font-size: 17px; }
+    .cal-dow{ padding: 5px 2px; font-size: 9.5px; }
+    .cal-evt-chip{ font-size: 10px; padding: 2px 4px; }
+    .cal-daynum{ font-size: 11px; }
+
+    /* ---------- analytics stat rows ---------- */
+    .stat-row .stat-label{ width: 118px; font-size: 12px; }
+    .host-expand{ margin-left: 0; }
+
+    /* ---------- summary cards ---------- */
+    .summary-card{ padding: 10px 14px; min-width: 100px; }
+
+    /* ---------- закупки: таблица остатков в один столбец на телефоне ---------- */
+    .proc-row{ grid-template-columns: 1fr 1fr; grid-auto-rows:auto; row-gap:4px; gap:6px 12px; }
+    .proc-row.head{ display:none; }
+    .proc-row > div:nth-child(1){ grid-column: 1 / -1; font-size: 13.5px; }
+    .proc-row > div::before{ content: attr(data-label); display:block; font-size:10px; color:var(--ink-soft); font-family:var(--font-mono); text-transform:uppercase; }
+    .proc-row > div:nth-child(1)::before{ content:none; }
   }
 </style>
 </head>
@@ -11202,6 +11280,12 @@
             <div id="auto-backup-list">${renderAutoBackupList()}</div>
           </div>
 
+          <div style="border-top:1px solid var(--line); margin-top:6px; padding-top:14px;">
+            <label style="display:block; font-size:11.5px; font-family: var(--font-mono); color: var(--ink-soft); margin-bottom:8px;">Снимки каждые 15 минут — последние 24 часа</label>
+            <div style="font-size:12px;color:var(--ink-soft);margin-bottom:8px;">Сервер сам сохраняет снимок базы каждые 15 минут — для случая, если нужно откатиться на конкретный момент, а не только на начало дня. Список ниже подгружается с сервера.</div>
+            <div id="snapshot-list" style="font-size:12.5px;color:var(--ink-soft);">Загрузка списка…</div>
+          </div>
+
           ${state.currentRole === 'owner' ? `
           <div style="border-top:1px solid var(--line); margin-top:6px; padding-top:14px;">
             <label style="display:block; font-size:11.5px; font-family: var(--font-mono); color: var(--ink-soft); margin-bottom:8px;">Push-уведомления — порог крупного возврата</label>
@@ -11273,6 +11357,38 @@
         btn.textContent = originalText; btn.disabled = false;
       };
     });
+    (async ()=>{
+      const listEl = overlay.querySelector('#snapshot-list');
+      if(!listEl) return;
+      try{
+        const res = await fetch('/api/backup/snapshots');
+        if(!res.ok) throw new Error('bad status');
+        const data = await res.json();
+        const snaps = (data.snapshots || []);
+        if(!listEl.isConnected) return; // модалку уже закрыли, пока грузился список
+        if(!snaps.length){
+          listEl.innerHTML = '<div style="color:var(--ink-soft);">Пока нет ни одного снимка — первый появится в течение 15 минут после запуска сервера.</div>';
+          return;
+        }
+        listEl.innerHTML = snaps.map(s=>{
+          const d = new Date(s.savedAt);
+          const dateLabel = isNaN(d.getTime()) ? s.savedAt : d.toLocaleString('ru-RU', {day:'2-digit', month:'2-digit', hour:'2-digit', minute:'2-digit'});
+          return `<div class="stat-row"><div class="stat-label">${escapeHtml(dateLabel)}</div><button type="button" class="btn btn-ghost btn-dl-snapshot" data-slot="${s.slot}" style="font-size:11.5px;padding:4px 10px;">Скачать</button></div>`;
+        }).join('');
+        listEl.querySelectorAll('.btn-dl-snapshot').forEach(btn=>{
+          btn.onclick = ()=>{
+            const a = document.createElement('a');
+            a.href = '/api/backup/snapshots/' + btn.dataset.slot;
+            a.download = '';
+            document.body.appendChild(a);
+            a.click();
+            a.remove();
+          };
+        });
+      }catch(e){
+        if(listEl.isConnected) listEl.innerHTML = '<div style="color:var(--danger);">Не удалось загрузить список снимков — попробуйте обновить страницу.</div>';
+      }
+    })();
     const pushThresholdBtn = overlay.querySelector('#btn-save-push-threshold');
     if(pushThresholdBtn) pushThresholdBtn.onclick = async ()=>{
       const val = Number(overlay.querySelector('#push-threshold-input').value) || 0;
