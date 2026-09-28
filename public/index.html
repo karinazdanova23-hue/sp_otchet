@@ -1308,6 +1308,10 @@
   // поэтому им тоже открыт раздел "Для менеджеров" — но внутри него видны только вкладки
   // "Сертификаты" и "Изделия" (без корректировок ЗП, возвратов, конверсии, заказов и выдачи — см. renderCertificatesView)
   function roleCanAccessCertificatesView(role){ return roleCanAccessManagersTab(role) || role === 'hostess'; }
+  // быстрое добавление нового вида мероприятия прямо из формы (поле "Название") — по просьбе владелицы
+  // доступно только менеджерам и старшему администратору, но не обычным администраторам (роль "hostess")
+  // и не другим ролям; полная панель "Виды мероприятий" с себестоимостью по-прежнему только у isAdminLevel
+  function roleCanQuickAddEventType(role){ return ['manager','admin'].includes(role); }
   // "Закупки" — рабочий инструмент старшего администратора (закуп материалов) и руководителя
   function roleCanAccessProcurement(role){ return ['admin','owner'].includes(role); }
   // отмечать себя выходным в календаре могут менеджеры, ассистент, старший администратор и руководитель —
@@ -8530,7 +8534,12 @@
       const closeBtn = overlay.querySelector('.modal-close');
       if(closeBtn) closeBtn.onclick = ()=>{ overlay.remove(); state.modal = {type:'hosts-list'}; render(); };
     } else {
-      overlay.addEventListener('click', (e)=>{ if(e.target === overlay){ state.modal = null; state.pendingAction = null; draftEventTypes = null; draftHostsList = null; draftPayRates = null; draftMaterialsCatalog = null; overlay.remove(); } });
+      // у мероприятия — клик мимо окна (по тёмному фону) больше не закрывает его и не сбрасывает
+      // несохранённые правки; закрыть можно только явно — крестиком или «Отмена». Для всех остальных
+      // модалок клик по фону работает как раньше.
+      if(state.modal.type !== 'event'){
+        overlay.addEventListener('click', (e)=>{ if(e.target === overlay){ state.modal = null; state.pendingAction = null; draftEventTypes = null; draftHostsList = null; draftPayRates = null; draftMaterialsCatalog = null; overlay.remove(); } });
+      }
       const closeBtn = overlay.querySelector('.modal-close');
       if(closeBtn) closeBtn.onclick = ()=>{ state.modal = null; state.pendingAction = null; draftEventTypes = null; draftHostsList = null; draftPayRates = null; draftMaterialsCatalog = null; overlay.remove(); };
     }
@@ -14846,8 +14855,9 @@
             <select id="f-title">
               <option value="" ${!ev.title?'selected':''}>— выберите вид —</option>
               ${Array.from(new Set([...(ev.title?[ev.title]:[]), ...state.eventTypes.map(t=>t.name)])).sort((a,b)=>a.localeCompare(b,'ru')).map(t=>`<option value="${escapeHtml(t)}" ${ev.title===t?'selected':''}>${escapeHtml(t)}</option>`).join('')}
+              ${roleCanQuickAddEventType(state.currentRole) ? '<option value="__add_new__">+ Добавить новый вид…</option>' : ''}
             </select>
-            <div style="font-size:11px;color:var(--ink-soft);margin-top:4px;">Нет нужного вида в списке? Добавьте его в «📋 Виды мероприятий» в шапке — тогда он появится здесь.</div>
+            <div style="font-size:11px;color:var(--ink-soft);margin-top:4px;">${roleCanQuickAddEventType(state.currentRole) ? 'Нет нужного вида в списке? Выберите «+ Добавить новый вид…» прямо здесь — он сразу появится в списке. Настроить для него статьи расхода материалов можно позже в «📋 Виды мероприятий» (доступно администраторам).' : 'Нет нужного вида в списке? Добавьте его в «📋 Виды мероприятий» в шапке — тогда он появится здесь.'}</div>
           </div>
           <div class="field">
             <label>Направление (для фильтра в календаре)</label>
@@ -14955,7 +14965,7 @@
                 <input type="number" id="cert-attach-amount" placeholder="Сумма" step="100" style="width:110px;border:1px solid var(--line-strong);border-radius:var(--radius);padding:8px 9px;font-family:var(--font-body);font-size:13px;background:var(--paper);">
                 <button type="button" class="btn btn-ghost" id="btn-attach-cert" style="white-space:nowrap;">+ Добавить</button>
               </div>
-              <datalist id="cert-attach-options">${state.certificates.filter(c=>certRemaining(c)>0).map(c=>`<option value="${escapeHtml(certPickerLabel(c))}">`).join('')}</datalist>
+              <datalist id="cert-attach-options">${state.certificates.filter(c=>certRemaining(c)>0).sort((a,b)=>(b.saleDate||'').localeCompare(a.saleDate||'')).map(c=>`<option value="${escapeHtml(certPickerLabel(c))}">`).join('')}</datalist>
               <div style="font-size:11px;color:var(--ink-soft);margin-top:4px;">Если один номер встречается несколько раз (например, после импорта) — выбирайте по дате, показанной в списке.</div>
               <div id="cert-attach-hint" style="font-size:11px;color:var(--ink-soft);margin-top:4px;"></div>
             </div>
@@ -15083,6 +15093,32 @@
 
     const titleInput = overlay.querySelector('#f-title');
     const durationInput = overlay.querySelector('#f-duration');
+    if(titleInput){
+      titleInput.addEventListener('change', async ()=>{
+        if(titleInput.value !== '__add_new__') return;
+        if(!roleCanQuickAddEventType(state.currentRole)){
+          titleInput.value = (state.modal.event && state.modal.event.title) || '';
+          return;
+        }
+        const name = (window.prompt('Название нового вида мероприятия:', '') || '').trim();
+        const addOption = titleInput.querySelector('option[value="__add_new__"]');
+        if(!name){
+          titleInput.value = (state.modal.event && state.modal.event.title) || '';
+          return;
+        }
+        const existing = state.eventTypes.find(t=>t.name.toLowerCase() === name.toLowerCase());
+        if(!existing){
+          state.eventTypes = [...state.eventTypes, {name, duration:120, materialRules:[]}];
+          await saveEventTypes();
+        }
+        const newOption = document.createElement('option');
+        newOption.value = name; newOption.textContent = name;
+        titleInput.insertBefore(newOption, addOption);
+        titleInput.value = name;
+        titleInput.dispatchEvent(new Event('input'));
+        showToast(existing ? 'Такой вид уже есть в списке — выбрала его' : `Добавлен новый вид «${name}»`);
+      });
+    }
     if(titleInput && durationInput){
       titleInput.addEventListener('input', ()=>{
         const match = state.eventTypes.find(t=>t.name.toLowerCase() === titleInput.value.trim().toLowerCase());
@@ -15949,7 +15985,7 @@
     function refreshCertAttachOptions(){
       const list = overlay.querySelector('#cert-attach-options');
       if(!list) return;
-      const certs = state.certificates.filter(c=>certRemaining(c)>0);
+      const certs = state.certificates.filter(c=>certRemaining(c)>0).sort((a,b)=>(b.saleDate||'').localeCompare(a.saleDate||''));
       certAttachLabelToId = {};
       certs.forEach(c=>{ certAttachLabelToId[certPickerLabel(c)] = c.id; });
       list.innerHTML = certs.map(c=>`<option value="${escapeHtml(certPickerLabel(c))}">`).join('');
