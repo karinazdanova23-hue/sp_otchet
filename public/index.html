@@ -779,6 +779,13 @@
   ];
   // вместимость по ФИКСИРОВАННОМУ id пространства (не зависит от того, как его переименовали)
   const SPACE_CAPACITY = { s1:8, s2:10, s3:14, s4:16, s5:null };
+  // ориентир по тому, что обычно проводится в каком пространстве — только подсказка при выборе
+  // пространства, ничего не блокирует (сама Карина: «приоритетно, но необязательно»)
+  const SPACE_HINTS = {
+    s2: 'Обычно здесь: духи, керамика, свечи',
+    s3: 'Обычно здесь: винная дегустация',
+    s1: 'Обычно здесь: смола, акрил, аффирмации, дофаминовые картины',
+  };
 
   const STATUS_LABEL = { confirmed: 'По расписанию', tentative: 'Частник', marketing: 'Маркетинг', offsite: 'Выезд', slot: 'Слот', cancelled: 'Отменено' };
   // ЗП менеджеров: единая на всех (не привязана к конкретному сотруднику) — оклад + проценты от выручки студии за месяц
@@ -808,7 +815,7 @@
     return fmtDate(d);
   }
 
-  const PRODUCTS = ['День рождения','Свадьба','Свидание','Девичник','Корпоратив','Детский МК','Мастер-класс','Аренда'];
+  const PRODUCTS = ['День рождения','Свадьба','Свидание','Девичник','Корпоратив','Детский МК','Мастер-класс','Аренда','Другое'];
   // продукт "Аренда" — сдаём пространство без своего мастера, поэтому ведущего можно не выбирать
   const PRODUCTS_WITHOUT_HOST = ['Аренда'];
   // условная "вместимость" месяца в мероприятиях, для % заполняемости (см. "📊 Заполняемость" и "Отчёт дня")
@@ -828,7 +835,7 @@
   const REFUND_STATUS_LABEL = { in_progress: 'В процессе', refunded: 'Возвращено' };
 
   const INCOME_OPERATIONS = ['Оплата','Предоплата','Остаток оплаты'];
-  const INCOME_PRODUCTS = [...PRODUCTS, 'Сертификат', 'Изделие', 'Заказ', 'Другое'];
+  const INCOME_PRODUCTS = [...PRODUCTS, 'Сертификат', 'Изделие', 'Заказ'];
   const INCOME_ACCOUNTS = ['Точка','Наличные','Юклиент','ЮрСчет'];
 
   const EXPENSE_CATEGORIES = ['Материалы','Инвентарь','Маркетинг','Зарплата','Аренда','Подарки','Операции','Декор','Логистика','Продукты','Типография','Косяки'];
@@ -2785,9 +2792,14 @@
     const cls = size ? ' '+size : '';
     return `<span class="space-badge${cls}" style="background:${space.hex}">${escapeHtml(space.letter || space.name.charAt(0))}</span>`;
   }
+  // слот-предложение мастера без привязки к пространству (новый формат) — не показывается в обычных
+  // списках по пространствам/«Все», а отдельной полосой «Предложения мастеров» в дне (см. renderDayModal)
+  function isUnassignedSlotProposal(e){
+    return e.status === 'slot' && !e.spaceId;
+  }
   function eventsFor(spaceId, dateStr){
     const list = spaceId === 'all'
-      ? state.events.filter(e=>e.date===dateStr)
+      ? state.events.filter(e=>e.date===dateStr && !isUnassignedSlotProposal(e))
       : state.events.filter(e=>e.spaceId===spaceId && e.date===dateStr);
     return list.sort((a,b)=> a.time.localeCompare(b.time));
   }
@@ -12218,7 +12230,6 @@
   // мастера могут сами ставить себе "Слот" — время занято, без гостя и без себестоимости —
   // но не могут создавать полноценные мероприятия (это остаётся у администрации)
   function renderQuickAddSlotModal(ev){
-    const sp = getSpace(ev.spaceId);
     return `
       <div class="modal" style="max-width:380px;">
         <div class="modal-head">
@@ -12226,13 +12237,7 @@
           <button class="modal-close">×</button>
         </div>
         <div class="modal-body">
-          <div style="font-size:11.5px;color:var(--ink-soft);margin-top:-6px;">Слот занимает время в расписании на ваше имя — без гостя и себестоимости. Остальные детали мероприятия сможет добавить администратор.</div>
-          <div class="field">
-            <label>Пространство</label>
-            <select id="qas-space">
-              ${state.spaces.filter(s=>s.id!=='s5' && s.name!=='Выезд').map(s=>`<option value="${s.id}" ${s.id===ev.spaceId?'selected':''}>${escapeHtml(s.name)}</option>`).join('')}
-            </select>
-          </div>
+          <div style="font-size:11.5px;color:var(--ink-soft);margin-top:-6px;">Слот — это предложение своей доступности: старший администратор или менеджер увидят его при формировании расписания и сами решат, в каком пространстве и для какого мероприятия его использовать. Слот не занимает конкретное место — только ваше время.</div>
           <div class="row2">
             <div class="field">
               <label>Дата</label>
@@ -12276,7 +12281,6 @@
         titleEl.scrollIntoView({block:'center', behavior:'smooth'});
         return;
       }
-      const spaceVal = overlay.querySelector('#qas-space').value;
       const dateVal = overlay.querySelector('#qas-date').value;
       const timeVal = overlay.querySelector('#qas-time').value;
       const durationVal = parseInt(overlay.querySelector('#qas-duration').value) || 60;
@@ -12293,19 +12297,19 @@
           return newStart < en && s < newEnd;
         });
         if(conflict){
-          const csp = getSpace(conflict.spaceId);
+          const csp = conflict.spaceId ? getSpace(conflict.spaceId) : null;
           const conflictEnd = timeToMinutes(conflict.time) + (Number(conflict.duration)||0);
           const endH = String(Math.floor(conflictEnd/60)).padStart(2,'0');
           const endM = String(conflictEnd%60).padStart(2,'0');
           showHostConflictPopup(
-            `Вы уже заняты в это время — «${escapeHtml(conflict.title)}» с ${conflict.time} до ${endH}:${endM} в пространстве «${escapeHtml(csp.name)}» (${formatDateText(dateVal)}).<br><br>Выберите другое время.`
+            `Вы уже заняты в это время — «${escapeHtml(conflict.title)}» с ${conflict.time} до ${endH}:${endM}${csp ? ` в пространстве «${escapeHtml(csp.name)}»` : ''} (${formatDateText(dateVal)}).<br><br>Выберите другое время.`
           );
           return;
         }
       }
 
       const newEvent = {
-        id: uid(), spaceId: spaceVal, date: dateVal, time: timeVal, duration: durationVal,
+        id: uid(), spaceId: null, date: dateVal, time: timeVal, duration: durationVal,
         guests: null, itemsCount: null, itemsCountAuto: true, masterPay: null, masterPayAuto: true,
         additionalHosts: [], guestName: '', price: null, agreedPrice: null, materialsItems: [], pickupItems: [],
         payments: [], title: titleVal, product: '', host: hostVal, dishes: '', dishesPayment: '', dishesWasher: '',
@@ -14523,6 +14527,14 @@
     const evts = eventsFor(state.activeSpaceId, dateStr);
     const warnMap = computeGapWarnings(evts);
 
+    // предложения мастеров («Слот» без пространства) на этот день — показываются отдельной полосой,
+    // видны на любой вкладке пространства, не только «Все» (см. isUnassignedSlotProposal/eventsFor)
+    const canSeeSlotProposals = ['admin','owner','manager','master'].includes(state.currentRole);
+    const dayProposals = state.events.filter(e=> e.date===dateStr && isUnassignedSlotProposal(e));
+    const slotProposals = state.currentRole === 'master'
+      ? dayProposals.filter(e=> (e.host||'').trim().toLowerCase() === (state.loggedInMasterName||'').trim().toLowerCase())
+      : dayProposals;
+
     // сводка по всему дню (все пространства), независимо от того, какая вкладка открыта
     const allDayEvts = state.events.filter(e=>e.date===dateStr);
     const dayRevenue = allDayEvts.reduce((s,e)=> s + ((e.price!==undefined&&e.price!==null&&!isNaN(e.price))?Number(e.price):0), 0);
@@ -14556,8 +14568,23 @@
           ${renderManagerShiftBlock(dateStr)}
           ${renderDaysOffBlock(dateStr)}
           ${!isAll ? `<div style="font-size:12px;color:var(--ink-soft);font-family:var(--font-mono);margin-top:-8px;display:flex;align-items:center;gap:6px;">
-            ${spaceBadge(space,'sm')}${escapeHtml(space.name)}
+            ${spaceBadge(space,'sm')}${escapeHtml(space.name)}${SPACE_HINTS[space.id] ? ` <span style="color:var(--ink-faint,var(--ink-soft));">· ${escapeHtml(SPACE_HINTS[space.id])}</span>` : ''}
           </div>` : ''}
+          ${canSeeSlotProposals && slotProposals.length ? `
+          <div style="margin:0 0 4px;">
+            <div style="font-size:11px;color:var(--ink-soft);font-family:var(--font-mono);margin-bottom:4px;">${state.currentRole==='master' ? '📣 Ваши слоты (ещё не заняты)' : '📣 Предложения мастеров — нажмите, чтобы поставить мероприятие'}</div>
+            ${slotProposals.map(e=>`
+              <div class="${state.currentRole==='master' ? 'slot-proposal-card' : 'slot-proposal-card day-evt'}" ${state.currentRole!=='master' ? `data-eid="${e.id}"` : ''} style="border:1px dashed var(--status-cyan);border-radius:var(--radius);padding:8px 10px;margin-bottom:6px;display:flex;align-items:center;justify-content:space-between;gap:8px;cursor:${state.currentRole==='master'?'default':'pointer'};">
+                <div class="left">
+                  <div class="time"><span class="chip-dot" style="background:var(--status-cyan);display:inline-block;margin-right:6px;"></span>${e.time}${e.duration?' · '+formatDuration(e.duration):''}</div>
+                  <div class="title">${escapeHtml(e.title||'Слот')}</div>
+                  <div class="host">${escapeHtml(e.host||'')}</div>
+                </div>
+                ${state.currentRole==='master' ? `<button type="button" class="slot-proposal-cancel" data-eid="${e.id}" title="Отменить слот" style="border:1px solid var(--line-strong);background:var(--white);border-radius:var(--radius);padding:4px 10px;color:var(--danger);cursor:pointer;">✕</button>` : ''}
+              </div>
+            `).join('')}
+          </div>
+          ` : ''}
           ${evts.length ? evts.map(e=>{
             const w = warnMap[e.id];
             const warnHtml = w ? `<div class="gap-warning">⚠ ${w.gap < 0 ? `Наложение по времени с «${escapeHtml(w.prevTitle)}» на ${Math.abs(w.gap)} мин` : `Перерыв с «${escapeHtml(w.prevTitle)}» всего ${w.gap} мин (меньше ${MIN_GAP_MINUTES})`}</div>` : '';
@@ -14631,6 +14658,20 @@
         render();
       };
     });
+    overlay.querySelectorAll('.slot-proposal-cancel').forEach(btn=>{
+      btn.onclick = async (ev)=>{
+        ev.stopPropagation();
+        const id = btn.dataset.eid;
+        const e = state.events.find(x=>x.id===id);
+        if(!e) return;
+        state.events = state.events.filter(x=>x.id!==id);
+        await saveEvents();
+        recordAction('Мастер отменил слот', `«${e.title||'Слот'}» — ${formatDateText(e.date)} ${e.time}`);
+        overlay.remove();
+        state.modal = {type:'day', date: dateStr};
+        render();
+      };
+    });
     overlay.querySelectorAll('.day-evt').forEach(el=>{
       el.onclick = ()=>{
         const e = state.events.find(x=>x.id===el.dataset.eid);
@@ -14685,11 +14726,10 @@
 
     const addSlotBtn = overlay.querySelector('#btn-add-slot');
     if(addSlotBtn) addSlotBtn.onclick = ()=>{
-      const defaultSpaceId = state.activeSpaceId === 'all' ? state.spaces[0].id : state.activeSpaceId;
       const keepAll = state.activeSpaceId==='all';
       overlay.remove();
       state.modal = {type:'quick-add-slot', keepAll, event:{
-        id: uid(), spaceId: defaultSpaceId, date: dateStr, time:'10:00', duration:60, title:'', host: state.loggedInMasterName || ''
+        id: uid(), spaceId: null, date: dateStr, time:'10:00', duration:60, title:'', host: state.loggedInMasterName || ''
       }};
       render();
     };
@@ -14709,6 +14749,7 @@
               <select id="f-space">
                 ${state.spaces.map(s=>`<option value="${s.id}" ${s.id===ev.spaceId?'selected':''}>${escapeHtml(s.name)}</option>`).join('')}
               </select>
+              <div id="f-space-hint" style="font-size:11px;color:var(--ink-soft);margin-top:4px;">${escapeHtml(SPACE_HINTS[ev.spaceId]||'')}</div>
             </div>
             <div class="field">
               <label>Дата</label>
@@ -15139,6 +15180,14 @@
     }
     if(guestsInput) guestsInput.addEventListener('change', checkSpaceCapacity);
     if(spaceSelect) spaceSelect.addEventListener('change', checkSpaceCapacity);
+
+    // подсказка «что обычно проводится в этом пространстве» — только текст, ничего не блокирует
+    const spaceHintEl = overlay.querySelector('#f-space-hint');
+    if(spaceSelect && spaceHintEl){
+      spaceSelect.addEventListener('change', ()=>{
+        spaceHintEl.textContent = SPACE_HINTS[spaceSelect.value] || '';
+      });
+    }
 
     if(spaceSelect) spaceSelect.addEventListener('change', ()=>{
       if(spaceSelect.value === 's5'){
