@@ -1168,6 +1168,7 @@
     salaryAdjustments: null,
     monthlyPlans: null,
     netProfitManual: null,
+    hostessBonuses: null,
     yearSummaryManual: null,
     auditLog: null,
     eventsIntegritySnapshot: null,
@@ -1476,6 +1477,11 @@
     }catch(e){ state.netProfitManual = {}; }
 
     try{
+      const hb = await window.storage.get('hostess-bonuses', true);
+      state.hostessBonuses = hb ? JSON.parse(hb.value) : {};
+    }catch(e){ state.hostessBonuses = {}; }
+
+    try{
       const ysm = await window.storage.get('year-summary-manual', true);
       state.yearSummaryManual = ysm ? JSON.parse(ysm.value) : {};
     }catch(e){ state.yearSummaryManual = {}; }
@@ -1572,6 +1578,7 @@
     state._salaryAdjustmentsBaseline = JSON.parse(JSON.stringify(state.salaryAdjustments));
     state._monthlyPlansBaseline = JSON.parse(JSON.stringify(state.monthlyPlans));
     state._netProfitManualBaseline = JSON.parse(JSON.stringify(state.netProfitManual));
+    state._hostessBonusesBaseline = JSON.parse(JSON.stringify(state.hostessBonuses));
     state._yearSummaryManualBaseline = JSON.parse(JSON.stringify(state.yearSummaryManual));
     state._auditLogBaseline = JSON.parse(JSON.stringify(state.auditLog));
     state._closedMonthsBaseline = state.closedMonths.slice();
@@ -2128,6 +2135,7 @@
       hostessShifts: state.hostessShifts,
       managerShifts: state.managerShifts,
       netProfitManual: state.netProfitManual,
+      hostessBonuses: state.hostessBonuses,
       yearSummaryManual: state.yearSummaryManual,
       auditLog: state.auditLog,
       closedMonths: state.closedMonths,
@@ -2490,6 +2498,12 @@
     await saveMapMerged('net-profit-manual', state.netProfitManual, state._netProfitManualBaseline, (finalMap)=>{
       state.netProfitManual = finalMap;
       state._netProfitManualBaseline = JSON.parse(JSON.stringify(finalMap));
+    });
+  }
+  async function saveHostessBonuses(){
+    await saveMapMerged('hostess-bonuses', state.hostessBonuses, state._hostessBonusesBaseline, (finalMap)=>{
+      state.hostessBonuses = finalMap;
+      state._hostessBonusesBaseline = JSON.parse(JSON.stringify(finalMap));
     });
   }
   async function saveYearSummaryManual(){
@@ -8782,6 +8796,8 @@
       overlay.innerHTML = renderNetProfitEditModal();
     } else if(state.modal.type === 'netprofit-calc'){
       overlay.innerHTML = renderNetProfitCalcModal();
+    } else if(state.modal.type === 'hostess-bonus-edit'){
+      overlay.innerHTML = renderHostessBonusEditModal();
     } else if(state.modal.type === 'yearsummary-edit'){
       overlay.innerHTML = renderYearSummaryEditModal();
     } else if(state.modal.type === 'certificate'){
@@ -8855,6 +8871,7 @@
     else if(state.modal.type === 'daily-report'){ attachDailyReportModalEvents(overlay); }
     else if(state.modal.type === 'netprofit-edit'){ attachNetProfitEditModalEvents(overlay); }
     else if(state.modal.type === 'netprofit-calc'){ attachNetProfitCalcModalEvents(overlay); }
+    else if(state.modal.type === 'hostess-bonus-edit'){ attachHostessBonusEditModalEvents(overlay); }
     else if(state.modal.type === 'yearsummary-edit'){ attachYearSummaryEditModalEvents(overlay); }
     else if(state.modal.type === 'certificate'){ attachCertificateModalEvents(overlay); }
     else if(state.modal.type === 'refund'){ attachRefundModalEvents(overlay); }
@@ -10848,12 +10865,59 @@
       if(!hostessAdjustmentDetails[name]) hostessAdjustmentDetails[name] = [];
       hostessAdjustmentDetails[name].push({ date: x.date, comment: x.comment||'', amount });
     });
+    // премия админам, назначенная владельцем вручную за этот месяц (видна самому админу) — учитывается во
+    // 2-й половине месяца (выплачивается по итогам месяца целиком, а не привязана к конкретному дню)
+    const hostessManualBonusesForMerge = (state.hostessBonuses && state.hostessBonuses[monthYmForItemSales]) || {};
+    Object.entries(hostessManualBonusesForMerge).forEach(([name, b])=>{
+      const amount = Number((b&&b.amount)||0);
+      if(!amount) return;
+      hostessSalary[name] = (hostessSalary[name]||0) + amount;
+      totalHostessSalary += amount;
+      hostessSalaryH2[name] = (hostessSalaryH2[name]||0) + amount;
+      totalHostessSalaryH2 += amount;
+    });
     const hostessSalaryList = Object.entries(hostessSalary).sort((a,b)=>b[1]-a[1]);
     const maxHostessSalary = Math.max(1, ...hostessSalaryList.map(x=>x[1]));
     const hostessSalaryH1List = Object.entries(hostessSalaryH1).sort((a,b)=>b[1]-a[1]);
     const hostessSalaryH2List = Object.entries(hostessSalaryH2).sort((a,b)=>b[1]-a[1]);
     const maxHostessSalaryH1 = Math.max(1, ...hostessSalaryH1List.map(x=>x[1]));
     const maxHostessSalaryH2 = Math.max(1, ...hostessSalaryH2List.map(x=>x[1]));
+
+    // Премия админам за месяц — расчётная подсказка, видна ТОЛЬКО владельцу (см. isAdminFinRestricted/
+    // state.currentRole==='owner' ниже). Формула: ((выручка месяца − выручка «Лофт» − выручка «Выезд») × 1.5%) /
+    // общее кол-во смен всех админов за месяц × кол-во смен лично этого админа. Сама премия, которую видит
+    // сам админ в своей «Моя зарплата», — это отдельное значение, которое владелец вписывает вручную
+    // (state.hostessBonuses[ym][имя]) — эта расчётная цифра лишь помогает решить, сколько вписать.
+    const hostessShiftCounts = {};
+    let totalHostessShiftsAll = 0;
+    {
+      const ySh = cursor.getFullYear(), mSh = cursor.getMonth();
+      const daysInMonthSh = new Date(ySh, mSh+1, 0).getDate();
+      for(let d=1; d<=daysInMonthSh; d++){
+        const dateStr = fmtDate(new Date(ySh, mSh, d));
+        const dayShifts = state.hostessShifts[dateStr];
+        if(!dayShifts) continue;
+        SHIFT_DEFS.forEach(s=>{
+          const entry = normalizeShiftEntry(dayShifts[s.key], s);
+          if(entry && entry.name){
+            hostessShiftCounts[entry.name] = (hostessShiftCounts[entry.name]||0) + 1;
+            totalHostessShiftsAll += 1;
+          }
+        });
+      }
+    }
+    const hostessBonusSpaceIds = state.spaces.filter(s=> s.name==='Лофт' || s.name==='Выезд').map(s=>s.id);
+    const hostessBonusBaseRevenue = Math.max(0, totalRevenueAllSources - hostessBonusSpaceIds.reduce((sum,id)=> sum + (spaceRevenue[id]||0), 0));
+    const hostessBonusPool = hostessBonusBaseRevenue * 0.015;
+    const hostessComputedBonuses = {};
+    Object.keys(hostessShiftCounts).forEach(name=>{
+      hostessComputedBonuses[name] = totalHostessShiftsAll>0 ? Math.round(hostessBonusPool / totalHostessShiftsAll * hostessShiftCounts[name]) : 0;
+    });
+    const hostessManualBonuses = (state.hostessBonuses && state.hostessBonuses[monthYmForItemSales]) || {};
+    const hostessBonusNames = Array.from(new Set([...HOSTESS_LIST, ...Object.keys(hostessShiftCounts), ...Object.keys(hostessManualBonuses)]));
+    // кэш для модалки "Вписать премию" (attachHostessBonusEditModalEvents/renderHostessBonusEditModal) —
+    // они не имеют доступа к локальным переменным renderAnalytics(), поэтому берут расчётные цифры отсюда
+    state._hostessBonusRef = { ym: monthYmForItemSales, pool: hostessBonusPool, totalShifts: totalHostessShiftsAll, shiftCounts: hostessShiftCounts, computed: hostessComputedBonuses, names: hostessBonusNames };
 
     // сверка: начислено vs выплачено (по расходам категории "Зарплата"), с учётом того, что ЗП выдаётся
     // двумя частями по фактическому графику выплат: за 1–15 число — 16-го числа ЭТОГО ЖЕ месяца,
@@ -11202,6 +11266,23 @@
             </div>
           `).join('') : `<div style="color:var(--ink-soft);font-size:13px;">Нет смен с админом за вторую половину месяца.</div>`}
         </div>
+        ${state.currentRole==='owner' ? `
+        <div class="analytics-section" style="border:1px dashed #6B4A1E;">
+          <h4 style="color:#6B4A1E;">🔒 Премия админам — только вам</h4>
+          <div style="font-size:11.5px;color:var(--ink-soft);font-family:var(--font-mono);margin-bottom:8px;">Справочный расчёт: ((выручка месяца − выручка «Лофт» − выручка «Выезд») × 1,5%) / общее кол-во смен всех админов × кол-во смен лично. Эта цифра нигде не видна админам — просто подсказка, сколько вписать вручную ниже. Сумма за месяц: ${formatMoney(hostessBonusPool)}, смен всего: ${totalHostessShiftsAll}.</div>
+          ${hostessBonusNames.length ? hostessBonusNames.map(name=>{
+            const computed = hostessComputedBonuses[name]||0;
+            const manual = (hostessManualBonuses[name]&&hostessManualBonuses[name].amount) || 0;
+            return `
+            <div class="stat-row">
+              <div class="stat-label">${escapeHtml(name)}</div>
+              <div style="flex:1;font-size:12px;color:var(--ink-soft);">расчётная: ${formatMoney(computed)} (смен: ${hostessShiftCounts[name]||0})</div>
+              <div class="stat-count" style="width:auto;font-size:12.5px;font-weight:600;">вписано: ${formatMoney(manual)}</div>
+            </div>
+          `;}).join('') : `<div style="color:var(--ink-soft);font-size:13px;">В этом месяце нет ни смен, ни вписанных премий.</div>`}
+          <button class="btn btn-ghost owner-panel-btn" data-panel="hostess-bonus" style="border-color:#6B4A1E;color:#6B4A1E;margin-top:8px;">✏ Вписать премию за месяц</button>
+        </div>
+        ` : ''}
       `;
     }
 
@@ -11481,7 +11562,7 @@
       return renderPersonalMasterSalaryView(monthLabel, combinedMasterTotals, masterEventDetails, masterAdjustmentDetails, combinedGrandTotal);
     }
     if(state.loggedInHostessName){
-      return renderPersonalHostessSalaryView(monthLabel, hostessSalary, hostessSalaryH1, hostessSalaryH2, totalHostessSalary, hostessAdjustmentDetails);
+      return renderPersonalHostessSalaryView(monthLabel, hostessSalary, hostessSalaryH1, hostessSalaryH2, totalHostessSalary, hostessAdjustmentDetails, hostessManualBonusesForMerge);
     }
     return fullHtml;
   }
@@ -11617,7 +11698,7 @@
     if(today) today.onclick = ()=>{ state.analyticsCursor = new Date(new Date().getFullYear(), new Date().getMonth(), 1); render(); };
   }
 
-  function renderPersonalHostessSalaryView(monthLabel, hostessSalary, hostessSalaryH1, hostessSalaryH2, totalHostessSalary, hostessAdjustmentDetails){
+  function renderPersonalHostessSalaryView(monthLabel, hostessSalary, hostessSalaryH1, hostessSalaryH2, totalHostessSalary, hostessAdjustmentDetails, hostessBonusesForMonth){
     const myName = state.loggedInHostessName;
     const norm = s => (s||'').trim().toLowerCase();
     const cursor = state.analyticsCursor;
@@ -11628,6 +11709,8 @@
     const myTotal = resolvedName ? (hostessSalary[resolvedName]||0) : 0;
     const myAdjustments = resolvedName ? ((hostessAdjustmentDetails||{})[resolvedName]||[]).slice().sort((a,b)=>a.date.localeCompare(b.date)) : [];
     const myAdjustmentsTotal = myAdjustments.reduce((s,a)=>s+a.amount,0);
+    const myBonusEntry = resolvedName ? ((hostessBonusesForMonth||{})[resolvedName]) : null;
+    const myBonusAmount = Number((myBonusEntry&&myBonusEntry.amount)||0);
     const shifts = [];
     for(let d=1; d<=daysInMonth; d++){
       const dateObj = new Date(y, m, d);
@@ -11665,11 +11748,12 @@
       </div>
       <div class="analytics-section">
         <h4>Моя зарплата: ${formatMoney(myTotal)}</h4>
-        ${(shifts.length === 0 && myAdjustments.length === 0) ? `<div style="color:var(--ink-soft);font-size:13px;">${state.events.length>=0 && Object.values(state.hostessShifts).some(d=>Object.values(d).some(e=>e&&norm(e.name)===norm(myName))) ? 'В этом месяце пока нет смен.' : `Ваше имя «${escapeHtml(myName)}» пока ни разу не встречалось в графике смен. Возможно, оно записано чуть иначе — сверьтесь с администратором.`}</div>` : `
-          <div style="display:flex;gap:16px;margin-bottom:10px;font-size:12.5px;">
+        ${(shifts.length === 0 && myAdjustments.length === 0 && myBonusAmount === 0) ? `<div style="color:var(--ink-soft);font-size:13px;">${state.events.length>=0 && Object.values(state.hostessShifts).some(d=>Object.values(d).some(e=>e&&norm(e.name)===norm(myName))) ? 'В этом месяце пока нет смен.' : `Ваше имя «${escapeHtml(myName)}» пока ни разу не встречалось в графике смен. Возможно, оно записано чуть иначе — сверьтесь с администратором.`}</div>` : `
+          <div style="display:flex;gap:16px;margin-bottom:10px;font-size:12.5px;flex-wrap:wrap;">
             <div><b>1–15 число:</b> ${formatMoney(h1Total)}</div>
             <div><b>16 – конец:</b> ${formatMoney(h2Total)}</div>
             ${myAdjustmentsTotal!==0 ? `<div><b>корректировки:</b> ${myAdjustmentsTotal>0?'+':''}${formatMoney(myAdjustmentsTotal)}</div>` : ''}
+            ${myBonusAmount!==0 ? `<div><b>премия:</b> +${formatMoney(myBonusAmount)}</div>` : ''}
           </div>
           ${['H1','H2'].map(half=>{
             const halfShifts = shifts.filter(s=>s.half===half);
@@ -11697,6 +11781,15 @@
                   <div style="font-family:var(--font-mono);font-size:12.5px;color:${a.amount>=0?'var(--status-green)':'var(--status-red)'};">${a.amount>=0?'+':''}${formatMoney(a.amount)}</div>
                 </div>
               `).join('')}
+            </div>
+          ` : ''}
+          ${myBonusAmount!==0 ? `
+            <div style="margin-top:4px;padding-top:10px;border-top:1px dashed var(--line-strong);">
+              <div style="font-size:11px;color:var(--ink-soft);font-family:var(--font-mono);text-transform:uppercase;letter-spacing:0.03em;margin-bottom:4px;">Премия за месяц</div>
+              <div class="stat-row" style="margin-bottom:5px;">
+                <div style="flex:1;font-size:12.5px;">${escapeHtml((myBonusEntry&&myBonusEntry.comment)||'премия за месяц')}</div>
+                <div style="font-family:var(--font-mono);font-size:12.5px;color:var(--status-green);">+${formatMoney(myBonusAmount)}</div>
+              </div>
             </div>
           ` : ''}
         `}
@@ -11858,6 +11951,8 @@
             state.modal = {type:'netprofit-edit'};
           } else if(btn.dataset.panel === 'netprofit-calc'){
             state.modal = {type:'netprofit-calc'};
+          } else if(btn.dataset.panel === 'hostess-bonus'){
+            state.modal = {type:'hostess-bonus-edit'};
           } else {
             state.modal = {type:'analytics-panel', panel: btn.dataset.panel};
           }
@@ -12122,7 +12217,7 @@
       reader.onload = ()=>{
         try{
           const data = JSON.parse(reader.result);
-          const KNOWN_FIELDS = ['spaces','events','certificates','refunds','leads','incomes','expenses','eventTypes','hostsList','materialsCatalog','itemSales','orders','salaryAdjustments','masterPayRates','masterPayOverrides','monthlyPlans','hostessShifts','managerShifts','netProfitManual','yearSummaryManual','auditLog','closedMonths','marketingSpend','marketingPlans','contentPosts','suppliers','stockReceipts','daysOff'];
+          const KNOWN_FIELDS = ['spaces','events','certificates','refunds','leads','incomes','expenses','eventTypes','hostsList','materialsCatalog','itemSales','orders','salaryAdjustments','masterPayRates','masterPayOverrides','monthlyPlans','hostessShifts','managerShifts','netProfitManual','hostessBonuses','yearSummaryManual','auditLog','closedMonths','marketingSpend','marketingPlans','contentPosts','suppliers','stockReceipts','daysOff'];
           const hasAnyKnownField = KNOWN_FIELDS.some(f => data[f] !== undefined);
           if(!hasAnyKnownField) throw new Error('bad shape');
           pendingImportData = data;
@@ -12187,6 +12282,7 @@
         if(pendingImportData.hostessShifts) await rawReplace('hostessShifts', 'hostess-shifts', '_hostessShiftsBaseline', pendingImportData.hostessShifts);
         if(pendingImportData.managerShifts) await rawReplace('managerShifts', 'manager-shifts', '_managerShiftsBaseline', pendingImportData.managerShifts);
         if(pendingImportData.netProfitManual) await rawReplace('netProfitManual', 'net-profit-manual', '_netProfitManualBaseline', pendingImportData.netProfitManual);
+        if(pendingImportData.hostessBonuses) await rawReplace('hostessBonuses', 'hostess-bonuses', '_hostessBonusesBaseline', pendingImportData.hostessBonuses);
         if(pendingImportData.yearSummaryManual) await rawReplace('yearSummaryManual', 'year-summary-manual', '_yearSummaryManualBaseline', pendingImportData.yearSummaryManual);
         if(Array.isArray(pendingImportData.auditLog)) await rawReplace('auditLog', 'audit-log', '_auditLogBaseline', pendingImportData.auditLog);
         if(Array.isArray(pendingImportData.closedMonths)) await rawReplace('closedMonths', 'closed-months', '_closedMonthsBaseline', pendingImportData.closedMonths);
@@ -14022,6 +14118,8 @@
             state.modal = {type:'netprofit-edit'};
           } else if(btn.dataset.panel === 'netprofit-calc'){
             state.modal = {type:'netprofit-calc'};
+          } else if(btn.dataset.panel === 'hostess-bonus'){
+            state.modal = {type:'hostess-bonus-edit'};
           } else {
             state.modal = {type:'analytics-panel', panel: btn.dataset.panel};
           }
@@ -14072,6 +14170,72 @@
         <button type="button" class="${cls}-del" data-idx="${i}" style="border:1px solid var(--line-strong);background:var(--white);border-radius:var(--radius);color:var(--danger);cursor:pointer;">✕</button>
       </div>
     `).join('');
+  }
+
+  function renderHostessBonusEditModal(){
+    const cursor = state.analyticsCursor;
+    const ym = cursor.getFullYear()+'-'+pad(cursor.getMonth()+1);
+    const label = MONTHS[cursor.getMonth()] + ' ' + cursor.getFullYear();
+    const ref = (state._hostessBonusRef && state._hostessBonusRef.ym === ym) ? state._hostessBonusRef : { pool:0, totalShifts:0, shiftCounts:{}, computed:{}, names: HOSTESS_LIST.slice() };
+    const manual = (state.hostessBonuses && state.hostessBonuses[ym]) || {};
+    return `
+      <div class="modal" style="max-width:460px;">
+        <div class="modal-head">
+          <h3>Премия админам — ${escapeHtml(label)}</h3>
+          <button class="modal-close">×</button>
+        </div>
+        <div class="modal-body">
+          <div style="font-size:12px;color:var(--ink-soft);margin-top:-6px;">Эта сумма — и только она — видна самому админу в его «Моя зарплата». Расчётная подсказка (ниже, серым) нигде, кроме этого окна, не отображается.</div>
+          <div id="hb-rows">
+            ${ref.names.map(name=>{
+              const m = manual[name] || {};
+              return `
+              <div class="field" data-hb-name="${escapeHtml(name)}" style="border-top:1px solid var(--line);padding-top:12px;">
+                <label style="display:flex;justify-content:space-between;align-items:baseline;">
+                  <span style="font-family:var(--font-display);font-size:15px;font-weight:600;">${escapeHtml(name)}</span>
+                  <span style="font-size:11px;color:var(--ink-soft);font-family:var(--font-mono);">расчётная: ${formatMoney(ref.computed[name]||0)} (смен: ${ref.shiftCounts[name]||0})</span>
+                </label>
+                <div class="row2" style="grid-template-columns:130px 1fr;margin-top:6px;">
+                  <input type="number" class="hb-amount" value="${m.amount!==undefined&&m.amount!==null?m.amount:''}" placeholder="0 ₽">
+                  <input type="text" class="hb-comment" value="${escapeHtml(m.comment||'')}" placeholder="Комментарий (необязательно)">
+                </div>
+              </div>
+            `;}).join('')}
+          </div>
+          <div class="modal-actions">
+            <span></span>
+            <div style="display:flex;gap:8px;">
+              <button class="btn btn-ghost" id="hb-cancel">Отмена</button>
+              <button class="btn btn-primary" id="hb-save">Сохранить</button>
+            </div>
+          </div>
+        </div>
+      </div>
+    `;
+  }
+
+  function attachHostessBonusEditModalEvents(overlay){
+    const cursor = state.analyticsCursor;
+    const ym = cursor.getFullYear()+'-'+pad(cursor.getMonth()+1);
+    overlay.querySelector('#hb-cancel').onclick = ()=>{ state.modal = null; overlay.remove(); };
+    overlay.querySelector('#hb-save').onclick = async ()=>{
+      const newManual = {};
+      overlay.querySelectorAll('#hb-rows [data-hb-name]').forEach(row=>{
+        const name = row.dataset.hbName;
+        const amountRaw = row.querySelector('.hb-amount').value;
+        const comment = row.querySelector('.hb-comment').value.trim();
+        const amount = amountRaw !== '' ? (parseFloat(amountRaw)||0) : 0;
+        if(amount !== 0){ newManual[name] = { amount, comment }; }
+      });
+      if(!state.hostessBonuses) state.hostessBonuses = {};
+      if(Object.keys(newManual).length) state.hostessBonuses[ym] = newManual;
+      else delete state.hostessBonuses[ym];
+      await saveHostessBonuses();
+      recordAction("Премия админам сохранена");
+      state.modal = null;
+      overlay.remove();
+      render();
+    };
   }
 
   function renderYearSummaryEditModal(){
