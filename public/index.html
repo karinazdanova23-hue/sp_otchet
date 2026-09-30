@@ -2415,6 +2415,14 @@
     if(cost <= 0) return 0;
     return (order.costSource !== 'master') ? cost : 0;
   }
+  // остаток к оплате по заказу — поле "Получено" необязательное: пока оно не заполнено, заказ считается
+  // оплаченным полностью (чтобы старые заказы без этого поля не показались вдруг "неоплаченными")
+  function orderRemainderTotal(order){
+    if(order.received === undefined || order.received === null || order.received === '') return 0;
+    const revenue = (order.revenue!==undefined && order.revenue!==null && !isNaN(order.revenue)) ? Number(order.revenue) : 0;
+    const received = Number(order.received)||0;
+    return Math.max(0, revenue - received);
+  }
   async function saveEventTypes(){
     await saveCollectionMerged('event-types', state.eventTypes, state._eventTypesBaseline, (finalArr)=>{
       state.eventTypes = finalArr;
@@ -5277,7 +5285,7 @@
               <div class="cell">${x.date ? formatDateText(x.date) : '—'}</div>
               <div class="cell">${escapeHtml(x.masterName||'')}${(x.additionalMasters||[]).filter(m=>(m.name||'').trim()).length ? ` +${(x.additionalMasters||[]).filter(m=>(m.name||'').trim()).length}` : ''}</div>
               <div class="amount">${x.revenue!==undefined&&x.revenue!==null ? formatMoney(x.revenue) : ''}</div>
-              <div class="cell" style="color:var(--ink-soft);font-size:12px;">${orderMasterShareLabel(x)}${x.cost>0?` · себес ${formatMoney(Number(x.cost))} (${x.costSource==='master'?'мастер':'студия'})`:''}</div>
+              <div class="cell" style="color:var(--ink-soft);font-size:12px;">${orderMasterShareLabel(x)}${x.cost>0?` · себес ${formatMoney(Number(x.cost))} (${x.costSource==='master'?'мастер':'студия'})`:''}${orderRemainderTotal(x)>0?` · <span style="color:var(--status-red);">ждём: ${formatMoney(orderRemainderTotal(x))}</span>`:''}</div>
               <div class="reason">${escapeHtml(x.comment||'')}</div>
             </div>
           `).join('')}
@@ -5876,6 +5884,11 @@
             </div>
           </div>
           <div class="field">
+            <label>Получено (₽) <span style="font-weight:400;color:var(--ink-soft);">— необязательно; если оставить пустым, заказ считается оплаченным полностью</span></label>
+            <input type="number" id="or-received" value="${order.received!==undefined&&order.received!==null?order.received:''}" min="0" step="50" placeholder="Оставьте пустым, если оплачено полностью">
+            <div id="or-awaiting-hint" style="font-size:12.5px;font-family:var(--font-mono);margin-top:6px;"></div>
+          </div>
+          <div class="field">
             <label>Мастер</label>
             <input type="text" id="or-master" value="${escapeHtml(order.masterName||'')}" placeholder="Начните вводить имя…" list="host-suggestions-order">
             <datalist id="host-suggestions-order">${state.hostsList.map(h=>`<option value="${escapeHtml(h)}">`).join('')}</datalist>
@@ -5923,10 +5936,36 @@
     if(cancelBtn) cancelBtn.onclick = ()=>{ state.modal = null; overlay.remove(); };
 
     const revenueInput = overlay.querySelector('#or-revenue');
+    const receivedInput = overlay.querySelector('#or-received');
     const masterShareInput = overlay.querySelector('#or-master-share');
     const costInput = overlay.querySelector('#or-cost');
     const costSourceInput = overlay.querySelector('#or-cost-source');
     const previewEl = overlay.querySelector('#or-split-preview');
+    const awaitingHintEl = overlay.querySelector('#or-awaiting-hint');
+
+    const updateAwaitingHint = ()=>{
+      const rev = parseInt(revenueInput.value) || 0;
+      if(receivedInput.value === ''){
+        awaitingHintEl.textContent = rev>0 ? 'Считаем оплаченным полностью' : '';
+        awaitingHintEl.style.color = 'var(--ink-soft)';
+        return;
+      }
+      const received = parseInt(receivedInput.value) || 0;
+      const remain = rev - received;
+      if(remain > 0){
+        awaitingHintEl.textContent = `Ждём ещё: ${formatMoney(remain)}`;
+        awaitingHintEl.style.color = 'var(--status-red)';
+      } else if(remain < 0){
+        awaitingHintEl.textContent = `Переплата: ${formatMoney(-remain)}`;
+        awaitingHintEl.style.color = 'var(--status-blue)';
+      } else {
+        awaitingHintEl.textContent = 'Оплачено полностью';
+        awaitingHintEl.style.color = 'var(--status-green)';
+      }
+    };
+    revenueInput.addEventListener('input', updateAwaitingHint);
+    receivedInput.addEventListener('input', updateAwaitingHint);
+    updateAwaitingHint();
 
     overlay.querySelectorAll('.or-cost-source-opt').forEach(btn=>{
       btn.onclick = ()=>{
@@ -6031,6 +6070,7 @@
       const dateVal = overlay.querySelector('#or-date').value;
       const masterVal = overlay.querySelector('#or-master').value.trim();
       const revenueRaw = overlay.querySelector('#or-revenue').value;
+      const receivedRaw = overlay.querySelector('#or-received').value;
       const masterShareRaw = overlay.querySelector('#or-master-share').value;
       const costRaw = overlay.querySelector('#or-cost').value;
       const costSourceVal = overlay.querySelector('#or-cost-source').value === 'master' ? 'master' : 'studio';
@@ -6046,6 +6086,7 @@
       if(revenueRaw === '' || Number(revenueRaw) < 0) markInvalid('or-revenue');
       if(masterShareRaw === '' || Number(masterShareRaw) < 0) markInvalid('or-master-share');
       if(costRaw !== '' && Number(costRaw) < 0) markInvalid('or-cost');
+      if(receivedRaw !== '' && Number(receivedRaw) < 0) markInvalid('or-received');
       // каждый дополнительный мастер — либо оба поля заполнены (имя + ЗП), либо оба пустые (тогда строка просто не сохранится)
       let additionalMastersInvalid = false;
       overlay.querySelectorAll('#additional-order-masters-list [data-om-idx]').forEach(row=>{
@@ -6060,7 +6101,7 @@
           if(!firstInvalid) firstInvalid = hasName ? shareInp : nameInp;
         }
       });
-      if(!dateVal || !masterVal || revenueRaw==='' || Number(revenueRaw)<0 || masterShareRaw==='' || Number(masterShareRaw)<0 || (costRaw!=='' && Number(costRaw)<0) || additionalMastersInvalid){
+      if(!dateVal || !masterVal || revenueRaw==='' || Number(revenueRaw)<0 || masterShareRaw==='' || Number(masterShareRaw)<0 || (costRaw!=='' && Number(costRaw)<0) || (receivedRaw!=='' && Number(receivedRaw)<0) || additionalMastersInvalid){
         showGapWarningBanner(additionalMastersInvalid ? 'У каждого дополнительного мастера укажите и имя, и его ЗП (или уберите пустую строку).' : 'Заполните все поля перед сохранением заказа — включая сумму ЗП мастера (её нужно вписать вручную). Суммы не могут быть отрицательными.');
         if(firstInvalid && firstInvalid.scrollIntoView) firstInvalid.scrollIntoView({block:'center', behavior:'smooth'});
         return;
@@ -6075,6 +6116,7 @@
         date: dateVal,
         masterName: masterVal,
         revenue: parseInt(revenueRaw),
+        received: receivedRaw !== '' ? parseInt(receivedRaw) : null,
         masterShare: parseInt(masterShareRaw),
         additionalMasters: finalAdditionalMasters,
         cost: costRaw !== '' ? parseInt(costRaw) : 0,
@@ -7268,7 +7310,7 @@
       if(productVal === 'Заказ'){
         // сохраняем доп. мастеров заказа (если их добавляли отдельно на вкладке «Заказ»), чтобы не затереть их отсюда
         const existingOrderForSync = updated.orderId ? state.orders.find(x=>x.id===updated.orderId) : null;
-        const orderEntry = { id: updated.orderId || uid(), date: updated.date, masterName: orderMasterVal, revenue: updated.amount, masterShare: parseInt(orderShareRaw), additionalMasters: (existingOrderForSync && existingOrderForSync.additionalMasters) || [], cost: (existingOrderForSync && existingOrderForSync.cost) || 0, costSource: (existingOrderForSync && existingOrderForSync.costSource) || 'studio', comment: updated.comment };
+        const orderEntry = { id: updated.orderId || uid(), date: updated.date, masterName: orderMasterVal, revenue: updated.amount, received: (existingOrderForSync && existingOrderForSync.received!==undefined) ? existingOrderForSync.received : null, masterShare: parseInt(orderShareRaw), additionalMasters: (existingOrderForSync && existingOrderForSync.additionalMasters) || [], cost: (existingOrderForSync && existingOrderForSync.cost) || 0, costSource: (existingOrderForSync && existingOrderForSync.costSource) || 'studio', comment: updated.comment };
         updated.orderId = orderEntry.id;
         const orderIdx = state.orders.findIndex(x=>x.id===orderEntry.id);
         if(orderIdx >= 0) state.orders[orderIdx] = orderEntry; else state.orders.push(orderEntry);
@@ -9376,15 +9418,18 @@
   function eventCertRedeemedTotal(e){
     return (Array.isArray(e.payments) ? e.payments : []).filter(p=>p.certRedemptionRef).reduce((s,p)=> s + (Number(p.amount)||0), 0);
   }
-  // прогнозная выручка мероприятия — полная ожидаемая сумма (включает уже внесённую предоплату), используется в аналитике как "факт";
-  // сертификатная часть вычитается, чтобы не задваивать её с выручкой от продажи сертификата (см. "Сводка по годам").
+  // прогнозная выручка мероприятия — полная ожидаемая сумма (включает уже внесённую предоплату), используется в аналитике как "факт".
+  // сертификатную часть здесь вычитать НЕ нужно: performCertRedemption() сознательно не увеличивает "Выручку"/"Согласованную
+  // сумму" при оплате сертификатом (см. комментарий там же) — то есть price/agreedPrice и так уже не включают эту сумму,
+  // она уже "чистые деньги". Задвоения с выручкой от продажи сертификата поэтому не возникает (сверено с книгой учёта:
+  // до этой правки сентябрьская выручка по мероприятиям с сертификатной оплатой была занижена ровно на сумму сертификата).
   // отменённое мероприятие (см. статус "cancelled") в выручку не считается вовсе, даже если в полях
   // "Выручка"/"Согласованная сумма" остались ненулевые значения (например, возврат вернули не полностью)
   function eventRevenueForecast(e){
     if(e.status === 'cancelled') return 0;
     const price = (e.price!==undefined && e.price!==null && !isNaN(e.price)) ? Number(e.price) : 0;
     const agreed = (e.agreedPrice!==undefined && e.agreedPrice!==null && !isNaN(e.agreedPrice)) ? Number(e.agreedPrice) : 0;
-    return Math.max(0, Math.max(price, agreed) - eventCertRedeemedTotal(e));
+    return Math.max(price, agreed);
   }
   // полная ожидаемая сумма по мероприятию (максимум из "Выручки" и "Согласованной суммы"), без вычета сертификатов —
   // используется только для метки "Остаток", в отличие от eventRevenueForecast (для аналитики)
@@ -9652,6 +9697,14 @@
 
     // выполнение плана — сравниваем факт с ежедневным темпом, который нужен, чтобы уложиться в план к концу месяца
     const planYm = cursor.getFullYear()+'-'+pad(cursor.getMonth()+1);
+    // заказы этого месяца, по которым ещё не всё получено (см. поле "Получено" в карточке заказа) — считаем
+    // здесь, до ранней заглушки "нет мероприятий", чтобы неоплаченные заказы были видны даже в пустой по МК месяц
+    const awaitingOrdersForMonth = state.orders
+      .filter(x=> x.date && x.date.startsWith(planYm))
+      .map(x=>({ ...x, _remain: orderRemainderTotal(x) }))
+      .filter(x=>x._remain > 0)
+      .sort((a,b)=>b._remain-a._remain);
+    const totalAwaitingOrders = awaitingOrdersForMonth.reduce((sum,x)=>sum+x._remain, 0);
     const currentPlan = (state.monthlyPlans && state.monthlyPlans[planYm]) || {};
     const daysInMonth = new Date(cursor.getFullYear(), cursor.getMonth()+1, 0).getDate();
     const isCurrentMonth = planYm === (new Date()).getFullYear()+'-'+pad((new Date()).getMonth()+1);
@@ -10409,6 +10462,18 @@
           ${certOutstandingMarketingCount>0?`<div class="stat-row"><div class="stat-label" style="color:var(--ink-soft);">Непогашено по маркетинговым сертификатам</div><div style="flex:1;font-family:var(--font-mono);font-size:13px;color:var(--ink-soft);">${formatMoney(certOutstandingMarketing)} <span style="font-size:11px;">— ${certOutstandingMarketingCount} шт.</span></div></div>`:''}
         </div>
         ` : ''}
+        ${(!isAdminFinRestricted && awaitingOrdersForMonth.length>0) ? `
+        <div class="analytics-section">
+          <h4 style="color:var(--status-red);">Ждём оплату: ${formatMoney(totalAwaitingOrders)}</h4>
+          ${awaitingOrdersForMonth.slice(0,10).map(x=>`
+            <div class="stat-row">
+              <div class="stat-label" style="width:210px;">${x.date?formatDateText(x.date)+' · ':''}🧾 Заказ${x.masterName?' · '+escapeHtml(x.masterName):''}${x.comment?' · '+escapeHtml(x.comment):''}</div>
+              <div class="stat-bar-track"><div class="stat-bar-fill" style="width:${Math.round(x._remain/(awaitingOrdersForMonth[0]?awaitingOrdersForMonth[0]._remain:1)*100)}%;background:var(--status-red);"></div></div>
+              <div class="stat-count" style="width:auto;font-size:12px;">${formatMoney(x._remain)}</div>
+            </div>
+          `).join('')}
+        </div>
+        ` : ''}
         <div class="analytics-section">
           <h4>Заполняемость</h4>
           <div class="stat-row">
@@ -10555,7 +10620,11 @@
       })
       .filter(e=>e._remain > 0)
       .sort((a,b)=>b._remain-a._remain);
-    const totalAwaiting = awaitingEvts.reduce((sum,e)=>sum+e._remain, 0);
+    const totalAwaiting = awaitingEvts.reduce((sum,e)=>sum+e._remain, 0) + totalAwaitingOrders;
+    const awaitingCombined = [
+      ...awaitingEvts.map(e=>({ kind:'event', date:e.date, label:e.title, extra: e.host?' · '+e.host:'', spaceId:e.spaceId, remain:e._remain })),
+      ...awaitingOrdersForMonth.map(x=>({ kind:'order', date:x.date, label:'Заказ'+(x.masterName?' · '+x.masterName:''), extra: x.comment?' · '+x.comment:'', spaceId:null, remain:x._remain })),
+    ].sort((a,b)=>b.remain-a.remain);
 
     // расхождения: для Частника и Выезда выручка в мероприятии обязана сходиться с "Книгой"
     // (По расписанию, Маркетинг и Слот из этой сверки исключены)
@@ -10892,13 +10961,14 @@
         </div>
         <div class="analytics-section">
           <h4 style="color:${totalAwaiting>0?'var(--status-red)':'inherit'};">Ждём оплату: ${formatMoney(totalAwaiting)}</h4>
-          ${awaitingEvts.length ? awaitingEvts.slice(0,10).map(e=>`
+          <div style="font-size:11px;color:var(--ink-soft);font-family:var(--font-mono);margin-bottom:8px;">Мероприятия (по «Прогнозной выручке») и заказы (по полю «Получено») с этого месяца, где деньги ещё не пришли полностью.</div>
+          ${awaitingCombined.length ? awaitingCombined.slice(0,10).map(x=>`
             <div class="stat-row">
-              <div class="stat-label" style="width:210px;">${escapeHtml(e.title)} ${spaceBadge(getSpace(e.spaceId),'xs')}${e.host?' · '+escapeHtml(e.host):''}</div>
-              <div class="stat-bar-track"><div class="stat-bar-fill" style="width:${Math.round(e._remain/(awaitingEvts[0]?awaitingEvts[0]._remain:1)*100)}%;background:var(--status-red);"></div></div>
-              <div class="stat-count" style="width:auto;font-size:12px;">${formatMoney(e._remain)}</div>
+              <div class="stat-label" style="width:210px;">${x.date?formatDateText(x.date)+' · ':''}${x.kind==='order'?'🧾 ':''}${escapeHtml(x.label)} ${x.spaceId?spaceBadge(getSpace(x.spaceId),'xs'):''}${x.extra?escapeHtml(x.extra):''}</div>
+              <div class="stat-bar-track"><div class="stat-bar-fill" style="width:${Math.round(x.remain/(awaitingCombined[0]?awaitingCombined[0].remain:1)*100)}%;background:var(--status-red);"></div></div>
+              <div class="stat-count" style="width:auto;font-size:12px;">${formatMoney(x.remain)}</div>
             </div>
-          `).join('') : `<div style="color:var(--ink-soft);font-size:13px;">Нет мероприятий с неполной оплатой (или не указана «Прогнозная выручка»).</div>`}
+          `).join('') : `<div style="color:var(--ink-soft);font-size:13px;">Нет мероприятий или заказов с неполной оплатой.</div>`}
         </div>
         <div class="analytics-section">
           <h4 style="color:${discrepancies.length>0?'var(--status-red)':'inherit'};">Расхождения: Календарь vs Книга ${discrepancies.length ? `(${discrepancies.length}, на сумму ${formatMoney(totalDiscrepancy)})` : ''}</h4>
