@@ -9726,17 +9726,10 @@
     const ordersRevenueForTotal = state.orders
       .filter(x=> x.date && x.date.startsWith(planYm))
       .reduce((s,x)=> s + ((x.revenue!==undefined&&x.revenue!==null&&!isNaN(x.revenue))?Number(x.revenue):0), 0);
-    // сертификаты, погашенные в этом месяце, но проданные раньше — по просьбе владелицы тоже считаем в выручку месяца
-    // (сертификат, который и продан, и погашен в этом же месяце, уже полностью учтён строкой выше — не дублируем)
-    const certRedeemedThisMonthForTotal = state.certificates.reduce((sum,c)=>{
-      if(!Array.isArray(c.redemptions) || c.redemptions.length === 0) return sum;
-      if(c.saleDate && c.saleDate.startsWith(planYm)) return sum;
-      const monthSpent = c.redemptions
-        .filter(r=> r.date && r.date.startsWith(planYm))
-        .reduce((s,r)=> s + ((r.amount!==undefined&&r.amount!==null&&!isNaN(r.amount))?Number(r.amount):0), 0);
-      return sum + monthSpent;
-    }, 0);
-    const totalRevenueAllSources = totalRevenue + certSalesRevenueForTotal + itemSalesRevenueForTotal + ordersRevenueForTotal + certRedeemedThisMonthForTotal;
+    // ВАЖНО: сертификаты, проданные в прошлые месяцы и погашенные в этом — по прямому указанию владелицы
+    // в выручку ТЕКУЩЕГО месяца больше не включаются (эти деньги — выручка того месяца, когда сертификат
+    // продан, а не когда погашен). Раньше сюда прибавлялся certRedeemedThisMonthForTotal — убрано.
+    const totalRevenueAllSources = totalRevenue + certSalesRevenueForTotal + itemSalesRevenueForTotal + ordersRevenueForTotal;
 
     const PLAN_METRICS = [
       {key:'revenue', label:'Выручка', value: totalRevenueAllSources, format:'money'},
@@ -11504,17 +11497,9 @@
     const ordersRevenueForTotal = state.orders
       .filter(x=> x.date && x.date.startsWith(planYm))
       .reduce((s,x)=> s + ((x.revenue!==undefined&&x.revenue!==null&&!isNaN(x.revenue))?Number(x.revenue):0), 0);
-    // сертификаты, погашенные в этом месяце, но проданные раньше — тоже считаем в выручку месяца
-    // (сертификат, который и продан, и погашен в этом же месяце, уже полностью учтён строкой выше — не дублируем)
-    const certRedeemedThisMonthForTotal = state.certificates.reduce((sum,c)=>{
-      if(!Array.isArray(c.redemptions) || c.redemptions.length === 0) return sum;
-      if(c.saleDate && c.saleDate.startsWith(planYm)) return sum;
-      const monthSpent = c.redemptions
-        .filter(r=> r.date && r.date.startsWith(planYm))
-        .reduce((s,r)=> s + ((r.amount!==undefined&&r.amount!==null&&!isNaN(r.amount))?Number(r.amount):0), 0);
-      return sum + monthSpent;
-    }, 0);
-    const totalRevenueAllSources = totalRevenue + certSalesRevenueForTotal + itemSalesRevenueForTotal + ordersRevenueForTotal + certRedeemedThisMonthForTotal;
+    // ВАЖНО: сертификаты, проданные в прошлые месяцы и погашенные в этом, в выручку текущего месяца НЕ включаются
+    // (по прямому указанию владелицы) — это выручка того месяца, когда сертификат продан.
+    const totalRevenueAllSources = totalRevenue + certSalesRevenueForTotal + itemSalesRevenueForTotal + ordersRevenueForTotal;
 
     // без "Прибыли" — менеджеру/маркетологу не нужны финансовые показатели, только операционные и выручка
     const PP_METRICS = [
