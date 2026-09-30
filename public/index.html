@@ -11937,6 +11937,15 @@
             <div id="import-missing-list" style="margin-top:10px;"></div>
             <button class="btn btn-danger" id="btn-do-import-missing" style="display:none; margin-top:10px; background:var(--danger); color:#fff;">Добавить отмеченные мероприятия</button>
           </div>
+
+          <div style="border-top:1px solid var(--line); margin-top:6px; padding-top:16px;">
+            <label style="display:block; font-size:11.5px; font-family: var(--font-mono); color: var(--ink-soft); margin-bottom:8px;">Добрать недостающие доходы и расходы из файла (требует иной доступ)</label>
+            <div style="font-size:12px;color:var(--ink-soft);margin-bottom:10px;">Безопасный режим: сравнивает записи «Книги» (доходы/расходы) из выбранного файла с текущими (по дате, сумме и комментарию) и добавляет только те, которых сейчас нет. Ничего не заменяет и не удаляет.</div>
+            <input type="file" id="f-import-missing-book" accept="application/json" style="font-size:13px;">
+            <div id="import-missing-book-status" style="font-size:12.5px; color: var(--ink-soft); margin-top:8px;"></div>
+            <div id="import-missing-book-list" style="margin-top:10px;max-height:320px;overflow-y:auto;"></div>
+            <button class="btn btn-danger" id="btn-do-import-missing-book" style="display:none; margin-top:10px; background:var(--danger); color:#fff;">Добавить отмеченные записи</button>
+          </div>
         </div>
       </div>
     `;
@@ -12221,6 +12230,100 @@
         state.modal = null;
         render();
         showGapWarningBanner(`Добавлено мероприятий: ${reallyAdded.length}.`);
+      });
+    };
+
+    // ---------- добор недостающих доходов/расходов «Книги» (безопасное добавление, без замены) ----------
+    // записи из внешней таблицы не имеют id этого приложения, поэтому сверяем не по id, а по дате+сумме+комментарию
+    const bookMissingFileInput = overlay.querySelector('#f-import-missing-book');
+    const bookMissingStatusEl = overlay.querySelector('#import-missing-book-status');
+    const bookMissingListEl = overlay.querySelector('#import-missing-book-list');
+    const bookMissingBtn = overlay.querySelector('#btn-do-import-missing-book');
+    let pendingMissingBook = { incomes: [], expenses: [] };
+
+    function bookEntryKey(date, amount, comment){
+      const amt = Math.round(Number(amount)||0);
+      const c = (comment||'').trim().toLowerCase();
+      return `${date}|${amt}|${c}`;
+    }
+
+    if(bookMissingFileInput) bookMissingFileInput.onchange = ()=>{
+      const file = bookMissingFileInput.files[0];
+      if(!file) return;
+      const reader = new FileReader();
+      reader.onload = ()=>{
+        try{
+          const data = JSON.parse(reader.result);
+          const fileIncomes = Array.isArray(data.incomes) ? data.incomes : [];
+          const fileExpenses = Array.isArray(data.expenses) ? data.expenses : [];
+          if(!fileIncomes.length && !fileExpenses.length) throw new Error('bad shape');
+          const currentIncomeKeys = new Set(state.incomes.map(x=>bookEntryKey(x.date, x.amount, x.comment)));
+          const currentExpenseKeys = new Set(state.expenses.map(x=>bookEntryKey(x.date, x.amount, x.comment)));
+          const missingIncomes = fileIncomes.filter(x=> x && x.date && !currentIncomeKeys.has(bookEntryKey(x.date, x.amount, x.comment)));
+          const missingExpenses = fileExpenses.filter(x=> x && x.date && !currentExpenseKeys.has(bookEntryKey(x.date, x.amount, x.comment)));
+          pendingMissingBook = { incomes: missingIncomes, expenses: missingExpenses };
+          const totalMissing = missingIncomes.length + missingExpenses.length;
+          if(!totalMissing){
+            bookMissingStatusEl.textContent = `Файл прочитан (доходов: ${fileIncomes.length}, расходов: ${fileExpenses.length}). Все записи из файла уже есть в текущей «Книге» — добавлять нечего.`;
+            bookMissingStatusEl.style.color = 'var(--ink-soft)';
+            bookMissingListEl.innerHTML = '';
+            bookMissingBtn.style.display = 'none';
+            return;
+          }
+          bookMissingStatusEl.textContent = `Файл прочитан. Найдено записей, которых нет в текущей «Книге»: доходов — ${missingIncomes.length}, расходов — ${missingExpenses.length}. Отметьте, что добавить:`;
+          bookMissingStatusEl.style.color = 'var(--ink-soft)';
+          const incomeRows = missingIncomes.map((x,i)=>`
+            <label style="display:flex; gap:8px; align-items:flex-start; font-size:12.5px; padding:6px 0; border-bottom:1px solid var(--line);">
+              <input type="checkbox" class="missing-book-inc-check" data-idx="${i}" checked style="margin-top:2px;">
+              <span style="color:var(--status-green);">+${formatMoney(x.amount)}</span>
+              <span><b>${escapeHtml(formatDateText(x.date))}</b> — ${escapeHtml(x.operation||'')}${x.product?` (${escapeHtml(x.product)})`:''}${x.comment?`, «${escapeHtml(x.comment)}»`:''}</span>
+            </label>`).join('');
+          const expenseRows = missingExpenses.map((x,i)=>`
+            <label style="display:flex; gap:8px; align-items:flex-start; font-size:12.5px; padding:6px 0; border-bottom:1px solid var(--line);">
+              <input type="checkbox" class="missing-book-exp-check" data-idx="${i}" checked style="margin-top:2px;">
+              <span style="color:var(--status-red);">−${formatMoney(x.amount)}</span>
+              <span><b>${escapeHtml(formatDateText(x.date))}</b> — ${escapeHtml(x.category||'')}${x.comment?`, «${escapeHtml(x.comment)}»`:''}</span>
+            </label>`).join('');
+          bookMissingListEl.innerHTML =
+            (missingIncomes.length ? `<div style="font-size:11px;font-family:var(--font-mono);color:var(--ink-soft);margin:8px 0 4px;">ДОХОДЫ</div>${incomeRows}` : '') +
+            (missingExpenses.length ? `<div style="font-size:11px;font-family:var(--font-mono);color:var(--ink-soft);margin:14px 0 4px;">РАСХОДЫ</div>${expenseRows}` : '');
+          bookMissingBtn.style.display = 'inline-block';
+        }catch(e){
+          pendingMissingBook = { incomes: [], expenses: [] };
+          bookMissingStatusEl.textContent = 'Не удалось прочитать файл — это не корректный JSON-файл с доходами/расходами.';
+          bookMissingStatusEl.style.color = 'var(--danger)';
+          bookMissingListEl.innerHTML = '';
+          bookMissingBtn.style.display = 'none';
+        }
+      };
+      reader.readAsText(file);
+    };
+
+    if(bookMissingBtn) bookMissingBtn.onclick = ()=>{
+      const checkedInc = [...overlay.querySelectorAll('.missing-book-inc-check')].filter(c=>c.checked).map(c=>parseInt(c.dataset.idx));
+      const checkedExp = [...overlay.querySelectorAll('.missing-book-exp-check')].filter(c=>c.checked).map(c=>parseInt(c.dataset.idx));
+      const incToAdd = pendingMissingBook.incomes.filter((x,i)=>checkedInc.includes(i));
+      const expToAdd = pendingMissingBook.expenses.filter((x,i)=>checkedExp.includes(i));
+      if(!incToAdd.length && !expToAdd.length) return;
+      requireAdminUnlock(async ()=>{
+        // на случай, если что-то изменилось с момента чтения файла до клика — сверяем ключи ещё раз перед добавлением
+        const currentIncomeKeys = new Set(state.incomes.map(x=>bookEntryKey(x.date, x.amount, x.comment)));
+        const currentExpenseKeys = new Set(state.expenses.map(x=>bookEntryKey(x.date, x.amount, x.comment)));
+        const reallyAddedInc = incToAdd.filter(x=>!currentIncomeKeys.has(bookEntryKey(x.date, x.amount, x.comment)));
+        const reallyAddedExp = expToAdd.filter(x=>!currentExpenseKeys.has(bookEntryKey(x.date, x.amount, x.comment)));
+        if(reallyAddedInc.length){
+          state.incomes = state.incomes.concat(reallyAddedInc);
+          await saveIncomes();
+        }
+        if(reallyAddedExp.length){
+          state.expenses = state.expenses.concat(reallyAddedExp);
+          await saveExpenses();
+        }
+        recordAction('Добор недостающих доходов/расходов из файла', `доходов: ${reallyAddedInc.length}, расходов: ${reallyAddedExp.length}`);
+        pendingMissingBook = { incomes: [], expenses: [] };
+        state.modal = null;
+        render();
+        showGapWarningBanner(`Добавлено: доходов — ${reallyAddedInc.length}, расходов — ${reallyAddedExp.length}.`);
       });
     };
   }
