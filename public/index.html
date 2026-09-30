@@ -10722,12 +10722,14 @@
         ordersByMaster[e.name] = (ordersByMaster[e.name]||0) + e.share;
       });
     });
-    // корректировки ЗП (доплаты/удержания) за этот же месяц
+    // корректировки ЗП (доплаты/удержания) за этот же месяц — только для мастеров; корректировки, введённые на имя админа
+    // (роль "hostess", HOSTESS_LIST), считаются отдельно в зарплате админов, чтобы не путать два разных начисления
     const adjustmentsByMaster = {};
     const masterAdjustmentDetails = {};
     state.salaryAdjustments.filter(x=> x.date && x.date.startsWith(monthYmForItemSales)).forEach(x=>{
       const name = (x.masterName||'').trim();
       if(!name) return;
+      if(HOSTESS_LIST.some(h=>h.toLowerCase()===name.toLowerCase())) return;
       adjustmentsByMaster[name] = (adjustmentsByMaster[name]||0) + (Number(x.amount)||0);
       if(!masterAdjustmentDetails[name]) masterAdjustmentDetails[name] = [];
       masterAdjustmentDetails[name].push({ date: x.date, comment: x.comment||'', amount: Number(x.amount)||0 });
@@ -10781,6 +10783,7 @@
     state.salaryAdjustments.filter(x=> x.date && x.date.startsWith(monthYmForItemSales)).forEach(x=>{
       const name = (x.masterName||'').trim();
       if(!name) return;
+      if(HOSTESS_LIST.some(h=>h.toLowerCase()===name.toLowerCase())) return;
       const day = parseInt((x.date||'').split('-')[2], 10) || 1;
       const amount = Number(x.amount) || 0;
       if(day <= 15){ hostSalaryH1[name] = (hostSalaryH1[name]||0) + amount; totalSalaryH1 += amount; }
@@ -10827,6 +10830,24 @@
         });
       }
     }
+    // корректировки ЗП (доплаты/удержания), введённые на имя админа (роль "hostess", HOSTESS_LIST) — добавляются
+    // в зарплату админов (и в нужную половину месяца по дате самой корректировки), а не мастеров
+    const hostessAdjustmentsByName = {};
+    const hostessAdjustmentDetails = {};
+    state.salaryAdjustments.filter(x=> x.date && x.date.startsWith(monthYmForItemSales)).forEach(x=>{
+      const name = (x.masterName||'').trim();
+      if(!name) return;
+      if(!HOSTESS_LIST.some(h=>h.toLowerCase()===name.toLowerCase())) return;
+      const day = parseInt((x.date||'').split('-')[2], 10) || 1;
+      const amount = Number(x.amount) || 0;
+      hostessSalary[name] = (hostessSalary[name]||0) + amount;
+      totalHostessSalary += amount;
+      if(day <= 15){ hostessSalaryH1[name] = (hostessSalaryH1[name]||0) + amount; totalHostessSalaryH1 += amount; }
+      else { hostessSalaryH2[name] = (hostessSalaryH2[name]||0) + amount; totalHostessSalaryH2 += amount; }
+      hostessAdjustmentsByName[name] = (hostessAdjustmentsByName[name]||0) + amount;
+      if(!hostessAdjustmentDetails[name]) hostessAdjustmentDetails[name] = [];
+      hostessAdjustmentDetails[name].push({ date: x.date, comment: x.comment||'', amount });
+    });
     const hostessSalaryList = Object.entries(hostessSalary).sort((a,b)=>b[1]-a[1]);
     const maxHostessSalary = Math.max(1, ...hostessSalaryList.map(x=>x[1]));
     const hostessSalaryH1List = Object.entries(hostessSalaryH1).sort((a,b)=>b[1]-a[1]);
@@ -11460,7 +11481,7 @@
       return renderPersonalMasterSalaryView(monthLabel, combinedMasterTotals, masterEventDetails, masterAdjustmentDetails, combinedGrandTotal);
     }
     if(state.loggedInHostessName){
-      return renderPersonalHostessSalaryView(monthLabel, hostessSalary, hostessSalaryH1, hostessSalaryH2, totalHostessSalary);
+      return renderPersonalHostessSalaryView(monthLabel, hostessSalary, hostessSalaryH1, hostessSalaryH2, totalHostessSalary, hostessAdjustmentDetails);
     }
     return fullHtml;
   }
@@ -11596,14 +11617,17 @@
     if(today) today.onclick = ()=>{ state.analyticsCursor = new Date(new Date().getFullYear(), new Date().getMonth(), 1); render(); };
   }
 
-  function renderPersonalHostessSalaryView(monthLabel, hostessSalary, hostessSalaryH1, hostessSalaryH2, totalHostessSalary){
+  function renderPersonalHostessSalaryView(monthLabel, hostessSalary, hostessSalaryH1, hostessSalaryH2, totalHostessSalary, hostessAdjustmentDetails){
     const myName = state.loggedInHostessName;
     const norm = s => (s||'').trim().toLowerCase();
     const cursor = state.analyticsCursor;
     const y = cursor.getFullYear(), m = cursor.getMonth();
     const daysInMonth = new Date(y, m+1, 0).getDate();
     let resolvedName = Object.keys(hostessSalary).find(n=>n===myName) || Object.keys(hostessSalary).find(n=>norm(n)===norm(myName));
+    if(!resolvedName) resolvedName = Object.keys(hostessAdjustmentDetails||{}).find(n=>n===myName) || Object.keys(hostessAdjustmentDetails||{}).find(n=>norm(n)===norm(myName));
     const myTotal = resolvedName ? (hostessSalary[resolvedName]||0) : 0;
+    const myAdjustments = resolvedName ? ((hostessAdjustmentDetails||{})[resolvedName]||[]).slice().sort((a,b)=>a.date.localeCompare(b.date)) : [];
+    const myAdjustmentsTotal = myAdjustments.reduce((s,a)=>s+a.amount,0);
     const shifts = [];
     for(let d=1; d<=daysInMonth; d++){
       const dateObj = new Date(y, m, d);
@@ -11641,10 +11665,11 @@
       </div>
       <div class="analytics-section">
         <h4>Моя зарплата: ${formatMoney(myTotal)}</h4>
-        ${shifts.length === 0 ? `<div style="color:var(--ink-soft);font-size:13px;">${state.events.length>=0 && Object.values(state.hostessShifts).some(d=>Object.values(d).some(e=>e&&norm(e.name)===norm(myName))) ? 'В этом месяце пока нет смен.' : `Ваше имя «${escapeHtml(myName)}» пока ни разу не встречалось в графике смен. Возможно, оно записано чуть иначе — сверьтесь с администратором.`}</div>` : `
+        ${(shifts.length === 0 && myAdjustments.length === 0) ? `<div style="color:var(--ink-soft);font-size:13px;">${state.events.length>=0 && Object.values(state.hostessShifts).some(d=>Object.values(d).some(e=>e&&norm(e.name)===norm(myName))) ? 'В этом месяце пока нет смен.' : `Ваше имя «${escapeHtml(myName)}» пока ни разу не встречалось в графике смен. Возможно, оно записано чуть иначе — сверьтесь с администратором.`}</div>` : `
           <div style="display:flex;gap:16px;margin-bottom:10px;font-size:12.5px;">
             <div><b>1–15 число:</b> ${formatMoney(h1Total)}</div>
             <div><b>16 – конец:</b> ${formatMoney(h2Total)}</div>
+            ${myAdjustmentsTotal!==0 ? `<div><b>корректировки:</b> ${myAdjustmentsTotal>0?'+':''}${formatMoney(myAdjustmentsTotal)}</div>` : ''}
           </div>
           ${['H1','H2'].map(half=>{
             const halfShifts = shifts.filter(s=>s.half===half);
@@ -11662,6 +11687,18 @@
               `).join('')}
             </div>
           `;}).join('')}
+          ${myAdjustments.length > 0 ? `
+            <div style="margin-top:4px;padding-top:10px;border-top:1px dashed var(--line-strong);">
+              <div style="font-size:11px;color:var(--ink-soft);font-family:var(--font-mono);text-transform:uppercase;letter-spacing:0.03em;margin-bottom:4px;">Корректировки ЗП</div>
+              ${myAdjustments.map(a=>`
+                <div class="stat-row" style="margin-bottom:5px;">
+                  <div class="stat-label" style="width:170px;">${formatDateText(a.date)}</div>
+                  <div style="flex:1;font-size:12.5px;">${escapeHtml(a.comment||'без комментария')}</div>
+                  <div style="font-family:var(--font-mono);font-size:12.5px;color:${a.amount>=0?'var(--status-green)':'var(--status-red)'};">${a.amount>=0?'+':''}${formatMoney(a.amount)}</div>
+                </div>
+              `).join('')}
+            </div>
+          ` : ''}
         `}
       </div>
     `;
