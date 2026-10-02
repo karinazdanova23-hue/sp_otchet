@@ -1207,8 +1207,13 @@
   function fmtDate(d){ return d.getFullYear()+'-'+pad(d.getMonth()+1)+'-'+pad(d.getDate()); }
   function todayStr(){ return fmtDate(new Date()); }
   // по просьбе владелицы отчёты мастеров по мероприятиям временно не обязательны — с 1 октября 2026,
-  // когда запускается отдельное приложение для мастеров, напоминания и пометки "не сдано" включаются снова
-  function reportsRequiredNow(){ return todayStr() >= '2026-10-01'; }
+  // когда запускается отдельное приложение для мастеров, напоминания и пометки "не сдано" включаются снова.
+  // Важно: требование привязано к ДАТЕ САМОГО МЕРОПРИЯТИЯ, а не к сегодняшней дате — иначе 1 октября все
+  // несданные отчёты за весь сентябрь (и раньше) резко стали бы "обязательными" задним числом, чего быть
+  // не должно (сентябрь так и остаётся необязательной справочной сводкой навсегда).
+  const REPORTS_REQUIRED_FROM = '2026-10-01';
+  function reportsRequiredNow(){ return todayStr() >= REPORTS_REQUIRED_FROM; }
+  function isReportRequiredForEvent(e){ return !!(e && e.date && e.date >= REPORTS_REQUIRED_FROM); }
   function parseDate(s){ const [y,m,d]=s.split('-').map(Number); return new Date(y,m-1,d); }
   function formatDateText(dateStr){
     if(!dateStr) return '';
@@ -3239,9 +3244,10 @@
     const belowMinStock = state.materialsCatalog.filter(m=>m.trackStock && m.minStock>0 && m.stock!==undefined && m.stock!==null && m.stock>0 && m.stock<m.minStock);
     if(belowMinStock.length > 0) alerts.push({icon:'📉', text:`Ниже минимального остатка: ${belowMinStock.map(m=>m.name).join(', ')}`, view: roleCanAccessProcurement(state.currentRole) ? 'procurement' : undefined});
 
-    // несданные отчёты мастеров за последние 14 дней
+    // несданные отчёты мастеров за последние 14 дней — и не раньше даты, с которой отчёты вообще обязательны
+    // (см. REPORTS_REQUIRED_FROM), иначе этот баннер задним числом нагнал бы весь сентябрь
     const cutoff = new Date(); cutoff.setDate(cutoff.getDate()-14);
-    const cutoffStr = fmtDate(cutoff);
+    const cutoffStr = fmtDate(cutoff) > REPORTS_REQUIRED_FROM ? fmtDate(cutoff) : REPORTS_REQUIRED_FROM;
     const missingReports = state.events.filter(e=> e.host && e.host.trim() && e.date && e.date>=cutoffStr && e.date<=today && !hasMasterReport(e)).length;
     if(missingReports > 0 && reportsRequiredNow() && !['manager','assistant'].includes(state.currentRole)) alerts.push({icon:'📝', text:`Не сдано отчётов за 2 недели: ${missingReports}`});
 
@@ -9688,12 +9694,16 @@
     });
     redoRows.sort((a,b)=> (b.event.date+b.event.time).localeCompare(a.event.date+a.event.time));
 
-    // отчёты мастеров — контроль, у каких мероприятий с мастером нет отчёта
+    // отчёты мастеров — контроль, у каких мероприятий с мастером нет отчёта. Полный список (missingReportEvts)
+    // используется только для справочной статистики "сдано X из Y" за любой месяц; а вот что реально считается
+    // "несданным" и подсвечивается/напоминается (missingReportEvtsRequired) — только начиная с REPORTS_REQUIRED_FROM,
+    // чтобы сентябрьские (и более ранние) пробелы не стали задним числом обязательными.
     const reportableEvts = evts.filter(e=> e.host && e.host.trim() && e.date <= todayStr());
     const missingReportEvts = reportableEvts.filter(e=> !hasMasterReport(e))
       .sort((a,b)=> (b.date+b.time).localeCompare(a.date+a.time));
+    const missingReportEvtsRequired = missingReportEvts.filter(isReportRequiredForEvent);
     const missingReportsByHost = {};
-    missingReportEvts.forEach(e=>{
+    missingReportEvtsRequired.forEach(e=>{
       const h = e.host.trim();
       missingReportsByHost[h] = (missingReportsByHost[h]||0) + 1;
     });
@@ -10028,11 +10038,18 @@
     const npMastersOrderShare = state.orders
       .filter(x=> x.date && x.date.startsWith(monthYm))
       .reduce((s,x)=> s + orderTotalMasterShare(x), 0);
+    // корректировки (доплаты/удержания) без привязки к мероприятию — на имя мастера идут в ЗП мастеров,
+    // на имя админа (роль "hostess", HOSTESS_LIST) — в ЗП админов (см. тот же принцип в renderAnalytics)
     const npUnlinkedAdjustments = state.salaryAdjustments
-      .filter(a=> a.date && a.date.startsWith(monthYm) && !a.eventId)
+      .filter(a=> a.date && a.date.startsWith(monthYm) && !a.eventId && !HOSTESS_LIST.some(h=>h.toLowerCase()===(a.masterName||'').trim().toLowerCase()))
+      .reduce((s,a)=> s + (Number(a.amount)||0), 0);
+    const npHostessAdjustments = state.salaryAdjustments
+      .filter(a=> a.date && a.date.startsWith(monthYm) && !a.eventId && HOSTESS_LIST.some(h=>h.toLowerCase()===(a.masterName||'').trim().toLowerCase()))
       .reduce((s,a)=> s + (Number(a.amount)||0), 0);
     const npMastersSalary = npMastersBasePay + npMastersItemShare + npMastersOrderShare + npUnlinkedAdjustments;
-    // зп хостес — по графику смен (будни/выходные + переработка), как и в разделе "ЗП хостес"
+    // зп хостес — по графику смен (будни/выходные + переработка), как и в разделе "ЗП хостес", плюс
+    // корректировки на имя админа и премия, вписанная владельцем вручную (state.hostessBonuses) — то же,
+    // что фактически увидит админ в своей «Моя зарплата», иначе эти расходы нигде не попадали бы в прибыль
     let npHostessSalary = 0;
     {
       const y = cursor.getFullYear(), m = cursor.getMonth();
@@ -10055,6 +10072,9 @@
         npHostessSalary += Object.values(hostessDishesBonusesForDate(dateStr, dayShifts)).reduce((s,v)=>s+v,0);
       }
     }
+    npHostessSalary += npHostessAdjustments;
+    const npHostessBonusTotal = Object.values((state.hostessBonuses && state.hostessBonuses[monthYm]) || {}).reduce((s,b)=> s + (Number((b&&b.amount)||0)), 0);
+    npHostessSalary += npHostessBonusTotal;
     const npManual = (state.netProfitManual && state.netProfitManual[monthYm]) || {};
     // ЗП менеджеров считается автоматически по той же формуле, что и в «Для менеджеров → ЗП менеджеров»
     const npManagerSalary = computeManagerSalaryForMonth(monthYm).total;
@@ -10691,6 +10711,12 @@
     // зарплата мастеров (учитывает всех со-ведущих на мероприятии, не только основного)
     const monthYmForItemSales = cursor.getFullYear()+'-'+pad(cursor.getMonth()+1);
     const totalSalary = evts.reduce((sum,e)=> sum + eventTotalMasterPay(e), 0);
+    // единый список ВСЕХ корректировок ЗП за месяц (и мастера, и админы вместе) — чтобы видеть все
+    // доплаты/удержания в одном месте, без необходимости открывать каждого сотрудника по отдельности
+    const allSalaryAdjustmentsThisMonth = state.salaryAdjustments
+      .filter(x=> x.date && x.date.startsWith(monthYmForItemSales))
+      .map(x=> ({ date: x.date, masterName: (x.masterName||'').trim(), comment: x.comment||'', amount: Number(x.amount)||0 }))
+      .sort((a,b)=> a.date.localeCompare(b.date));
 
     const hostSalary = {};
     const hostSessionPay = {};
@@ -10724,19 +10750,30 @@
       });
     });
 
-    // доля мастеров от продажи изделий за этот же месяц
+    // доля мастеров от продажи изделий за этот же месяц — показывается в сводной строке ("за изделия: ...")
+    // и, как и у мероприятий/заказов, отдельной строкой в разбивке по дням (masterEventDetails), чтобы
+    // мастер мог увидеть и сверить конкретную продажу, а не только итоговую сумму
     const itemSalesByMaster = {};
     state.itemSales.filter(x=> x.date && x.date.startsWith(monthYmForItemSales)).forEach(x=>{
       const name = (x.masterName||'').trim();
       if(!name) return;
       const rev = (x.revenue!==undefined&&x.revenue!==null&&!isNaN(x.revenue))?Number(x.revenue):0;
-      itemSalesByMaster[name] = (itemSalesByMaster[name]||0) + Math.round(rev*ITEM_SALE_MASTER_PCT/100);
+      const share = Math.round(rev*ITEM_SALE_MASTER_PCT/100);
+      itemSalesByMaster[name] = (itemSalesByMaster[name]||0) + share;
+      const half = parseInt((x.date||'').split('-')[2], 10) <= 15 ? 'H1' : 'H2';
+      if(!masterEventDetails[name]) masterEventDetails[name] = [];
+      masterEventDetails[name].push({ date: x.date, title: `Изделие${x.comment?' — '+x.comment:''}`, sessionPay: 0, materialsComp: 0, total: share, half, kind: 'item' });
     });
-    // доля мастеров от заказов за этот же месяц
+    // доля мастеров от заказов за этот же месяц — та же логика: сводная сумма ("за заказы: ...") плюс
+    // отдельная строка на каждый заказ в разбивке по дням, иначе мастеру не найти, откуда взялась сумма
     const ordersByMaster = {};
     state.orders.filter(x=> x.date && x.date.startsWith(monthYmForItemSales)).forEach(x=>{
+      const half = parseInt((x.date||'').split('-')[2], 10) <= 15 ? 'H1' : 'H2';
       orderMasterEntries(x).forEach(e=>{
         ordersByMaster[e.name] = (ordersByMaster[e.name]||0) + e.share;
+        if(!e.share) return;
+        if(!masterEventDetails[e.name]) masterEventDetails[e.name] = [];
+        masterEventDetails[e.name].push({ date: x.date, title: `Заказ${x.comment?' — '+x.comment:''}`, sessionPay: 0, materialsComp: 0, total: e.share, half, kind: 'order' });
       });
     });
     // корректировки ЗП (доплаты/удержания) за этот же месяц — только для мастеров; корректировки, введённые на имя админа
@@ -11200,7 +11237,7 @@
                       `).join('')}
                       ${half==='H2' ? `
                         <div style="margin-top:8px;padding-top:8px;border-top:1px solid var(--line-strong);">
-                          <div class="stat-row"><div class="stat-label">Сумма за 2-ю половину (МК)</div><div style="flex:1;text-align:right;font-family:var(--font-mono);font-size:12.5px;">${formatMoney(h2EventTotal)}</div></div>
+                          <div class="stat-row"><div class="stat-label">Сумма за 2-ю половину (МК + заказы + изделия)</div><div style="flex:1;text-align:right;font-family:var(--font-mono);font-size:12.5px;">${formatMoney(h2EventTotal)}</div></div>
                           <div class="stat-row"><div class="stat-label">Корректировки</div><div style="flex:1;text-align:right;font-family:var(--font-mono);font-size:12.5px;color:${x.fromAdjustments>=0?'var(--status-green)':'var(--status-red)'};">${x.fromAdjustments>=0?'+':''}${formatMoney(x.fromAdjustments)}</div></div>
                           <div class="stat-row" style="font-weight:600;"><div class="stat-label">Итог к выдаче (2-я половина)</div><div style="flex:1;text-align:right;font-family:var(--font-mono);font-size:13px;">${formatMoney(h2EventTotal + x.fromAdjustments)}</div></div>
                         </div>
@@ -11223,6 +11260,18 @@
               ` : ''}
             </div>
           `;}).join('') : `<div style="color:var(--ink-soft);font-size:13px;">В этом месяце нет ни мероприятий с мастером, ни продаж изделий.</div>`}
+        </div>
+        <div class="analytics-section">
+          <h4>Все корректировки ЗП за месяц: ${formatMoney(allSalaryAdjustmentsThisMonth.reduce((s,a)=>s+a.amount,0))}</h4>
+          <div style="font-size:11.5px;color:var(--ink-soft);font-family:var(--font-mono);margin-bottom:8px;">Все доплаты/удержания за месяц в одном месте — и мастерам, и админам, без необходимости открывать каждого по отдельности.</div>
+          ${allSalaryAdjustmentsThisMonth.length ? allSalaryAdjustmentsThisMonth.map(a=>`
+            <div class="stat-row">
+              <div class="stat-label" style="width:170px;">${formatDateText(a.date)}</div>
+              <div style="width:140px;font-weight:600;">${escapeHtml(a.masterName||'—')}</div>
+              <div style="flex:1;font-size:12.5px;">${escapeHtml(a.comment||'без комментария')}</div>
+              <div style="font-family:var(--font-mono);font-size:12.5px;color:${a.amount>=0?'var(--status-green)':'var(--status-red)'};">${a.amount>=0?'+':''}${formatMoney(a.amount)}</div>
+            </div>
+          `).join('') : `<div style="color:var(--ink-soft);font-size:13px;">В этом месяце корректировок не было.</div>`}
         </div>
         <div class="analytics-section">
           <h4 style="color:${salaryReconciliation.length>0?'var(--status-red)':'inherit'};">Начислено vs Выплачено ${salaryReconciliation.length ? `(${salaryReconciliation.length} расхождений)` : ''}</h4>
@@ -11422,18 +11471,18 @@
 `;
 
     const analyticsPanel_reports = `      <div class="analytics-section">
-        <h4 style="color:${(missingReportEvts.length>0 && reportsRequiredNow())?'var(--status-red)':'inherit'};">Отчёты мастеров ${reportableEvts.length ? `(${reportableEvts.length - missingReportEvts.length} из ${reportableEvts.length} сдано)` : ''}</h4>
-        <div style="font-size:11.5px;color:var(--ink-soft);font-family:var(--font-mono);margin-bottom:8px;">Учитываются мероприятия с указанным мастером, дата которых уже наступила.${!reportsRequiredNow() ? ' До 1 октября заполнение отчётов необязательно — это просто справочная сводка.' : ''}</div>
+        <h4 style="color:${missingReportEvtsRequired.length>0?'var(--status-red)':'inherit'};">Отчёты мастеров ${reportableEvts.length ? `(${reportableEvts.length - missingReportEvts.length} из ${reportableEvts.length} сдано)` : ''}</h4>
+        <div style="font-size:11.5px;color:var(--ink-soft);font-family:var(--font-mono);margin-bottom:8px;">Учитываются мероприятия с указанным мастером, дата которых уже наступила. Обязательны отчёты только с 1 октября 2026 — за более ранние даты (в т.ч. сентябрь) это просто справочная сводка, без напоминаний и без «не сдано».</div>
         ${reportableEvts.length === 0 ? `<div style="color:var(--ink-soft);font-size:13px;">В этом месяце пока нет прошедших мероприятий с мастером.</div>` : (
-          missingReportEvts.length === 0
-          ? `<div style="color:var(--status-green);font-size:13px;">✓ Все отчёты сданы.</div>`
+          missingReportEvtsRequired.length === 0
+          ? `<div style="color:var(--status-green);font-size:13px;">✓ Все обязательные отчёты (с 1 октября) сданы.</div>`
           : `
             ${missingReportsByHostList.length>1 ? `
               <div style="margin-bottom:12px;">
                 ${missingReportsByHostList.map(([h,c])=>`<span class="cert-badge in_progress" style="margin:2px 6px 2px 0;display:inline-block;">${escapeHtml(h)}: ${c}</span>`).join('')}
               </div>
             ` : ''}
-            ${missingReportEvts.map(e=>`
+            ${missingReportEvtsRequired.map(e=>`
               <div class="stat-row">
                 <div class="stat-label" style="width:100%;flex:1;">
                   <b>${escapeHtml(e.host)}</b> — ${escapeHtml(e.title)} ${spaceBadge(getSpace(e.spaceId),'xs')} · ${formatDateText(e.date)} ${e.time}
@@ -11809,7 +11858,7 @@
     const h2EventTotal = details.filter(d=>d.half==='H2').reduce((s,d)=>s+d.total,0);
     const myAdjustments = resolvedName ? (masterAdjustmentDetails[resolvedName]||[]).sort((a,b)=>a.date.localeCompare(b.date)) : [];
     const myMissingReports = state.events
-      .filter(e=> e.date && e.date<=todayStr() && !hasMasterReport(e) && (norm(e.host)===norm(myName) || (e.additionalHosts||[]).some(h=>norm(h.name)===norm(myName))))
+      .filter(e=> e.date && e.date<=todayStr() && isReportRequiredForEvent(e) && !hasMasterReport(e) && (norm(e.host)===norm(myName) || (e.additionalHosts||[]).some(h=>norm(h.name)===norm(myName))))
       .sort((a,b)=> (b.date+b.time).localeCompare(a.date+a.time));
     return `
       <div class="analytics-header">
@@ -11854,7 +11903,7 @@
               `).join('')}
               ${half==='H2' ? `
                 <div style="margin-top:8px;padding-top:8px;border-top:1px solid var(--line-strong);">
-                  <div class="stat-row"><div class="stat-label">Сумма за 2-ю половину (МК)</div><div style="flex:1;text-align:right;font-family:var(--font-mono);font-size:12.5px;">${formatMoney(h2EventTotal)}</div></div>
+                  <div class="stat-row"><div class="stat-label">Сумма за 2-ю половину (МК + заказы + изделия)</div><div style="flex:1;text-align:right;font-family:var(--font-mono);font-size:12.5px;">${formatMoney(h2EventTotal)}</div></div>
                   <div class="stat-row"><div class="stat-label">Корректировки</div><div style="flex:1;text-align:right;font-family:var(--font-mono);font-size:12.5px;color:${(mine?mine.fromAdjustments:0)>=0?'var(--status-green)':'var(--status-red)'};">${(mine&&mine.fromAdjustments>=0)?'+':''}${formatMoney(mine?mine.fromAdjustments:0)}</div></div>
                   <div class="stat-row" style="font-weight:600;"><div class="stat-label">Итог к выдаче (2-я половина)</div><div style="flex:1;text-align:right;font-family:var(--font-mono);font-size:13px;">${formatMoney(h2EventTotal + (mine?mine.fromAdjustments:0))}</div></div>
                 </div>
@@ -14494,7 +14543,10 @@
       .filter(x=> x.date && x.date.startsWith(ym))
       .reduce((s,x)=> s + orderTotalMasterShare(x), 0);
     const npUnlinkedAdjustments = state.salaryAdjustments
-      .filter(a=> a.date && a.date.startsWith(ym) && !a.eventId)
+      .filter(a=> a.date && a.date.startsWith(ym) && !a.eventId && !HOSTESS_LIST.some(h=>h.toLowerCase()===(a.masterName||'').trim().toLowerCase()))
+      .reduce((s,a)=> s + (Number(a.amount)||0), 0);
+    const npHostessAdjustments = state.salaryAdjustments
+      .filter(a=> a.date && a.date.startsWith(ym) && !a.eventId && HOSTESS_LIST.some(h=>h.toLowerCase()===(a.masterName||'').trim().toLowerCase()))
       .reduce((s,a)=> s + (Number(a.amount)||0), 0);
     const npMastersSalary = npMastersBasePay + npMastersItemShare + npMastersOrderShare + npUnlinkedAdjustments;
 
@@ -14521,6 +14573,8 @@
         npHostessSalary += Object.values(hostessDishesBonusesForDate(dateStr, dayShifts)).reduce((s,v)=>s+v,0);
       }
     }
+    npHostessSalary += npHostessAdjustments;
+    npHostessSalary += Object.values((state.hostessBonuses && state.hostessBonuses[ym]) || {}).reduce((s,b)=> s + (Number((b&&b.amount)||0)), 0);
     const npManagerSalary = computeManagerSalaryForMonth(ym).total;
 
     // расходы из «Книги → Расходы»: «Маркетинг» — отдельной строкой (как и раньше), «Аренда»/«Зарплата» —
