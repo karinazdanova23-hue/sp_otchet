@@ -123,6 +123,19 @@
   .summary-card.green .num{ color: var(--status-green); }
   .summary-card.red .num{ color: var(--status-red); }
 
+  /* ---------- режим приватности: скрывает экран от случайного взгляда ---------- */
+  #app.privacy-blur{ filter: blur(9px); transition: filter .12s ease; pointer-events: none; user-select: none; }
+  #privacy-toggle-btn{
+    position: fixed; top: 12px; right: 12px; z-index: 99999;
+    width: 42px; height: 42px; border-radius: 50%; border: 1px solid var(--line-strong);
+    background: var(--white); cursor: pointer; font-size: 19px; display: flex; align-items: center; justify-content: center;
+    box-shadow: 0 2px 10px rgba(0,0,0,0.18);
+  }
+  #privacy-toggle-btn.active{ background: var(--ink); color: var(--white); border-color: var(--ink); }
+  @media (max-width: 760px){
+    #privacy-toggle-btn{ top: auto; bottom: 16px; right: 16px; }
+  }
+
   .analytics-section{ margin-bottom: 30px; }
   .analytics-section h4{
     font-family: var(--font-display); font-size: 16px; font-weight: 600; margin: 0 0 14px;
@@ -489,6 +502,15 @@
     cursor:pointer; font-family: var(--font-mono);
   }
   .quick-report-btn:hover{ border-color: var(--ink); color: var(--ink); }
+  .day-evt.open-master-slot{ border-style: dashed; border-color: var(--status-cyan); }
+  .slot-signup-btn{
+    flex-shrink:0; border: 1px solid var(--status-cyan); background: var(--white);
+    padding: 6px 10px; border-radius: var(--radius); font-size: 11.5px; color: var(--status-cyan);
+    cursor:pointer; font-family: var(--font-mono); font-weight:600;
+  }
+  .slot-signup-btn:hover{ background: var(--status-cyan); color: var(--white); }
+  .slot-signup-btn.active{ border-color: var(--status-green); color: var(--status-green); }
+  .slot-signup-btn.active:hover{ background: var(--status-green); color: var(--white); }
   .rating-scale{ display:flex; gap:8px; }
   .rating-btn{
     width: 42px; height: 42px; border-radius: 50%; border: 1px solid var(--line-strong);
@@ -791,6 +813,9 @@
   const MANAGER_SALARY_PCT_TENTATIVE = 0.03; // % от выручки "Частник"
   const MANAGER_SALARY_PCT_CONFIRMED = 0.01; // % от выручки "По расписанию"
   const MANAGER_SALARY_PCT_CERTS = 0.01;     // % от суммы проданных сертификатов
+  const MANAGER_SALARY_PCT_ORDERS_ITEMS = 0.01; // % от выручки "Заказы" + "Изделия"
+  const SALARY_MASTERS_COLLAPSE_LIMIT = 5; // сколько мастеров показывать в "ЗП по мастерам" до кнопки "показать всех"
+  const COLLAPSE_LIST_LIMIT = 5; // сколько строк показывать в длинных списках вкладки "Зарплата" (корректировки, начислено/выплачено) до кнопки "показать все"
   const STATUS_COLOR_VAR = { confirmed: '--status-green', tentative: '--status-red', marketing: '--status-blue', offsite: '--status-purple', slot: '--status-cyan', cancelled: '--ink-soft' };
   function statusColor(status){ return 'var(' + (STATUS_COLOR_VAR[status] || '--status-green') + ')'; }
   function showsDishesAndRental(status){ return status === 'tentative' || status === 'marketing'; }
@@ -832,13 +857,21 @@
   const REFUND_SOURCES = ['YCLIENTS', 'Точка'];
   const REFUND_STATUS_LABEL = { in_progress: 'В процессе', refunded: 'Возвращено' };
 
-  const INCOME_OPERATIONS = ['Оплата','Предоплата','Остаток оплаты'];
-  const INCOME_PRODUCTS = [...PRODUCTS, 'Сертификат', 'Изделие', 'Заказ'];
-  const INCOME_ACCOUNTS = ['Точка','Наличные','Юклиент','ЮрСчет'];
+  const INCOME_OPERATIONS = ['Оплата','Предоплата','Остаток оплаты','Перемещение'];
+  const INCOME_PRODUCTS = [...PRODUCTS.filter(p=>p!=='Мастер-класс'), 'Расписание', 'Сертификат', 'Изделие', 'Заказ'];
+  const INCOME_ACCOUNTS = ['Точка','Наличные','ЮрСчет','Сейф'];
+  // те же счета, но без служебного "Сейф" — для мест, где выбирают способ оплаты гостя
+  // (продажа сертификата/изделия), а не ведут саму "Книгу": "Сейф" там не осмысленный вариант.
+  const SALE_PAYMENT_ACCOUNTS = ['Точка','Наличные','Юклиент','ЮрСчет'];
 
-  const EXPENSE_CATEGORIES = ['Материалы','Инвентарь','Маркетинг','Зарплата','Аренда','Подарки','Операции','Декор','Логистика','Продукты','Типография','Косяки'];
-  const EXPENSE_SOURCES = ['Наличные','Точка','ВБ','Озон','Карина'];
+  const EXPENSE_CATEGORIES = ['Материалы','Инвентарь','Маркетинг','Зарплата','Аренда','Подарки','Операции','Декор','Логистика','Продукты','Типография','Косяки','Сейф'];
+  const EXPENSE_SOURCES = ['Наличные','Точка','ВБ','Озон','Карина','Сейф'];
+  const STAFF_ROLE_OPTIONS = ['Старший администратор','Ассистент','Менеджер','Другое'];
   const EXPENSE_RESPONSIBLE = ['Карина','Ассистент','Менеджер'];
+  // "Сейф" — служебная категория/счёт для перемещений наличных между кассой и сейфом (раздел "Касса",
+  // доступен администраторам): см. roleCanAccessCashbox и renderCashboxView. Каждое перемещение пишется
+  // как обычная запись в "Книге" (safeTransfer:true помечает такие записи, чтобы отличать их от
+  // настоящих доходов/расходов при необходимости и не открывать их через общую модалку редактирования).
 
   const ITEM_SALE_MASTER_PCT = 70; // % от выручки — мастеру, изготовившему изделие
   const ITEM_SALE_STUDIO_PCT = 100 - ITEM_SALE_MASTER_PCT; // остальное — в прибыль студии
@@ -1143,6 +1176,8 @@
     eventTypes: null,
     incomes: null,
     expenses: null,
+    cashboxDate: null,
+    receiptPhotoCache: {},
     bookView: 'incomes',
     bookCursor: new Date(),
     bookMode: 'month',
@@ -1183,6 +1218,10 @@
     certExpandedGroups: new Set(),
     certSummaryExpandedYears: null,
     expandedSalaryMasters: new Set(),
+    salaryMastersShowAll: false,
+    salaryMastersSearch: '',
+    npAdjustmentsShowAll: false,
+    npReconciliationShowAll: false,
     masterPersonalPasswords: {},
     loggedInMasterName: null,
     hostessPersonalPasswords: {},
@@ -1315,8 +1354,14 @@
   const DEFAULT_ROLE_CODES = { hostess:'1111', master:'2222', manager:'3333', marketer:'6666', assistant:'4444', admin:'5555', owner:'0000' };
   // права: кто видит "Для менеджеров"/"Книгу" (менеджер, маркетолог и выше), кто видит "Аналитику" (ассистент/админ и выше), кто видит "Чистую прибыль" (только руководитель)
   function roleCanAccessManagersTab(role){ return ['manager','marketer','assistant','admin','owner'].includes(role); }
-  // маркетологу по просьбе владелицы закрыт доступ ко всем финансам, включая "Книгу"
-  function roleCanAccessBook(role){ return ['manager','assistant','admin','owner'].includes(role); }
+  // маркетологу по просьбе владелицы закрыт доступ ко всем финансам, включая "Книгу".
+  // Администраторам (роль "hostess") доступ в "Книгу" открыт — им нужно заносить туда оплаты
+  // "Точкой" и остатки оплат за мероприятия, которые не проходят через "Кассу" (та — только наличные) —
+  // но общие суммы (итого за месяц, разбивки по категориям/счетам) от них скрыты, см. bookTotalsHidden().
+  function roleCanAccessBook(role){ return ['manager','assistant','admin','owner','hostess'].includes(role); }
+  // скрывать ли агрегированные суммы в "Книге" (итого за период, разбивки по категориям/счетам,
+  // вкладку "Аналитика" и сверку с Точка Банком) — по просьбе владелицы, только для администраторов
+  function bookTotalsHidden(role){ return role === 'hostess'; }
   function roleCanAccessAnalytics(role){ return ['manager','assistant','admin','owner'].includes(role); }
   // менеджер и маркетолог не видят полную "Аналитику", но им нужно окно с выполнением плана (без прибыли и прочих финансовых деталей)
   function roleCanSeePlanProgress(role){ return ['manager','marketer'].includes(role); }
@@ -1330,6 +1375,10 @@
   function roleCanQuickAddEventType(role){ return ['manager','admin'].includes(role); }
   // "Закупки" — рабочий инструмент старшего администратора (закуп материалов) и руководителя
   function roleCanAccessProcurement(role){ return ['admin','owner'].includes(role); }
+  // "Касса" — урезанная книга доходов/расходов только по наличным, для администраторов (роль "hostess"):
+  // видят приход/расход наличными и остаток за день, но не общую сумму за месяц (та — только в полной
+  // "Книге", к которой у роли "hostess" доступа нет); руководитель тоже видит её — для контроля за кассой.
+  function roleCanAccessCashbox(role){ return role === 'hostess' || role === 'owner'; }
   // отмечать себя выходным в календаре могут менеджеры, ассистент, старший администратор и руководитель —
   // каждый только сам за себя (см. canDayOffEntryBeRemovedByMe)
   function roleCanMarkDayOff(role){ return ['manager','assistant','admin','owner'].includes(role); }
@@ -1346,7 +1395,9 @@
     if(view==='certificates') return roleCanAccessCertificatesView(state.currentRole);
     if(view==='marketing') return roleCanAccessManagersTab(state.currentRole);
     if(view==='book') return roleCanAccessBook(state.currentRole);
+    if(view==='cashbox') return roleCanAccessCashbox(state.currentRole);
     if(view==='analytics') return roleCanAccessAnalytics(state.currentRole) || !!state.loggedInMasterName || !!state.loggedInHostessName;
+    if(view==='my-orders') return !!state.loggedInMasterName;
     if(view==='planprogress') return roleCanSeePlanProgress(state.currentRole);
     if(view==='procurement') return roleCanAccessProcurement(state.currentRole);
     return false;
@@ -2436,6 +2487,28 @@
     const received = Number(order.received)||0;
     return Math.max(0, revenue - received);
   }
+  // остаток дней до дедлайна заказа (отрицательное — просрочено); null, если дедлайн не указан
+  function orderDaysLeft(order){
+    if(!order || !order.deadline) return null;
+    return daysBetweenDates(todayStr(), order.deadline);
+  }
+  function orderDaysLeftLabel(order){
+    const days = orderDaysLeft(order);
+    if(days === null) return {text:'', color:'var(--ink-soft)'};
+    let color = 'var(--ink-soft)', text;
+    if(days < 0){ color = 'var(--status-red)'; text = `просрочен на ${Math.abs(days)} дн.`; }
+    else if(days === 0){ color = 'var(--status-red)'; text = 'сегодня'; }
+    else if(days <= 3){ color = 'var(--status-red)'; text = `осталось ${days} дн.`; }
+    else if(days <= 7){ color = 'var(--accent)'; text = `осталось ${days} дн.`; }
+    else { text = `осталось ${days} дн.`; }
+    return {text, color};
+  }
+  function orderDeadlineBadgeHtml(order){
+    const days = orderDaysLeft(order);
+    if(days === null) return '';
+    const {text, color} = orderDaysLeftLabel(order);
+    return ` · <span style="color:${color};font-weight:600;">⏳ дедлайн ${formatDateText(order.deadline)} (${text})</span>`;
+  }
   async function saveEventTypes(){
     await saveCollectionMerged('event-types', state.eventTypes, state._eventTypesBaseline, (finalArr)=>{
       state.eventTypes = finalArr;
@@ -2707,15 +2780,23 @@
       const amt = (c.amount!==undefined && c.amount!==null && !isNaN(c.amount)) ? Number(c.amount) : 0;
       return sum + amt;
     }, 0);
+    const ordersRevenue = state.orders
+      .filter(x=> x.date && x.date.startsWith(ym))
+      .reduce((s,x)=> s + ((x.revenue!==undefined&&x.revenue!==null&&!isNaN(x.revenue))?Number(x.revenue):0), 0);
+    const itemSalesRevenue = state.itemSales
+      .filter(x=> x.date && x.date.startsWith(ym))
+      .reduce((s,x)=> s + ((x.revenue!==undefined&&x.revenue!==null&&!isNaN(x.revenue))?Number(x.revenue):0), 0);
     const bonusTentative = Math.round(revenueByStatus.tentative * MANAGER_SALARY_PCT_TENTATIVE);
     const bonusConfirmed = Math.round(revenueByStatus.confirmed * MANAGER_SALARY_PCT_CONFIRMED);
     const bonusCerts = Math.round(certsRevenue * MANAGER_SALARY_PCT_CERTS);
-    const total = MANAGER_SALARY_BASE + bonusTentative + bonusConfirmed + bonusCerts;
+    const bonusOrdersItems = Math.round((ordersRevenue + itemSalesRevenue) * MANAGER_SALARY_PCT_ORDERS_ITEMS);
+    const total = MANAGER_SALARY_BASE + bonusTentative + bonusConfirmed + bonusCerts + bonusOrdersItems;
     return {
       base: MANAGER_SALARY_BASE,
       revenueTentative: revenueByStatus.tentative, bonusTentative,
       revenueConfirmed: revenueByStatus.confirmed, bonusConfirmed,
       certsRevenue, bonusCerts,
+      ordersRevenue, itemSalesRevenue, bonusOrdersItems,
       total,
     };
   }
@@ -2783,6 +2864,57 @@
       state._certificatesBaseline = JSON.parse(JSON.stringify(finalArr));
     });
   }
+
+  // фото чека по сертификату — хранится отдельным ключом (не внутри самого сертификата), чтобы
+  // не раздувать общий массив certificates; в памяти держим кэш, чтобы не перезапрашивать повторно
+  function compressImageFile(file, maxDim=1400, quality=0.75){
+    return new Promise((resolve, reject)=>{
+      const reader = new FileReader();
+      reader.onload = ()=>{
+        const img = new Image();
+        img.onload = ()=>{
+          let { width, height } = img;
+          if(width > maxDim || height > maxDim){
+            if(width >= height){ height = Math.round(height * maxDim / width); width = maxDim; }
+            else { width = Math.round(width * maxDim / height); height = maxDim; }
+          }
+          const canvas = document.createElement('canvas');
+          canvas.width = width; canvas.height = height;
+          const ctx = canvas.getContext('2d');
+          ctx.drawImage(img, 0, 0, width, height);
+          resolve(canvas.toDataURL('image/jpeg', quality));
+        };
+        img.onerror = ()=> reject(new Error('image load failed'));
+        img.src = reader.result;
+      };
+      reader.onerror = ()=> reject(new Error('file read failed'));
+      reader.readAsDataURL(file);
+    });
+  }
+  // общие функции для любого "прикреплённого фото" (чек сертификата, фото заявки и т.п.) — отличаются
+  // только ключом хранения; общий кэш в памяти экономит повторные запросы к storage в рамках сессии
+  async function loadAttachedPhoto(storageKey){
+    if(state.receiptPhotoCache[storageKey]) return state.receiptPhotoCache[storageKey];
+    try{
+      const r = await window.storage.get(storageKey, true);
+      if(r && r.value){ state.receiptPhotoCache[storageKey] = r.value; return r.value; }
+    }catch(e){ /* фото ещё нет или не загрузилось — покажем как "не прикреплено" */ }
+    return null;
+  }
+  async function saveAttachedPhoto(storageKey, dataUrl){
+    state.receiptPhotoCache[storageKey] = dataUrl;
+    return storageSetWithRetry(storageKey, dataUrl);
+  }
+  async function deleteAttachedPhoto(storageKey){
+    delete state.receiptPhotoCache[storageKey];
+    try{ await window.storage.remove(storageKey); }catch(e){ /* не критично */ }
+  }
+  function loadReceiptPhoto(certId){ return loadAttachedPhoto('receipt-photo-'+certId); }
+  function saveReceiptPhoto(certId, dataUrl){ return saveAttachedPhoto('receipt-photo-'+certId, dataUrl); }
+  function deleteReceiptPhoto(certId){ return deleteAttachedPhoto('receipt-photo-'+certId); }
+  function loadLeadPhoto(leadId){ return loadAttachedPhoto('lead-photo-'+leadId); }
+  function saveLeadPhoto(leadId, dataUrl){ return saveAttachedPhoto('lead-photo-'+leadId, dataUrl); }
+  function deleteLeadPhoto(leadId){ return deleteAttachedPhoto('lead-photo-'+leadId); }
   async function saveRefunds(){
     await saveCollectionMerged('refunds', state.refunds, state._refundsBaseline, (finalArr)=>{
       state.refunds = finalArr;
@@ -2871,6 +3003,16 @@
   // списках по пространствам/«Все», а отдельной полосой «Предложения мастеров» в дне (см. renderDayModal)
   function isUnassignedSlotProposal(e){
     return e.status === 'slot' && !e.spaceId;
+  }
+  // слот, который старший администратор поставил в расписание (пространство/время/продукт заданы), но мастер
+  // ещё не назначен — мастера видят его в обычном дне и могут отметить себя свободными (см. availableMasters)
+  function isOpenMasterSlot(e){
+    return e.status === 'slot' && !!e.spaceId && !(e.host||'').trim();
+  }
+  function iAmAvailableForSlot(e){
+    const myName = (state.loggedInMasterName||'').trim().toLowerCase();
+    if(!myName) return false;
+    return (e.availableMasters||[]).some(n=>(n||'').trim().toLowerCase()===myName);
   }
   function eventsFor(spaceId, dateStr){
     const list = spaceId === 'all'
@@ -3136,6 +3278,8 @@
       html += renderHostView();
     } else if(state.view === 'analytics'){
       html += renderAnalytics();
+    } else if(state.view === 'my-orders'){
+      html += renderMyOrdersView();
     } else if(state.view === 'planprogress'){
       html += renderPlanProgressView();
     } else if(state.view === 'certificates'){
@@ -3144,6 +3288,8 @@
       html += renderMarketingView();
     } else if(state.view === 'book'){
       html += renderBookView();
+    } else if(state.view === 'cashbox'){
+      html += renderCashboxView();
     } else if(state.view === 'procurement'){
       html += renderProcurementView();
     }
@@ -3152,11 +3298,13 @@
     if(state.view === 'calendar'){ attachCalendarEvents(); }
     else if(state.view === 'host'){ attachHostEvents(); }
     else if(state.view === 'analytics'){ attachAnalyticsEvents(); }
+    else if(state.view === 'my-orders'){ /* только чтение, обработчики не нужны */ }
     else if(state.view === 'planprogress'){ attachPlanProgressViewEvents(); }
     else if(state.view === 'certificates'){ attachCertificatesEvents(); }
     else if(state.view === 'marketing'){ attachMarketingEvents(); }
     else if(state.view === 'procurement'){ attachProcurementEvents(); }
     else if(state.view === 'book'){ attachBookEvents(); }
+    else if(state.view === 'cashbox'){ attachCashboxEvents(); }
 
     if(state.modal){ renderModal(); }
   }
@@ -3430,10 +3578,12 @@
             <button data-view="calendar" class="${state.view==='calendar'?'active':''}">По пространствам</button>
             <button data-view="host" class="${state.view==='host'?'active':''}">По ведущим</button>
             ${(roleCanAccessAnalytics(role) || state.loggedInMasterName || state.loggedInHostessName) ? `<button data-view="analytics" class="${state.view==='analytics'?'active':''}">${(state.loggedInMasterName || state.loggedInHostessName) ? '💰 Моя зарплата' : 'Аналитика'}</button>` : ''}
+            ${state.loggedInMasterName ? `<button data-view="my-orders" class="${state.view==='my-orders'?'active':''}">📦 Заказы</button>` : ''}
             ${roleCanSeePlanProgress(role) ? `<button data-view="planprogress" class="${state.view==='planprogress'?'active':''}">🎯 План</button>` : ''}
             ${roleCanAccessCertificatesView(role) ? `<button data-view="certificates" class="${state.view==='certificates'?'active':''}">${role==='hostess' ? 'Сертификаты / Изделия' : 'Для менеджеров'}</button>` : ''}
             ${roleCanAccessManagersTab(role) ? `<button data-view="marketing" class="${state.view==='marketing'?'active':''}">Маркетинг</button>` : ''}
             ${roleCanAccessBook(role) ? `<button data-view="book" class="${state.view==='book'?'active':''}">Книга</button>` : ''}
+            ${roleCanAccessCashbox(role) ? `<button data-view="cashbox" class="${state.view==='cashbox'?'active':''}">💵 Касса</button>` : ''}
             ${roleCanAccessProcurement(role) ? `<button data-view="procurement" class="${state.view==='procurement'?'active':''}">📦 Закупки</button>` : ''}
           </div>
           <button class="lock-btn no-print" id="btn-today-view">📋 Сегодня</button>
@@ -3631,12 +3781,24 @@
     return subTabsHtml + renderMarketingSpendListView();
   }
 
+  // блогер — просто ссылка на его аккаунт (а не ник), поэтому везде, где раньше показывали текст "ника",
+  // показываем кликабельную ссылку; если протокол не указан — добавляем https:// сами
+  function bloggerLinkHtml(url){
+    if(!url) return '';
+    const trimmed = String(url).trim();
+    if(!trimmed) return '';
+    const href = /^https?:\/\//i.test(trimmed) ? trimmed : 'https://'+trimmed;
+    return `<a href="${escapeHtml(href)}" target="_blank" rel="noopener" style="color:var(--status-blue);">${escapeHtml(trimmed)}</a>`;
+  }
+
   function renderMarketingSpendListView(){
     const cursor = state.marketingSpendCursor;
     const ym = cursor.getFullYear()+'-'+pad(cursor.getMonth()+1);
     const monthLabel = `${MONTHS[cursor.getMonth()]} ${cursor.getFullYear()}`;
+    const bloggersOnly = state.marketingSpendFilter === 'bloggers';
     const allSorted = [...state.marketingSpend].sort((a,b)=> (b.date||'').localeCompare(a.date||''));
-    const items = state.marketingSpendShowAll ? allSorted : allSorted.filter(m=> m.date && m.date.startsWith(ym));
+    const inPeriodItems = state.marketingSpendShowAll ? allSorted : allSorted.filter(m=> m.date && m.date.startsWith(ym));
+    const items = bloggersOnly ? inPeriodItems.filter(m=>m.direction==='Блогеры') : inPeriodItems;
     const totalAmount = items.reduce((s,m)=> s + (Number(m.amount)||0), 0);
     return `
       <div class="cal-nav">
@@ -3650,21 +3812,29 @@
           ` : ''}
         </div>
       </div>
+      <div class="cert-subtabs" style="margin-bottom:12px;">
+        <button data-msfilter="all" class="${!bloggersOnly?'active':''}">Все направления</button>
+        <button data-msfilter="bloggers" class="${bloggersOnly?'active':''}">🎥 Блогеры</button>
+      </div>
       <div class="cert-toolbar">
         <div style="font-size:12px;color:var(--ink-soft);font-family:var(--font-mono);">Записей: ${items.length} · Сумма: ${formatMoney(totalAmount)}</div>
-        <button class="btn btn-primary" id="btn-add-marketing-spend">+ Добавить трату</button>
+        <button class="btn btn-primary" id="btn-add-marketing-spend">+ Добавить трату${bloggersOnly?' на блогера':''}</button>
       </div>
-      ${items.length === 0 ? `<div class="host-empty">${state.marketingSpendShowAll ? 'Трат пока нет' : 'В этом месяце трат нет'}</div>` : `
+      ${items.length === 0 ? `<div class="host-empty">${bloggersOnly ? 'Трат на блогеров пока нет' : (state.marketingSpendShowAll ? 'Трат пока нет' : 'В этом месяце трат нет')}</div>` : `
         <div class="cert-list">
-          ${items.map(m=>`
+          ${items.map(m=>{
+            const linkedEv = m.direction==='Блогеры' && m.eventId ? state.events.find(e=>e.id===m.eventId) : null;
+            return `
             <div class="refund-row" data-mid="${m.id}">
               <div class="cell">${m.date ? formatDateText(m.date) : '—'}</div>
               <div class="amount">${formatMoney(m.amount||0)}</div>
               <div class="cell"><span class="cert-badge in_progress">${escapeHtml(m.direction||'')}</span></div>
-              <div class="cell">${m.direction==='Блогеры' ? escapeHtml([m.bloggerName, m.bloggerHandle].filter(Boolean).join(' · ')) + (m.reach ? ' · охват '+m.reach : '') : escapeHtml(m.socialNetwork||'')}</div>
+              <div class="cell">${m.direction==='Блогеры'
+                ? [escapeHtml(m.bloggerName||''), bloggerLinkHtml(m.bloggerHandle)].filter(Boolean).join(' · ') + (m.reach ? ' · охват '+m.reach : '') + (linkedEv ? `<br><span style="color:var(--ink-soft);font-size:11px;">📅 ${escapeHtml(linkedEventLabel(linkedEv.id))}</span>` : '')
+                : escapeHtml(m.socialNetwork||'')}</div>
               <div class="reason">${escapeHtml(m.comment||'')}</div>
             </div>
-          `).join('')}
+          `;}).join('')}
         </div>
       `}
     `;
@@ -3840,7 +4010,7 @@
         <div style="font-size:12px;color:var(--ink-soft);margin-bottom:10px;">Сверху — те, у кого есть настоящая окупаемость (привязано мероприятие с реальной выручкой), от самой высокой. Дальше — по цене охвата, от самого дешёвого. Снизу — без данных для сравнения.</div>
         ${bloggerRows.length===0 ? `<div style="color:var(--ink-soft);font-size:13px;">За этот период трат на блогеров ещё не было.</div>` : bloggerRows.map(m=>`
           <div class="stat-row">
-            <div class="stat-label">${escapeHtml(m.bloggerHandle||'без ника')} · ${m.date?formatDateText(m.date):''}</div>
+            <div class="stat-label">${bloggerLinkHtml(m.bloggerHandle) || escapeHtml(m.bloggerName||'без ссылки')} · ${m.date?formatDateText(m.date):''}</div>
             <div style="flex:1;font-family:var(--font-mono);font-size:13px;">
               ${formatMoney(m.amount||0)}${m.reach?' · охват '+m.reach:' · охват не указан'}${m.perReach!==null?' · '+m.perReach.toFixed(2)+'₽ за охват':''}
               ${m.realRoi!==null ? `<div style="margin-top:2px;${m.realRoi<100?'color:var(--status-red);':'color:var(--status-green);'}">Привязано: «${escapeHtml(m.linkedEvent.title||'мероприятие')}» · выручка ${formatMoney(m.linkedRevenue)} · окупаемость ${m.realRoi}%</div>` : ''}
@@ -3862,7 +4032,7 @@
     });
     const factByBlogger = {};
     state.marketingSpend.filter(m=>m.date && m.date.startsWith(ym) && m.direction==='Блогеры').forEach(m=>{
-      const key = m.bloggerHandle || 'без ника';
+      const key = m.bloggerHandle || 'без ссылки';
       factByBlogger[key] = (factByBlogger[key]||0) + (Number(m.amount)||0);
     });
     const bloggerNames = new Set([...Object.keys(planForMonth.bloggers||{}), ...Object.keys(factByBlogger)]);
@@ -3901,7 +4071,7 @@
           const diff = fact - plan;
           return `
           <div class="stat-row">
-            <div class="stat-label">${escapeHtml(name)}</div>
+            <div class="stat-label">${bloggerLinkHtml(name) || escapeHtml(name)}</div>
             <div style="flex:1;font-family:var(--font-mono);font-size:13px;">план ${formatMoney(plan)} · факт ${formatMoney(fact)}${plan>0?` · <span style="color:${diff>0?'var(--status-red)':'var(--status-green)'};">${diff>0?'+':''}${formatMoney(diff)}</span>`:''}</div>
           </div>
         `;}).join('')}
@@ -3923,7 +4093,7 @@
         </div>
         <div class="modal-body">
           <div class="field">
-            <label>Дата</label>
+            <label>Дата${m.direction==='Блогеры'?' <span style="font-weight:400;color:var(--ink-soft);">— если ниже привязано мероприятие, подставится дата визита блогера</span>':''}</label>
             <input type="date" id="ms-date" value="${m.date||''}">
           </div>
           <div class="field">
@@ -3942,8 +4112,8 @@
           <div class="field" id="ms-blogger-field" style="display:${m.direction==='Блогеры'?'block':'none'};">
             <label>Имя блогера <span style="font-weight:400;color:var(--ink-soft);">— с этим именем блогер запишется гостем на мероприятие</span></label>
             <input type="text" id="ms-blogger-name" value="${escapeHtml(m.bloggerName||'')}" placeholder="Например: Мария Иванова">
-            <label style="margin-top:8px;">Ник блогера</label>
-            <input type="text" id="ms-blogger-handle" value="${escapeHtml(m.bloggerHandle||'')}" placeholder="@nickname">
+            <label style="margin-top:8px;">Ссылка на аккаунт блогера</label>
+            <input type="text" id="ms-blogger-handle" value="${escapeHtml(m.bloggerHandle||'')}" placeholder="https://instagram.com/username">
             <label style="margin-top:8px;">Охват</label>
             <input type="number" id="ms-reach" value="${m.reach!==undefined&&m.reach!==null?m.reach:''}" min="0" step="100" placeholder="Например: 15000">
           </div>
@@ -3956,7 +4126,7 @@
             <input type="text" id="ms-event-search" placeholder="Начните вводить дату или название…" list="ms-event-options" value="${escapeHtml(m.eventId ? (marketingEventOptions.find(o=>o.id===m.eventId)?.label || '') : '')}">
             <datalist id="ms-event-options">${marketingEventOptions.map(o=>`<option value="${escapeHtml(o.label)}">`).join('')}</datalist>
             <input type="hidden" id="ms-event" value="${m.eventId||''}">
-            <div style="font-size:11.5px;color:var(--ink-soft);margin-top:4px;" id="ms-event-hint">${m.direction==='Блогеры' ? 'Показаны все мероприятия — привяжите то, которое реально пришло по этому блогеру, тогда окупаемость посчитается по настоящей выручке.' : 'Показаны только мероприятия со статусом «Маркетинг» — например, съёмки или розыгрыши.'}</div>
+            <div style="font-size:11.5px;color:var(--ink-soft);margin-top:4px;" id="ms-event-hint">${m.direction==='Блогеры' ? 'Показаны все мероприятия — привяжите то, которое реально пришло по этому блогеру: окупаемость посчитается по настоящей выручке, а дата траты станет датой этого мероприятия (датой визита блогера).' : 'Показаны только мероприятия со статусом «Маркетинг» — например, съёмки или розыгрыши.'}</div>
             <div id="ms-blogger-guest-section" style="margin-top:10px;display:${m.direction==='Блогеры'?'block':'none'};"></div>
           </div>
           <div class="field">
@@ -4090,11 +4260,22 @@
       refreshBloggerGuestSection();
     };
 
+    const dateInputEl = overlay.querySelector('#ms-date');
+    // блогер: как только привязали мероприятие, дата траты подстраивается под дату этого мероприятия —
+    // считаем расход по дате визита блогера, а не по дате, когда запись завели в системе
+    function syncDateToLinkedEvent(){
+      if(directionSelect.value !== 'Блогеры' || !dateInputEl) return;
+      const eventId = eventHidden.value;
+      if(!eventId) return;
+      const ev = state.events.find(e=>e.id===eventId);
+      if(ev && ev.date) dateInputEl.value = ev.date;
+    }
     if(eventSearchInput && eventHidden){
       eventSearchInput.addEventListener('input', ()=>{
         const val = eventSearchInput.value.trim();
         if(val === ''){ eventHidden.value = ''; refreshBloggerGuestSection(); return; }
         if(labelToId[val]) eventHidden.value = labelToId[val];
+        syncDateToLinkedEvent();
         refreshBloggerGuestSection();
       });
       eventSearchInput.addEventListener('blur', ()=>{
@@ -4110,7 +4291,7 @@
     overlay.querySelector('#btn-cancel-marketing-spend').onclick = ()=>{ state.modal = null; overlay.remove(); };
 
     overlay.querySelector('#btn-save-marketing-spend').onclick = async ()=>{
-      const dateVal = overlay.querySelector('#ms-date').value;
+      let dateVal = overlay.querySelector('#ms-date').value;
       const directionVal = overlay.querySelector('#ms-direction').value;
       const socialVal = overlay.querySelector('#ms-social').value;
       const bloggerNameVal = overlay.querySelector('#ms-blogger-name').value.trim();
@@ -4118,6 +4299,14 @@
       const reachRaw = overlay.querySelector('#ms-reach').value;
       const amountRaw = overlay.querySelector('#ms-amount').value;
       const commentVal = overlay.querySelector('#ms-comment').value.trim();
+      const eventIdVal = overlay.querySelector('#ms-event').value || '';
+
+      // трата на блогера считается по дате его реального визита (дата привязанного мероприятия),
+      // а не по дате, когда запись завели в системе — даже если дату в поле не поправили руками
+      if(directionVal === 'Блогеры' && eventIdVal){
+        const linkedEv = state.events.find(e=>e.id===eventIdVal);
+        if(linkedEv && linkedEv.date) dateVal = linkedEv.date;
+      }
 
       if(state.currentRole !== 'owner'){
         const ymCheck = dateVal ? dateVal.slice(0,7) : null;
@@ -4144,7 +4333,7 @@
       if(amountRaw === '' || Number(amountRaw) < 0) markInvalid('ms-amount');
 
       if(!dateVal || bloggerNameMissing || bloggerMissing || amountRaw==='' || Number(amountRaw)<0){
-        showGapWarningBanner(bloggerNameMissing ? 'Для направления «Блогеры» укажите имя блогера — с ним блогер запишется гостем.' : bloggerMissing ? 'Для направления «Блогеры» укажите ник блогера.' : 'Заполните дату и сумму. Сумма не может быть отрицательной.');
+        showGapWarningBanner(bloggerNameMissing ? 'Для направления «Блогеры» укажите имя блогера — с ним блогер запишется гостем.' : bloggerMissing ? 'Для направления «Блогеры» укажите ссылку на аккаунт блогера.' : 'Заполните дату и сумму. Сумма не может быть отрицательной.');
         if(firstInvalid && firstInvalid.scrollIntoView) firstInvalid.scrollIntoView({block:'center', behavior:'smooth'});
         return;
       }
@@ -4160,7 +4349,7 @@
         amount: parseInt(amountRaw),
         comment: commentVal,
         expenseId: state.modal.marketingSpend.expenseId || '',
-        eventId: overlay.querySelector('#ms-event').value || '',
+        eventId: eventIdVal,
       };
       updated.expenseId = await syncMarketingSpendExpense(updated);
 
@@ -4430,7 +4619,7 @@
               <input type="number" class="mp-dir-input" data-dir="${escapeHtml(dir)}" value="${(planForMonth.directions||{})[dir] || ''}" min="0" step="500" placeholder="0">
             </div>
           `).join('')}
-          <div style="font-size:12.5px;color:var(--ink-soft);margin:14px 0 10px;">По блогерам (по нику)</div>
+          <div style="font-size:12.5px;color:var(--ink-soft);margin:14px 0 10px;">По блогерам (по ссылке на аккаунт)</div>
           <div id="mp-bloggers-list">
             ${[...bloggerNamesKnown].map(name=>`
               <div class="field" style="margin-bottom:8px;">
@@ -4440,7 +4629,7 @@
             `).join('')}
           </div>
           <div style="display:flex;gap:8px;margin-top:6px;">
-            <input type="text" id="mp-new-blogger-name" placeholder="Новый ник блогера" style="flex:1;">
+            <input type="text" id="mp-new-blogger-name" placeholder="Ссылка на аккаунт блогера" style="flex:1;">
             <button type="button" class="btn btn-ghost" id="btn-add-blogger-plan-row">+ Добавить</button>
           </div>
         </div>
@@ -4508,6 +4697,9 @@
     if(todayBtn) todayBtn.onclick = ()=>{ state.marketingSpendCursor = new Date(); render(); };
     const toggleAllBtn = document.getElementById('ms-toggle-all');
     if(toggleAllBtn) toggleAllBtn.onclick = ()=>{ state.marketingSpendShowAll = !state.marketingSpendShowAll; render(); };
+    document.querySelectorAll('[data-msfilter]').forEach(btn=>{
+      btn.onclick = ()=>{ state.marketingSpendFilter = btn.dataset.msfilter; render(); };
+    });
 
     // Статистика (конверсия/маркетинг) — по месяцам или сводка за год
     const mstPrevBtn = document.getElementById('mst-prev');
@@ -4543,7 +4735,7 @@
     if(addBtn) addBtn.onclick = ()=>{
       requireUnlock(()=>{
         state.modal = {type:'marketing-spend', isNew:true, marketingSpend:{
-          id: uid(), date: todayStr(), direction: MARKETING_DIRECTIONS[0], socialNetwork:'', bloggerName:'', bloggerHandle:'', reach: null, amount: null, comment:'',
+          id: uid(), date: todayStr(), direction: state.marketingSpendFilter==='bloggers' ? 'Блогеры' : MARKETING_DIRECTIONS[0], socialNetwork:'', bloggerName:'', bloggerHandle:'', reach: null, amount: null, comment:'',
         }};
         render();
       });
@@ -4718,7 +4910,7 @@
     function renderCertRow(c){
       return `
         <div class="cert-row" data-cid="${c.id}">
-          <div class="num">№${escapeHtml(String(c.number))}</div>
+          <div class="num">№${escapeHtml(String(c.number))}${c.hasReceiptPhoto?' <span title="Есть фото чека" style="font-size:12px;">📎</span>':''}</div>
           <div class="cell">${escapeHtml(c.channel||'')}</div>
           <div class="cell">${escapeHtml(c.certType||'')}${c.ownerName?'<br><span style="color:var(--ink-soft);font-size:11px;">👤 '+escapeHtml(c.ownerName)+'</span>':''}</div>
           <div class="cell">${c.saleDate ? formatDateText(c.saleDate) : ''}${(c.status==='used'||c.status==='partial')&&certSpentTotal(c)>0?'<br><span style="color:'+(certRemaining(c)>0?'var(--status-blue)':'var(--status-green)')+';font-size:11px;">ост. '+formatMoney(certRemaining(c))+'</span>':''}</div>
@@ -4835,6 +5027,7 @@
     attachPeriodNav('refundsCursor', 'refundsMode', 'refunds-nav');
     attachPeriodNav('itemSalesCursor', 'itemSalesMode', 'itemsales-nav');
     attachPeriodNav('ordersCursor', 'ordersMode', 'orders-nav');
+    attachPeriodNav('conversionCursor', 'conversionMode', 'conv');
     attachPeriodNav('salaryAdjCursor', 'salaryAdjMode', 'salaryadj-nav');
 
     document.querySelectorAll('[data-certgroup]').forEach(header=>{
@@ -4861,7 +5054,7 @@
       requireUnlock(()=>{
         state.modal = {type:'certificate', isNew:true, cert:{
           id: uid(), number: nextCertNumber(), channel: CERT_CHANNELS[0], certType: CERT_TYPES[0],
-          saleDate: todayStr(), amount: null, comment: '', status: 'in_progress', certKind: 'value', specificEventType: '', useDate: '', purpose: 'sale', eventId: '', ownerName: '', ownerContact: '', incomeId: '',
+          saleDate: todayStr(), amount: null, comment: '', status: 'in_progress', certKind: 'value', specificEventType: '', useDate: '', purpose: 'sale', eventId: '', ownerName: '', ownerContact: '', incomeId: '', account: 'Точка', hasReceiptPhoto: false,
         }};
         render();
       });
@@ -4912,7 +5105,7 @@
       requireUnlock(()=>{
         state.modal = {type:'lead', isNew:true, lead:{
           id: uid(), requestDate: todayStr(), contact: '', eventMonth: LEAD_MONTH_OPTIONS[0], source: LEAD_SOURCES[0],
-          product: LEAD_PRODUCTS[0], location: 'in_studio', revenue: null, sold: false, saleDate: '', eventId: '',
+          product: LEAD_PRODUCTS[0], location: 'in_studio', revenue: null, sold: false, saleDate: '', eventId: '', hasPhoto: false,
         }};
         render();
       });
@@ -5012,15 +5205,17 @@
   }
 
   function renderConversionView(){
-    const leads = [...state.leads].sort((a,b)=> (b.requestDate||'').localeCompare(a.requestDate||''));
-    const total = state.leads.length;
-    const soldCount = state.leads.filter(l=>l.sold).length;
+    const { navHtml, period } = buildPeriodNav('conversionCursor', 'conversionMode', 'conv');
+    const allLeadsInPeriod = state.leads.filter(l=> period.inPeriod(l.requestDate));
+    const leads = [...allLeadsInPeriod].sort((a,b)=> (b.requestDate||'').localeCompare(a.requestDate||''));
+    const total = allLeadsInPeriod.length;
+    const soldCount = allLeadsInPeriod.filter(l=>l.sold).length;
     const conversionPct = total>0 ? Math.round(soldCount/total*100) : 0;
-    const soldRevenue = state.leads.filter(l=>l.sold).reduce((s,l)=> s+((l.revenue!==undefined&&l.revenue!==null&&!isNaN(l.revenue))?Number(l.revenue):0), 0);
-    const soldWithoutEventCount = state.leads.filter(l=>l.sold && !l.eventId && !l.orderId).length;
+    const soldRevenue = allLeadsInPeriod.filter(l=>l.sold).reduce((s,l)=> s+((l.revenue!==undefined&&l.revenue!==null&&!isNaN(l.revenue))?Number(l.revenue):0), 0);
+    const soldWithoutEventCount = allLeadsInPeriod.filter(l=>l.sold && !l.eventId && !l.orderId).length;
 
     // средний срок продажи: сколько дней в среднем проходит от заявки до продажи
-    const salesCycleDays = state.leads
+    const salesCycleDays = allLeadsInPeriod
       .filter(l=> l.sold && l.requestDate && l.saleDate)
       .map(l=> Math.round((parseDate(l.saleDate) - parseDate(l.requestDate)) / 86400000))
       .filter(d=> d >= 0);
@@ -5045,12 +5240,14 @@
       return Object.entries(map).map(([k,v])=>({name:k, total:v.total, sold:v.sold, pct: v.total>0?Math.round(v.sold/v.total*100):0, avgDays: avgCycleDays(v.items)}))
         .sort((a,b)=>b.total-a.total);
     }
-    const bySource = breakdown(l=>l.source||'—', state.leads);
-    const byProduct = breakdown(l=>l.product||'—', state.leads);
+    const bySource = breakdown(l=>l.source||'—', allLeadsInPeriod);
+    const byProduct = breakdown(l=>l.product||'—', allLeadsInPeriod);
     const maxSourceTotal = Math.max(1, ...bySource.map(x=>x.total));
     const maxProductTotal = Math.max(1, ...byProduct.map(x=>x.total));
 
-    const byMonthRaw = breakdown(l=> l.requestDate ? l.requestDate.slice(0,7) : 'Без даты', state.leads);
+    // разбивка по месяцам имеет смысл только в режиме "Сводка за год" — внутри одного месяца это и так
+    // единственная строка, которая дублирует шапку навигации
+    const byMonthRaw = breakdown(l=> l.requestDate ? l.requestDate.slice(0,7) : 'Без даты', allLeadsInPeriod);
     const byMonth = byMonthRaw
       .map(x=>{
         if(x.name === 'Без даты') return {...x, label: 'Без даты'};
@@ -5061,7 +5258,7 @@
     const maxMonthTotal = Math.max(1, ...byMonth.map(x=>x.total));
 
     // ежедневная конверсия по продажам
-    const byDayRaw = breakdown(l=> l.requestDate || 'Без даты', state.leads);
+    const byDayRaw = breakdown(l=> l.requestDate || 'Без даты', allLeadsInPeriod);
     const byDay = byDayRaw
       .map(x=>{
         if(x.name === 'Без даты') return {...x, label: 'Без даты'};
@@ -5074,7 +5271,7 @@
     const currentMonthName = MONTHS[new Date().getMonth()].charAt(0).toUpperCase()+MONTHS[new Date().getMonth()].slice(1);
     const planningGroups = { 'На текущий месяц': 0, 'На будущий месяц': 0, 'Неизвестно': 0 };
     const planningSoldGroups = { 'На текущий месяц': 0, 'На будущий месяц': 0, 'Неизвестно': 0 };
-    state.leads.forEach(l=>{
+    allLeadsInPeriod.forEach(l=>{
       let key;
       if(!l.eventMonth || l.eventMonth === 'Нет информации') key = 'Неизвестно';
       else if(l.eventMonth === currentMonthName) key = 'На текущий месяц';
@@ -5087,7 +5284,7 @@
     }));
     const maxPlanning = Math.max(1, ...planningList.map(x=>x.total));
 
-    return `
+    return navHtml + `
       <div class="analytics-summary" style="margin-bottom:20px;">
         <div class="summary-card"><div class="num">${total}</div><div class="label">Всего заявок</div></div>
         <div class="summary-card"><div class="num" style="color:var(--status-green);">${soldCount}</div><div class="label">Продано</div></div>
@@ -5112,6 +5309,7 @@
           </div>
         `).join('')}
       </div>
+      ${period.mode==='year' ? `
       <div class="analytics-section">
         <h4>Заявки по месяцам</h4>
         ${byMonth.map(x=>`
@@ -5122,6 +5320,7 @@
           </div>
         `).join('')}
       </div>
+      ` : ''}
       <div class="analytics-section">
         <h4>Ежедневная конверсия</h4>
         <div style="font-size:11.5px;color:var(--ink-soft);font-family:var(--font-mono);margin-bottom:8px;">По дате заявки. Показывает, в какие дни приходят заявки и как они конвертируются в продажу.</div>
@@ -5160,14 +5359,14 @@
       ` : ''}
 
       <div class="cert-toolbar">
-        <div style="font-size:12px;color:var(--ink-soft);font-family:var(--font-mono);">Список заявок</div>
+        <div style="font-size:12px;color:var(--ink-soft);font-family:var(--font-mono);">${escapeHtml(period.periodLabel)} · Список заявок</div>
         <button class="btn btn-primary" id="btn-add-lead">+ Добавить заявку</button>
       </div>
-      ${leads.length === 0 ? `<div class="host-empty">Заявок пока нет</div>` : `
+      ${leads.length === 0 ? `<div class="host-empty">${state.leads.length === 0 ? 'Заявок пока нет' : 'В этом периоде заявок нет'}</div>` : `
         <div class="cert-list">
           ${leads.map(l=>`
             <div class="lead-row" data-lid="${l.id}">
-              <div class="cell">${l.requestDate ? formatDateText(l.requestDate) : '—'}${l.contact?'<br><span style="color:var(--ink-soft);font-size:11px;">'+escapeHtml(l.contact)+'</span>':''}</div>
+              <div class="cell">${l.requestDate ? formatDateText(l.requestDate) : '—'}${l.hasPhoto?' <span title="Есть фото" style="font-size:12px;">📎</span>':''}${l.contact?'<br><span style="color:var(--ink-soft);font-size:11px;">'+escapeHtml(l.contact)+'</span>':''}</div>
               <div class="cell" style="text-transform:capitalize;">${escapeHtml(weekdayFromDate(l.requestDate))}</div>
               <div class="cell">${escapeHtml(l.eventMonth||'')}</div>
               <div class="cell">${escapeHtml(l.source||'')}</div>
@@ -5305,8 +5504,39 @@
               <div class="cell">${x.date ? formatDateText(x.date) : '—'}</div>
               <div class="cell">${escapeHtml(x.masterName||'')}${(x.additionalMasters||[]).filter(m=>(m.name||'').trim()).length ? ` +${(x.additionalMasters||[]).filter(m=>(m.name||'').trim()).length}` : ''}</div>
               <div class="amount">${x.revenue!==undefined&&x.revenue!==null ? formatMoney(x.revenue) : ''}</div>
-              <div class="cell" style="color:var(--ink-soft);font-size:12px;">${orderMasterShareLabel(x)}${x.cost>0?` · себес ${formatMoney(Number(x.cost))} (${x.costSource==='master'?'мастер':'студия'})`:''}${orderRemainderTotal(x)>0?` · <span style="color:var(--status-red);">ждём: ${formatMoney(orderRemainderTotal(x))}</span>`:''}</div>
+              <div class="cell" style="color:var(--ink-soft);font-size:12px;">${orderMasterShareLabel(x)}${x.cost>0?` · себес ${formatMoney(Number(x.cost))} (${x.costSource==='master'?'мастер':'студия'})`:''}${orderRemainderTotal(x)>0?` · <span style="color:var(--status-red);">ждём: ${formatMoney(orderRemainderTotal(x))}</span>`:''}${orderDeadlineBadgeHtml(x)}</div>
               <div class="reason">${escapeHtml(x.comment||'')}</div>
+            </div>
+          `).join('')}
+        </div>
+      `}
+    `;
+  }
+
+  // личный список заказов мастера — что нужно сделать, с дедлайнами; доступен только под личным входом мастера
+  function renderMyOrdersView(){
+    const myName = state.loggedInMasterName;
+    const norm = s => (s||'').trim().toLowerCase();
+    const mine = state.orders.filter(o => norm(o.masterName)===norm(myName) || (o.additionalMasters||[]).some(m=>norm(m.name)===norm(myName)));
+    const withDeadline = mine.filter(o=>o.deadline).sort((a,b)=> a.deadline.localeCompare(b.deadline));
+    const withoutDeadline = mine.filter(o=>!o.deadline).sort((a,b)=> (b.date||'').localeCompare(a.date||''));
+    const ordered = [...withDeadline, ...withoutDeadline];
+    const myShareFor = (o)=>{
+      const e = orderMasterEntries(o).find(e=>norm(e.name)===norm(myName));
+      return e ? e.share : 0;
+    };
+    return `
+      <div class="cert-toolbar">
+        <div style="font-size:12px;color:var(--ink-soft);font-family:var(--font-mono);">Заказы на изготовление, где вы указаны мастером — всё, что нужно сделать</div>
+      </div>
+      ${ordered.length === 0 ? `<div class="host-empty">Заказов пока нет</div>` : `
+        <div class="cert-list">
+          ${ordered.map(o=>`
+            <div class="refund-row">
+              <div class="cell">${o.date ? formatDateText(o.date) : '—'}</div>
+              <div class="amount">ЗП: ${formatMoney(myShareFor(o))}</div>
+              <div class="cell" style="color:var(--ink-soft);font-size:12px;">${o.deadline ? orderDeadlineBadgeHtml(o).replace(/^ · /,'') : 'без дедлайна'}</div>
+              <div class="reason">${escapeHtml(o.comment||'')}</div>
             </div>
           `).join('')}
         </div>
@@ -5405,6 +5635,11 @@
           <div class="stat-label" style="width:200px;">Сертификаты (${Math.round(MANAGER_SALARY_PCT_CERTS*100)}%)</div>
           <div style="flex:1;font-family:var(--font-mono);font-size:13px;color:var(--ink-soft);">продано на ${formatMoney(calc.certsRevenue)}</div>
           <div style="width:110px;text-align:right;font-family:var(--font-mono);font-size:14px;font-weight:600;">${formatMoney(calc.bonusCerts)}</div>
+        </div>
+        <div class="stat-row">
+          <div class="stat-label" style="width:200px;">Заказы и изделия (${Math.round(MANAGER_SALARY_PCT_ORDERS_ITEMS*100)}%)</div>
+          <div style="flex:1;font-family:var(--font-mono);font-size:13px;color:var(--ink-soft);">заказы ${formatMoney(calc.ordersRevenue)} + изделия ${formatMoney(calc.itemSalesRevenue)}</div>
+          <div style="width:110px;text-align:right;font-family:var(--font-mono);font-size:14px;font-weight:600;">${formatMoney(calc.bonusOrdersItems)}</div>
         </div>
         <div class="stat-row" style="border-top:1px solid var(--line-strong);margin-top:4px;padding-top:10px;">
           <div class="stat-label" style="width:200px;font-weight:600;">Итого</div>
@@ -5560,6 +5795,12 @@
             <input type="hidden" id="l-order" value="${lead.orderId||''}">
             <div style="font-size:11.5px;color:var(--ink-soft);margin-top:6px;">Если нужного заказа ещё нет в списке — сначала заведите его в «Для менеджеров → Заказ», потом привяжите здесь.</div>
           </div>
+          <div class="field">
+            <label>Фото</label>
+            <div id="lead-photo-preview" style="margin-bottom:8px;">${lead.hasPhoto ? '<div style="font-size:12.5px;color:var(--ink-soft);">Загрузка фото…</div>' : '<div style="font-size:12.5px;color:var(--ink-soft);">Фото не прикреплено</div>'}</div>
+            <input type="file" id="l-photo-file" accept="image/*">
+            <button type="button" class="btn btn-ghost" id="btn-remove-lead-photo" style="margin-top:6px;display:${lead.hasPhoto?'inline-block':'none'};">Удалить фото</button>
+          </div>
           <div class="modal-actions">
             <div>${!isNew ? `<button class="btn-danger" id="btn-del-lead">Удалить</button>` : '<span></span>'}</div>
             <div style="display:flex;gap:8px;">
@@ -5575,6 +5816,47 @@
   function attachLeadModalEvents(overlay){
     const cancelBtn = overlay.querySelector('#btn-cancel-lead');
     if(cancelBtn) cancelBtn.onclick = ()=>{ state.modal = null; overlay.remove(); };
+
+    // фото заявки: null — без изменений, 'REMOVE' — удалить, иначе — новый dataURL для сохранения при "Сохранить"
+    let pendingLeadPhoto = null;
+    const leadPhotoPreviewEl = overlay.querySelector('#lead-photo-preview');
+    const leadPhotoFileInput = overlay.querySelector('#l-photo-file');
+    const removeLeadPhotoBtn = overlay.querySelector('#btn-remove-lead-photo');
+    function renderLeadPhotoPreview(dataUrl){
+      if(!leadPhotoPreviewEl) return;
+      if(dataUrl){
+        leadPhotoPreviewEl.innerHTML = `<a href="${dataUrl}" target="_blank" rel="noopener"><img src="${dataUrl}" style="max-width:160px;max-height:160px;border-radius:var(--radius);border:1px solid var(--line-strong);display:block;"></a>`;
+        if(removeLeadPhotoBtn) removeLeadPhotoBtn.style.display = 'inline-block';
+      } else {
+        leadPhotoPreviewEl.innerHTML = `<div style="font-size:12.5px;color:var(--ink-soft);">Фото не прикреплено</div>`;
+        if(removeLeadPhotoBtn) removeLeadPhotoBtn.style.display = 'none';
+      }
+    }
+    if(state.modal.lead.hasPhoto){
+      loadLeadPhoto(state.modal.lead.id).then(dataUrl=>{
+        if(pendingLeadPhoto === null && overlay.isConnected) renderLeadPhotoPreview(dataUrl);
+      });
+    }
+    if(leadPhotoFileInput) leadPhotoFileInput.onchange = async ()=>{
+      const file = leadPhotoFileInput.files && leadPhotoFileInput.files[0];
+      if(!file) return;
+      if(!file.type || !file.type.startsWith('image/')){
+        showGapWarningBanner('Можно прикрепить только изображение.');
+        leadPhotoFileInput.value = '';
+        return;
+      }
+      try{
+        const dataUrl = await compressImageFile(file);
+        pendingLeadPhoto = dataUrl;
+        renderLeadPhotoPreview(dataUrl);
+      }catch(e){
+        showGapWarningBanner('Не удалось обработать фото. Попробуйте другое изображение.');
+      }
+    };
+    if(removeLeadPhotoBtn) removeLeadPhotoBtn.onclick = ()=>{
+      pendingLeadPhoto = 'REMOVE';
+      renderLeadPhotoPreview(null);
+    };
 
     const dateInput = overlay.querySelector('#l-date');
     const weekdayHint = overlay.querySelector('#l-weekday-hint');
@@ -5665,7 +5947,9 @@
     const delBtn = overlay.querySelector('#btn-del-lead');
     if(delBtn) delBtn.onclick = ()=>{
       showConfirmDeletePopup('Удалить эту заявку? Действие необратимо.', async ()=>{
-        state.leads = state.leads.filter(x=>x.id !== state.modal.lead.id);
+        const leadToDelete = state.modal.lead;
+        state.leads = state.leads.filter(x=>x.id !== leadToDelete.id);
+        if(leadToDelete.hasPhoto) await deleteLeadPhoto(leadToDelete.id);
         await saveLeads();
         state.modal = null; overlay.remove(); render();
       });
@@ -5728,7 +6012,18 @@
         saleKind: soldVal ? saleKindVal : '',
         eventId: (soldVal && saleKindVal==='event') ? leadEventVal : '',
         orderId: (soldVal && saleKindVal==='order') ? leadOrderVal : '',
+        hasPhoto: state.modal.lead.hasPhoto || false,
       };
+
+      // фото заявки — сохраняем/удаляем отдельным ключом, только если что-то поменяли в этой сессии модалки
+      if(pendingLeadPhoto === 'REMOVE'){
+        await deleteLeadPhoto(updated.id);
+        updated.hasPhoto = false;
+      } else if(pendingLeadPhoto){
+        await saveLeadPhoto(updated.id, pendingLeadPhoto);
+        updated.hasPhoto = true;
+      }
+
       const idx = state.leads.findIndex(x=>x.id===updated.id);
       if(idx >= 0) state.leads[idx] = updated; else state.leads.push(updated);
       await saveLeads();
@@ -5763,7 +6058,7 @@
           <div class="field">
             <label>Источник оплаты</label>
             <select id="is-source">
-              ${INCOME_ACCOUNTS.map(a=>`<option value="${escapeHtml(a)}" ${(itemSale.source||INCOME_ACCOUNTS[0])===a?'selected':''}>${escapeHtml(a)}</option>`).join('')}
+              ${SALE_PAYMENT_ACCOUNTS.map(a=>`<option value="${escapeHtml(a)}" ${(itemSale.source||SALE_PAYMENT_ACCOUNTS[0])===a?'selected':''}>${escapeHtml(a)}</option>`).join('')}
             </select>
           </div>
           <div id="is-split-preview" style="font-size:13px;font-family:var(--font-mono);color:var(--ink-soft);"></div>
@@ -5895,13 +6190,17 @@
         <div class="modal-body">
           <div class="row2">
             <div class="field">
-              <label>Дата</label>
+              <label>Дата продажи</label>
               <input type="date" id="or-date" value="${order.date||''}">
             </div>
             <div class="field">
-              <label>Выручка (₽)</label>
-              <input type="number" id="or-revenue" value="${order.revenue!==undefined&&order.revenue!==null?order.revenue:''}" min="0" step="50" placeholder="Например: 3000">
+              <label>Дедлайн <span style="font-weight:400;color:var(--ink-soft);">— необязательно</span></label>
+              <input type="date" id="or-deadline" value="${order.deadline||''}">
             </div>
+          </div>
+          <div class="field">
+            <label>Выручка (₽)</label>
+            <input type="number" id="or-revenue" value="${order.revenue!==undefined&&order.revenue!==null?order.revenue:''}" min="0" step="50" placeholder="Например: 3000">
           </div>
           <div class="field">
             <label>Получено (₽) <span style="font-weight:400;color:var(--ink-soft);">— необязательно; если оставить пустым, заказ считается оплаченным полностью</span></label>
@@ -5936,8 +6235,8 @@
           </div>
           <div id="or-split-preview" style="font-size:13px;font-family:var(--font-mono);color:var(--ink-soft);"></div>
           <div class="field">
-            <label>Комментарий <span style="font-weight:400;color:var(--ink-soft);">— необязательно</span></label>
-            <textarea id="or-comment" placeholder="Что заказали...">${escapeHtml(order.comment||'')}</textarea>
+            <label>Комментарий</label>
+            <textarea id="or-comment" placeholder="Что заказали, что нужно сделать...">${escapeHtml(order.comment||'')}</textarea>
           </div>
           <div class="modal-actions">
             <div>${!isNew ? `<button class="btn-danger" id="btn-del-order">Удалить</button>` : '<span></span>'}</div>
@@ -6063,9 +6362,17 @@
           return;
         }
       }
-      showConfirmDeletePopup('Удалить этот заказ? Действие необратимо.', async ()=>{
+      // если этот заказ был создан через "Книга → Доходы" (продукт "Заказ"), к нему привязана
+      // зеркальная запись дохода (income.orderId) — без удаления она осталась бы "висеть" в Книге/Кассе
+      // как доход от уже не существующего заказа
+      const linkedIncomeForDelete = state.incomes.find(i=>i.orderId===state.modal.order.id);
+      showConfirmDeletePopup(`Удалить этот заказ?${linkedIncomeForDelete ? ' Связанный доход в «Книге» тоже удалится.' : ' Действие необратимо.'}`, async ()=>{
         state.orders = state.orders.filter(x=>x.id !== state.modal.order.id);
         await saveOrders();
+        if(linkedIncomeForDelete){
+          state.incomes = state.incomes.filter(x=>x.id !== linkedIncomeForDelete.id);
+          await saveIncomes();
+        }
         state.modal = null; overlay.remove(); render();
       });
     };
@@ -6081,13 +6388,14 @@
           return;
         }
       }
-      ['or-date','or-master','or-revenue','or-master-share'].forEach(id=>{
+      ['or-date','or-master','or-revenue','or-master-share','or-comment'].forEach(id=>{
         const el = overlay.querySelector('#'+id);
         if(el) el.style.borderColor = '';
       });
       syncAdditionalOrderMastersFromInputs();
       overlay.querySelectorAll('#additional-order-masters-list .om-name, #additional-order-masters-list .om-share').forEach(el=>{ el.style.borderColor = ''; });
       const dateVal = overlay.querySelector('#or-date').value;
+      const deadlineVal = overlay.querySelector('#or-deadline').value;
       const masterVal = overlay.querySelector('#or-master').value.trim();
       const revenueRaw = overlay.querySelector('#or-revenue').value;
       const receivedRaw = overlay.querySelector('#or-received').value;
@@ -6107,6 +6415,7 @@
       if(masterShareRaw === '' || Number(masterShareRaw) < 0) markInvalid('or-master-share');
       if(costRaw !== '' && Number(costRaw) < 0) markInvalid('or-cost');
       if(receivedRaw !== '' && Number(receivedRaw) < 0) markInvalid('or-received');
+      if(!commentVal) markInvalid('or-comment');
       // каждый дополнительный мастер — либо оба поля заполнены (имя + ЗП), либо оба пустые (тогда строка просто не сохранится)
       let additionalMastersInvalid = false;
       overlay.querySelectorAll('#additional-order-masters-list [data-om-idx]').forEach(row=>{
@@ -6121,8 +6430,8 @@
           if(!firstInvalid) firstInvalid = hasName ? shareInp : nameInp;
         }
       });
-      if(!dateVal || !masterVal || revenueRaw==='' || Number(revenueRaw)<0 || masterShareRaw==='' || Number(masterShareRaw)<0 || (costRaw!=='' && Number(costRaw)<0) || (receivedRaw!=='' && Number(receivedRaw)<0) || additionalMastersInvalid){
-        showGapWarningBanner(additionalMastersInvalid ? 'У каждого дополнительного мастера укажите и имя, и его ЗП (или уберите пустую строку).' : 'Заполните все поля перед сохранением заказа — включая сумму ЗП мастера (её нужно вписать вручную). Суммы не могут быть отрицательными.');
+      if(!dateVal || !masterVal || revenueRaw==='' || Number(revenueRaw)<0 || masterShareRaw==='' || Number(masterShareRaw)<0 || (costRaw!=='' && Number(costRaw)<0) || (receivedRaw!=='' && Number(receivedRaw)<0) || !commentVal || additionalMastersInvalid){
+        showGapWarningBanner(additionalMastersInvalid ? 'У каждого дополнительного мастера укажите и имя, и его ЗП (или уберите пустую строку).' : 'Заполните все поля перед сохранением заказа — включая сумму ЗП мастера (её нужно вписать вручную) и комментарий. Суммы не могут быть отрицательными.');
         if(firstInvalid && firstInvalid.scrollIntoView) firstInvalid.scrollIntoView({block:'center', behavior:'smooth'});
         return;
       }
@@ -6134,6 +6443,7 @@
       const updated = {
         id: state.modal.order.id,
         date: dateVal,
+        deadline: deadlineVal || null,
         masterName: masterVal,
         revenue: parseInt(revenueRaw),
         received: receivedRaw !== '' ? parseInt(receivedRaw) : null,
@@ -6146,6 +6456,19 @@
       const idx = state.orders.findIndex(x=>x.id===updated.id);
       if(idx >= 0) state.orders[idx] = updated; else state.orders.push(updated);
       await saveOrders();
+      // если заказ был создан через "Книга → Доходы" (продукт "Заказ"), подтягиваем сумму/дату/мастера
+      // в ту зеркальную запись дохода — иначе после правки заказа здесь "Книга"/"Касса" остались бы
+      // со старыми цифрами. Этот модал не заводит счёт/кассу сам — новую запись дохода не создаём,
+      // только обновляем уже существующую, если она есть.
+      const linkedIncome = state.incomes.find(i=>i.orderId===updated.id);
+      if(linkedIncome){
+        linkedIncome.amount = updated.revenue;
+        linkedIncome.date = updated.date;
+        linkedIncome.masterName = updated.masterName;
+        linkedIncome.masterShare = updated.masterShare;
+        linkedIncome.comment = updated.comment || linkedIncome.comment;
+        await saveIncomes();
+      }
       recordAction("Заказ сохранён");
       state.modal = null; overlay.remove(); render();
     };
@@ -6469,11 +6792,13 @@
   }
 
   function renderBookView(){
+    const hideTotals = bookTotalsHidden(state.currentRole);
+    if(hideTotals && state.bookView === 'book-analytics') state.bookView = 'incomes';
     const subTabsHtml = `
       <div class="cert-subtabs">
         <button data-bookview="incomes" class="${state.bookView!=='expenses'&&state.bookView!=='book-analytics'?'active':''}">Доходы</button>
         <button data-bookview="expenses" class="${state.bookView==='expenses'?'active':''}">Расходы</button>
-        <button data-bookview="book-analytics" class="${state.bookView==='book-analytics'?'active':''}">Аналитика</button>
+        ${!hideTotals ? `<button data-bookview="book-analytics" class="${state.bookView==='book-analytics'?'active':''}">Аналитика</button>` : ''}
       </div>
     `;
     const mode = state.bookMode || 'month';
@@ -6503,6 +6828,263 @@
       return subTabsHtml + navHtml + renderBookAnalyticsView(period);
     }
     return subTabsHtml + navHtml + renderIncomesView(period);
+  }
+
+  // -------------------- «Касса»: урезанная книга доходов/расходов только по наличным --------------------
+  // Доступна администраторам (роль "hostess") и руководителю. В отличие от полной "Книги" — НЕ показывает
+  // общую сумму за месяц (по просьбе владелицы), только сводку за конкретный день и текущий остаток
+  // наличных + учёт сейфа (куда админы убирают излишек наличных, и кто что из сейфа забирает).
+  // Перемещения в/из сейфа пишутся как обычные записи "Книги" (incomes/expenses), а не в отдельном
+  // хранилище — по просьбе владелицы, чтобы всё фиксировалось в уже существующей "Книге" и было видно
+  // старшему администратору/руководителю там же. safeTransfer:true отличает их от настоящих
+  // доходов/расходов (используется, чтобы не открывать их через общую модалку редактирования —
+  // см. attachBookEvents — и при желании исключить из бизнес-аналитики в будущем).
+  //   Внесение в сейф = пара записей: расход (source:"Наличные" — деньги ушли из кассы) + доход
+  //     (account:"Сейф" — деньги зачислены в сейф), обе с одинаковым safeTransferId.
+  //   Изъятие из сейфа = один расход (source:"Сейф" — деньги ушли из сейфа на сторону); парного дохода
+  //     нет, так как куда именно уходят деньги (банк, закупка и т.п.) приложение не отслеживает.
+  function cashOnHandAsOf(dateStr){
+    const cashIn = state.incomes.filter(i=> i.account === 'Наличные' && i.date && i.date <= dateStr)
+      .reduce((s,i)=> s + (Number(i.amount)||0), 0);
+    const cashOut = state.expenses.filter(e=> e.source === 'Наличные' && e.date && e.date <= dateStr)
+      .reduce((s,e)=> s + (Number(e.amount)||0), 0);
+    return cashIn - cashOut;
+  }
+  function safeBalanceNow(){
+    const safeIn = state.incomes.filter(i=> i.account === 'Сейф').reduce((s,i)=> s + (Number(i.amount)||0), 0);
+    const safeOut = state.expenses.filter(e=> e.source === 'Сейф').reduce((s,e)=> s + (Number(e.amount)||0), 0);
+    return safeIn - safeOut;
+  }
+  const CASHBOX_SAFE_THRESHOLD = 10000;
+  function renderCashboxView(){
+    if(!state.cashboxDate) state.cashboxDate = todayStr();
+    const selDate = state.cashboxDate;
+    const dateLabel = formatDateText(selDate);
+
+    // в сводке "за день" — только настоящие операционные доходы/расходы (продажи, закупки и т.п.),
+    // без самих перемещений в сейф, чтобы не путать выручку с внутренним перекладыванием денег
+    const dayIncomes = state.incomes.filter(i=> i.account === 'Наличные' && i.date === selDate && !i.safeTransfer);
+    const dayExpenses = state.expenses.filter(e=> e.source === 'Наличные' && e.date === selDate && !e.safeTransfer);
+    const dayIncomeTotal = dayIncomes.reduce((s,i)=> s + (Number(i.amount)||0), 0);
+    const dayExpenseTotal = dayExpenses.reduce((s,e)=> s + (Number(e.amount)||0), 0);
+    // а вот фактический остаток в кассе учитывает вообще все движения, включая перемещения в сейф
+    const cashBalance = cashOnHandAsOf(selDate);
+    const overThreshold = cashBalance > CASHBOX_SAFE_THRESHOLD;
+
+    const safeBalance = safeBalanceNow();
+    const txLog = [...state.expenses].filter(e=> e.safeTransfer)
+      .sort((a,b)=> (b.date||'').localeCompare(a.date||'') || (b.id||'').localeCompare(a.id||''));
+
+    const navHtml = `
+      <div class="cal-nav" style="margin-bottom:14px;">
+        <div class="month-label">${escapeHtml(dateLabel)}</div>
+        <div class="cal-nav-btns">
+          <button class="today-btn" id="cashbox-today">сегодня</button>
+          <button class="nav-btn" id="cashbox-prev">‹</button>
+          <button class="nav-btn" id="cashbox-next">›</button>
+        </div>
+      </div>
+    `;
+
+    return `
+      ${navHtml}
+      <div style="font-size:11.5px;color:var(--ink-soft);margin:-8px 0 14px;">Все движения наличных и сейфа записываются в общую «Книгу» — записи помечены категорией/счётом «Сейф» и видны старшему администратору и руководителю там же.</div>
+      <div class="analytics-summary" style="margin-bottom:16px;">
+        <div class="summary-card"><div class="num" style="font-size:20px;color:var(--status-green);">${formatMoney(dayIncomeTotal)}</div><div class="label">Доходы наличными за день</div></div>
+        <div class="summary-card"><div class="num" style="font-size:20px;color:var(--status-red);">${formatMoney(dayExpenseTotal)}</div><div class="label">Расходы наличными за день</div></div>
+        <div class="summary-card" style="border-left:4px solid ${overThreshold?'var(--status-red)':'var(--status-green)'};"><div class="num" style="font-size:20px;">${overThreshold?'⚠️ ':''}${formatMoney(cashBalance)}</div><div class="label">Остаток наличных</div></div>
+      </div>
+
+      ${overThreshold ? `
+        <div class="daily-alerts-banner" style="margin-bottom:16px;">
+          <span class="daily-alert-item">⚠️ Остаток наличных превышает ${formatMoney(CASHBOX_SAFE_THRESHOLD)} — уберите лишнее в сейф</span>
+        </div>
+      ` : ''}
+
+      <div class="analytics-section">
+        <h4>Доходы наличными — ${escapeHtml(dateLabel)}</h4>
+        ${dayIncomes.length ? dayIncomes.map(i=>`
+          <div class="stat-row">
+            <div class="stat-label" style="width:140px;">${escapeHtml(i.product || i.operation || 'доход')}</div>
+            <div style="flex:1;font-size:12.5px;">${escapeHtml(i.comment||'')}</div>
+            <div style="font-family:var(--font-mono);font-size:12.5px;color:var(--status-green);">+${formatMoney(i.amount)}</div>
+          </div>
+        `).join('') : `<div style="color:var(--ink-soft);font-size:13px;">Наличных поступлений за этот день не было.</div>`}
+      </div>
+
+      <div class="analytics-section">
+        <h4>Расходы наличными — ${escapeHtml(dateLabel)}</h4>
+        ${dayExpenses.length ? dayExpenses.map(e=>`
+          <div class="stat-row">
+            <div class="stat-label" style="width:140px;">${escapeHtml(e.category||'расход')}</div>
+            <div style="flex:1;font-size:12.5px;">${escapeHtml(e.comment||'')}</div>
+            <div style="font-family:var(--font-mono);font-size:12.5px;color:var(--status-red);">−${formatMoney(e.amount)}</div>
+          </div>
+        `).join('') : `<div style="color:var(--ink-soft);font-size:13px;">Наличных расходов за этот день не было.</div>`}
+      </div>
+
+      <div class="analytics-section">
+        <h4>Сейф — сейчас в сейфе: ${formatMoney(safeBalance)}</h4>
+        <div style="font-size:11.5px;color:var(--ink-soft);margin-bottom:10px;">Деньги, убранные из кассы на хранение. Каждое движение фиксируется — кто внёс или забрал и сколько — и записывается в «Книгу».</div>
+        <div style="display:flex;gap:8px;margin-bottom:14px;flex-wrap:wrap;">
+          <button class="btn btn-primary" id="btn-safe-deposit">➕ Убрать в сейф</button>
+          <button class="btn btn-ghost" id="btn-safe-withdraw">➖ Забрать из сейфа</button>
+        </div>
+        ${txLog.length ? txLog.map(t=>`
+          <div class="stat-row">
+            <div class="stat-label" style="width:100px;">${escapeHtml(formatDateText(t.date))}</div>
+            <div style="width:170px;font-weight:600;">${t.safeTransferType==='deposit' ? '➕ В сейф' : '➖ Из сейфа'} · ${escapeHtml(t.responsible||'—')}</div>
+            <div style="flex:1;font-size:12.5px;">${t.safeTransferType==='withdrawal' ? escapeHtml(t.destination || 'без назначения') : escapeHtml(t.rawComment||'')}</div>
+            <div style="font-family:var(--font-mono);font-size:12.5px;color:${t.safeTransferType==='deposit'?'var(--status-green)':'var(--status-red)'};">${t.safeTransferType==='deposit'?'+':'−'}${formatMoney(t.amount)}</div>
+          </div>
+        `).join('') : `<div style="color:var(--ink-soft);font-size:13px;">Движений по сейфу ещё не было.</div>`}
+      </div>
+    `;
+  }
+  function attachCashboxEvents(){
+    const todayBtn = document.getElementById('cashbox-today');
+    if(todayBtn) todayBtn.onclick = ()=>{ state.cashboxDate = todayStr(); render(); };
+    const prevBtn = document.getElementById('cashbox-prev');
+    if(prevBtn) prevBtn.onclick = ()=>{ state.cashboxDate = shiftDateStr(state.cashboxDate || todayStr(), -1); render(); };
+    const nextBtn = document.getElementById('cashbox-next');
+    if(nextBtn) nextBtn.onclick = ()=>{ state.cashboxDate = shiftDateStr(state.cashboxDate || todayStr(), 1); render(); };
+    const depositBtn = document.getElementById('btn-safe-deposit');
+    if(depositBtn) depositBtn.onclick = ()=>{ state.modal = {type:'safe-deposit'}; render(); };
+    const withdrawBtn = document.getElementById('btn-safe-withdraw');
+    if(withdrawBtn) withdrawBtn.onclick = ()=>{ state.modal = {type:'safe-withdraw'}; render(); };
+  }
+  function renderSafeDepositModal(){
+    const selDate = state.cashboxDate || todayStr();
+    const cashBalance = cashOnHandAsOf(selDate);
+    const suggested = cashBalance > CASHBOX_SAFE_THRESHOLD ? Math.round((cashBalance - CASHBOX_SAFE_THRESHOLD) * 100) / 100 : '';
+    const defaultPerson = state.loggedInHostessName || '';
+    return `
+      <div class="modal" style="max-width:380px;">
+        <div class="modal-head">
+          <h3>Убрать наличные в сейф</h3>
+          <button class="modal-close">×</button>
+        </div>
+        <div class="modal-body">
+          <div style="font-size:12px;color:var(--ink-soft);margin-top:-6px;">Текущий остаток в кассе: ${formatMoney(cashBalance)}. Запишется в «Книгу» как расход (Наличные) и доход (Сейф).</div>
+          <div class="field">
+            <label>Сумма</label>
+            <input type="number" id="sd-amount" value="${suggested}" min="0" placeholder="0 ₽">
+          </div>
+          <div class="field">
+            <label>Кто убрал</label>
+            <input type="text" id="sd-person" value="${escapeHtml(defaultPerson)}" list="cashbox-names-list" placeholder="Имя">
+            <datalist id="cashbox-names-list">${HOSTESS_LIST.map(n=>`<option value="${escapeHtml(n)}">`).join('')}</datalist>
+          </div>
+          <div class="field">
+            <label>Комментарий (необязательно)</label>
+            <input type="text" id="sd-comment" placeholder="Например: конец смены">
+          </div>
+          <div class="modal-actions">
+            <span></span>
+            <div style="display:flex;gap:8px;">
+              <button class="btn btn-ghost" id="sd-cancel">Отмена</button>
+              <button class="btn btn-primary" id="sd-save">Сохранить</button>
+            </div>
+          </div>
+        </div>
+      </div>
+    `;
+  }
+  function attachSafeDepositModalEvents(overlay){
+    overlay.querySelector('#sd-cancel').onclick = ()=>{ state.modal = null; overlay.remove(); };
+    overlay.querySelector('#sd-save').onclick = async ()=>{
+      const amountRaw = overlay.querySelector('#sd-amount').value;
+      const person = overlay.querySelector('#sd-person').value.trim();
+      const comment = overlay.querySelector('#sd-comment').value.trim();
+      if(!amountRaw || Number(amountRaw) <= 0 || !person){
+        showGapWarningBanner('Укажите сумму и кто убрал деньги в сейф.');
+        return;
+      }
+      const amount = Math.round(Number(amountRaw)*100)/100;
+      const date = state.cashboxDate || todayStr();
+      const pairId = uid();
+      const fullComment = 'Внесение наличных в сейф' + (comment ? ' · ' + comment : '');
+      const expenseEntry = {
+        id: uid(), date, category: 'Сейф', direction: '', master: '', source: 'Наличные',
+        amount, responsible: person, eventId: '', comment: fullComment,
+        safeTransfer: true, safeTransferType: 'deposit', safeTransferId: pairId, rawComment: comment,
+      };
+      const incomeEntry = {
+        id: uid(), date, operation: 'Перемещение', product: 'Сейф', account: 'Сейф', eventId: '',
+        amount, masterName: '', masterShare: null, itemSaleId: '', orderId: '', comment: fullComment,
+        safeTransfer: true, safeTransferType: 'deposit', safeTransferId: pairId, rawComment: comment,
+      };
+      state.expenses.push(expenseEntry);
+      state.incomes.push(incomeEntry);
+      await saveExpenses();
+      await saveIncomes();
+      recordAction("Наличные убраны в сейф", `${formatMoney(amount)} · ${person}`);
+      state.modal = null; overlay.remove(); render();
+    };
+  }
+  function renderSafeWithdrawModal(){
+    const safeBalance = safeBalanceNow();
+    const defaultPerson = state.loggedInHostessName || '';
+    return `
+      <div class="modal" style="max-width:380px;">
+        <div class="modal-head">
+          <h3>Забрать из сейфа</h3>
+          <button class="modal-close">×</button>
+        </div>
+        <div class="modal-body">
+          <div style="font-size:12px;color:var(--ink-soft);margin-top:-6px;">Сейчас в сейфе: ${formatMoney(safeBalance)}. Запишется в «Книгу» как расход (Сейф).</div>
+          <div class="field">
+            <label>Сумма</label>
+            <input type="number" id="sw-amount" min="0" placeholder="0 ₽">
+          </div>
+          <div class="field">
+            <label>Кто забрал</label>
+            <input type="text" id="sw-person" value="${escapeHtml(defaultPerson)}" list="cashbox-names-list" placeholder="Имя">
+            <datalist id="cashbox-names-list">${HOSTESS_LIST.map(n=>`<option value="${escapeHtml(n)}">`).join('')}</datalist>
+          </div>
+          <div class="field">
+            <label>Куда / на что</label>
+            <input type="text" id="sw-dest" placeholder="Например: инкассация в банк, закупка материалов">
+          </div>
+          <div class="field">
+            <label>Комментарий (необязательно)</label>
+            <input type="text" id="sw-comment" placeholder="">
+          </div>
+          <div class="modal-actions">
+            <span></span>
+            <div style="display:flex;gap:8px;">
+              <button class="btn btn-ghost" id="sw-cancel">Отмена</button>
+              <button class="btn btn-primary" id="sw-save">Сохранить</button>
+            </div>
+          </div>
+        </div>
+      </div>
+    `;
+  }
+  function attachSafeWithdrawModalEvents(overlay){
+    overlay.querySelector('#sw-cancel').onclick = ()=>{ state.modal = null; overlay.remove(); };
+    overlay.querySelector('#sw-save').onclick = async ()=>{
+      const amountRaw = overlay.querySelector('#sw-amount').value;
+      const person = overlay.querySelector('#sw-person').value.trim();
+      const dest = overlay.querySelector('#sw-dest').value.trim();
+      const comment = overlay.querySelector('#sw-comment').value.trim();
+      if(!amountRaw || Number(amountRaw) <= 0 || !person || !dest){
+        showGapWarningBanner('Укажите сумму, кто забрал деньги и куда/на что.');
+        return;
+      }
+      const amount = Math.round(Number(amountRaw)*100)/100;
+      const date = state.cashboxDate || todayStr();
+      const fullComment = `Из сейфа — куда/на что: ${dest}` + (comment ? ' · ' + comment : '');
+      const expenseEntry = {
+        id: uid(), date, category: 'Сейф', direction: '', master: '', source: 'Сейф',
+        amount, responsible: person, eventId: '', comment: fullComment,
+        safeTransfer: true, safeTransferType: 'withdrawal', destination: dest, rawComment: comment,
+      };
+      state.expenses.push(expenseEntry);
+      await saveExpenses();
+      recordAction("Деньги забраны из сейфа", `${formatMoney(amount)} · ${person} · ${dest}`);
+      state.modal = null; overlay.remove(); render();
+    };
   }
 
   function renderBookAnalyticsView(period){
@@ -6935,13 +7517,14 @@
   function renderIncomesView(period){
     const inPeriod = period ? period.inPeriod : (()=>true);
     const periodLabel = period ? period.periodLabel : '';
+    const hideTotals = bookTotalsHidden(state.currentRole);
     const items = state.incomes.filter(i=>inPeriod(i.date)).sort((a,b)=> (b.date||'').localeCompare(a.date||''));
     const total = items.reduce((s,i)=> s + ((i.amount!==undefined&&i.amount!==null&&!isNaN(i.amount))?Number(i.amount):0), 0);
     return `
       <div class="cert-toolbar">
-        <div style="font-size:12px;color:var(--ink-soft);font-family:var(--font-mono);">${escapeHtml(periodLabel)} · Записей: ${items.length} · Сумма: ${formatMoney(total)}</div>
+        <div style="font-size:12px;color:var(--ink-soft);font-family:var(--font-mono);">${escapeHtml(periodLabel)} · Записей: ${items.length}${hideTotals ? '' : ' · Сумма: '+formatMoney(total)}</div>
         <div style="display:flex;gap:8px;">
-          <button class="btn btn-ghost" id="btn-tochka-reconcile">📥 Сверка с Точка</button>
+          ${!hideTotals ? `<button class="btn btn-ghost" id="btn-tochka-reconcile">📥 Сверка с Точка</button>` : ''}
           <button class="btn btn-primary" id="btn-add-income">+ Добавить доход</button>
         </div>
       </div>
@@ -6952,7 +7535,7 @@
               <div class="cell">${i.date ? formatDateText(i.date) : '—'}</div>
               <div class="cell">${escapeHtml(i.operation||'')}</div>
               <div class="cell">${escapeHtml(i.product||'')}</div>
-              <div class="cell">${escapeHtml(i.account||'')}</div>
+              <div class="cell">${escapeHtml(i.account||'')}${i.viaYuklient?' <span style="color:var(--ink-soft);font-size:11px;">· Юклиент</span>':''}</div>
               <div class="amount">${i.amount!==undefined&&i.amount!==null ? formatMoney(i.amount) : ''}</div>
               <div class="reason">${i.eventId ? '🔗 '+escapeHtml(linkedEventLabel(i.eventId))+(i.comment?' · ':'') : ''}${escapeHtml(i.comment||'')}</div>
             </div>
@@ -6966,6 +7549,7 @@
     const inPeriod = period ? period.inPeriod : (()=>true);
     const periodLabel = period ? period.periodLabel : '';
     const isOwner = state.currentRole === 'owner';
+    const hideTotals = bookTotalsHidden(state.currentRole);
     // «Аренда»/«Зарплата» — видно только руководителю (та же чувствительная инфа, что и в «Ручных расходах»)
     const expensesP = state.expenses.filter(e=>inPeriod(e.date) && (isOwner || (!e.ownerOnly && e.category!=='Аренда' && e.category!=='Зарплата')));
     const items = [...expensesP].sort((a,b)=> (b.date||'').localeCompare(a.date||''));
@@ -6980,7 +7564,7 @@
     const maxCat = Math.max(1, ...catList.map(x=>x[1]));
 
     return `
-      ${catList.length ? `
+      ${(catList.length && !hideTotals) ? `
       <div class="analytics-section" style="margin-bottom:20px;">
         <h4>Расходы по категориям</h4>
         ${catList.map(([cat,sum])=>`
@@ -6993,7 +7577,7 @@
       </div>
       ` : ''}
       <div class="cert-toolbar">
-        <div style="font-size:12px;color:var(--ink-soft);font-family:var(--font-mono);">${escapeHtml(periodLabel)} · Записей: ${items.length} · Сумма: ${formatMoney(total)}</div>
+        <div style="font-size:12px;color:var(--ink-soft);font-family:var(--font-mono);">${escapeHtml(periodLabel)} · Записей: ${items.length}${hideTotals ? '' : ' · Сумма: '+formatMoney(total)}</div>
         <button class="btn btn-primary" id="btn-add-expense">+ Добавить расход</button>
       </div>
       ${items.length === 0 ? `<div class="host-empty">Записей пока нет</div>` : `
@@ -7043,7 +7627,7 @@
       requireUnlock(()=>{
         state.modal = {type:'income', isNew:true, income:{
           id: uid(), date: todayStr(), operation: INCOME_OPERATIONS[0], product: INCOME_PRODUCTS[0],
-          account: INCOME_ACCOUNTS[0], amount: null, comment: '', eventId: '', masterName: '', itemSaleId: '', orderId: '',
+          account: INCOME_ACCOUNTS[0], viaYuklient: false, amount: null, comment: '', eventId: '', masterName: '', itemSaleId: '', orderId: '',
         }};
         render();
       });
@@ -7059,6 +7643,12 @@
       row.onclick = ()=>{
         const i = state.incomes.find(x=>x.id===row.dataset.iid);
         if(!i) return;
+        // перемещение в сейф — парная запись с расходом, правится/удаляется только через «Кассу»,
+        // чтобы обе половины (доход и расход) не разъехались друг с другом
+        if(i.safeTransfer){
+          showGapWarningBanner('Это перемещение в сейф — его можно отменить только в разделе «Касса».');
+          return;
+        }
         // доход от продажи сертификата — редактируем и удаляем через карточку сертификата,
         // иначе при удалении прямо здесь сертификат в "Базе сертификатов" остаётся осиротевшим
         // (и наоборот — приходится удалять в двух местах отдельно)
@@ -7091,6 +7681,10 @@
       row.onclick = ()=>{
         const e = state.expenses.find(x=>x.id===row.dataset.eid);
         if(!e) return;
+        if(e.safeTransfer){
+          showGapWarningBanner('Это движение по сейфу — его можно отменить только в разделе «Касса».');
+          return;
+        }
         if(e.ownerOnly && e.netProfitRef){
           const ym = e.netProfitRef.split(':')[1];
           const [y,m] = ym.split('-').map(Number);
@@ -7146,6 +7740,10 @@
             <select id="i-account">
               ${INCOME_ACCOUNTS.map(a=>`<option value="${escapeHtml(a)}" ${income.account===a?'selected':''}>${escapeHtml(a)}</option>`).join('')}
             </select>
+          </div>
+          <div class="field" style="display:flex;align-items:center;gap:8px;">
+            <input type="checkbox" id="i-yuklient" ${income.viaYuklient?'checked':''} style="width:auto;margin:0;">
+            <label for="i-yuklient" style="margin:0;">Оплата принята через Юклиент</label>
           </div>
           <div class="field" id="income-master-field" style="display:${income.product==='Изделие'?'block':'none'};">
             <label>Мастер, изготовивший изделие</label>
@@ -7270,6 +7868,7 @@
       const operationVal = overlay.querySelector('#i-operation').value;
       const productVal = overlay.querySelector('#i-product').value;
       const accountVal = overlay.querySelector('#i-account').value;
+      const yuklientVal = overlay.querySelector('#i-yuklient') ? overlay.querySelector('#i-yuklient').checked : false;
       const commentVal = overlay.querySelector('#i-comment').value.trim();
       const masterVal = overlay.querySelector('#i-master').value.trim();
       const orderMasterVal = overlay.querySelector('#i-order-master').value.trim();
@@ -7304,6 +7903,7 @@
         operation: operationVal,
         product: productVal,
         account: accountVal,
+        viaYuklient: yuklientVal,
         eventId: overlay.querySelector('#i-event').value || '',
         amount: Math.round(Number(amountRaw) * 100) / 100, // округляем только до копеек, а не до целых рублей
         masterName: productVal==='Изделие' ? masterVal : (productVal==='Заказ' ? orderMasterVal : ''),
@@ -7622,6 +8222,13 @@
               <input type="number" id="c-amount" value="${cert.amount!==undefined&&cert.amount!==null?cert.amount:''}" min="0" step="100" placeholder="Например: 5000">
             </div>
           </div>
+          <div class="field" id="cert-account-field" style="display:${(cert.purpose||'sale')==='sale'?'block':'none'};">
+            <label>Способ оплаты</label>
+            <select id="c-account">
+              ${SALE_PAYMENT_ACCOUNTS.map(a=>`<option value="${escapeHtml(a)}" ${(cert.account||'Точка')===a?'selected':''}>${escapeHtml(a)}</option>`).join('')}
+            </select>
+            <div style="font-size:11px;color:var(--ink-soft);margin-top:4px;">Этим определяется, в какой счёт попадёт доход в «Книге» — выберите «Наличные», если гость платил наличными (тогда продажа появится в «Кассе»).</div>
+          </div>
           <div class="row2">
             <div class="field">
               <label>Имя владельца</label>
@@ -7688,6 +8295,12 @@
             <input type="hidden" id="c-purpose" value="${cert.purpose||'sale'}">
           </div>
           <div class="field">
+            <label>Фото чека</label>
+            <div id="cert-receipt-preview" style="margin-bottom:8px;">${cert.hasReceiptPhoto ? '<div style="font-size:12.5px;color:var(--ink-soft);">Загрузка фото…</div>' : '<div style="font-size:12.5px;color:var(--ink-soft);">Чек не прикреплён</div>'}</div>
+            <input type="file" id="c-receipt-file" accept="image/*">
+            <button type="button" class="btn btn-ghost" id="btn-remove-receipt" style="margin-top:6px;display:${cert.hasReceiptPhoto?'inline-block':'none'};">Удалить фото</button>
+          </div>
+          <div class="field">
             <label>Комментарий</label>
             <textarea id="c-comment" placeholder="Кому, для чего, доп. детали...">${escapeHtml(cert.comment||'')}</textarea>
           </div>
@@ -7706,6 +8319,47 @@
   function attachCertificateModalEvents(overlay){
     const cancelBtn = overlay.querySelector('#btn-cancel-cert');
     if(cancelBtn) cancelBtn.onclick = ()=>{ state.modal = null; overlay.remove(); };
+
+    // фото чека: null — без изменений, 'REMOVE' — удалить, иначе — новый dataURL для сохранения при "Сохранить"
+    let pendingReceiptPhoto = null;
+    const receiptPreviewEl = overlay.querySelector('#cert-receipt-preview');
+    const receiptFileInput = overlay.querySelector('#c-receipt-file');
+    const removeReceiptBtn = overlay.querySelector('#btn-remove-receipt');
+    function renderReceiptPreview(dataUrl){
+      if(!receiptPreviewEl) return;
+      if(dataUrl){
+        receiptPreviewEl.innerHTML = `<a href="${dataUrl}" target="_blank" rel="noopener"><img src="${dataUrl}" style="max-width:160px;max-height:160px;border-radius:var(--radius);border:1px solid var(--line-strong);display:block;"></a>`;
+        if(removeReceiptBtn) removeReceiptBtn.style.display = 'inline-block';
+      } else {
+        receiptPreviewEl.innerHTML = `<div style="font-size:12.5px;color:var(--ink-soft);">Чек не прикреплён</div>`;
+        if(removeReceiptBtn) removeReceiptBtn.style.display = 'none';
+      }
+    }
+    if(state.modal.cert.hasReceiptPhoto){
+      loadReceiptPhoto(state.modal.cert.id).then(dataUrl=>{
+        if(pendingReceiptPhoto === null && overlay.isConnected) renderReceiptPreview(dataUrl);
+      });
+    }
+    if(receiptFileInput) receiptFileInput.onchange = async ()=>{
+      const file = receiptFileInput.files && receiptFileInput.files[0];
+      if(!file) return;
+      if(!file.type || !file.type.startsWith('image/')){
+        showGapWarningBanner('Можно прикрепить только изображение.');
+        receiptFileInput.value = '';
+        return;
+      }
+      try{
+        const dataUrl = await compressImageFile(file);
+        pendingReceiptPhoto = dataUrl;
+        renderReceiptPreview(dataUrl);
+      }catch(e){
+        showGapWarningBanner('Не удалось обработать фото. Попробуйте другое изображение.');
+      }
+    };
+    if(removeReceiptBtn) removeReceiptBtn.onclick = ()=>{
+      pendingReceiptPhoto = 'REMOVE';
+      renderReceiptPreview(null);
+    };
 
     // журнал списаний по сертификату (мероприятие + дата + сумма), с остатком
     let redemptionsDraft = (state.modal.cert.redemptions || (state.modal.cert.eventId ? [{id:uid(), eventId:state.modal.cert.eventId, date:state.modal.cert.useDate||state.modal.cert.saleDate, amount:state.modal.cert.amount}] : [])).map(r=>({...r, id: r.id||uid()}));
@@ -7800,6 +8454,8 @@
         overlay.querySelectorAll('.certpurpose-opt').forEach(o=>o.classList.remove('active'));
         opt.classList.add('active');
         overlay.querySelector('#c-purpose').value = opt.dataset.certpurpose;
+        const accField = overlay.querySelector('#cert-account-field');
+        if(accField) accField.style.display = (opt.dataset.certpurpose === 'sale') ? 'block' : 'none';
       };
     });
 
@@ -7816,6 +8472,7 @@
       showConfirmDeletePopup(`Удалить этот сертификат?${cascades ? ' Связанный доход в «Книге» и платежи в привязанных мероприятиях тоже удалятся.' : ' Действие необратимо.'}`, async ()=>{
       const certToDelete = state.modal.cert;
       state.certificates = state.certificates.filter(x=>x.id !== certToDelete.id);
+      if(certToDelete.hasReceiptPhoto) await deleteReceiptPhoto(certToDelete.id);
       if(certToDelete.incomeId){
         state.incomes = state.incomes.filter(x=>x.id !== certToDelete.incomeId);
         await saveIncomes();
@@ -7944,14 +8601,27 @@
         ownerName: ownerNameVal,
         ownerContact: ownerContactVal,
         incomeId: previousCert.incomeId || '',
+        account: overlay.querySelector('#c-account') ? overlay.querySelector('#c-account').value : (previousCert.account || 'Точка'),
         comment: commentVal,
+        hasReceiptPhoto: previousCert.hasReceiptPhoto || false,
       };
 
-      // 1) синхронизация с "Книга → Доходы": продажа сертификата = доход студии в момент продажи
+      // 0) фото чека — сохраняем/удаляем отдельным ключом, только если что-то поменяли в этой сессии модалки
+      if(pendingReceiptPhoto === 'REMOVE'){
+        await deleteReceiptPhoto(updated.id);
+        updated.hasReceiptPhoto = false;
+      } else if(pendingReceiptPhoto){
+        await saveReceiptPhoto(updated.id, pendingReceiptPhoto);
+        updated.hasReceiptPhoto = true;
+      }
+
+      // 1) синхронизация с "Книга → Доходы": продажа сертификата = доход студии в момент продажи.
+      // Счёт — тот, что выбрали в «Способ оплаты» (по умолчанию «Точка», для старых сертификатов без
+      // этого поля); если гость платил наличными, выбор «Наличные» делает продажу видимой в «Кассе».
       if(updated.purpose === 'sale'){
         const incomeEntry = {
           id: updated.incomeId || uid(), date: updated.saleDate, operation: 'Оплата', product: 'Сертификат',
-          account: 'Точка', eventId: '', amount: updated.amount, masterName: '', itemSaleId: '', orderId: '',
+          account: updated.account || 'Точка', eventId: '', amount: updated.amount, masterName: '', itemSaleId: '', orderId: '',
           comment: `Сертификат №${updated.number} — ${updated.ownerName}`,
         };
         updated.incomeId = incomeEntry.id;
@@ -8836,6 +9506,10 @@
       overlay.innerHTML = renderStockReceiptModal();
     } else if(state.modal.type === 'tochka-reconcile'){
       overlay.innerHTML = renderTochkaReconcileModal(state.modal);
+    } else if(state.modal.type === 'safe-deposit'){
+      overlay.innerHTML = renderSafeDepositModal();
+    } else if(state.modal.type === 'safe-withdraw'){
+      overlay.innerHTML = renderSafeWithdrawModal();
     }
     document.body.appendChild(overlay);
 
@@ -8894,6 +9568,8 @@
     else if(state.modal.type === 'supplier-entry'){ attachSupplierModalEvents(overlay); }
     else if(state.modal.type === 'stock-receipt'){ attachStockReceiptModalEvents(overlay); }
     else if(state.modal.type === 'tochka-reconcile'){ attachTochkaReconcileModalEvents(overlay); }
+    else if(state.modal.type === 'safe-deposit'){ attachSafeDepositModalEvents(overlay); }
+    else if(state.modal.type === 'safe-withdraw'){ attachSafeWithdrawModalEvents(overlay); }
   }
 
   function renderRoleLoginModal(){
@@ -9517,6 +10193,11 @@
     DAILY_REPORT_LEAD_CATS.forEach(c=>{ leadsByCatToday[c]=0; });
     leadsToday.forEach(l=>{ const cat=dailyReportLeadCategory(l); leadsByCatToday[cat]=(leadsByCatToday[cat]||0)+1; });
     const leadsTodayCount = leadsToday.length;
+    // та же разбивка, но нарастающим итогом с начала месяца — для отображения ЗАЯВОК по месяцу, а не по дню
+    const leadsByCatMTD = {};
+    DAILY_REPORT_LEAD_CATS.forEach(c=>{ leadsByCatMTD[c]=0; });
+    leadsMonthToDate.forEach(l=>{ const cat=dailyReportLeadCategory(l); leadsByCatMTD[cat]=(leadsByCatMTD[cat]||0)+1; });
+    const leadsMTDCount = leadsMonthToDate.length;
     const leadsPlanPct = (plan.leadsCount!==undefined && plan.leadsCount!==null && plan.leadsCount>0) ? Math.round(leadsMonthToDate.length/plan.leadsCount*100) : null;
 
     // ВЫРУЧКА — четыре потока: Частные (все продукты, кроме «Мастер-класс»), Расписание («Мастер-класс»),
@@ -9550,6 +10231,11 @@
     const privateByCatToday = {};
     DAILY_REPORT_PRIVATE_CATS.forEach(c=>{ privateByCatToday[c]=0; });
     privateEventsToday.forEach(e=>{ const cat=dailyReportEventCategory(e); privateByCatToday[cat]=(privateByCatToday[cat]||0)+eventRevenueForecast(e); });
+    // то же самое, но нарастающим итогом с начала месяца — для отображения ВЫРУЧКИ по месяцу, а не по дню
+    const privateEventsMTD = eventsMonthToDate.filter(e=>!isSchedule(e));
+    const privateByCatMTD = {};
+    DAILY_REPORT_PRIVATE_CATS.forEach(c=>{ privateByCatMTD[c]=0; });
+    privateEventsMTD.forEach(e=>{ const cat=dailyReportEventCategory(e); privateByCatMTD[cat]=(privateByCatMTD[cat]||0)+eventRevenueForecast(e); });
 
     // ПРИБЫЛЬ — по мероприятиям (выручка минус материалы и ЗП мастерам), плюс заказы (за вычетом доли мастера),
     // плюс сертификаты целиком (у них нет своей себестоимости — общие расходы студии сюда не входят,
@@ -9600,9 +10286,10 @@
 
     return {
       dateStr, ym, plan,
-      leadsTodayCount, leadsByCatToday, leadsPlanPct,
-      revenueToday, revenuePlanPct,
+      leadsTodayCount, leadsByCatToday, leadsMTDCount, leadsByCatMTD, leadsPlanPct,
+      revenueToday, revenueMTD, revenuePlanPct,
       privateRevenueToday, privateByCatToday, scheduleRevenueToday, ordersRevenueToday, certsRevenueToday,
+      privateRevenueMTD, privateByCatMTD, scheduleRevenueMTD, ordersRevenueMTD, certsRevenueMTD,
       profitToday, profitPlanPct,
       convDayPct, convMonthPct, rentabilityPct,
       occupancyPct, avgCheck,
@@ -9618,15 +10305,15 @@
     const lines = [];
     lines.push(`${dateLabel}🍁`);
     lines.push('');
-    lines.push(`▫️ЗАЯВКИ ${d.leadsTodayCount} шт (${pctStr(d.leadsPlanPct)} от выполнения плана)`);
+    lines.push(`▫️ЗАЯВКИ (месяц): ${d.leadsMTDCount} шт (${pctStr(d.leadsPlanPct)} от выполнения плана)`);
     lines.push('');
     DAILY_REPORT_LEAD_CATS.forEach(cat=>{
-      lines.push(`- ${cat} ${d.leadsByCatToday[cat]||0} шт (${shareStr(d.leadsByCatToday[cat]||0, d.leadsTodayCount)})`);
+      lines.push(`- ${cat} ${d.leadsByCatMTD[cat]||0} шт (${shareStr(d.leadsByCatMTD[cat]||0, d.leadsMTDCount)})`);
     });
     lines.push('');
     lines.push('——');
     lines.push('');
-    lines.push(`▫️ВЫРУЧКА: ${rubStr(d.revenueToday)} руб. (${pctStr(d.revenuePlanPct)} от плана)`);
+    lines.push(`▫️ВЫРУЧКА (месяц): ${rubStr(d.revenueMTD)} руб. (${pctStr(d.revenuePlanPct)} от плана)`);
     lines.push('');
     lines.push(`▫️ПРИБЫЛЬ: ${rubStr(d.profitToday)} руб. (${pctStr(d.profitPlanPct)})`);
     if(d.netProfitMonth !== null){
@@ -9634,25 +10321,75 @@
       lines.push(`🔒 Чистая прибыль (весь ${MONTHS[parseDate(d.dateStr).getMonth()]}, прогноз): ${rubStr(d.netProfitMonth)} руб.`);
     }
     lines.push('');
-    lines.push(`▪️Частные: ${rubStr(d.privateRevenueToday)} руб. (${shareStr(d.privateRevenueToday, d.revenueToday)}):`);
+    lines.push(`▪️Частные: ${rubStr(d.privateRevenueMTD)} руб. (${shareStr(d.privateRevenueMTD, d.revenueMTD)}):`);
     lines.push('');
     DAILY_REPORT_PRIVATE_CATS.forEach(cat=>{
-      lines.push(`- ${cat} ${rubStr(d.privateByCatToday[cat]||0)} руб. (${shareStr(d.privateByCatToday[cat]||0, d.privateRevenueToday)})`);
+      lines.push(`- ${cat} ${rubStr(d.privateByCatMTD[cat]||0)} руб. (${shareStr(d.privateByCatMTD[cat]||0, d.privateRevenueMTD)})`);
     });
     lines.push('');
-    lines.push(`▪️Расписание ${rubStr(d.scheduleRevenueToday)} руб. (${shareStr(d.scheduleRevenueToday, d.revenueToday)})`);
+    lines.push(`▪️Расписание ${rubStr(d.scheduleRevenueMTD)} руб. (${shareStr(d.scheduleRevenueMTD, d.revenueMTD)})`);
     lines.push('');
-    lines.push(`▪️Заказы ${rubStr(d.ordersRevenueToday)} руб. (${shareStr(d.ordersRevenueToday, d.revenueToday)})`);
+    lines.push(`▪️Заказы ${rubStr(d.ordersRevenueMTD)} руб. (${shareStr(d.ordersRevenueMTD, d.revenueMTD)})`);
     lines.push('');
-    lines.push(`▪️Сертификаты ${rubStr(d.certsRevenueToday)} руб. (${shareStr(d.certsRevenueToday, d.revenueToday)})`);
+    lines.push(`▪️Сертификаты ${rubStr(d.certsRevenueMTD)} руб. (${shareStr(d.certsRevenueMTD, d.revenueMTD)})`);
+    lines.push('');
+    lines.push(`▪️Итого за месяц: ${rubStr(d.revenueMTD)} руб.`);
     lines.push('');
     lines.push('———');
-    lines.push(`Конверсия дня: ${pctStr(d.convDayPct)} (продажи/заявки)`);
-    lines.push(`Конверсия (месяц): ${pctStr(d.convMonthPct)} (продажи/заявки)`);
+    lines.push(`Конверсия дня: ${pctStr(d.convDayPct)} (продажи/заявки, в штуках)`);
+    lines.push(`Конверсия (месяц): ${pctStr(d.convMonthPct)} (продажи/заявки, в штуках)`);
     lines.push(`Рентабельность: ${pctStr(d.rentabilityPct)}`);
     lines.push(`% заполняемости (месяц): ${d.occupancyPct}%`);
     lines.push(`Средний чек (месяц): ${d.avgCheck===null ? '—' : rubStr(d.avgCheck)+' руб.'}`);
     return lines.join('\n');
+  }
+
+  // краткая сводка "кому и сколько вы платите" — только для руководителя, собирается из уже посчитанных
+  // сумм (мастера/админы/менеджеры) и из ролей, вписанных в "Чистая прибыль → Другие сотрудники"
+  function renderPayrollSummarySection(monthYm, monthLabel, mastersTotal, hostessTotal, hostessList, managerPoolTotal, npStaffList){
+    const byRole = {};
+    (npStaffList||[]).forEach(s=>{
+      const role = STAFF_ROLE_OPTIONS.includes(s.role) ? s.role : STAFF_ROLE_OPTIONS[STAFF_ROLE_OPTIONS.length-1];
+      if(!byRole[role]) byRole[role] = [];
+      byRole[role].push(s);
+    });
+    const roleTotal = (role)=> (byRole[role]||[]).reduce((s,x)=> s + (Number(x.amount)||0), 0);
+    const staffRow = (s)=>`<div class="stat-row" style="padding-left:14px;"><div class="stat-label" style="font-weight:400;">${escapeHtml(s.name)}</div><div style="flex:1;text-align:right;font-family:var(--font-mono);font-size:12.5px;">${formatMoney(Number(s.amount)||0)}</div></div>`;
+    const groupRow = (label, total)=>`<div class="stat-row" style="font-weight:600;margin-top:8px;"><div class="stat-label">${label}</div><div style="flex:1;text-align:right;font-family:var(--font-mono);">${formatMoney(total)}</div></div>`;
+    const emptyHint = (text)=>`<div style="color:var(--ink-soft);font-size:12.5px;padding-left:14px;">${text}</div>`;
+
+    const seniorAdminTotal = roleTotal('Старший администратор');
+    const assistantTotal = roleTotal('Ассистент');
+    const managerManualTotal = roleTotal('Менеджер');
+    const otherTotal = roleTotal('Другое');
+    const grandTotal = mastersTotal + hostessTotal + seniorAdminTotal + assistantTotal + managerPoolTotal + managerManualTotal + otherTotal;
+
+    return `
+      <div class="analytics-section" style="border:2px solid var(--ink);">
+        <h4>💰 Кому и сколько вы платите — ${escapeHtml(monthLabel)}</h4>
+        <div style="font-size:11.5px;color:var(--ink-soft);font-family:var(--font-mono);margin-bottom:10px;">Собрано из всех разделов зарплаты и из «Чистой прибыли → ✏ Изменить аренду / свои статьи» — там у каждого сотрудника отмечено «Кто», это и формирует разбивку ниже.</div>
+        <div style="font-size:22px;font-family:var(--font-display);font-weight:600;margin-bottom:10px;">Итого за месяц: ${formatMoney(grandTotal)}</div>
+
+        ${groupRow('Мастера', mastersTotal)}
+        ${emptyHint('Подробно по именам — в разделе «ЗП по мастерам» выше.')}
+
+        ${groupRow('Админы (посменно)', hostessTotal)}
+        ${hostessList.length ? hostessList.map(([h,pay])=>staffRow({name:h, amount:pay})).join('') : emptyHint('Никто не работал смену в этом месяце.')}
+
+        ${groupRow('Старший администратор', seniorAdminTotal)}
+        ${(byRole['Старший администратор']||[]).length ? byRole['Старший администратор'].map(staffRow).join('') : emptyHint('Не вписано — добавьте в «Чистая прибыль → Другие сотрудники» с пометкой «Кто: Старший администратор».')}
+
+        ${groupRow('Ассистент', assistantTotal)}
+        ${(byRole['Ассистент']||[]).length ? byRole['Ассистент'].map(staffRow).join('') : emptyHint('Не вписано — добавьте в «Чистая прибыль → Другие сотрудники» с пометкой «Кто: Ассистент».')}
+
+        ${groupRow('Менеджеры', managerPoolTotal + managerManualTotal)}
+        ${emptyHint(`Оклад + % от выручки, общей суммой (не делится по сотруднику): ${formatMoney(managerPoolTotal)}${MANAGER_LIST.length?' · '+MANAGER_LIST.map(escapeHtml).join(', '):''}`)}
+        ${(byRole['Менеджер']||[]).length ? emptyHint('Доп. выплаты вписаны вручную:') + byRole['Менеджер'].map(staffRow).join('') : ''}
+
+        ${groupRow('Остальные', otherTotal)}
+        ${(byRole['Другое']||[]).length ? byRole['Другое'].map(staffRow).join('') : emptyHint('Пока никто не вписан.')}
+      </div>
+    `;
   }
 
   function renderAnalytics(){
@@ -10012,7 +10749,14 @@
     const npOrdersRevenue = state.orders
       .filter(x=> x.date && x.date.startsWith(monthYm))
       .reduce((s,x)=> s + ((x.revenue!==undefined&&x.revenue!==null&&!isNaN(x.revenue))?Number(x.revenue):0), 0);
-    const npTotalRevenue = npEventsRevenue + npItemSalesRevenue + npCertSalesRevenue + npOrdersRevenue;
+    // прочие доходы из "Книги → Доходы" — те, что НЕ являются зеркалом другого источника (мероприятие,
+    // оплата по журналу, изделие, заказ — всё это уже посчитано строками выше, не задваиваем). То, что
+    // вписано вручную без привязки (сдали зал на сторону, "Другое" и т.п.) — реальные деньги студии,
+    // без этой строки они вообще не попадали бы в "Чистую прибыль".
+    const npOtherIncomeRevenue = state.incomes
+      .filter(i=> i.date && i.date.startsWith(monthYm) && !i.autoFromEvent && !i.autoFromPayment && !i.itemSaleId && !i.orderId && !i.eventId && !i.safeTransfer)
+      .reduce((s,i)=> s + ((i.amount!==undefined&&i.amount!==null&&!isNaN(i.amount))?Number(i.amount):0), 0);
+    const npTotalRevenue = npEventsRevenue + npItemSalesRevenue + npCertSalesRevenue + npOrdersRevenue + npOtherIncomeRevenue;
 
     // Расходы = материалы + маркетинг + зп мастеров + зп хостес + зп менеджеров (вручную) + аренда (вручную)
     //          + прочие сотрудники (вручную) + свои статьи расходов (вручную)
@@ -10028,8 +10772,13 @@
     // остальные категории из "Книги → Расходы" (Инвентарь, Декор, Логистика, Продукты и т.п., включая свои) —
     // "Аренда"/"Зарплата" туда не входят: для них уже есть ручное поле "Аренда" и автосчёт ЗП ниже, те же
     // суммы задвоились бы. Расходы, привязанные к конкретному мероприятию, тоже не берём — они уже в "Материалы" выше.
+    // "Сейф" — служебная категория для перемещений наличных между кассой и сейфом (раздел "Касса"),
+    // не настоящий расход — исключаем, иначе внутреннее перекладывание денег ложно снижало бы прибыль.
+    // "netProfitRef" — зеркальные записи из этой же модалки (аренда/сотрудники/свои статьи, см.
+    // syncNetProfitLinkedExpenses) — они уже учтены отдельно ниже (npRent/npStaffTotal/npCustomTotal),
+    // без этого исключения "свои статьи расходов" (категория "Операции") считались бы дважды.
     const npOtherLedgerCost = state.expenses
-      .filter(e=> e.date && e.date.startsWith(monthYm) && !e.eventId && !['Маркетинг','Аренда','Зарплата'].includes(e.category))
+      .filter(e=> e.date && e.date.startsWith(monthYm) && !e.eventId && !e.safeTransfer && !e.netProfitRef && !['Маркетинг','Аренда','Зарплата','Сейф'].includes(e.category))
       .reduce((s,e)=> s + ((e.amount!==undefined&&e.amount!==null&&!isNaN(e.amount))?Number(e.amount):0), 0);
     const npMastersBasePay = evts.reduce((s,e)=> s + eventTotalMasterPay(e), 0);
     const npMastersItemShare = state.itemSales
@@ -10038,13 +10787,18 @@
     const npMastersOrderShare = state.orders
       .filter(x=> x.date && x.date.startsWith(monthYm))
       .reduce((s,x)=> s + orderTotalMasterShare(x), 0);
-    // корректировки (доплаты/удержания) без привязки к мероприятию — на имя мастера идут в ЗП мастеров,
-    // на имя админа (роль "hostess", HOSTESS_LIST) — в ЗП админов (см. тот же принцип в renderAnalytics)
+    // корректировки (доплаты/удержания) — на имя мастера идут в ЗП мастеров, на имя админа (роль "hostess",
+    // HOSTESS_LIST) — в ЗП админов. Привязанная к мероприятию ПОЛОЖИТЕЛЬНАЯ доплата уже зеркалится в
+    // себестоимость этого мероприятия (см. сохранение карточки корректировки — пишет в materialsItems с
+    // adjRef), поэтому её здесь не берём, иначе задвоится. А вот привязанное к мероприятию УДЕРЖАНИЕ
+    // (сумма ≤ 0) никуда больше не зеркалится — его нужно брать и здесь, иначе оно просто пропадает из
+    // "Чистой прибыли" (студия как будто заплатила мастеру полностью, хотя на самом деле удержала).
+    const isAdjMirroredToEvent = a=> !!a.eventId && Number(a.amount) > 0;
     const npUnlinkedAdjustments = state.salaryAdjustments
-      .filter(a=> a.date && a.date.startsWith(monthYm) && !a.eventId && !HOSTESS_LIST.some(h=>h.toLowerCase()===(a.masterName||'').trim().toLowerCase()))
+      .filter(a=> a.date && a.date.startsWith(monthYm) && !isAdjMirroredToEvent(a) && !HOSTESS_LIST.some(h=>h.toLowerCase()===(a.masterName||'').trim().toLowerCase()))
       .reduce((s,a)=> s + (Number(a.amount)||0), 0);
     const npHostessAdjustments = state.salaryAdjustments
-      .filter(a=> a.date && a.date.startsWith(monthYm) && !a.eventId && HOSTESS_LIST.some(h=>h.toLowerCase()===(a.masterName||'').trim().toLowerCase()))
+      .filter(a=> a.date && a.date.startsWith(monthYm) && !isAdjMirroredToEvent(a) && HOSTESS_LIST.some(h=>h.toLowerCase()===(a.masterName||'').trim().toLowerCase()))
       .reduce((s,a)=> s + (Number(a.amount)||0), 0);
     const npMastersSalary = npMastersBasePay + npMastersItemShare + npMastersOrderShare + npUnlinkedAdjustments;
     // зп хостес — по графику смен (будни/выходные + переработка), как и в разделе "ЗП хостес", плюс
@@ -10092,6 +10846,7 @@
       {label:'Изделия', amount: npItemSalesRevenue},
       {label:'Сертификаты', amount: npCertSalesRevenue},
       {label:'Заказы', amount: npOrdersRevenue},
+      {label:'Прочие доходы (Книга)', amount: npOtherIncomeRevenue},
     ];
     const npExpenseRows = [
       {label:'Материалы', amount: npMaterialsCost},
@@ -11204,8 +11959,20 @@
       finContent = `
         <div class="analytics-section">
           <h4>ЗП по мастерам за месяц: ${formatMoney(combinedGrandTotal)}</h4>
+          ${combinedMasterTotals.length > SALARY_MASTERS_COLLAPSE_LIMIT ? `
+            <div style="display:flex;align-items:center;gap:8px;margin-bottom:10px;flex-wrap:wrap;">
+              <input type="text" id="salary-masters-search" value="${escapeHtml(state.salaryMastersSearch||'')}" placeholder="🔍 Найти мастера…" style="flex:1;max-width:260px;padding:7px 10px;border:1px solid var(--line-strong);border-radius:var(--radius);font-size:12.5px;font-family:var(--font-body);">
+              ${!(state.salaryMastersSearch||'').trim() ? `<button type="button" class="btn btn-ghost" id="btn-toggle-salary-masters" style="font-size:11.5px;padding:5px 10px;">${state.salaryMastersShowAll ? '▲ Свернуть список' : `▾ Показать всех (${combinedMasterTotals.length})`}</button>` : ''}
+            </div>
+          ` : ''}
           <div style="font-size:11.5px;color:var(--ink-soft);font-family:var(--font-mono);margin-bottom:8px;">МК — по ставкам за сессию: до ${(state.masterPayRates||DEFAULT_MASTER_PAY_RATES).tier1Max} чел — ${formatMoney((state.masterPayRates||DEFAULT_MASTER_PAY_RATES).tier1Flat)}, ${(state.masterPayRates||DEFAULT_MASTER_PAY_RATES).tier1Max+1}\u2013${(state.masterPayRates||DEFAULT_MASTER_PAY_RATES).tier2Max} — ${formatMoney((state.masterPayRates||DEFAULT_MASTER_PAY_RATES).tier2Flat)}, ${(state.masterPayRates||DEFAULT_MASTER_PAY_RATES).tier2Max+1}+ — ${formatMoney((state.masterPayRates||DEFAULT_MASTER_PAY_RATES).tier3PerGuest)}/гость. Изделия — ${ITEM_SALE_MASTER_PCT}% от выручки со стеллажа. Заказ — сумма мастеру вводится вручную по договорённости. Нажмите на сотрудника, чтобы увидеть каждый МК отдельно и разбивку по половинам месяца.</div>
-          ${combinedMasterTotals.length ? combinedMasterTotals.map(x=>{
+          ${(()=>{
+            const q = (state.salaryMastersSearch||'').trim().toLowerCase();
+            const filtered = q ? combinedMasterTotals.filter(x=>x.name.toLowerCase().includes(q)) : combinedMasterTotals;
+            const visible = q ? filtered : (state.salaryMastersShowAll ? filtered : filtered.slice(0, SALARY_MASTERS_COLLAPSE_LIMIT));
+            if(combinedMasterTotals.length === 0) return `<div style="color:var(--ink-soft);font-size:13px;">В этом месяце нет ни мероприятий с мастером, ни продаж изделий.</div>`;
+            if(visible.length === 0) return `<div style="color:var(--ink-soft);font-size:13px;">Никого не нашлось по «${escapeHtml(state.salaryMastersSearch)}».</div>`;
+            return visible.map(x=>{
             const expanded = state.expandedSalaryMasters.has(x.name);
             const details = (masterEventDetails[x.name]||[]).sort((a,b)=> a.date.localeCompare(b.date));
             const h1EventTotal = details.filter(d=>d.half==='H1').reduce((s,d)=>s+d.total,0);
@@ -11259,12 +12026,16 @@
                 </div>
               ` : ''}
             </div>
-          `;}).join('') : `<div style="color:var(--ink-soft);font-size:13px;">В этом месяце нет ни мероприятий с мастером, ни продаж изделий.</div>`}
+          `;}).join('');
+          })()}
         </div>
         <div class="analytics-section">
           <h4>Все корректировки ЗП за месяц: ${formatMoney(allSalaryAdjustmentsThisMonth.reduce((s,a)=>s+a.amount,0))}</h4>
           <div style="font-size:11.5px;color:var(--ink-soft);font-family:var(--font-mono);margin-bottom:8px;">Все доплаты/удержания за месяц в одном месте — и мастерам, и админам, без необходимости открывать каждого по отдельности.</div>
-          ${allSalaryAdjustmentsThisMonth.length ? allSalaryAdjustmentsThisMonth.map(a=>`
+          ${allSalaryAdjustmentsThisMonth.length > COLLAPSE_LIST_LIMIT ? `
+            <button type="button" class="btn btn-ghost" id="btn-toggle-np-adjustments" style="font-size:11.5px;padding:5px 10px;margin-bottom:8px;">${state.npAdjustmentsShowAll ? '▲ Свернуть список' : `▾ Показать все (${allSalaryAdjustmentsThisMonth.length})`}</button>
+          ` : ''}
+          ${allSalaryAdjustmentsThisMonth.length ? (state.npAdjustmentsShowAll ? allSalaryAdjustmentsThisMonth : allSalaryAdjustmentsThisMonth.slice(0,COLLAPSE_LIST_LIMIT)).map(a=>`
             <div class="stat-row">
               <div class="stat-label" style="width:170px;">${formatDateText(a.date)}</div>
               <div style="width:140px;font-weight:600;">${escapeHtml(a.masterName||'—')}</div>
@@ -11276,7 +12047,10 @@
         <div class="analytics-section">
           <h4 style="color:${salaryReconciliation.length>0?'var(--status-red)':'inherit'};">Начислено vs Выплачено ${salaryReconciliation.length ? `(${salaryReconciliation.length} расхождений)` : ''}</h4>
           <div style="font-size:11.5px;color:var(--ink-soft);font-family:var(--font-mono);margin-bottom:8px;">ЗП выдаётся двумя частями: за 1–15 число — 16-го, за 16 – конец месяца — 2-го числа следующего месяца. Выплаченным считается расход категории «Зарплата» с указанным мастером и датой в соответствующем окне выдачи. Расхождение показывается только после даты выдачи — до неё платить ещё рано.</div>
-          ${salaryReconciliation.length ? salaryReconciliation.map(x=>`
+          ${salaryReconciliation.length > COLLAPSE_LIST_LIMIT ? `
+            <button type="button" class="btn btn-ghost" id="btn-toggle-np-reconciliation" style="font-size:11.5px;padding:5px 10px;margin-bottom:8px;">${state.npReconciliationShowAll ? '▲ Свернуть список' : `▾ Показать все (${salaryReconciliation.length})`}</button>
+          ` : ''}
+          ${salaryReconciliation.length ? (state.npReconciliationShowAll ? salaryReconciliation : salaryReconciliation.slice(0,COLLAPSE_LIST_LIMIT)).map(x=>`
             <div class="stat-row">
               <div class="stat-label">${escapeHtml(x.name)} <span style="color:var(--ink-soft);font-weight:400;">· ${x.halfLabel}</span></div>
               <div style="flex:1;font-size:12.5px;">Начислено: ${formatMoney(x.accrued)} · Выплачено: ${formatMoney(x.paid)}</div>
@@ -11331,6 +12105,7 @@
           `;}).join('') : `<div style="color:var(--ink-soft);font-size:13px;">В этом месяце нет ни смен, ни вписанных премий.</div>`}
           <button class="btn btn-ghost owner-panel-btn" data-panel="hostess-bonus" style="border-color:#6B4A1E;color:#6B4A1E;margin-top:8px;">✏ Вписать премию за месяц</button>
         </div>
+        ${renderPayrollSummarySection(monthYm, monthLabel, combinedGrandTotal, totalHostessSalary, hostessSalaryList, npManagerSalary, npStaffList)}
         ` : ''}
       `;
     }
@@ -11860,6 +12635,9 @@
     const myMissingReports = state.events
       .filter(e=> e.date && e.date<=todayStr() && isReportRequiredForEvent(e) && !hasMasterReport(e) && (norm(e.host)===norm(myName) || (e.additionalHosts||[]).some(h=>norm(h.name)===norm(myName))))
       .sort((a,b)=> (b.date+b.time).localeCompare(a.date+a.time));
+    const myOrderDeadlines = state.orders
+      .filter(o => o.deadline && (norm(o.masterName)===norm(myName) || (o.additionalMasters||[]).some(m=>norm(m.name)===norm(myName))))
+      .sort((a,b)=> a.deadline.localeCompare(b.deadline));
     return `
       <div class="analytics-header">
         <h3 style="text-transform:capitalize;">${escapeHtml(monthLabel)}</h3>
@@ -11879,6 +12657,20 @@
               <div style="font-family:var(--font-mono);font-size:12px;color:var(--status-red);">заполнить →</div>
             </div>
           `).join('')}
+        </div>
+      ` : ''}
+      ${myOrderDeadlines.length > 0 ? `
+        <div class="analytics-section" style="border:1px solid ${myOrderDeadlines.some(o=>orderDaysLeft(o)<=3)?'var(--status-red)':'var(--line-strong)'};">
+          <h4 style="color:${myOrderDeadlines.some(o=>orderDaysLeft(o)<=3)?'var(--status-red)':'inherit'};">📦 Дедлайны по заказам</h4>
+          ${myOrderDeadlines.map(o=>{
+            const {text, color} = orderDaysLeftLabel(o);
+            return `
+            <div class="stat-row">
+              <div class="stat-label" style="width:170px;">${formatDateText(o.deadline)}</div>
+              <div style="flex:1;font-size:12.5px;">${escapeHtml(o.comment||'Без комментария')}</div>
+              <div style="font-family:var(--font-mono);font-size:12px;color:${color};font-weight:600;">${text}</div>
+            </div>
+          `;}).join('')}
         </div>
       ` : ''}
       <div class="analytics-section">
@@ -11946,6 +12738,31 @@
         render();
       };
     });
+
+    const toggleSalaryMastersBtn = document.getElementById('btn-toggle-salary-masters');
+    if(toggleSalaryMastersBtn) toggleSalaryMastersBtn.onclick = ()=>{
+      state.salaryMastersShowAll = !state.salaryMastersShowAll;
+      render();
+    };
+    const toggleNpAdjustmentsBtn = document.getElementById('btn-toggle-np-adjustments');
+    if(toggleNpAdjustmentsBtn) toggleNpAdjustmentsBtn.onclick = ()=>{
+      state.npAdjustmentsShowAll = !state.npAdjustmentsShowAll;
+      render();
+    };
+    const toggleNpReconciliationBtn = document.getElementById('btn-toggle-np-reconciliation');
+    if(toggleNpReconciliationBtn) toggleNpReconciliationBtn.onclick = ()=>{
+      state.npReconciliationShowAll = !state.npReconciliationShowAll;
+      render();
+    };
+    const salaryMastersSearchInput = document.getElementById('salary-masters-search');
+    if(salaryMastersSearchInput){
+      salaryMastersSearchInput.oninput = ()=>{
+        state.salaryMastersSearch = salaryMastersSearchInput.value;
+        render();
+        const el = document.getElementById('salary-masters-search');
+        if(el){ el.focus(); el.selectionStart = el.selectionEnd = el.value.length; }
+      };
+    }
 
     const prev = document.getElementById('an-prev');
     const next = document.getElementById('an-next');
@@ -14208,14 +15025,18 @@
     `;
   }
 
-  function renderNetProfitAmountRows(list, cls){
+  function renderNetProfitAmountRows(list, cls, roleOptions){
+    const withRole = Array.isArray(roleOptions);
     return list.map((m,i)=>`
-      <div class="row2" data-npr-idx="${i}" style="grid-template-columns: 1.2fr 100px 112px 32px; margin-bottom:8px;align-items:center;">
+      <div class="row2" data-npr-idx="${i}" style="grid-template-columns: 1fr 90px 100px ${withRole?'150px ':''}32px; margin-bottom:8px;align-items:center;">
         <input type="text" class="${cls}-name" value="${escapeHtml(m.name||'')}" placeholder="Название">
         <input type="number" class="${cls}-amount" value="${m.amount!==undefined&&m.amount!==null?m.amount:''}" placeholder="Сумма ₽">
         <select class="${cls}-source" title="Откуда взяли деньги">
           ${EXPENSE_SOURCES.map(s=>`<option value="${escapeHtml(s)}" ${(m.source||EXPENSE_SOURCES[0])===s?'selected':''}>${escapeHtml(s)}</option>`).join('')}
         </select>
+        ${withRole ? `<select class="${cls}-role" title="Кто это — нужно для сводки по зарплатам">
+          ${roleOptions.map(r=>`<option value="${escapeHtml(r)}" ${(m.role||roleOptions[roleOptions.length-1])===r?'selected':''}>${escapeHtml(r)}</option>`).join('')}
+        </select>` : ''}
         <button type="button" class="${cls}-del" data-idx="${i}" style="border:1px solid var(--line-strong);background:var(--white);border-radius:var(--radius);color:var(--danger);cursor:pointer;">✕</button>
       </div>
     `).join('');
@@ -14371,8 +15192,8 @@
           </div>
           <div class="field" style="border-top:1px solid var(--line);padding-top:16px;">
             <label style="font-family:var(--font-display);font-size:15px;font-weight:600;">Другие сотрудники</label>
-            <div style="font-size:11.5px;color:var(--ink-soft);margin-top:-4px;margin-bottom:8px;">Например: уборщица, бухгалтер — те, чья зарплата нигде больше не считается</div>
-            <div id="np-staff-list">${renderNetProfitAmountRows(manual.staff||[], 'np-staff')}</div>
+            <div style="font-size:11.5px;color:var(--ink-soft);margin-top:-4px;margin-bottom:8px;">Например: старший администратор, ассистент, уборщица, бухгалтер — те, чья зарплата нигде больше не считается. Отметьте «Кто» у каждого — это нужно для сводки по зарплатам внизу вкладки «Зарплата».</div>
+            <div id="np-staff-list">${renderNetProfitAmountRows(manual.staff||[], 'np-staff', STAFF_ROLE_OPTIONS)}</div>
             <button type="button" class="add-evt-btn" id="btn-add-np-staff">+ добавить сотрудника</button>
           </div>
           <div class="field" style="border-top:1px solid var(--line);padding-top:16px;">
@@ -14397,27 +15218,30 @@
     const cursor = state.analyticsCursor;
     const ym = cursor.getFullYear()+'-'+pad(cursor.getMonth()+1);
     const existing = (state.netProfitManual && state.netProfitManual[ym]) || {};
-    let staffDraft = (existing.staff || []).map(x=>({id:x.id||uid(), name:x.name, amount:x.amount, source:x.source||EXPENSE_SOURCES[0]}));
+    let staffDraft = (existing.staff || []).map(x=>({id:x.id||uid(), name:x.name, amount:x.amount, source:x.source||EXPENSE_SOURCES[0], role:x.role||STAFF_ROLE_OPTIONS[STAFF_ROLE_OPTIONS.length-1]}));
     let customDraft = (existing.customExpenses || []).map(x=>({id:x.id||uid(), name:x.name, amount:x.amount, source:x.source||EXPENSE_SOURCES[0]}));
 
-    function makeListManager(containerId, draftGetter, draftSetter, cls, addBtnId){
+    function makeListManager(containerId, draftGetter, draftSetter, cls, addBtnId, roleOptions){
+      const withRole = Array.isArray(roleOptions);
       function sync(){
         const draft = draftGetter();
         overlay.querySelectorAll(`#${containerId} [data-npr-idx]`).forEach(row=>{
           const i = parseInt(row.dataset.nprIdx);
           if(!draft[i]) return;
           const amountRaw = row.querySelector(`.${cls}-amount`).value;
+          const roleEl = withRole ? row.querySelector(`.${cls}-role`) : null;
           draft[i] = {
             id: draft[i].id,
             name: row.querySelector(`.${cls}-name`).value,
             amount: amountRaw !== '' ? parseFloat(amountRaw) : null,
             source: row.querySelector(`.${cls}-source`).value,
+            ...(withRole ? { role: roleEl ? roleEl.value : draft[i].role } : {}),
           };
         });
       }
       function refresh(){
         const draft = draftGetter();
-        overlay.querySelector('#'+containerId).innerHTML = renderNetProfitAmountRows(draft, cls);
+        overlay.querySelector('#'+containerId).innerHTML = renderNetProfitAmountRows(draft, cls, roleOptions);
         attachRowEvents();
       }
       function attachRowEvents(){
@@ -14436,21 +15260,21 @@
       if(addBtn) addBtn.onclick = ()=>{
         sync();
         const draft = draftGetter();
-        draft.push({id:uid(), name:'', amount:null, source:EXPENSE_SOURCES[0]});
+        draft.push({id:uid(), name:'', amount:null, source:EXPENSE_SOURCES[0], ...(withRole?{role:roleOptions[roleOptions.length-1]}:{})});
         draftSetter(draft);
         refresh();
       };
       return sync;
     }
 
-    const syncStaff = makeListManager('np-staff-list', ()=>staffDraft, (d)=>{staffDraft=d;}, 'np-staff', 'btn-add-np-staff');
+    const syncStaff = makeListManager('np-staff-list', ()=>staffDraft, (d)=>{staffDraft=d;}, 'np-staff', 'btn-add-np-staff', STAFF_ROLE_OPTIONS);
     const syncCustom = makeListManager('np-custom-list', ()=>customDraft, (d)=>{customDraft=d;}, 'np-custom', 'btn-add-np-custom');
 
     overlay.querySelector('#np-cancel').onclick = ()=>{ state.modal = null; overlay.remove(); };
     overlay.querySelector('#np-save').onclick = async ()=>{
       syncStaff(); syncCustom();
       const readVal = (id)=>{ const v = overlay.querySelector('#'+id).value; return v!=='' ? parseFloat(v) : null; };
-      const cleanedStaff = staffDraft.map(x=>({id:x.id, name:(x.name||'').trim(), amount:x.amount, source:x.source||EXPENSE_SOURCES[0]})).filter(x=>x.name);
+      const cleanedStaff = staffDraft.map(x=>({id:x.id, name:(x.name||'').trim(), amount:x.amount, source:x.source||EXPENSE_SOURCES[0], role:x.role||STAFF_ROLE_OPTIONS[STAFF_ROLE_OPTIONS.length-1]})).filter(x=>x.name);
       const cleanedCustom = customDraft.map(x=>({id:x.id, name:(x.name||'').trim(), amount:x.amount, source:x.source||EXPENSE_SOURCES[0]})).filter(x=>x.name);
       const newManual = {
         rent: readVal('np-rent'),
@@ -14529,7 +15353,12 @@
     const npOrdersRevenue = state.orders
       .filter(x=> x.date && x.date.startsWith(ym))
       .reduce((s,x)=> s + ((x.revenue!==undefined&&x.revenue!==null&&!isNaN(x.revenue))?Number(x.revenue):0), 0);
-    const npTotalRevenue = npEventsRevenue + npItemSalesRevenue + npCertSalesRevenue + npOrdersRevenue;
+    // прочие доходы из "Книги → Доходы", не являющиеся зеркалом другого источника — см. тот же приём
+    // в основном расчёте "Чистой прибыли" выше по файлу.
+    const npOtherIncomeRevenue = state.incomes
+      .filter(i=> i.date && i.date.startsWith(ym) && !i.autoFromEvent && !i.autoFromPayment && !i.itemSaleId && !i.orderId && !i.eventId && !i.safeTransfer)
+      .reduce((s,i)=> s + ((i.amount!==undefined&&i.amount!==null&&!isNaN(i.amount))?Number(i.amount):0), 0);
+    const npTotalRevenue = npEventsRevenue + npItemSalesRevenue + npCertSalesRevenue + npOrdersRevenue + npOtherIncomeRevenue;
 
     const npOrdersCost = state.orders
       .filter(x=> x.date && x.date.startsWith(ym))
@@ -14542,11 +15371,14 @@
     const npMastersOrderShare = state.orders
       .filter(x=> x.date && x.date.startsWith(ym))
       .reduce((s,x)=> s + orderTotalMasterShare(x), 0);
+    // см. тот же приём (и объяснение) в основном расчёте "Чистой прибыли" выше по файлу: привязанная
+    // к мероприятию положительная доплата уже зеркалится в его себестоимость, удержание — нет.
+    const isAdjMirroredToEvent = a=> !!a.eventId && Number(a.amount) > 0;
     const npUnlinkedAdjustments = state.salaryAdjustments
-      .filter(a=> a.date && a.date.startsWith(ym) && !a.eventId && !HOSTESS_LIST.some(h=>h.toLowerCase()===(a.masterName||'').trim().toLowerCase()))
+      .filter(a=> a.date && a.date.startsWith(ym) && !isAdjMirroredToEvent(a) && !HOSTESS_LIST.some(h=>h.toLowerCase()===(a.masterName||'').trim().toLowerCase()))
       .reduce((s,a)=> s + (Number(a.amount)||0), 0);
     const npHostessAdjustments = state.salaryAdjustments
-      .filter(a=> a.date && a.date.startsWith(ym) && !a.eventId && HOSTESS_LIST.some(h=>h.toLowerCase()===(a.masterName||'').trim().toLowerCase()))
+      .filter(a=> a.date && a.date.startsWith(ym) && !isAdjMirroredToEvent(a) && HOSTESS_LIST.some(h=>h.toLowerCase()===(a.masterName||'').trim().toLowerCase()))
       .reduce((s,a)=> s + (Number(a.amount)||0), 0);
     const npMastersSalary = npMastersBasePay + npMastersItemShare + npMastersOrderShare + npUnlinkedAdjustments;
 
@@ -14585,8 +15417,13 @@
     const npMarketingCost = state.expenses
       .filter(e=> e.date && e.date.startsWith(ym) && !e.eventId && e.category === 'Маркетинг')
       .reduce((s,e)=> s + ((e.amount!==undefined&&e.amount!==null&&!isNaN(e.amount))?Number(e.amount):0), 0);
+    // "Сейф" — служебная категория для перемещений наличных между кассой и сейфом (раздел "Касса"),
+    // не настоящий расход — исключаем, иначе внутреннее перекладывание денег ложно снижало бы прибыль.
+    // "netProfitRef" — зеркальные записи из "Чистая прибыль" (аренда/сотрудники/свои статьи) — этот
+    // снимок их намеренно не учитывает вовсе (см. комментарий в начале функции), без исключения
+    // "свои статьи расходов" (категория "Операции") просочились бы сюда как будто обычный расход.
     const npOtherLedgerCost = state.expenses
-      .filter(e=> e.date && e.date.startsWith(ym) && !e.eventId && !['Маркетинг','Аренда','Зарплата'].includes(e.category))
+      .filter(e=> e.date && e.date.startsWith(ym) && !e.eventId && !e.safeTransfer && !e.netProfitRef && !['Маркетинг','Аренда','Зарплата','Сейф'].includes(e.category))
       .reduce((s,e)=> s + ((e.amount!==undefined&&e.amount!==null&&!isNaN(e.amount))?Number(e.amount):0), 0);
 
     return { npEventsRevenue, npItemSalesRevenue, npCertSalesRevenue, npOrdersRevenue, npTotalRevenue,
@@ -14834,7 +15671,7 @@
             <label>Дата</label>
             <input type="date" id="dr-date" value="${dateStr}">
           </div>
-          <div style="font-size:11.5px;color:var(--ink-soft);font-family:var(--font-mono);margin-top:-6px;">«Шт»/«руб.» — цифры за сам этот день. Проценты у ЗАЯВОК и у ВЫРУЧКИ/ПРИБЫЛИ — нарастающим итогом с начала месяца по эту дату, относительно месячного плана. Остальные проценты в скобках — доля от суммы строкой выше. «Чистая прибыль» (видна только руководителю), «% заполняемости» и «Средний чек» — тоже про весь месяц целиком, а не про этот день: заполняемость показывает, насколько заполнен месяц (включая уже забронированные будущие даты), а средний чек за один день слишком случаен, поэтому считается нарастающим итогом с начала месяца.</div>
+          <div style="font-size:11.5px;color:var(--ink-soft);font-family:var(--font-mono);margin-top:-6px;">«Руб.» у ПРИБЫЛИ — цифры за сам этот день. ЗАЯВКИ и ВЫРУЧКА (и их разбивка по категориям/Частным/Расписанию/Заказам/Сертификатам) — нарастающим итогом с начала месяца по эту дату. Проценты у ЗАЯВОК и у ВЫРУЧКИ/ПРИБЫЛИ — нарастающим итогом с начала месяца по эту дату, относительно месячного плана. Остальные проценты в скобках — доля от суммы строкой выше. «Чистая прибыль» (видна только руководителю), «% заполняемости» и «Средний чек» — тоже про весь месяц целиком, а не про этот день: заполняемость показывает, насколько заполнен месяц (включая уже забронированные будущие даты), а средний чек за один день слишком случаен, поэтому считается нарастающим итогом с начала месяца.</div>
           <textarea id="dr-text" readonly style="width:100%;box-sizing:border-box;min-height:420px;font-family:var(--font-mono);font-size:13px;line-height:1.5;border:1px solid var(--line-strong);border-radius:var(--radius);padding:10px 12px;resize:vertical;background:var(--paper-2);">${escapeHtml(text)}</textarea>
           <div class="modal-actions">
             <span></span>
@@ -15306,18 +16143,26 @@
             const w = warnMap[e.id];
             const warnHtml = w ? `<div class="gap-warning">⚠ ${w.gap < 0 ? `Наложение по времени с «${escapeHtml(w.prevTitle)}» на ${Math.abs(w.gap)} мин` : `Перерыв с «${escapeHtml(w.prevTitle)}» всего ${w.gap} мин (меньше ${MIN_GAP_MINUTES})`}</div>` : '';
             const remainder = roleCanSeeGuestBalances(state.currentRole) ? eventRemainderTotal(e) : 0;
+            const openSlot = isOpenMasterSlot(e);
+            const available = openSlot ? (e.availableMasters||[]).filter(n=>(n||'').trim()) : [];
+            const iAmAvailable = openSlot && iAmAvailableForSlot(e);
+            const masterRowNoClick = openSlot && state.currentRole === 'master';
             return `
             ${warnHtml}
-            <div class="day-evt" data-eid="${e.id}">
+            <div class="day-evt${openSlot?' open-master-slot':''}" data-eid="${e.id}" ${masterRowNoClick?'style="cursor:default;"':''}>
               <div class="left">
                 <div class="time"><span class="chip-dot" style="background:${statusColor(e.status)};display:inline-block;margin-right:6px;"></span>${e.time}${e.duration?' · '+formatDuration(e.duration):''}${(e.guests!==undefined&&e.guests!==null&&e.guests!=='')?' · 👤 '+e.guests:''}</div>
-                <div class="title">${escapeHtml(e.title)}</div>
+                <div class="title">${openSlot?'🙋 ':''}${escapeHtml(e.title)}</div>
                 ${isAll ? `<div class="host" style="display:flex;align-items:center;gap:6px;">${spaceBadge(getSpace(e.spaceId),'sm')}${escapeHtml(getSpace(e.spaceId).name)} · ${escapeHtml(allHostNamesDisplay(e))}${e.product?' · '+escapeHtml(e.product):''}${showsDishesAndRental(e.status)&&e.dishes?' · 🍽 '+(e.dishes==='needed'?'нужна посуда':'без посуды'):''}${rentalSuffix(e)}${legalSuffix(e)}</div>` : `<div class="host">${escapeHtml(allHostNamesDisplay(e))}${e.product?' · '+escapeHtml(e.product):''}${showsDishesAndRental(e.status)&&e.dishes?' · 🍽 '+(e.dishes==='needed'?'нужна посуда':'без посуды'):''}${rentalSuffix(e)}${legalSuffix(e)}</div>`}
+                ${openSlot ? `<div class="notes" style="color:var(--status-cyan);">🙋 ${available.length ? 'Свободны: '+escapeHtml(available.join(', ')) : 'Пока никто не откликнулся'}</div>` : ''}
                 ${e.notes ? `<div class="notes" title="${escapeHtml(e.notes)}">💬 ${escapeHtml(e.notes)}</div>` : ''}
                 ${remainder>0 ? `<div class="notes" style="color:var(--status-red);">💳 Остаток: ${formatMoney(remainder)}</div>` : ''}
               </div>
               <div style="display:flex;flex-direction:column;gap:6px;flex-shrink:0;">
-                <button class="quick-host-btn" data-eid="${e.id}" title="Сменить мастера (без кода)">✎ мастер</button>
+                ${openSlot && state.currentRole === 'master'
+                  ? `<button type="button" class="slot-signup-btn${iAmAvailable?' active':''}" data-eid="${e.id}" title="${iAmAvailable?'Отменить — я не смогу провести':'Отметить себя свободным для этого слота'}">${iAmAvailable?'✓ Вы свободны':'✅ Я свободен'}</button>`
+                  : `<button class="quick-host-btn" data-eid="${e.id}" title="Сменить мастера (без кода)">✎ мастер</button>`
+                }
                 ${isMyEventForReport(e) ? `<button class="quick-report-btn" data-eid="${e.id}" title="Отчёт мастера (без кода)" style="${hasMasterReport(e)?'border-color:var(--status-green);color:var(--status-green);':''}">📝 ${hasMasterReport(e)?'отчёт ✓':'отчёт'}</button>` : ''}
               </div>
             </div>
@@ -15389,10 +16234,41 @@
         render();
       };
     });
+    overlay.querySelectorAll('.slot-signup-btn').forEach(btn=>{
+      btn.onclick = async (ev)=>{
+        ev.stopPropagation();
+        const id = btn.dataset.eid;
+        const e = state.events.find(x=>x.id===id);
+        if(!e) return;
+        const myName = (state.loggedInMasterName||'').trim();
+        if(!myName) return;
+        const norm = s=>(s||'').trim().toLowerCase();
+        const list = Array.isArray(e.availableMasters) ? e.availableMasters.filter(n=>(n||'').trim()) : [];
+        const idx = list.findIndex(n=>norm(n)===norm(myName));
+        if(idx>=0){
+          list.splice(idx,1);
+          recordAction('Мастер отменил отклик на слот', `${myName} — «${e.title||'Слот'}» ${formatDateText(e.date)} ${e.time}`);
+        } else {
+          list.push(myName);
+          recordAction('Мастер отметил себя свободным для слота', `${myName} — «${e.title||'Слот'}» ${formatDateText(e.date)} ${e.time}`);
+        }
+        const idx2 = state.events.findIndex(x=>x.id===id);
+        if(idx2>=0) state.events[idx2] = {...state.events[idx2], availableMasters: list};
+        await saveEvents();
+        overlay.remove();
+        state.modal = {type:'day', date: dateStr};
+        render();
+      };
+    });
     overlay.querySelectorAll('.day-evt').forEach(el=>{
       el.onclick = ()=>{
         const e = state.events.find(x=>x.id===el.dataset.eid);
         const keepAll = state.activeSpaceId==='all';
+        if(state.currentRole === 'master' && e && isOpenMasterSlot(e)){
+          // открытый слот без мастера — у мастера здесь только кнопка "Я свободен" в самой строке,
+          // по клику на саму строку ничего не открываем (нет граба мастера в обход старшего администратора)
+          return;
+        }
         overlay.remove();
         if(state.currentRole === 'master'){
           state.modal = {type:'quick-host', event:{...e}, keepAll};
@@ -15435,7 +16311,7 @@
       overlay.remove();
       requireUnlock(()=>{
         state.modal = {type:'event', isNew:true, keepAll, event:{
-          id: uid(), spaceId: defaultSpaceId, date: dateStr, time:'10:00', duration:60, guests:null, itemsCount:null, itemsCountAuto:true, masterPay:null, masterPayAuto:true, additionalHosts:[], guestName:'', price:null, agreedPrice:null, materialsItems:[], pickupItems:[], payments:[], title:'', product:'', host:'', dishes:'', dishesWasher:'', rentalBefore:0, rentalAfter:0, payerType:'individual', companyName:'', documents:{contract:false,paymentOrder:false,act:false}, masterReport:null, notes:''
+          id: uid(), spaceId: defaultSpaceId, date: dateStr, time:'10:00', duration:60, guests:null, itemsCount:null, itemsCountAuto:true, masterPay:null, masterPayAuto:true, additionalHosts:[], guestName:'', price:null, agreedPrice:null, materialsItems:[], pickupItems:[], payments:[], title:'', product:'', host:'', dishes:'', dishesWasher:'', rentalBefore:0, rentalAfter:0, payerType:'individual', companyName:'', documents:{contract:false,paymentOrder:false,act:false}, masterReport:null, notes:'', availableMasters:[]
         }};
         render();
       });
@@ -15588,10 +16464,19 @@
             <div id="pickup-items-list">${renderPickupItemRows(ev.pickupItems||[])}</div>
             <button type="button" class="add-evt-btn" id="btn-add-pickup">+ добавить изделие на выдачу</button>
           </div>
+          ${(ev.availableMasters||[]).filter(n=>(n||'').trim()).length ? `
+          <div class="field" id="available-masters-field">
+            <label>🙋 Отметили себя свободными для этого слота <span style="font-weight:400;color:var(--ink-soft);">— нажмите на имя, чтобы назначить ведущим</span></label>
+            <div style="display:flex;flex-wrap:wrap;gap:6px;">
+              ${ev.availableMasters.filter(n=>(n||'').trim()).map(n=>`<button type="button" class="available-master-chip" data-name="${escapeHtml(n)}" style="border:1px solid var(--status-cyan);background:${ev.host===n?'var(--status-cyan)':'var(--white)'};color:${ev.host===n?'var(--white)':'var(--status-cyan)'};border-radius:999px;padding:5px 12px;font-size:12.5px;cursor:pointer;font-weight:600;">🙋 ${escapeHtml(n)}</button>`).join('')}
+            </div>
+          </div>
+          ` : ''}
           <div class="field">
-            <label>Ведущий <span id="f-host-optional-hint" style="font-weight:400;color:var(--ink-soft);display:${PRODUCTS_WITHOUT_HOST.includes(ev.product)?'inline':'none'};">— необязательно для продукта «Аренда»</span></label>
+            <label>Ведущий <span id="f-host-optional-hint" style="font-weight:400;color:var(--ink-soft);display:${(PRODUCTS_WITHOUT_HOST.includes(ev.product)||ev.status==='slot')?'inline':'none'};">— необязательно${ev.status==='slot'?' для статуса «Слот»':' для продукта «Аренда»'}</span></label>
             <input type="text" id="f-host" value="${escapeHtml(ev.host||'')}" placeholder="Начните вводить имя…" list="host-suggestions">
             <datalist id="host-suggestions">${hostSelectOptions(ev.host).map(h=>`<option value="${escapeHtml(h)}">`).join('')}</datalist>
+            ${ev.status==='slot' ? `<div style="font-size:11px;color:var(--ink-soft);margin-top:4px;">Статус «Слот» — расписание зафиксировано, но мастер ещё не назначен. Мастера видят этот слот и могут отметить себя свободными (см. выше). Когда определитесь, впишите мастера сюда, выберите продукт/направление и смените статус на нужный.</div>` : ''}
           </div>
           <div class="field">
             <label>Зарплата мастеру (₽) <span style="font-weight:400;color:var(--ink-soft);">— считается автоматически по тарифу, можно поправить вручную</span></label>
@@ -15863,6 +16748,20 @@
       hostInputEl.title = 'Изменить ведущего может только тот, кто сейчас ведёт это мероприятие';
       hostInputEl.style.background = 'var(--paper-2)';
     }
+    // чипы "отметились свободными" — клик подставляет имя в поле "Ведущий", направление/продукт
+    // администратор выбирает рядом как обычно, двумя полями сразу назначается и мастер, и направление
+    overlay.querySelectorAll('.available-master-chip').forEach(chip=>{
+      chip.onclick = ()=>{
+        if(!hostInputEl || hostInputEl.disabled) return;
+        hostInputEl.value = chip.dataset.name;
+        hostInputEl.dispatchEvent(new Event('input'));
+        overlay.querySelectorAll('.available-master-chip').forEach(c=>{
+          const picked = c.dataset.name === chip.dataset.name;
+          c.style.background = picked ? 'var(--status-cyan)' : 'var(--white)';
+          c.style.color = picked ? 'var(--white)' : 'var(--status-cyan)';
+        });
+      };
+    });
     if(guestsInput && masterPayInput){
       guestsInput.addEventListener('input', ()=>{
         if(masterPayInput.dataset.auto === 'true'){
@@ -17167,6 +18066,9 @@
           if(!source && !professions && !unique && !ratingRaw && !ratingComment) return state.modal.event.masterReport || null;
           return { source, professions, unique, rating: ratingRaw?parseInt(ratingRaw):null, ratingComment };
         })(),
+        // список откликнувшихся мастеров нужен, только пока слот ещё не занят — как только назначили
+        // ведущего, список больше не нужен и не должен висеть "призраком" на обычном мероприятии
+        availableMasters: hostVal ? [] : (state.modal.event.availableMasters || []),
       };
       const idx = state.events.findIndex(x=>x.id===updated.id);
       const previousMaterialsItems = idx >= 0 ? (state.events[idx].materialsItems || []) : [];
@@ -17300,6 +18202,33 @@
     document.body.appendChild(banner);
     setTimeout(()=>{ if(banner && banner.parentNode) banner.remove(); }, 8000);
   }
+
+  // мгновенная "приватность" — скрывает (блюрит) весь экран по клику, чтобы никто рядом случайно не увидел
+  // цифры; кнопка живёт вне #app (не пересоздаётся при каждом render()), поэтому остаётся кликабельной и
+  // видимой даже когда сам контент заблюрен. Состояние хранится в localStorage — это чисто визуальная
+  // настройка этого устройства/браузера, не данные студии, поэтому отдельное хранилище тут уместно.
+  function setupPrivacyToggle(){
+    let hidden = false;
+    try{ hidden = localStorage.getItem('sp-privacy-blur') === '1'; }catch(e){ /* приватный режим браузера и т.п. */ }
+    const btn = document.createElement('button');
+    btn.id = 'privacy-toggle-btn';
+    btn.type = 'button';
+    function applyState(){
+      const appEl = document.getElementById('app');
+      if(appEl) appEl.classList.toggle('privacy-blur', hidden);
+      btn.classList.toggle('active', hidden);
+      btn.textContent = hidden ? '👁' : '🙈';
+      btn.title = hidden ? 'Показать экран' : 'Скрыть экран (например, если кто-то подошёл)';
+    }
+    btn.onclick = ()=>{
+      hidden = !hidden;
+      try{ localStorage.setItem('sp-privacy-blur', hidden ? '1' : '0'); }catch(e){ /* не критично */ }
+      applyState();
+    };
+    document.body.appendChild(btn);
+    applyState();
+  }
+  setupPrivacyToggle();
 
   loadData();
 })();
