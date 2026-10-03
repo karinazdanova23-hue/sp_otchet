@@ -864,6 +864,17 @@
   // (продажа сертификата/изделия), а не ведут саму "Книгу": "Сейф" там не осмысленный вариант.
   const SALE_PAYMENT_ACCOUNTS = ['Точка','Наличные','Юклиент','ЮрСчет'];
 
+  // статусы "Поздравлений с ДР" — те же 5 статусов, что были в Google-таблице менеджеров (цветные
+  // плашки); "bought" дополнительно создаёт/убирает связанную заявку в "Конверсии" (см. attachOutreachBoughtModalEvents)
+  const OUTREACH_STATUSES = [
+    { key:'in_progress', label:'В процессе', bg:'#F5E6BE', fg:'#8A6D1F' },
+    { key:'written', label:'Написали', bg:'#D7E3F0', fg:'#5A6E86' },
+    { key:'bought', label:'Купили', bg:'#E3EEE0', fg:'#75804F' },
+    { key:'ignored', label:'Игнор предложения', bg:'#F3DCCF', fg:'#9A5B35' },
+    { key:'no_sale', label:'Пообщались и не продали', bg:'#EFD4D0', fg:'#A3402F' },
+  ];
+  function outreachStatusMeta(key){ return OUTREACH_STATUSES.find(s=>s.key===key) || OUTREACH_STATUSES[0]; }
+
   const EXPENSE_CATEGORIES = ['Материалы','Инвентарь','Маркетинг','Зарплата','Аренда','Подарки','Операции','Декор','Логистика','Продукты','Типография','Косяки','Сейф'];
   const EXPENSE_SOURCES = ['Наличные','Точка','ВБ','Озон','Карина','Сейф'];
   const STAFF_ROLE_OPTIONS = ['Старший администратор','Ассистент','Менеджер','Другое'];
@@ -1773,6 +1784,12 @@
       if(bo){ state.birthdayOutreach = JSON.parse(bo.value); }
       else { state.birthdayOutreach = DEFAULT_BIRTHDAY_OUTREACH; await storageSetWithRetry('birthday-outreach', JSON.stringify(DEFAULT_BIRTHDAY_OUTREACH)); }
     }catch(e){ state.birthdayOutreach = DEFAULT_BIRTHDAY_OUTREACH; }
+    // миграция на статусную модель (5 статусов, как в исходной Google-таблице) — у записей, где ещё
+    // нет поля status (свежий сид из Excel или данные, сохранённые до перехода на статусы), выводим
+    // его из старых булевых полей written/bought
+    (state.birthdayOutreach||[]).forEach(o=>{
+      if(!o.status){ o.status = o.bought ? 'bought' : (o.written ? 'written' : 'in_progress'); }
+    });
 
     try{
       const ref = await window.storage.get('refunds', true);
@@ -5380,46 +5397,38 @@
     if(btnOutreachDue) btnOutreachDue.onclick = ()=>{ state.outreachViewMode = 'due'; render(); };
     const btnOutreachAll = document.getElementById('btn-outreach-all');
     if(btnOutreachAll) btnOutreachAll.onclick = ()=>{ state.outreachViewMode = 'all'; render(); };
-    document.querySelectorAll('.outreach-toggle-btn').forEach(btn=>{
-      btn.onclick = ()=>{
-        const item = state.birthdayOutreach.find(o=>o.id===btn.dataset.id);
+    // смена статуса "Поздравления" прямо в списке — тот же набор из 5 статусов, что был в таблице.
+    // Переход В "Купили" открывает окно (нужно выбрать мероприятие + сумму — заявка в "Конверсии"
+    // создаётся только там); переход ИЗ "Купили" в любой другой статус спрашивает подтверждение и
+    // удаляет связанную заявку, чтобы в "Конверсии" не оставалось "проданных" без реального статуса.
+    document.querySelectorAll('.outreach-status-select').forEach(sel=>{
+      sel.onchange = ()=>{
+        const item = state.birthdayOutreach.find(o=>o.id===sel.dataset.id);
         if(!item) return;
-        item.written = !item.written;
-        if(item.written){
-          item.writtenBy = state.loggedInManagerName || ROLE_LABELS[state.currentRole] || '—';
-          item.writtenAt = new Date().toISOString();
-        } else {
-          item.writtenBy = '';
-          item.writtenAt = '';
+        const newStatus = sel.value;
+        const oldStatus = item.status || 'in_progress';
+        if(oldStatus === 'bought' && newStatus !== 'bought'){
+          showConfirmDeletePopup('Сменить статус у «Купили»? Связанная заявка в «Конверсии» будет удалена.', async ()=>{
+            if(item.leadId){
+              state.leads = state.leads.filter(x=>x.id !== item.leadId);
+              await saveLeads();
+            }
+            item.leadId = ''; item.boughtEventId = ''; item.boughtRevenue = null; item.boughtDate = '';
+            applyOutreachStatus(item, newStatus);
+            await saveBirthdayOutreach();
+            render();
+          });
+          return;
         }
+        if(newStatus === 'bought'){
+          // сам статус выставится при сохранении модалки (там же выбор мероприятия и суммы)
+          state.modal = {type:'outreach-bought', outreachItem: item};
+          render();
+          return;
+        }
+        applyOutreachStatus(item, newStatus);
         saveBirthdayOutreach();
         render();
-      };
-    });
-    document.querySelectorAll('.outreach-bought-btn').forEach(btn=>{
-      btn.onclick = ()=>{
-        const item = state.birthdayOutreach.find(o=>o.id===btn.dataset.id);
-        if(!item) return;
-        state.modal = {type:'outreach-bought', outreachItem: item};
-        render();
-      };
-    });
-    document.querySelectorAll('.outreach-unbought-btn').forEach(btn=>{
-      btn.onclick = ()=>{
-        const item = state.birthdayOutreach.find(o=>o.id===btn.dataset.id);
-        if(!item) return;
-        showConfirmDeletePopup('Отменить покупку? Связанная заявка в «Конверсии» будет удалена.', async ()=>{
-          if(item.leadId){
-            state.leads = state.leads.filter(x=>x.id !== item.leadId);
-            await saveLeads();
-          }
-          item.bought = false;
-          item.leadId = '';
-          item.boughtEventId = '';
-          item.boughtRevenue = null;
-          await saveBirthdayOutreach();
-          render();
-        });
       };
     });
 
@@ -5910,8 +5919,10 @@
   }
 
   // "Поздравления" — менеджеры пишут гостям в день рождения (их близких), по заранее составленному
-  // плану. writeDate — дата, когда нужно отправить сообщение (не сама дата ДР). written отмечается
-  // самим менеджером, с именем и временем — для контроля владелицей.
+  // плану. writeDate — дата, когда нужно отправить сообщение (не сама дата ДР). Статус — один из 5,
+  // как в исходной Google-таблице (см. OUTREACH_STATUSES); меняется менеджером, с фиксацией кто и
+  // когда — для контроля владелицей. "due" (нужно действие) — только статус "В процессе": остальные
+  // 4 статуса — уже результат (написали/купили/отказ/не продали), действие по ним не требуется.
   function formatOutreachDate(iso){
     if(!iso) return '—';
     const d = parseDate(iso);
@@ -5919,9 +5930,20 @@
   }
   function outreachDueList(){
     const today = todayStr();
-    return (state.birthdayOutreach||[]).filter(o=> !o.written && o.writeDate && o.writeDate <= today);
+    return (state.birthdayOutreach||[]).filter(o=> (o.status||'in_progress')==='in_progress' && o.writeDate && o.writeDate <= today);
   }
   function outreachDueCount(){ return outreachDueList().length; }
+  // фиксируем автора/время смены статуса — для контроля, кто и когда отработал запись; возврат в
+  // "В процессе" очищает отметку (запись снова ждёт действия, как будто к ней ещё не притрагивались)
+  function applyOutreachStatus(item, newStatus){
+    item.status = newStatus;
+    if(newStatus === 'in_progress'){
+      item.writtenBy = ''; item.writtenAt = '';
+    } else if(!item.writtenBy){
+      item.writtenBy = state.loggedInManagerName || ROLE_LABELS[state.currentRole] || '—';
+      item.writtenAt = new Date().toISOString();
+    }
+  }
   function outreachOverdueCount(){
     const today = todayStr();
     return outreachDueList().filter(o=>o.writeDate < today).length;
@@ -5929,6 +5951,13 @@
   function outreachTodayCount(){
     const today = todayStr();
     return outreachDueList().filter(o=>o.writeDate === today).length;
+  }
+  // статистика по статусам — сколько записей в каждом статусе сейчас (не зависит от периода/фильтра)
+  function outreachStatusCounts(){
+    const counts = {};
+    OUTREACH_STATUSES.forEach(s=>{ counts[s.key] = 0; });
+    (state.birthdayOutreach||[]).forEach(o=>{ const k = o.status||'in_progress'; counts[k] = (counts[k]||0) + 1; });
+    return counts;
   }
 
   function renderOutreachView(){
@@ -5954,13 +5983,16 @@
 
     const overdue = outreachOverdueCount();
     const todayCnt = outreachTodayCount();
+    const statusCounts = outreachStatusCounts();
 
     function row(o){
-      const isOverdue = !o.written && o.writeDate && o.writeDate < today;
-      const isToday = !o.written && o.writeDate === today;
-      const dimmed = o.written && !o.bought;
+      const status = o.status || 'in_progress';
+      const meta = outreachStatusMeta(status);
+      const isOverdue = status==='in_progress' && o.writeDate && o.writeDate < today;
+      const isToday = status==='in_progress' && o.writeDate === today;
+      const dimmed = status!=='in_progress' && status!=='bought';
       return `
-        <div class="refund-row" data-outreach-id="${o.id}" style="${dimmed?'opacity:0.55;':''}${o.bought?'border-left:3px solid var(--status-green);':(isOverdue?'border-left:3px solid var(--status-red);':(isToday?'border-left:3px solid var(--status-blue);':''))}">
+        <div class="refund-row" data-outreach-id="${o.id}" style="${dimmed?'opacity:0.6;':''}${status==='bought'?'border-left:3px solid var(--status-green);':(isOverdue?'border-left:3px solid var(--status-red);':(isToday?'border-left:3px solid var(--status-blue);':''))}">
           <div class="cell" style="flex:0 0 90px;">${formatOutreachDate(o.writeDate)}${isOverdue?' <span style="color:var(--status-red);font-size:10px;">просрочено</span>':''}</div>
           <div class="cell" style="flex:0 0 170px;">
             <a href="${escapeHtml(o.profileUrl||'#')}" target="_blank" rel="noopener" style="font-weight:600;">${escapeHtml(o.instagram||'—')}</a>
@@ -5969,14 +6001,13 @@
           <div class="cell" style="flex:1;">
             <div style="font-size:13px;">${escapeHtml(o.message||'')}</div>
             ${o.note ? `<div style="font-size:11px;color:var(--ink-soft);">${escapeHtml(o.note)}</div>` : ''}
-            ${o.written && o.writtenBy ? `<div style="font-size:11px;color:var(--status-green);">✓ Написали — ${escapeHtml(o.writtenBy)}${o.writtenAt?', '+formatDateText(o.writtenAt.slice(0,10)):''}</div>` : ''}
-            ${o.bought ? `<div style="font-size:11px;color:var(--status-green);font-weight:600;">🛍 Купили — ${escapeHtml(linkedEventLabel(o.boughtEventId))}${o.boughtRevenue!==undefined&&o.boughtRevenue!==null?' · '+formatMoney(o.boughtRevenue):''}</div>` : ''}
+            ${o.writtenBy ? `<div style="font-size:11px;color:var(--ink-soft);">${escapeHtml(o.writtenBy)}${o.writtenAt?', '+formatDateText(o.writtenAt.slice(0,10)):''}</div>` : ''}
+            ${status==='bought' ? `<div style="font-size:11px;color:var(--status-green);font-weight:600;">🛍 ${escapeHtml(linkedEventLabel(o.boughtEventId))}${o.boughtRevenue!==undefined&&o.boughtRevenue!==null?' · '+formatMoney(o.boughtRevenue):''}</div>` : ''}
           </div>
-          <div class="reason" style="display:flex;flex-direction:column;gap:6px;align-items:flex-end;">
-            <button type="button" class="btn ${o.written?'btn-ghost':'btn-primary'} outreach-toggle-btn" data-id="${o.id}" style="font-size:11.5px;padding:4px 10px;">${o.written?'↺ отменить':'✓ Написали'}</button>
-            ${o.bought
-              ? `<button type="button" class="btn btn-ghost outreach-unbought-btn" data-id="${o.id}" style="font-size:11px;padding:4px 10px;color:var(--status-red);">↺ отменить покупку</button>`
-              : `<button type="button" class="btn btn-ghost outreach-bought-btn" data-id="${o.id}" style="font-size:11.5px;padding:4px 10px;">🛍 Купили</button>`}
+          <div class="reason">
+            <select class="outreach-status-select" data-id="${o.id}" style="background:${meta.bg};color:${meta.fg};border:1px solid ${meta.fg};border-radius:4px;padding:5px 8px;font-size:11.5px;font-weight:600;cursor:pointer;">
+              ${OUTREACH_STATUSES.map(s=>`<option value="${s.key}" ${status===s.key?'selected':''}>${escapeHtml(s.label)}</option>`).join('')}
+            </select>
           </div>
         </div>
       `;
@@ -5989,10 +6020,10 @@
       const dates = Object.keys(groups).sort();
       listHtml = dates.map(d=>{
         const items = groups[d];
-        const pending = items.filter(o=>!o.written).length;
+        const pending = items.filter(o=>(o.status||'in_progress')==='in_progress').length;
         return `
           <div class="analytics-section">
-            <h4 style="color:${d<today&&pending>0?'var(--status-red)':'inherit'};">${formatOutreachDate(d)}${d===today?' · сегодня':(d<today?' · просрочено':'')} <span style="font-size:12px;color:var(--ink-soft);font-weight:400;">(не написано: ${pending} из ${items.length})</span></h4>
+            <h4 style="color:${d<today&&pending>0?'var(--status-red)':'inherit'};">${formatOutreachDate(d)}${d===today?' · сегодня':(d<today?' · просрочено':'')} <span style="font-size:12px;color:var(--ink-soft);font-weight:400;">(в процессе: ${pending} из ${items.length})</span></h4>
             <div class="cert-list">${items.map(row).join('')}</div>
           </div>
         `;
@@ -6002,10 +6033,18 @@
     }
 
     return `
-      <div class="analytics-summary" style="margin-bottom:20px;">
+      <div class="analytics-summary" style="margin-bottom:12px;">
         <div class="summary-card" style="border-left:4px solid ${todayCnt>0?'var(--status-blue)':'var(--status-green)'};"><div class="num">${todayCnt}</div><div class="label">Сегодня нужно написать</div></div>
         <div class="summary-card" style="border-left:4px solid ${overdue>0?'var(--status-red)':'var(--status-green)'};"><div class="num" style="color:${overdue>0?'var(--status-red)':'inherit'};">${overdue}</div><div class="label">Просрочено</div></div>
         <div class="summary-card"><div class="num">${all.length}</div><div class="label">Всего в списке</div></div>
+      </div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:20px;">
+        ${OUTREACH_STATUSES.map(s=>`
+          <div style="background:${s.bg};color:${s.fg};border-radius:6px;padding:8px 14px;font-size:12px;">
+            <div style="font-size:18px;font-weight:700;line-height:1.1;">${statusCounts[s.key]||0}</div>
+            <div style="font-size:11px;">${escapeHtml(s.label)}</div>
+          </div>
+        `).join('')}
       </div>
       <div class="cert-toolbar">
         <div style="display:flex;gap:8px;">
@@ -6128,12 +6167,7 @@
       if(idx >= 0) state.leads[idx] = leadEntry; else state.leads.push(leadEntry);
       await saveLeads();
 
-      outreach.bought = true;
-      outreach.written = true;
-      if(!outreach.writtenBy){
-        outreach.writtenBy = state.loggedInManagerName || ROLE_LABELS[state.currentRole] || '—';
-        outreach.writtenAt = new Date().toISOString();
-      }
+      applyOutreachStatus(outreach, 'bought');
       outreach.leadId = leadEntry.id;
       outreach.boughtEventId = eventIdVal;
       outreach.boughtRevenue = leadEntry.revenue;
@@ -8960,14 +8994,25 @@
       link.href = canvas.toDataURL(mime, mime==='image/jpeg' ? 0.92 : undefined);
       link.click();
     }
-    async function handleDownload(format, ext, mime){
-      const ok = await saveToBookAndCertificates();
-      if(!ok) return;
-      downloadAs(format, ext, mime);
-    }
     const downloadPngBtn = overlay.querySelector('#gc-download-png');
-    downloadPngBtn.onclick = ()=> handleDownload('PNG', 'png', 'image/png');
     const downloadJpgBtn = overlay.querySelector('#gc-download-jpg');
+    // защита от дублей дохода: если нажать на скачивание повторно (или другую кнопку скачивания),
+    // пока первое сохранение ещё обрабатывается, блокируем обе кнопки до завершения
+    let downloadInFlight = false;
+    async function handleDownload(format, ext, mime){
+      if(downloadInFlight) return;
+      downloadInFlight = true;
+      downloadPngBtn.disabled = true; downloadJpgBtn.disabled = true;
+      try{
+        const ok = await saveToBookAndCertificates();
+        if(!ok) return;
+        downloadAs(format, ext, mime);
+      } finally {
+        downloadInFlight = false;
+        downloadPngBtn.disabled = false; downloadJpgBtn.disabled = false;
+      }
+    }
+    downloadPngBtn.onclick = ()=> handleDownload('PNG', 'png', 'image/png');
     downloadJpgBtn.onclick = ()=> handleDownload('JPG', 'jpg', 'image/jpeg');
   }
 
@@ -9283,7 +9328,15 @@
       });
     };
 
-    overlay.querySelector('#btn-save-cert').onclick = async ()=>{
+    const saveCertBtn = overlay.querySelector('#btn-save-cert');
+    saveCertBtn.onclick = async ()=>{
+      // защита от дублей: если кликнуть "Сохранить" повторно, пока первый клик ещё обрабатывается
+      // (например при медленной сети), без этой защиты запускались бы два параллельных сохранения —
+      // оба генерировали бы СВОЙ income-id (т.к. previousCert.incomeId ещё пуст в обоих), и в «Книге»/
+      // «Кассе» появлялось бы несколько доходов на один и тот же сертификат
+      if(saveCertBtn.disabled) return;
+      saveCertBtn.disabled = true;
+      try{
       if(state.currentRole !== 'owner'){
         const dateCheck = overlay.querySelector('#c-date').value;
         const ymCheck = dateCheck ? dateCheck.slice(0,7) : null;
@@ -9471,6 +9524,9 @@
       await saveCertificates();
       recordAction("Сертификат сохранён");
       state.modal = null; overlay.remove(); render();
+      } finally {
+        if(saveCertBtn.isConnected) saveCertBtn.disabled = false;
+      }
     };
   }
 
