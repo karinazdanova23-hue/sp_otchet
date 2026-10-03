@@ -5273,7 +5273,7 @@
       requireUnlock(()=>{
         state.modal = {type:'gift-cert-gen', giftCert:{
           text: 'Арт-свидание\n«Керамика»', number: nextCertNumber(), date: todayStr(),
-          account: 'Точка', amount: '',
+          account: 'Точка', amount: '', purpose: 'sale',
         }};
         render();
       });
@@ -8429,19 +8429,27 @@
               <input type="date" id="gc-date" value="${g.date||todayStr()}">
             </div>
             <div style="font-size:11px;color:var(--ink-soft);">Остальное (условия, контакты, QR, адрес) — фиксированный шаблон, не меняется.</div>
+            <div class="field">
+              <label>Назначение сертификата</label>
+              <div style="display:flex;gap:8px;">
+                <div class="certpurpose-opt ${(g.purpose||'sale')==='sale'?'active':''}" data-gcpurpose="sale" style="display:flex;align-items:center;gap:6px;cursor:pointer;flex:1;"><span class="dot" style="background:var(--status-green);"></span>Продажа (за деньги)</div>
+                <div class="certpurpose-opt ${g.purpose==='marketing'?'active':''}" data-gcpurpose="marketing" style="display:flex;align-items:center;gap:6px;cursor:pointer;flex:1;"><span class="dot" style="background:var(--status-blue);"></span>Маркетинговый</div>
+              </div>
+              <input type="hidden" id="gc-purpose" value="${g.purpose||'sale'}">
+            </div>
             <div class="row2">
-              <div class="field">
+              <div class="field" id="gc-account-field" style="display:${(g.purpose||'sale')==='sale'?'block':'none'};">
                 <label>Способ оплаты</label>
                 <select id="gc-account">
                   ${SALE_PAYMENT_ACCOUNTS.map(a=>`<option value="${escapeHtml(a)}" ${(g.account||'Точка')===a?'selected':''}>${escapeHtml(a)}</option>`).join('')}
                 </select>
               </div>
               <div class="field">
-                <label>Сумма выручки (₽)</label>
+                <label id="gc-amount-label">${(g.purpose||'sale')==='sale'?'Сумма выручки (₽)':'Номинал сертификата (₽)'}</label>
                 <input type="number" id="gc-amount" value="${g.amount!==undefined&&g.amount!==null?g.amount:''}" min="0" step="100" placeholder="Например: 3500">
               </div>
             </div>
-            <div style="font-size:11px;color:var(--ink-soft);">При скачивании сертификат автоматически запишется в базу сертификатов и доходом в «Книгу» (по выбранному способу оплаты).</div>
+            <div style="font-size:11px;color:var(--ink-soft);" id="gc-save-hint">${(g.purpose||'sale')==='sale'?'При скачивании сертификат автоматически запишется в базу сертификатов и доходом в «Книгу» (по выбранному способу оплаты).':'При скачивании сертификат автоматически запишется в базу сертификатов как маркетинговый — без дохода в «Книге» (его себестоимость учитывается в разделе «Маркетинг», если сертификат передан блогеру или по акции).'}</div>
           </div>
           <div style="flex:0 0 auto;display:flex;flex-direction:column;align-items:center;gap:10px;">
             <canvas id="gc-canvas" width="1080" height="1536" style="width:220px;height:313px;border-radius:6px;box-shadow:0 6px 20px rgba(0,0,0,0.18);background:#fff;"></canvas>
@@ -8463,13 +8471,33 @@
     const dateEl = overlay.querySelector('#gc-date');
     const accountEl = overlay.querySelector('#gc-account');
     const amountEl = overlay.querySelector('#gc-amount');
+    const purposeEl = overlay.querySelector('#gc-purpose');
+    const accountFieldEl = overlay.querySelector('#gc-account-field');
+    const amountLabelEl = overlay.querySelector('#gc-amount-label');
+    const saveHintEl = overlay.querySelector('#gc-save-hint');
     const saveStatusEl = overlay.querySelector('#gc-save-status');
+
+    overlay.querySelectorAll('[data-gcpurpose]').forEach(opt=>{
+      opt.addEventListener('click', ()=>{
+        overlay.querySelectorAll('[data-gcpurpose]').forEach(o=>o.classList.remove('active'));
+        opt.classList.add('active');
+        purposeEl.value = opt.dataset.gcpurpose;
+        const isSale = purposeEl.value === 'sale';
+        if(accountFieldEl) accountFieldEl.style.display = isSale ? 'block' : 'none';
+        if(amountLabelEl) amountLabelEl.textContent = isSale ? 'Сумма выручки (₽)' : 'Номинал сертификата (₽)';
+        if(saveHintEl) saveHintEl.textContent = isSale
+          ? 'При скачивании сертификат автоматически запишется в базу сертификатов и доходом в «Книгу» (по выбранному способу оплаты).'
+          : 'При скачивании сертификат автоматически запишется в базу сертификатов как маркетинговый — без дохода в «Книге» (его себестоимость учитывается в разделе «Маркетинг», если сертификат передан блогеру или по акции).';
+        currentState();
+        if(saveStatusEl) saveStatusEl.textContent = '';
+      });
+    });
 
     function currentState(){
       state.modal.giftCert = {
         ...state.modal.giftCert,
         text: textEl.value, number: numberEl.value, date: dateEl.value,
-        account: accountEl.value, amount: amountEl.value,
+        account: accountEl.value, amount: amountEl.value, purpose: purposeEl.value || 'sale',
       };
       return state.modal.giftCert;
     }
@@ -8494,32 +8522,43 @@
     async function saveToBookAndCertificates(){
       [numberEl, dateEl, accountEl, amountEl].forEach(el=>el.style.borderColor='');
       const g = currentState();
+      const isSale = (g.purpose||'sale') === 'sale';
       let firstInvalid = null;
       const markInvalid = (el)=>{ el.style.borderColor = 'var(--danger)'; if(!firstInvalid) firstInvalid = el; };
       if(!g.number || !String(g.number).trim()) markInvalid(numberEl);
       if(!g.date) markInvalid(dateEl);
       if(g.amount===''||g.amount===undefined||g.amount===null||Number(g.amount)<0) markInvalid(amountEl);
       if(firstInvalid){
-        showGapWarningBanner('Для записи в базу и «Книгу» укажите номер, дату и сумму.');
+        showGapWarningBanner(isSale ? 'Для записи в базу и «Книгу» укажите номер, дату и сумму.' : 'Для записи в базу сертификатов укажите номер, дату и номинал.');
         firstInvalid.focus();
         return false;
       }
       const certId = g.certId || uid();
       const amountNum = parseInt(g.amount) || 0;
-      const incomeEntry = {
-        id: g.incomeId || uid(), date: g.date, operation: 'Оплата', product: 'Сертификат',
-        account: g.account || 'Точка', eventId: '', amount: amountNum, masterName: '', itemSaleId: '', orderId: '',
-        comment: `Электронный сертификат №${g.number}`,
-      };
-      const incIdx = state.incomes.findIndex(x=>x.id===incomeEntry.id);
-      if(incIdx >= 0) state.incomes[incIdx] = incomeEntry; else state.incomes.push(incomeEntry);
-      await saveIncomes();
+      let incomeId = g.incomeId || '';
+
+      if(isSale){
+        const incomeEntry = {
+          id: g.incomeId || uid(), date: g.date, operation: 'Оплата', product: 'Сертификат',
+          account: g.account || 'Точка', eventId: '', amount: amountNum, masterName: '', itemSaleId: '', orderId: '',
+          comment: `Электронный сертификат №${g.number}`,
+        };
+        const incIdx = state.incomes.findIndex(x=>x.id===incomeEntry.id);
+        if(incIdx >= 0) state.incomes[incIdx] = incomeEntry; else state.incomes.push(incomeEntry);
+        await saveIncomes();
+        incomeId = incomeEntry.id;
+      } else if(incomeId){
+        // переключили на «маркетинговый» — ранее созданный доход за этот сертификат убираем
+        state.incomes = state.incomes.filter(x=>x.id !== incomeId);
+        await saveIncomes();
+        incomeId = '';
+      }
 
       const certEntry = {
         id: certId, number: String(g.number).trim(), channel: CERT_CHANNELS[0], certType: 'Электронный',
-        certKind: 'value', purpose: 'sale', specificEventType: '', saleDate: g.date, amount: amountNum,
+        certKind: 'value', purpose: isSale ? 'sale' : 'marketing', specificEventType: '', saleDate: g.date, amount: amountNum,
         status: 'in_progress', redemptions: [], useDate: '', eventId: '', ownerName: '', ownerContact: '',
-        incomeId: incomeEntry.id, account: g.account || 'Точка', comment: 'Сгенерирован через «Создать сертификат»',
+        incomeId: incomeId, account: g.account || 'Точка', comment: 'Сгенерирован через «Создать сертификат»',
         hasReceiptPhoto: false,
       };
       const certIdx = state.certificates.findIndex(x=>x.id===certId);
@@ -8527,9 +8566,9 @@
       await saveCertificates();
 
       state.modal.giftCert.certId = certId;
-      state.modal.giftCert.incomeId = incomeEntry.id;
-      recordAction('Электронный сертификат записан в базу и «Книгу»', '№'+g.number);
-      if(saveStatusEl) saveStatusEl.textContent = '✓ Записан в базу сертификатов и в «Книгу»';
+      state.modal.giftCert.incomeId = incomeId;
+      recordAction('Электронный сертификат записан в базу' + (isSale ? ' и «Книгу»' : ' (маркетинговый)'), '№'+g.number);
+      if(saveStatusEl) saveStatusEl.textContent = isSale ? '✓ Записан в базу сертификатов и в «Книгу»' : '✓ Записан в базу сертификатов как маркетинговый';
       return true;
     }
 
