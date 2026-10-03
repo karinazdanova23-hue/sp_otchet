@@ -1136,7 +1136,9 @@
     const after = Math.max(0, actualEnd - standardEnd);
     return (before + after) / 60;
   }
-  const LEAD_PRODUCTS = PRODUCTS; // тот же список, что и у мероприятий — чтобы заявки и мероприятия говорили на одном языке
+  // список мероприятий + "Заказ" (заявки на изготовление изделий тоже идут через воронку "Конверсии",
+  // но "Заказ" не должен попадать в форму создания мероприятия, поэтому список не переиспользуем целиком
+  const LEAD_PRODUCTS = [...PRODUCTS, 'Заказ'];
   const LEAD_MONTH_OPTIONS = ['Нет информации', ...MONTHS.map(m=>m.charAt(0).toUpperCase()+m.slice(1))];
   const WEEKDAYS_FULL = ['воскресенье','понедельник','вторник','среда','четверг','пятница','суббота'];
   function weekdayFromDate(dateStr){
@@ -5473,6 +5475,24 @@
         });
       };
     });
+    // клик по "мероприятие без заявки" (мягкая проверка в "Конверсии") — сразу открывает новую заявку,
+    // предзаполненную по этому мероприятию (продано, привязано к нему), остаётся только дозаполнить источник/контакт
+    document.querySelectorAll('.event-no-lead-chip').forEach(chip=>{
+      chip.onclick = ()=>{
+        const ev = state.events.find(x=>x.id===chip.dataset.eid);
+        if(!ev) return;
+        requireUnlock(()=>{
+          const monthName = ev.date ? MONTHS[parseDate(ev.date).getMonth()].charAt(0).toUpperCase()+MONTHS[parseDate(ev.date).getMonth()].slice(1) : LEAD_MONTH_OPTIONS[0];
+          state.modal = {type:'lead', isNew:true, lead:{
+            id: uid(), requestDate: ev.date || todayStr(), contact: '', eventMonth: monthName, source: LEAD_SOURCES[0],
+            product: PRODUCTS.includes(ev.product) ? ev.product : LEAD_PRODUCTS[0], location: 'in_studio',
+            revenue: (ev.price!==undefined && ev.price!==null) ? ev.price : null, sold: true, saleDate: ev.date || todayStr(),
+            saleKind: 'event', eventId: ev.id, orderId: '', hasPhoto: false,
+          }};
+          render();
+        });
+      };
+    });
 
     const addItemSaleBtn = document.getElementById('btn-add-itemsale');
     if(addItemSaleBtn) addItemSaleBtn.onclick = ()=>{
@@ -5567,6 +5587,13 @@
     const soldRevenue = allLeadsInPeriod.filter(l=>l.sold).reduce((s,l)=> s+((l.revenue!==undefined&&l.revenue!==null&&!isNaN(l.revenue))?Number(l.revenue):0), 0);
     const soldWithoutEventCount = allLeadsInPeriod.filter(l=>l.sold && !l.eventId && !l.orderId).length;
 
+    // обратная проверка: мероприятия без заявки — реальные (не маркетинговые съёмки/промо и не отменённые)
+    // мероприятия в периоде, на которые не ссылается ни одна заявка (заявка.eventId). Мягкая проверка —
+    // ничего не блокирует, просто подсказывает, где забыли завести/привязать заявку
+    const leadEventIds = new Set(state.leads.filter(l=>l.eventId).map(l=>l.eventId));
+    const eventsWithoutLead = state.events.filter(e=> period.inPeriod(e.date) && e.status!=='marketing' && e.status!=='cancelled' && !leadEventIds.has(e.id));
+    const eventsWithoutLeadCount = eventsWithoutLead.length;
+
     // отдельный исходящий канал — "Поздравления с ДР": менеджеры сами пишут гостям, а не ждут заявку,
     // поэтому считаем воронку по собственным датам поздравления (написано/куплено), а не по заявкам —
     // заявка в leads создаётся только в момент "Купили", а не в момент "Написали"
@@ -5656,6 +5683,15 @@
         <div class="summary-card"><div class="num" style="font-size:20px;">${avgSalesCycle!==null?avgSalesCycle+' дн.':'—'}</div><div class="label">Средний срок продажи</div></div>
       </div>
       ${soldWithoutEventCount>0 ? `<div style="font-size:12.5px;color:var(--status-red);margin-bottom:16px;">⚠ ${soldWithoutEventCount} «проданных» заявок без привязки к мероприятию или заказу — откройте заявку и укажите, что из неё создано.</div>` : ''}
+      ${eventsWithoutLeadCount>0 ? `
+        <div style="font-size:12.5px;color:var(--status-red);margin-bottom:6px;">⚠ ${eventsWithoutLeadCount} мероприятий без привязанной заявки — непонятно, откуда пришёл гость. Заведите заявку и укажите в ней это мероприятие.</div>
+        <div style="margin-bottom:16px;">
+          ${eventsWithoutLead.slice(0,20).map(e=>`
+            <span class="event-no-lead-chip" data-eid="${e.id}" style="display:inline-block;margin:0 6px 6px 0;padding:3px 9px;border-radius:20px;background:var(--bg-soft);border:1px solid var(--status-red);font-size:11.5px;font-family:var(--font-mono);cursor:pointer;">${formatDateText(e.date)} · ${escapeHtml(e.title||e.product||'Мероприятие')}</span>
+          `).join('')}
+          ${eventsWithoutLeadCount>20 ? `<span style="font-size:11.5px;color:var(--ink-soft);">и ещё ${eventsWithoutLeadCount-20}…</span>` : ''}
+        </div>
+      ` : ''}
 
       <div class="analytics-section">
         <h4>📤 Исходящие — Поздравления с ДР</h4>
