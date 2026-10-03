@@ -288,6 +288,13 @@
   }
   .dishes-opt .dot, .dishes-payment-opt .dot{ width:10px; height:10px; border-radius:50%; }
   .dishes-opt.active, .dishes-payment-opt.active{ border-color: var(--ink); background: var(--white); font-weight:500; }
+  .leadmode-opt{
+    flex: 1 1 calc(50% - 5px); border:1px solid var(--line-strong); border-radius: var(--radius);
+    padding: 9px 10px; display:flex; align-items:center; gap:8px; cursor:pointer;
+    font-size: 13.5px; background: var(--paper);
+  }
+  .leadmode-opt .dot{ width:10px; height:10px; border-radius:50%; }
+  .leadmode-opt.active{ border-color: var(--ink); background: var(--white); font-weight:500; }
   .payer-opt{
     flex: 1 1 calc(50% - 5px); border:1px solid var(--line-strong); border-radius: var(--radius);
     padding: 9px 10px; display:flex; align-items:center; gap:8px; cursor:pointer;
@@ -890,6 +897,10 @@
   // сумма вводится вручную по каждому заказу (в отличие от "Изделия", где действует общий процент)
 
   const LEAD_SOURCES = ['ВК','Инста','ТГ','Макс','Одноклассники','Дзен','TikTok','YouTube','Авито','Звонок','Сайт','Лично','Листовки','Гео','Офлайн маркетинг','Бартер','Розыгрыши','Поздравление с ДР'];
+  // статусы мероприятия, для которых при создании обязательно указывать заявку — реальные платные
+  // брони. "Маркетинг" (промо-съёмки), "Слот" (открытый слот, ещё не забронирован) и "Отменено" — нет,
+  // там либо нет гостя-покупателя, либо мероприятие могли сразу создать отменённым
+  const EVENT_STATUSES_NEEDING_LEAD = ['confirmed','tentative','offsite'];
   const MARKETING_DIRECTIONS = ['Офлайн маркетинг','Блогеры','Листовки','Розыгрыши','Рассылки','Гео-сервисы','Бартер','Партнёрства','Съёмки'];
 
   // ---------- Электронный подарочный сертификат (генератор изображения) ----------
@@ -1451,6 +1462,15 @@
     const e = state.events.find(x=>x.id===eventId);
     if(!e) return 'мероприятие удалено';
     return `${e.title||'без названия'} (${formatDateText(e.date)})`;
+  }
+  // список заявок для привязки к новому мероприятию — только те, что ещё ни к чему не привязаны
+  // (без eventId и без orderId), плюс сама текущая заявка мероприятия (при редактировании), чтобы
+  // поиск не путал админа уже занятыми заявками
+  function leadSelectOptionsForEvent(currentLeadId){
+    return state.leads
+      .filter(l=> l.id===currentLeadId || (!l.eventId && !l.orderId))
+      .sort((a,b)=> (b.requestDate||'').localeCompare(a.requestDate||''))
+      .map(l=> ({ id: l.id, label: `${l.requestDate?formatDateText(l.requestDate):'без даты'} · ${l.contact||'без контакта'} · ${l.source||'источник не указан'}` }));
   }
   // список заказов для привязки заявки — заявка бывает не на мероприятие, а на заказ на изготовление
   // (например, кто-то попросил слепить кружку на заказ, а не пришёл на мастер-класс)
@@ -17377,6 +17397,40 @@
               </div>
             </div>
           </div>
+          ${isNew ? `
+          <div class="field" id="lead-link-field" style="display:${EVENT_STATUSES_NEEDING_LEAD.includes(ev.status||'confirmed')?'block':'none'};">
+            <label>Заявка, из которой пришёл гость <span style="font-weight:400;color:var(--ink-soft);">— обязательно, чтобы потом не терялся источник продажи</span></label>
+            <div class="status-select-wrap" style="margin-bottom:8px;">
+              <div class="leadmode-opt active" data-leadmode="existing">
+                <span class="dot" style="background:var(--accent)"></span>Выбрать существующую заявку
+              </div>
+              <div class="leadmode-opt" data-leadmode="new">
+                <span class="dot" style="background:var(--ink-soft)"></span>Создать новую заявку
+              </div>
+            </div>
+            <input type="hidden" id="f-lead-mode" value="existing">
+            <div id="lead-existing-wrap">
+              <input type="text" id="f-lead-search" placeholder="Начните вводить дату, контакт или источник…" list="f-lead-options" value="">
+              <datalist id="f-lead-options">${leadSelectOptionsForEvent('').map(opt=>`<option value="${escapeHtml(opt.label)}">`).join('')}</datalist>
+              <input type="hidden" id="f-lead-id" value="">
+              ${leadSelectOptionsForEvent('').length===0 ? `<div style="font-size:11px;color:var(--ink-soft);margin-top:4px;">Свободных заявок (ещё ни к чему не привязанных) пока нет — переключитесь на «Создать новую заявку».</div>` : ''}
+            </div>
+            <div id="lead-new-wrap" style="display:none;">
+              <div class="row2">
+                <div>
+                  <label style="font-size:11px;color:var(--ink-soft);margin-bottom:4px;display:block;">Контакт гостя</label>
+                  <input type="text" id="f-lead-contact" placeholder="+7 999 123-45-67 или @nickname">
+                </div>
+                <div>
+                  <label style="font-size:11px;color:var(--ink-soft);margin-bottom:4px;display:block;">Источник</label>
+                  <select id="f-lead-source">
+                    ${LEAD_SOURCES.map(s=>`<option value="${escapeHtml(s)}">${escapeHtml(s)}</option>`).join('')}
+                  </select>
+                </div>
+              </div>
+            </div>
+          </div>
+          ` : ''}
           <div class="field">
             <label>Название</label>
             <select id="f-title">
@@ -18653,6 +18707,8 @@
       if(dishesField) dishesField.style.display = showsDishesAndRental(statusValue) ? 'block' : 'none';
       const rentalField = overlay.querySelector('#rental-field');
       if(rentalField) rentalField.style.display = showsDishesAndRental(statusValue) ? 'block' : 'none';
+      const leadLinkField = overlay.querySelector('#lead-link-field');
+      if(leadLinkField) leadLinkField.style.display = EVENT_STATUSES_NEEDING_LEAD.includes(statusValue) ? 'block' : 'none';
       if(statusValue === 'offsite' && spaceSelect && state.spaces.find(s=>s.id==='s5')){
         spaceSelect.value = 's5'; // выездные мероприятия по умолчанию идут в пространство "Выезд"
       }
@@ -18706,6 +18762,36 @@
         if(washerField) washerField.style.display = opt.dataset.dishespayment === 'paid' ? 'block' : 'none';
       };
     });
+
+    // заявка, из которой пришёл гость (обязательно при создании мероприятия — см. #lead-link-field выше)
+    const leadModeHidden = overlay.querySelector('#f-lead-mode');
+    const leadExistingWrap = overlay.querySelector('#lead-existing-wrap');
+    const leadNewWrap = overlay.querySelector('#lead-new-wrap');
+    overlay.querySelectorAll('.leadmode-opt').forEach(opt=>{
+      opt.onclick = ()=>{
+        overlay.querySelectorAll('.leadmode-opt').forEach(o=>o.classList.remove('active'));
+        opt.classList.add('active');
+        if(leadModeHidden) leadModeHidden.value = opt.dataset.leadmode;
+        if(leadExistingWrap) leadExistingWrap.style.display = opt.dataset.leadmode === 'existing' ? 'block' : 'none';
+        if(leadNewWrap) leadNewWrap.style.display = opt.dataset.leadmode === 'new' ? 'block' : 'none';
+      };
+    });
+    const leadSearchInput = overlay.querySelector('#f-lead-search');
+    const leadIdHidden = overlay.querySelector('#f-lead-id');
+    if(leadSearchInput && leadIdHidden){
+      const leadLabelToId = {};
+      leadSelectOptionsForEvent('').forEach(o=>{ leadLabelToId[o.label] = o.id; });
+      leadSearchInput.addEventListener('input', ()=>{
+        const val = leadSearchInput.value.trim();
+        leadSearchInput.style.borderColor = '';
+        if(val === ''){ leadIdHidden.value = ''; return; }
+        if(leadLabelToId[val]) leadIdHidden.value = leadLabelToId[val];
+      });
+      leadSearchInput.addEventListener('blur', ()=>{
+        const val = leadSearchInput.value.trim();
+        if(val !== '' && !leadLabelToId[val]){ leadSearchInput.value = ''; leadIdHidden.value = ''; }
+      });
+    }
 
     overlay.querySelectorAll('.payer-opt').forEach(opt=>{
       opt.onclick = ()=>{
@@ -18925,6 +19011,28 @@
         return;
       }
 
+      // заявка, из которой пришёл гость — обязательна для новых мероприятий реальных платных статусов
+      // (см. EVENT_STATUSES_NEEDING_LEAD); поле скрыто и не проверяется при редактировании и для
+      // маркетинга/слота/отменённых
+      let leadModeVal = '', leadIdVal = '', leadContactVal = '', leadSourceVal = '';
+      if(state.modal.isNew && EVENT_STATUSES_NEEDING_LEAD.includes(statusVal)){
+        leadModeVal = overlay.querySelector('#f-lead-mode') ? (overlay.querySelector('#f-lead-mode').value || 'existing') : 'existing';
+        const leadSearchEl = overlay.querySelector('#f-lead-search');
+        const leadContactEl = overlay.querySelector('#f-lead-contact');
+        leadIdVal = overlay.querySelector('#f-lead-id') ? overlay.querySelector('#f-lead-id').value : '';
+        leadContactVal = leadContactEl ? leadContactEl.value.trim() : '';
+        leadSourceVal = overlay.querySelector('#f-lead-source') ? overlay.querySelector('#f-lead-source').value : '';
+        const leadMissing = leadModeVal === 'existing' ? !leadIdVal : !leadContactVal;
+        if(leadMissing){
+          if(leadModeVal === 'existing' && leadSearchEl) leadSearchEl.style.borderColor = 'var(--danger)';
+          if(leadModeVal === 'new' && leadContactEl) leadContactEl.style.borderColor = 'var(--danger)';
+          showGapWarningBanner('Укажите заявку, из которой пришёл гость, — выберите существующую или заполните контакт для новой.');
+          const leadLinkField = overlay.querySelector('#lead-link-field');
+          if(leadLinkField && leadLinkField.scrollIntoView) leadLinkField.scrollIntoView({block:'center', behavior:'smooth'});
+          return;
+        }
+      }
+
       syncAdditionalHostsFromInputs();
       const finalAdditionalHosts = additionalHostsDraft
         .map(h=>({ name: (h.name||'').trim(), masterPay: h.masterPay, masterPayAuto: h.masterPayAuto }))
@@ -19055,6 +19163,32 @@
       }
 
       await saveEvents();
+
+      // привязка заявки к новому мероприятию (см. блок валидации выше) — создаём новую заявку или
+      // дописываем eventId в выбранную существующую, сразу помечая её проданной этим мероприятием
+      if(state.modal.isNew && EVENT_STATUSES_NEEDING_LEAD.includes(statusVal)){
+        if(leadModeVal === 'new' && leadContactVal){
+          const monthName = updated.date ? MONTHS[parseDate(updated.date).getMonth()].charAt(0).toUpperCase()+MONTHS[parseDate(updated.date).getMonth()].slice(1) : LEAD_MONTH_OPTIONS[0];
+          state.leads.push({
+            id: uid(), requestDate: updated.date || todayStr(), contact: leadContactVal, eventMonth: monthName,
+            source: leadSourceVal || LEAD_SOURCES[0], product: PRODUCTS.includes(updated.product) ? updated.product : LEAD_PRODUCTS[0],
+            location: 'in_studio', revenue: (updated.price!==undefined&&updated.price!==null)?updated.price:null,
+            sold: true, saleDate: updated.date || todayStr(), saleKind: 'event', eventId: updated.id, orderId: '', hasPhoto: false,
+          });
+          await saveLeads();
+        } else if(leadModeVal === 'existing' && leadIdVal){
+          const leadIdx = state.leads.findIndex(l=>l.id===leadIdVal);
+          if(leadIdx >= 0){
+            state.leads[leadIdx] = {
+              ...state.leads[leadIdx], sold: true, saleKind: 'event', eventId: updated.id, orderId: '',
+              saleDate: state.leads[leadIdx].saleDate || updated.date || todayStr(),
+              revenue: (state.leads[leadIdx].revenue!==undefined && state.leads[leadIdx].revenue!==null) ? state.leads[leadIdx].revenue : ((updated.price!==undefined&&updated.price!==null)?updated.price:null),
+            };
+            await saveLeads();
+          }
+        }
+      }
+
       await syncEventIncomeIfNeeded(updated);
       await syncEventPaymentsToBook(updated);
       const dayEvts = state.events.filter(e=>e.date===updated.date && e.spaceId===updated.spaceId);
