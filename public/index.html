@@ -1501,6 +1501,10 @@
     // (см. monthProgressRatioLastYear)
     historyDaily: null,
     historyDailyEditDate: null,
+    // "снимки" прогнозных цифр "Отчёта дня" на конкретную дату (см. computeDailyReport/recordDailyReportSnapshot) —
+    // чтобы "Выручка (прогноз)"/"Чистая прибыль (прогноз)" у уже прошедшего дня не пересчитывались заново из
+    // сегодняшних живых данных каждый раз, а показывали то, что было известно на тот день
+    dailyReportSnapshots: null,
   };
 
   function pad(n){ return n<10 ? '0'+n : ''+n; }
@@ -1817,6 +1821,11 @@
     }catch(e){ state.monthlyPlans = {}; }
 
     try{
+      const drs = await window.storage.get('daily-report-snapshots', true);
+      state.dailyReportSnapshots = drs ? JSON.parse(drs.value) : {};
+    }catch(e){ state.dailyReportSnapshots = {}; }
+
+    try{
       const npm = await window.storage.get('net-profit-manual', true);
       state.netProfitManual = npm ? JSON.parse(npm.value) : {};
     }catch(e){ state.netProfitManual = {}; }
@@ -1943,6 +1952,7 @@
     state._ordersBaseline = JSON.parse(JSON.stringify(state.orders));
     state._salaryAdjustmentsBaseline = JSON.parse(JSON.stringify(state.salaryAdjustments));
     state._monthlyPlansBaseline = JSON.parse(JSON.stringify(state.monthlyPlans));
+    state._dailyReportSnapshotsBaseline = JSON.parse(JSON.stringify(state.dailyReportSnapshots));
     state._netProfitManualBaseline = JSON.parse(JSON.stringify(state.netProfitManual));
     state._hostessBonusesBaseline = JSON.parse(JSON.stringify(state.hostessBonuses));
     state._yearSummaryManualBaseline = JSON.parse(JSON.stringify(state.yearSummaryManual));
@@ -2514,6 +2524,7 @@
       stockReceipts: state.stockReceipts,
       daysOff: state.daysOff,
       historyDaily: state.historyDaily,
+      dailyReportSnapshots: state.dailyReportSnapshots,
     }, null, 2);
   }
 
@@ -2892,6 +2903,12 @@
     await saveMapMerged('monthly-plans', state.monthlyPlans, state._monthlyPlansBaseline, (finalMap)=>{
       state.monthlyPlans = finalMap;
       state._monthlyPlansBaseline = JSON.parse(JSON.stringify(finalMap));
+    });
+  }
+  async function saveDailyReportSnapshots(){
+    await saveMapMerged('daily-report-snapshots', state.dailyReportSnapshots, state._dailyReportSnapshotsBaseline, (finalMap)=>{
+      state.dailyReportSnapshots = finalMap;
+      state._dailyReportSnapshotsBaseline = JSON.parse(JSON.stringify(finalMap));
     });
   }
   async function saveNetProfitManual(){
@@ -11299,7 +11316,7 @@
     return { status: mtdValue>=expectedByNow ? 'ahead' : 'behind', expectedByNow };
   }
 
-  function computeDailyReport(dateStr){
+  function computeDailyReportLive(dateStr){
     const ym = dateStr.slice(0,7);
     const plan = (state.monthlyPlans && state.monthlyPlans[ym]) || {};
     const cutoffDay = parseDate(dateStr).getDate();
@@ -11364,6 +11381,22 @@
     DAILY_REPORT_PRIVATE_CATS.forEach(c=>{ privateByCatMTD[c]=0; });
     privateEventsMTD.forEach(e=>{ const cat=dailyReportEventCategory(e); privateByCatMTD[cat]=(privateByCatMTD[cat]||0)+eventRevenueForecast(e); });
 
+    // то же самое (Частные/Расписание/Заказы/Сертификаты), но ПРОГНОЗ на весь месяц целиком — включая
+    // уже забронированные будущие даты, а не только «по эту дату» (как privateRevenueMTD и т.п. выше) —
+    // это декомпозиция строки «Выручка (прогноз)» по потокам: из чего складывается общая сумма, которую
+    // студия планирует получить за месяц (то, что уже продано/забронировано, по каждому потоку отдельно).
+    const eventsWholeMonth = state.events.filter(e=>e.date && e.date.startsWith(ym));
+    const privateRevenueForecast = eventsWholeMonth.filter(e=>!isSchedule(e)).reduce((s,e)=>s+eventRevenueForecast(e),0);
+    const scheduleRevenueForecast = eventsWholeMonth.filter(isSchedule).reduce((s,e)=>s+eventRevenueForecast(e),0);
+    const privateByCatForecast = {};
+    DAILY_REPORT_PRIVATE_CATS.forEach(c=>{ privateByCatForecast[c]=0; });
+    eventsWholeMonth.filter(e=>!isSchedule(e)).forEach(e=>{ const cat=dailyReportEventCategory(e); privateByCatForecast[cat]=(privateByCatForecast[cat]||0)+eventRevenueForecast(e); });
+    const ordersRevenueForecast = state.incomes.filter(i=>i.date && i.date.startsWith(ym) && isOrderLike(i))
+      .reduce((s,i)=>s+((i.amount!==undefined&&i.amount!==null&&!isNaN(i.amount))?Number(i.amount):0),0);
+    const certsRevenueForecast = state.certificates.filter(c=>c.saleDate && c.saleDate.startsWith(ym) && c.purpose!=='marketing' && c.status!=='refunded')
+      .reduce((s,c)=>s+((c.amount!==undefined&&c.amount!==null&&!isNaN(c.amount))?Number(c.amount):0),0);
+    const revenueForecastByStreams = privateRevenueForecast + scheduleRevenueForecast + ordersRevenueForecast + certsRevenueForecast;
+
     // ПРИБЫЛЬ — по мероприятиям (выручка минус материалы и ЗП мастерам), плюс заказы (за вычетом доли мастера),
     // плюс сертификаты целиком (у них нет своей себестоимости — общие расходы студии сюда не входят,
     // это только «Выполнение плана», не «Чистая прибыль» за месяц)
@@ -11388,7 +11421,7 @@
     // % ЗАПОЛНЯЕМОСТИ — как в панели «📊 Заполняемость»: весь месяц целиком (включая уже забронированные
     // будущие даты), а не только до сегодня — это ответ на вопрос «насколько заполнен месяц», а не «как мы
     // продвинулись». Выезды не считаются — у них нет ограничения по месту в студии.
-    const eventsWholeMonth = state.events.filter(e=>e.date && e.date.startsWith(ym));
+    // (eventsWholeMonth уже посчитан выше, для прогнозной декомпозиции выручки по потокам)
     const occupiedCount = eventsWholeMonth.filter(e=>e.status!=='offsite').length;
     const occupancyPct = Math.round(occupiedCount/MONTH_CAPACITY_EVENTS*100);
 
@@ -11426,12 +11459,51 @@
       revenueToday, revenueMTD, revenuePlanPct, revenuePace, revenueForecastMonth,
       privateRevenueToday, privateByCatToday, scheduleRevenueToday, ordersRevenueToday, certsRevenueToday,
       privateRevenueMTD, privateByCatMTD, scheduleRevenueMTD, ordersRevenueMTD, certsRevenueMTD,
+      privateRevenueForecast, privateByCatForecast, scheduleRevenueForecast, ordersRevenueForecast, certsRevenueForecast, revenueForecastByStreams,
       scheduleRevenuePlan, privateRevenuePlan, ordersRevenuePlan, certsRevenuePlan,
       profitToday, profitPlanPct, profitPace,
       convDayPct, convMonthPct, soldToday, soldMonthAll, leadsMonthAllCount: leadsMonthAll.length, rentabilityPct,
       occupancyPct, avgCheck,
       netProfitMonth,
     };
+  }
+  // прогнозные поля "Отчёта дня", которые считаются "на весь месяц целиком, по текущим данным" —
+  // у уже прошедшего дня их нужно замораживать (см. computeDailyReport/recordDailyReportSnapshot),
+  // иначе они молча пересчитывались бы из сегодняшних живых данных и росли даже у отчёта за давно
+  // прошедшую дату. netProfitMonth — отдельно, он не всегда посчитан (не у каждой роли).
+  const DAILY_REPORT_FORECAST_FIELDS = ['revenueForecastMonth','privateRevenueForecast','scheduleRevenueForecast','ordersRevenueForecast','certsRevenueForecast','revenueForecastByStreams'];
+  // "Отчёт дня" для конкретной даты — поверх "живых" цифр (computeDailyReportLive) подставляет
+  // ЗАМОРОЖЕННЫЙ на тот день снимок у полей из DAILY_REPORT_FORECAST_FIELDS плюс netProfitMonth и
+  // privateByCatForecast. "Сегодня" снимком не подменяем — там цифра должна быть живой, день ещё не
+  // закончился. Снимок создаётся/обновляется отдельно, в recordDailyReportSnapshot — сама эта функция
+  // остаётся чистой (без побочных эффектов и записи в storage).
+  function computeDailyReport(dateStr){
+    const live = computeDailyReportLive(dateStr);
+    if(dateStr === todayStr()) return live;
+    const snap = (state.dailyReportSnapshots && state.dailyReportSnapshots[dateStr]) || null;
+    if(!snap) return live;
+    DAILY_REPORT_FORECAST_FIELDS.forEach(f=>{ if(snap[f]!==undefined && snap[f]!==null) live[f] = snap[f]; });
+    if(snap.netProfitMonth!==undefined && snap.netProfitMonth!==null) live.netProfitMonth = snap.netProfitMonth;
+    if(snap.privateByCatForecast) live.privateByCatForecast = snap.privateByCatForecast;
+    return live;
+  }
+  // фиксирует снимок прогнозных цифр на эту дату: для "сегодня" обновляет его каждый раз (день ещё
+  // не закончился, пусть снимок идёт в ногу с живыми данными), а для уже прошедшей даты — только
+  // ОДИН раз, если снимка ещё не было (дальше он остаётся неизменным навсегда). Вызывается явно в
+  // момент открытия "Отчёта дня"/смены даты в нём — не на каждый render(), чтобы не писать в
+  // storage без необходимости.
+  function recordDailyReportSnapshot(dateStr){
+    if(!state.dailyReportSnapshots) state.dailyReportSnapshots = {};
+    const isToday = dateStr === todayStr();
+    const existing = state.dailyReportSnapshots[dateStr];
+    if(!isToday && existing) return;
+    const live = computeDailyReportLive(dateStr);
+    const entry = existing ? {...existing} : {};
+    DAILY_REPORT_FORECAST_FIELDS.forEach(f=>{ entry[f] = live[f]; });
+    entry.privateByCatForecast = live.privateByCatForecast;
+    if(state.currentRole === 'owner' && live.netProfitMonth !== null) entry.netProfitMonth = live.netProfitMonth;
+    state.dailyReportSnapshots[dateStr] = entry;
+    saveDailyReportSnapshots();
   }
   function pctStr(pct){ return pct===null ? '—' : pct+'%'; }
   function shareStr(part, whole){ return whole>0 ? Math.round(part/whole*100)+'%' : '0%'; }
@@ -11477,20 +11549,20 @@
       lines.push(`🔒 Чистая прибыль (весь ${MONTHS[parseDate(d.dateStr).getMonth()]}, прогноз): ${rubStr(d.netProfitMonth)} руб.`);
     }
     lines.push('');
-    lines.push(`▪️Частные: ${rubStr(d.privateRevenueMTD)} руб. (${catPctStr(d.privateRevenueMTD, d.privateRevenuePlan)}):`);
+    lines.push(`▪️Частные (прогноз): ${rubStr(d.privateRevenueForecast)} руб. (${catPctStr(d.privateRevenueForecast, d.privateRevenuePlan)}):`);
     lines.push('');
     DAILY_REPORT_PRIVATE_CATS.forEach(cat=>{
       const target = d.plan.byPrivateCat ? d.plan.byPrivateCat[cat] : null;
-      lines.push(`- ${cat} ${rubStr(d.privateByCatMTD[cat]||0)} руб. (${catPctStr(d.privateByCatMTD[cat]||0, target)})`);
+      lines.push(`- ${cat} ${rubStr(d.privateByCatForecast[cat]||0)} руб. (${catPctStr(d.privateByCatForecast[cat]||0, target)})`);
     });
     lines.push('');
-    lines.push(`▪️Расписание ${rubStr(d.scheduleRevenueMTD)} руб. (${catPctStr(d.scheduleRevenueMTD, d.scheduleRevenuePlan)})`);
+    lines.push(`▪️Расписание (прогноз) ${rubStr(d.scheduleRevenueForecast)} руб. (${catPctStr(d.scheduleRevenueForecast, d.scheduleRevenuePlan)})`);
     lines.push('');
-    lines.push(`▪️Заказы ${rubStr(d.ordersRevenueMTD)} руб. (${catPctStr(d.ordersRevenueMTD, d.ordersRevenuePlan)})`);
+    lines.push(`▪️Заказы (прогноз) ${rubStr(d.ordersRevenueForecast)} руб. (${catPctStr(d.ordersRevenueForecast, d.ordersRevenuePlan)})`);
     lines.push('');
-    lines.push(`▪️Сертификаты ${rubStr(d.certsRevenueMTD)} руб. (${catPctStr(d.certsRevenueMTD, d.certsRevenuePlan)})`);
+    lines.push(`▪️Сертификаты (прогноз) ${rubStr(d.certsRevenueForecast)} руб. (${catPctStr(d.certsRevenueForecast, d.certsRevenuePlan)})`);
     lines.push('');
-    lines.push(`▪️Итого за месяц: ${rubStr(d.revenueMTD)} руб.`);
+    lines.push(`▪️Итого (прогноз): ${rubStr(d.revenueForecastByStreams)} руб.`);
     lines.push('');
     lines.push('———');
     lines.push(`Конверсия дня: ${pctStr(d.convDayPct)}, ${d.soldToday}/${d.leadsTodayCount}`);
@@ -14051,6 +14123,7 @@
     const dailyReportBtn = document.getElementById('btn-daily-report');
     if(dailyReportBtn) dailyReportBtn.onclick = ()=>{
       if(!state.dailyReportDate) state.dailyReportDate = todayStr();
+      recordDailyReportSnapshot(state.dailyReportDate);
       state.modal = {type:'daily-report'};
       render();
     };
@@ -14362,6 +14435,7 @@
         if(pendingImportData.masterPayRates) await rawReplace('masterPayRates', 'master-pay-rates', '_masterPayRatesBaseline', pendingImportData.masterPayRates);
         if(pendingImportData.masterPayOverrides) await rawReplace('masterPayOverrides', 'master-pay-overrides', '_masterPayOverridesBaseline', pendingImportData.masterPayOverrides);
         if(pendingImportData.monthlyPlans) await rawReplace('monthlyPlans', 'monthly-plans', '_monthlyPlansBaseline', pendingImportData.monthlyPlans);
+        if(pendingImportData.dailyReportSnapshots) await rawReplace('dailyReportSnapshots', 'daily-report-snapshots', '_dailyReportSnapshotsBaseline', pendingImportData.dailyReportSnapshots);
         if(pendingImportData.hostessShifts) await rawReplace('hostessShifts', 'hostess-shifts', '_hostessShiftsBaseline', pendingImportData.hostessShifts);
         if(pendingImportData.managerShifts) await rawReplace('managerShifts', 'manager-shifts', '_managerShiftsBaseline', pendingImportData.managerShifts);
         if(pendingImportData.netProfitManual) await rawReplace('netProfitManual', 'net-profit-manual', '_netProfitManualBaseline', pendingImportData.netProfitManual);
@@ -17128,7 +17202,7 @@
             <input type="date" id="dr-date" value="${dateStr}">
           </div>
           <textarea id="dr-text" readonly style="width:100%;box-sizing:border-box;min-height:420px;font-family:var(--font-mono);font-size:13px;line-height:1.5;border:1px solid var(--line-strong);border-radius:var(--radius);padding:10px 12px;resize:vertical;background:var(--paper-2);">${escapeHtml(text)}</textarea>
-          <div style="font-size:11.5px;color:var(--ink-soft);font-family:var(--font-mono);">«Руб.» у ПРИБЫЛИ — цифры за сам этот день. ЗАЯВКИ и ВЫРУЧКА (и их разбивка по категориям/Частным/Расписанию/Заказам/Сертификатам) — нарастающим итогом с начала месяца по эту дату. Проценты у ЗАЯВОК и у ВЫРУЧКИ/ПРИБЫЛИ — нарастающим итогом с начала месяца по эту дату, относительно месячного плана. «Темп» у ЗАЯВОК/ВЫРУЧКИ/ПРИБЫЛИ — сравнение с тем, сколько от плана ОБЫЧНО набрано к этому же числу в этом месяце прошлого года (а не поровну по дням — мероприятия бронируют заранее, и к концу месяца темп естественно замедляется); если данных за прошлый год по этому дню нет — темп честно не считается, вместо него пометка «нет данных» (занести их можно в «Выполнение плана»). Остальные проценты в скобках (у категорий заявок, у Частных/Расписания/Заказов/Сертификатов и у категорий внутри Частных) — это % выполнения МЕСЯЧНОГО ПЛАНА именно по этой категории/потоку (план задаётся в настройке плана на месяц), а не доля от суммы строкой выше. Если план по категории не задан — вместо процента честно показывается «план не задан». «Выручка (прогноз)», «Чистая прибыль» (видна только руководителю), «% заполняемости» и «Средний чек» — тоже про весь месяц целиком, а не про этот день: «Выручка (прогноз)» и заполняемость считают ВСЕ мероприятия/заказы/сертификаты месяца, включая уже забронированные будущие даты (поэтому обычно больше, чем «ВЫРУЧКА (месяц)» выше — та только по эту дату), а средний чек за один день слишком случаен, поэтому считается нарастающим итогом с начала месяца.</div>
+          <div style="font-size:11.5px;color:var(--ink-soft);font-family:var(--font-mono);">«Руб.» у ПРИБЫЛИ — цифры за сам этот день. ЗАЯВКИ и ВЫРУЧКА (месяц) — нарастающим итогом с начала месяца по эту дату. Проценты у ЗАЯВОК и у ВЫРУЧКИ/ПРИБЫЛИ — нарастающим итогом с начала месяца по эту дату, относительно месячного плана. «Темп» у ЗАЯВОК/ВЫРУЧКИ/ПРИБЫЛИ — сравнение с тем, сколько от плана ОБЫЧНО набрано к этому же числу в этом месяце прошлого года (а не поровну по дням — мероприятия бронируют заранее, и к концу месяца темп естественно замедляется); если данных за прошлый год по этому дню нет — темп честно не считается, вместо него пометка «нет данных» (занести их можно в «Выполнение плана»). Остальные проценты в скобках (у категорий заявок и у категорий внутри Частных) — это % выполнения МЕСЯЧНОГО ПЛАНА именно по этой категории/потоку (план задаётся в настройке плана на месяц), а не доля от суммы строкой выше. Если план по категории не задан — вместо процента честно показывается «план не задан». «Выручка (прогноз)», «Чистая прибыль» (видна только руководителю), блок ▪️Частные/Расписание/Заказы/Сертификаты/Итого, «% заполняемости» и «Средний чек» — тоже про весь месяц целиком, а не про этот день: все они считают ВСЕ мероприятия/заказы/сертификаты месяца, включая уже забронированные будущие даты (поэтому обычно больше, чем «ВЫРУЧКА (месяц)» выше — та только по эту дату) — блок ▪️ показывает, из чего состоит эта прогнозная сумма по потокам (Частные/Расписание/Заказы/Сертификаты), а средний чек за один день слишком случаен, поэтому считается нарастающим итогом с начала месяца. Все прогнозные цифры (Выручка (прогноз), Чистая прибыль, блок ▪️) у СЕГОДНЯШНЕГО дня всегда живые (пересчитываются из текущих данных), а у уже ПРОШЕДШЕГО дня — замораживаются при первом открытии отчёта за этот день и дальше не меняются, даже если позже добавится новая бронь на этот месяц — так цифра показывает, что было известно именно на тот день, а не сегодняшнее состояние брони.</div>
           <div class="modal-actions">
             <span></span>
             <div style="display:flex;gap:8px;">
@@ -17144,6 +17218,7 @@
     const dateInput = overlay.querySelector('#dr-date');
     if(dateInput) dateInput.addEventListener('change', ()=>{
       state.dailyReportDate = dateInput.value || todayStr();
+      recordDailyReportSnapshot(state.dailyReportDate);
       state.modal = {type:'daily-report'};
       render();
     });
