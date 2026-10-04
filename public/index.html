@@ -10972,12 +10972,13 @@
     };
     const evtsM = state.events.filter(e=> e.date && e.date.startsWith(ym));
     // мастера: оплата по мероприятиям (кроме "Маркетинг" — это расход на маркетинг, учтён отдельно),
-    // компенсации за материалы, доли по изделиям/заказам
+    // доли по изделиям/заказам. ВАЖНО: компенсации мастеру за принесённые им материалы (eventMasterMaterialPayments)
+    // сюда НЕ добавляем — та же сумма уже входит в строку "Материалы" (см. eventMaterialsCostExclMarketingSpend,
+    // источник "мастер" с указанным payTo считается расходом студии именно там); если добавить её и здесь —
+    // список по именам перестанет сходиться с итогом строки "ЗП мастеров" (npMastersSalary), который этих
+    // компенсаций не включает, и сумма по сотрудникам окажется больше, чем сама строка над списком.
     evtsM.filter(e=> e.status!=='marketing').forEach(e=>{
       eventHostsWithPay(e).forEach(h=> add(h.name, h.pay, 'master'));
-    });
-    state.events.forEach(e=>{
-      eventMasterMaterialPayments(e).filter(p=>p.date && p.date.startsWith(ym)).forEach(p=> add(p.name, p.amount, 'master'));
     });
     state.itemSales.filter(x=> x.date && x.date.startsWith(ym)).forEach(x=>{
       const share = Math.round(((x.revenue!==undefined&&x.revenue!==null&&!isNaN(x.revenue))?Number(x.revenue):0) * ITEM_SALE_MASTER_PCT / 100);
@@ -11021,6 +11022,61 @@
     return {
       masters: all.filter(x=>x.role==='master'),
       hostess: all.filter(x=>x.role==='hostess'),
+    };
+  }
+  // детализация строк "Материалы", "Маркетинг" и "Прочие расходы (Книга)" в "Чистой прибыли" — раскладывает
+  // итог каждой строки на укрупнённые категории (направление/канал), а не на отдельное мероприятие или
+  // отдельную запись — так и попросила Карина: "не детально каждое мероприятие или каждая краска, а более
+  // крупно". Та же логика, что и сами итоговые суммы (npMaterialsCost/npMarketingCost/npOtherLedgerCost
+  // в renderAnalytics), чтобы сумма позиций списка всегда точно совпадала с числом в заголовке строки.
+  function computeExpenseLineBreakdownsForMonth(ym){
+    const evtsM = state.events.filter(e=> e.date && e.date.startsWith(ym));
+    const bucket = (map, key, amount)=>{ if(!amount) return; const k = key || 'Без направления'; map[k] = (map[k]||0) + amount; };
+    const toSortedArray = map=> Object.entries(map).filter(([,a])=>a).map(([name,amount])=>({name,amount})).sort((a,b)=>b.amount-a.amount);
+
+    // "Материалы": по направлению (это поле "product" мероприятия — тот же справочник видов мероприятий,
+    // которым Карина называет "керамика, акрил и т.п.") — за вычетом доли блогеров/гостей, которая
+    // уходит в "Маркетинг" (см. eventMarketingGuestsMaterialsCost). Заказы на изготовление — отдельной
+    // строкой, у них нет своего направления.
+    const materialsMap = {};
+    evtsM.filter(e=> e.status!=='marketing').forEach(e=>{
+      const amount = eventMaterialsCostExclMarketingSpend(e) - eventMarketingGuestsMaterialsCost(e);
+      bucket(materialsMap, e.product, amount);
+    });
+    const ordersMaterialsTotal = state.orders.filter(x=> x.date && x.date.startsWith(ym)).reduce((s,x)=> s + orderMaterialsCost(x), 0);
+    bucket(materialsMap, 'Заказы (изготовление на заказ)', ordersMaterialsTotal);
+
+    // "Маркетинг": раскладываем по направлению из раздела "Маркетинг → Статистика" (офлайн маркетинг,
+    // блогеры, листовки и т.п. — см. MARKETING_DIRECTIONS) — каждая такая трата зеркалится в "Книгу"
+    // записью с этим же expenseId (см. syncMarketingSpendExpense), поэтому ищем направление через эту
+    // связь; расход, добавленный в "Книгу" вручную (не через раздел "Маркетинг"), идёт в "Прочее".
+    // Съёмки/промо-мероприятия (статус "Маркетинг") и гости по маркетинг-сертификату — отдельными строками,
+    // у них направления не бывает.
+    const marketingMap = {};
+    const spendByExpenseId = {};
+    state.marketingSpend.forEach(m=>{ if(m.expenseId) spendByExpenseId[m.expenseId] = m; });
+    state.expenses.filter(e=> e.date && e.date.startsWith(ym) && !e.eventId && e.category === 'Маркетинг').forEach(e=>{
+      const amount = (e.amount!==undefined&&e.amount!==null&&!isNaN(e.amount))?Number(e.amount):0;
+      const spend = spendByExpenseId[e.id];
+      bucket(marketingMap, spend && spend.direction ? spend.direction : 'Прочее (добавлено вручную в Книге)', amount);
+    });
+    const marketingEventsTotal = evtsM.filter(e=> e.status==='marketing').reduce((s,e)=> s + eventTotalMasterPay(e) + eventMaterialsCostExclMarketingSpend(e), 0);
+    bucket(marketingMap, 'Съёмки/промо-мероприятия', marketingEventsTotal);
+    const guestsCostTotal = evtsM.filter(e=> e.status!=='marketing').reduce((s,e)=> s + eventMarketingGuestsMaterialsCost(e), 0);
+    bucket(marketingMap, 'Гости по маркетинг-сертификату', guestsCostTotal);
+
+    // "Прочие расходы (Книга)" — та же выборка, что и в npOtherLedgerCost, укрупнённо по категории
+    // расхода (Инвентарь, Декор, Логистика, Продукты и т.п.), а не по каждой отдельной записи.
+    const otherLedgerMap = {};
+    state.expenses.filter(e=> e.date && e.date.startsWith(ym) && !e.eventId && !e.safeTransfer && !e.netProfitRef && !['Маркетинг','Аренда','Зарплата','Сейф'].includes(e.category)).forEach(e=>{
+      const amount = (e.amount!==undefined&&e.amount!==null&&!isNaN(e.amount))?Number(e.amount):0;
+      bucket(otherLedgerMap, e.category || 'Прочее', amount);
+    });
+
+    return {
+      materials: toSortedArray(materialsMap),
+      marketing: toSortedArray(marketingMap),
+      otherLedger: toSortedArray(otherLedgerMap),
     };
   }
   function eventProfit(e){
@@ -11781,6 +11837,7 @@
     const netProfit = npTotalRevenue - npTotalExpenses;
     // разбивка для финмодели ("из чего состоит выручка/расходы") — доли считаются от выручки месяца
     const npStaffBreakdown = computeStaffPayBreakdownForMonth(monthYm);
+    const npExpenseBreakdown = computeExpenseLineBreakdownsForMonth(monthYm);
     const npRevenueRows = [
       {label:'Мероприятия', amount: npEventsRevenue},
       {label:'Изделия', amount: npItemSalesRevenue},
@@ -11789,12 +11846,9 @@
       {label:'Прочие доходы (Книга)', amount: npOtherIncomeRevenue},
     ];
     const npExpenseRows = [
-      {label:'Материалы', amount: npMaterialsCost},
-      {label:'Маркетинг', amount: npMarketingCost, note: (npMarketingMasterPay>0 || npMarketingMaterialsCost>0 || npMarketingGuestsMaterialsCost>0) ? 'из них: ' + [
-        (npMarketingMasterPay>0 || npMarketingMaterialsCost>0) ? `за съёмки/маркетинг-мероприятия ЗП ${formatMoney(npMarketingMasterPay)}${npMarketingMaterialsCost>0?` + материалы ${formatMoney(npMarketingMaterialsCost)}`:''}` : '',
-        npMarketingGuestsMaterialsCost>0 ? `себестоимость блогеров/гостей по маркетинг-сертификату ${formatMoney(npMarketingGuestsMaterialsCost)}` : '',
-      ].filter(Boolean).join('; ') : ''},
-      {label:'Прочие расходы (Книга)', amount: npOtherLedgerCost},
+      {label:'Материалы', amount: npMaterialsCost, breakdown: npExpenseBreakdown.materials},
+      {label:'Маркетинг', amount: npMarketingCost, breakdown: npExpenseBreakdown.marketing},
+      {label:'Прочие расходы (Книга)', amount: npOtherLedgerCost, breakdown: npExpenseBreakdown.otherLedger},
       {label:'ЗП мастеров', amount: npMastersSalary, breakdown: npStaffBreakdown.masters},
       {label:'ЗП админов', amount: npHostessSalary, breakdown: npStaffBreakdown.hostess},
       {label:'ЗП менеджеров (авто)', amount: npManagerSalary, note: MANAGER_LIST.length ? `общей суммой на ${MANAGER_LIST.length} чел. (${MANAGER_LIST.join(', ')}), не делится по сотруднику` : ''},
@@ -17521,7 +17575,7 @@
           </div>
           ${isNew ? `
           <div class="field" id="lead-link-field" style="display:${EVENT_STATUSES_NEEDING_LEAD.includes(ev.status||'confirmed')?'block':'none'};">
-            <label>Заявка, из которой пришёл гость <span style="font-weight:400;color:var(--ink-soft);">— обязательно, чтобы потом не терялся источник продажи</span></label>
+            <label>Заявка, из которой пришёл гость <span style="font-weight:400;color:var(--ink-soft);">— необязательно, но полезно заполнить, чтобы не терялся источник продажи</span></label>
             <div class="status-select-wrap" style="margin-bottom:8px;">
               <div class="leadmode-opt active" data-leadmode="existing">
                 <span class="dot" style="background:var(--accent)"></span>Выбрать существующую заявку
@@ -18862,7 +18916,7 @@
       };
     });
 
-    // заявка, из которой пришёл гость (обязательно при создании мероприятия — см. #lead-link-field выше)
+    // заявка, из которой пришёл гость (необязательна при создании мероприятия — см. #lead-link-field выше)
     const leadModeHidden = overlay.querySelector('#f-lead-mode');
     const leadExistingWrap = overlay.querySelector('#lead-existing-wrap');
     const leadNewWrap = overlay.querySelector('#lead-new-wrap');
@@ -19106,26 +19160,17 @@
         return;
       }
 
-      // заявка, из которой пришёл гость — обязательна для новых мероприятий реальных платных статусов
-      // (см. EVENT_STATUSES_NEEDING_LEAD); поле скрыто и не проверяется при редактировании и для
-      // маркетинга/слота/отменённых
+      // заявка, из которой пришёл гость — необязательна (можно создать мероприятие по расписанию без
+      // привязки к заявке), но если её вписали — используем ниже, чтобы не терять источник продажи.
+      // Поле скрыто и не проверяется при редактировании и для маркетинга/слота/отменённых
+      // (см. EVENT_STATUSES_NEEDING_LEAD).
       let leadModeVal = '', leadIdVal = '', leadContactVal = '', leadSourceVal = '';
       if(state.modal.isNew && EVENT_STATUSES_NEEDING_LEAD.includes(statusVal)){
         leadModeVal = overlay.querySelector('#f-lead-mode') ? (overlay.querySelector('#f-lead-mode').value || 'existing') : 'existing';
-        const leadSearchEl = overlay.querySelector('#f-lead-search');
         const leadContactEl = overlay.querySelector('#f-lead-contact');
         leadIdVal = overlay.querySelector('#f-lead-id') ? overlay.querySelector('#f-lead-id').value : '';
         leadContactVal = leadContactEl ? leadContactEl.value.trim() : '';
         leadSourceVal = overlay.querySelector('#f-lead-source') ? overlay.querySelector('#f-lead-source').value : '';
-        const leadMissing = leadModeVal === 'existing' ? !leadIdVal : !leadContactVal;
-        if(leadMissing){
-          if(leadModeVal === 'existing' && leadSearchEl) leadSearchEl.style.borderColor = 'var(--danger)';
-          if(leadModeVal === 'new' && leadContactEl) leadContactEl.style.borderColor = 'var(--danger)';
-          showGapWarningBanner('Укажите заявку, из которой пришёл гость, — выберите существующую или заполните контакт для новой.');
-          const leadLinkField = overlay.querySelector('#lead-link-field');
-          if(leadLinkField && leadLinkField.scrollIntoView) leadLinkField.scrollIntoView({block:'center', behavior:'smooth'});
-          return;
-        }
       }
 
       syncAdditionalHostsFromInputs();
