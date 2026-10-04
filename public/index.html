@@ -11089,13 +11089,18 @@
   // итог по каждому человеку, а не только общую сумму. Используется в "Чистой прибыли" для
   // разворачиваемого списка сотрудников.
   function computeStaffPayBreakdownForMonth(ym){
-    const byName = {}; // name -> {name, amount, role}
+    // раздельные суммы по РОЛИ (master/hostess), а не одна общая сумма на имя — один и тот же человек
+    // может в этом же месяце и вести мероприятия (мастер), и стоять на смене администратором (админ);
+    // раньше была одна запись на имя с "первой встреченной" ролью — если человек сначала попадал как
+    // мастер, его админская ЗП молча приплюсовывалась к мастерской сумме и пропадала из "ЗП админов"
+    // (ровно так и выпала Оксана, которая ведёт МК и ещё стоит на сменах)
+    const byName = {}; // name -> {name, master, hostess}
     const add = (name, amount, role)=>{
       if(!name || !amount) return;
       const n = name.trim();
       if(!n) return;
-      if(!byName[n]) byName[n] = { name: n, amount: 0, role };
-      byName[n].amount += amount;
+      if(!byName[n]) byName[n] = { name: n, master: 0, hostess: 0 };
+      byName[n][role] += amount;
     };
     const evtsM = state.events.filter(e=> e.date && e.date.startsWith(ym));
     // мастера: оплата по мероприятиям (кроме "Маркетинг" — это расход на маркетинг, учтён отдельно),
@@ -11145,10 +11150,10 @@
     }
     Object.entries((state.hostessBonuses && state.hostessBonuses[ym]) || {}).forEach(([name, b])=> add(name, Number((b&&b.amount)||0), 'hostess'));
 
-    const all = Object.values(byName).filter(x=> x.amount !== 0).sort((a,b)=> b.amount - a.amount);
+    const people = Object.values(byName);
     return {
-      masters: all.filter(x=>x.role==='master'),
-      hostess: all.filter(x=>x.role==='hostess'),
+      masters: people.filter(x=> x.master !== 0).map(x=>({name:x.name, amount:x.master})).sort((a,b)=> b.amount - a.amount),
+      hostess: people.filter(x=> x.hostess !== 0).map(x=>({name:x.name, amount:x.hostess})).sort((a,b)=> b.amount - a.amount),
     };
   }
   // детализация строк "Материалы", "Маркетинг" и "Прочие расходы (Книга)" в "Чистой прибыли" — раскладывает
@@ -11161,14 +11166,14 @@
     const bucket = (map, key, amount)=>{ if(!amount) return; const k = key || 'Без направления'; map[k] = (map[k]||0) + amount; };
     const toSortedArray = map=> Object.entries(map).filter(([,a])=>a).map(([name,amount])=>({name,amount})).sort((a,b)=>b.amount-a.amount);
 
-    // "Материалы": по направлению (это поле "product" мероприятия — тот же справочник видов мероприятий,
-    // которым Карина называет "керамика, акрил и т.п.") — за вычетом доли блогеров/гостей, которая
-    // уходит в "Маркетинг" (см. eventMarketingGuestsMaterialsCost). Заказы на изготовление — отдельной
-    // строкой, у них нет своего направления.
+    // "Материалы": по НАПРАВЛЕНИЮ (керамика, акрил и т.п. — см. eventDirection; это НЕ поле "product",
+    // которое означает повод/вид мероприятия — день рождения, корпоратив и т.д., это другой справочник) —
+    // за вычетом доли блогеров/гостей, которая уходит в "Маркетинг" (см. eventMarketingGuestsMaterialsCost).
+    // Заказы на изготовление — отдельной строкой, у них нет своего направления.
     const materialsMap = {};
     evtsM.filter(e=> e.status!=='marketing').forEach(e=>{
       const amount = eventMaterialsCostExclMarketingSpend(e) - eventMarketingGuestsMaterialsCost(e);
-      bucket(materialsMap, e.product, amount);
+      bucket(materialsMap, eventDirection(e), amount);
     });
     const ordersMaterialsTotal = state.orders.filter(x=> x.date && x.date.startsWith(ym)).reduce((s,x)=> s + orderMaterialsCost(x), 0);
     bucket(materialsMap, 'Заказы (изготовление на заказ)', ordersMaterialsTotal);
@@ -11193,9 +11198,10 @@
     bucket(marketingMap, 'Гости по маркетинг-сертификату', guestsCostTotal);
 
     // "Прочие расходы (Книга)" — та же выборка, что и в npOtherLedgerCost, укрупнённо по категории
-    // расхода (Инвентарь, Декор, Логистика, Продукты и т.п.), а не по каждой отдельной записи.
+    // расхода (Инвентарь, Декор, Логистика и т.п.), а не по каждой отдельной записи. "Материалы" (поставки
+    // сырья) сюда не входят — та же себестоимость уже посчитана в строке "Материалы" выше, иначе задвоится.
     const otherLedgerMap = {};
-    state.expenses.filter(e=> e.date && e.date.startsWith(ym) && !e.eventId && !e.safeTransfer && !e.netProfitRef && !['Маркетинг','Аренда','Зарплата','Сейф'].includes(e.category)).forEach(e=>{
+    state.expenses.filter(e=> e.date && e.date.startsWith(ym) && !e.eventId && !e.safeTransfer && !e.netProfitRef && !['Маркетинг','Аренда','Зарплата','Сейф','Материалы'].includes(e.category)).forEach(e=>{
       const amount = (e.amount!==undefined&&e.amount!==null&&!isNaN(e.amount))?Number(e.amount):0;
       bucket(otherLedgerMap, e.category || 'Прочее', amount);
     });
@@ -11945,16 +11951,19 @@
     const npMarketingCost = state.expenses
       .filter(e=> e.date && e.date.startsWith(monthYm) && !e.eventId && e.category === 'Маркетинг')
       .reduce((s,e)=> s + ((e.amount!==undefined&&e.amount!==null&&!isNaN(e.amount))?Number(e.amount):0), 0) + npMarketingMasterPay + npMarketingMaterialsCost + npMarketingGuestsMaterialsCost;
-    // остальные категории из "Книги → Расходы" (Инвентарь, Декор, Логистика, Продукты и т.п., включая свои) —
+    // остальные категории из "Книги → Расходы" (Инвентарь, Декор, Логистика и т.п., включая свои) —
     // "Аренда"/"Зарплата" туда не входят: для них уже есть ручное поле "Аренда" и автосчёт ЗП ниже, те же
     // суммы задвоились бы. Расходы, привязанные к конкретному мероприятию, тоже не берём — они уже в "Материалы" выше.
+    // "Материалы" (поставки/приёмка сырья — глина, краски и т.п., см. раздел "Поставки") тоже не берём сюда —
+    // это та же самая себестоимость материалов, которая уже учтена построчно в "Материалы" выше (через
+    // materialsItems каждого мероприятия); если взять их ещё и здесь — расход на материалы задвоится.
     // "Сейф" — служебная категория для перемещений наличных между кассой и сейфом (раздел "Касса"),
     // не настоящий расход — исключаем, иначе внутреннее перекладывание денег ложно снижало бы прибыль.
     // "netProfitRef" — зеркальные записи из этой же модалки (аренда/сотрудники/свои статьи, см.
     // syncNetProfitLinkedExpenses) — они уже учтены отдельно ниже (npRent/npStaffTotal/npCustomTotal),
     // без этого исключения "свои статьи расходов" (категория "Операции") считались бы дважды.
     const npOtherLedgerCost = state.expenses
-      .filter(e=> e.date && e.date.startsWith(monthYm) && !e.eventId && !e.safeTransfer && !e.netProfitRef && !['Маркетинг','Аренда','Зарплата','Сейф'].includes(e.category))
+      .filter(e=> e.date && e.date.startsWith(monthYm) && !e.eventId && !e.safeTransfer && !e.netProfitRef && !['Маркетинг','Аренда','Зарплата','Сейф','Материалы'].includes(e.category))
       .reduce((s,e)=> s + ((e.amount!==undefined&&e.amount!==null&&!isNaN(e.amount))?Number(e.amount):0), 0);
     // ЗП за мероприятия со статусом "Маркетинг" исключаем здесь — она уже учтена выше, внутри "Маркетинг"
     const npMastersBasePay = evts.filter(e=> e.status!=='marketing').reduce((s,e)=> s + eventTotalMasterPay(e), 0);
@@ -16659,13 +16668,15 @@
     const npMarketingCost = state.expenses
       .filter(e=> e.date && e.date.startsWith(ym) && !e.eventId && e.category === 'Маркетинг')
       .reduce((s,e)=> s + ((e.amount!==undefined&&e.amount!==null&&!isNaN(e.amount))?Number(e.amount):0), 0) + npMarketingMasterPay + npMarketingMaterialsCost + npMarketingGuestsMaterialsCost;
+    // "Материалы" (поставки/приёмка сырья) тоже не берём — та же себестоимость уже учтена в npMaterialsCost
+    // выше (через materialsItems каждого мероприятия); иначе расход на материалы задвоится.
     // "Сейф" — служебная категория для перемещений наличных между кассой и сейфом (раздел "Касса"),
     // не настоящий расход — исключаем, иначе внутреннее перекладывание денег ложно снижало бы прибыль.
     // "netProfitRef" — зеркальные записи из "Чистая прибыль" (аренда/сотрудники/свои статьи) — этот
     // снимок их намеренно не учитывает вовсе (см. комментарий в начале функции), без исключения
     // "свои статьи расходов" (категория "Операции") просочились бы сюда как будто обычный расход.
     const npOtherLedgerCost = state.expenses
-      .filter(e=> e.date && e.date.startsWith(ym) && !e.eventId && !e.safeTransfer && !e.netProfitRef && !['Маркетинг','Аренда','Зарплата','Сейф'].includes(e.category))
+      .filter(e=> e.date && e.date.startsWith(ym) && !e.eventId && !e.safeTransfer && !e.netProfitRef && !['Маркетинг','Аренда','Зарплата','Сейф','Материалы'].includes(e.category))
       .reduce((s,e)=> s + ((e.amount!==undefined&&e.amount!==null&&!isNaN(e.amount))?Number(e.amount):0), 0);
 
     return { npEventsRevenue, npItemSalesRevenue, npCertSalesRevenue, npOrdersRevenue, npTotalRevenue,
