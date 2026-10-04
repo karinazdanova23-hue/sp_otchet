@@ -826,6 +826,8 @@
   const STATUS_COLOR_VAR = { confirmed: '--status-green', tentative: '--status-red', marketing: '--status-blue', offsite: '--status-purple', slot: '--status-cyan', cancelled: '--ink-soft' };
   function statusColor(status){ return 'var(' + (STATUS_COLOR_VAR[status] || '--status-green') + ')'; }
   function showsDishesAndRental(status){ return status === 'tentative' || status === 'marketing'; }
+  // "частное" мероприятие — не занятие "по расписанию" (мастер-класс), не слот и не отменено
+  function isPrivateEventStatus(status){ return status === 'tentative' || status === 'marketing' || status === 'offsite'; }
   function isCeramicsEvent(title){
     const t = (title||'').toLowerCase();
     return t.includes('керамик') || t.includes('круг') || t.includes('гончар');
@@ -1027,8 +1029,82 @@
     drawLines(['В СВОБОДНОЕ ПРОСТРАНСТВО'], 'normal '+Math.round(H*0.021)+'px "'+GIFT_CERT_FONT_FAMILY_XB+'", Arial, sans-serif', H*0.028);
 
     y += H*0.05;
+    // основной текст — это то, что менеджер сам вписывает при создании сертификата (переменная длина,
+    // в отличие от остальных надписей на карточке, которые заданы один раз и подобраны по месту).
+    // Чтобы длинная строка не вылезала с белой карточки на цветной/текстурный фон — переносим по
+    // словам по ширине карточки, а если текста всё равно много (много строк) или попалось одно очень
+    // длинное слово без пробелов — дополнительно уменьшаем шрифт, пока всё не поместится на карточке.
     const mainLines = (opts.text||'').split('\n');
-    drawLines(mainLines.length ? mainLines : [''], 'normal '+Math.round(H*0.04)+'px "'+GIFT_CERT_FONT_FAMILY_XB+'", Arial, sans-serif', H*0.05);
+    const mainTextMaxWidth = cardW * 0.78;
+    const mainMaxLines = 4;
+    // слово, которое не влезает целиком даже с дефисом: сначала пробуем перенести ЛОГИЧНО — по
+    // дефису (так переносят составные слова типа "Мастер-класс" — "Мастер-" / "класс"), и только
+    // если это не помогло (совсем длинное слово без дефисов), рубим по буквам как крайний случай
+    function splitLongWord(word, maxWidth){
+      if(word.includes('-')){
+        const parts = word.split('-');
+        const pieces = parts.map((p,i)=> i<parts.length-1 ? p+'-' : p).filter(p=>p);
+        if(pieces.length>1 && pieces.every(p=> ctx.measureText(p).width <= maxWidth)) return pieces;
+      }
+      const chunks = [];
+      let chunk = '';
+      for(const ch of word){
+        const test = chunk + ch;
+        if(chunk && ctx.measureText(test).width > maxWidth){ chunks.push(chunk); chunk = ch; }
+        else { chunk = test; }
+      }
+      if(chunk) chunks.push(chunk);
+      return chunks;
+    }
+    // переносим по словам (пробелам) по ширине карточки. allowHardBreak=false — слово, которое не
+    // влезает целиком, просто оставляем как есть и помечаем overflowed (чтобы сначала попробовать
+    // уменьшить шрифт — это выглядит аккуратнее, чем ломать слово); allowHardBreak=true — ломаем
+    // через splitLongWord (используется только если уменьшение шрифта до минимума не помогло).
+    function wrapLinesAtFont(lines, fontPx, allowHardBreak){
+      ctx.font = 'normal '+fontPx+'px "'+GIFT_CERT_FONT_FAMILY_XB+'", Arial, sans-serif';
+      const wrapped = [];
+      let overflowed = false;
+      lines.forEach(line=>{
+        if(!line){ wrapped.push(''); return; }
+        const words = line.split(/\s+/).filter(Boolean);
+        let cur = '';
+        words.forEach(w=>{
+          if(ctx.measureText(w).width > mainTextMaxWidth){
+            if(!allowHardBreak){
+              overflowed = true;
+              if(cur){ wrapped.push(cur); cur = ''; }
+              wrapped.push(w);
+              return;
+            }
+            if(cur){ wrapped.push(cur); cur = ''; }
+            const pieces = splitLongWord(w, mainTextMaxWidth);
+            pieces.forEach((p,i)=>{ if(i < pieces.length-1) wrapped.push(p); else cur = p; });
+            return;
+          }
+          const test = cur ? cur+' '+w : w;
+          if(!cur || ctx.measureText(test).width <= mainTextMaxWidth){ cur = test; }
+          else { wrapped.push(cur); cur = w; }
+        });
+        wrapped.push(cur);
+      });
+      return { wrapped, overflowed };
+    }
+    let mainFontPx = Math.round(H*0.04);
+    const mainMinFontPx = Math.round(H*0.02);
+    let mainRes = wrapLinesAtFont(mainLines.length ? mainLines : [''], mainFontPx, false);
+    // сначала просто уменьшаем шрифт — пока строк больше, чем помещается на карточке, или пока
+    // какое-то слово целиком шире карточки; ломать слово (по дефису/по буквам) — это крайний случай,
+    // применяем только если шрифт уже на минимуме, а слово всё равно не влезает целиком
+    while(mainFontPx > mainMinFontPx && (mainRes.wrapped.length > mainMaxLines || mainRes.overflowed)){
+      mainFontPx -= 2;
+      mainRes = wrapLinesAtFont(mainLines.length ? mainLines : [''], mainFontPx, false);
+    }
+    if(mainRes.overflowed){
+      mainRes = wrapLinesAtFont(mainLines.length ? mainLines : [''], mainFontPx, true);
+    }
+    const mainWrapped = mainRes.wrapped;
+    const mainLineHeight = mainFontPx * 1.25;
+    drawLines(mainWrapped, 'normal '+mainFontPx+'px "'+GIFT_CERT_FONT_FAMILY_XB+'", Arial, sans-serif', mainLineHeight);
 
     y += H*0.035;
     drawLines(GIFT_CERT_VALIDITY_TEXT.split('\n'), 'normal '+Math.round(H*0.018)+'px "'+GIFT_CERT_FONT_FAMILY_BODY+'", Arial, sans-serif', H*0.026, '#4A4A46');
@@ -3601,6 +3677,7 @@
               <div class="today-details">
                 ${(roleCanSeeGuestBalances(state.currentRole) && (price>0 || agreed>0)) ? `<div class="today-detail-row"><b>Оплата:</b> получено ${formatMoney(price)}${agreed>0?` из ${formatMoney(agreed)}`:''}</div>` : ''}
                 ${showsDishesAndRental(e.status) && e.dishes ? `<div class="today-detail-row"><b>Посуда:</b> ${e.dishes==='needed'?'нужна':'без посуды'}</div>` : ''}
+                ${isPrivateEventStatus(e.status) && e.ageCategory ? `<div class="today-detail-row"><b>Возрастная категория:</b> ${escapeHtml(e.ageCategory)}</div>` : ''}
                 ${rentalSuffix(e) ? `<div class="today-detail-row"><b>Аренда:</b> ${rentalSuffix(e).replace(' · ⏱ ','')}</div>` : ''}
                 ${e.payerType==='legal' ? `<div class="today-detail-row"><b>Плательщик:</b> Юр.лицо — ${escapeHtml(e.companyName||'без названия')}${missing.length?` <span style="color:var(--status-red);">(не хватает: ${missing.join(', ')})</span>`:' <span style="color:var(--status-green);">(документы в порядке)</span>'}</div>` : ''}
                 ${e.notes ? `<div class="today-detail-row"><b>Заметки:</b> ${escapeHtml(e.notes)}</div>` : ''}
@@ -11264,6 +11341,13 @@
     const revenueMTD = privateRevenueMTD + scheduleRevenueMTD + ordersRevenueMTD + certsRevenueMTD;
     const revenuePlanPct = (plan.revenue!==undefined && plan.revenue!==null && plan.revenue>0) ? Math.round(revenueMTD/plan.revenue*100) : null;
     const revenuePace = dailyReportPace('revenue', ym, cutoffDay, plan.revenue, revenueMTD);
+    // ВЫРУЧКА (прогноз на весь месяц) — в отличие от ВЫРУЧКА (месяц) выше, которая только «по эту дату»,
+    // здесь берём ВСЕ мероприятия/заказы/сертификаты месяца целиком, включая уже забронированные
+    // будущие даты (та же логика, что у «Мероприятия (календарь, прогноз)» и «Чистой прибыли» —
+    // см. computeNetProfitSnapshot). Это не финансовая тайна (в отличие от «Чистой прибыли»), поэтому
+    // показываем всем ролям, которым вообще виден «Отчёт дня», а не только владельцу.
+    const npSnapshot = computeNetProfitSnapshot(ym);
+    const revenueForecastMonth = npSnapshot.npTotalRevenue;
 
     const privateByCatToday = {};
     DAILY_REPORT_PRIVATE_CATS.forEach(c=>{ privateByCatToday[c]=0; });
@@ -11313,13 +11397,12 @@
     // поэтому день здесь ни на что не влияет, в отличие от остальных строк отчёта.
     let netProfitMonth = null;
     if(state.currentRole === 'owner'){
-      const snap = computeNetProfitSnapshot(ym);
       const npManual = (state.netProfitManual && state.netProfitManual[ym]) || {};
       const npRent = (npManual.rent!==undefined && npManual.rent!==null) ? Number(npManual.rent) : 0;
       const npStaffTotal = (npManual.staff||[]).reduce((s,x)=> s + (Number(x.amount)||0), 0);
       const npCustomTotal = (npManual.customExpenses||[]).reduce((s,x)=> s + (Number(x.amount)||0), 0);
-      const npTotalExpensesM = snap.npMaterialsCost + snap.npMarketingCost + snap.npOtherLedgerCost + snap.npMastersSalary + snap.npHostessSalary + snap.npManagerSalary + npRent + npStaffTotal + npCustomTotal;
-      netProfitMonth = snap.npTotalRevenue - npTotalExpensesM;
+      const npTotalExpensesM = npSnapshot.npMaterialsCost + npSnapshot.npMarketingCost + npSnapshot.npOtherLedgerCost + npSnapshot.npMastersSalary + npSnapshot.npHostessSalary + npSnapshot.npManagerSalary + npRent + npStaffTotal + npCustomTotal;
+      netProfitMonth = npSnapshot.npTotalRevenue - npTotalExpensesM;
     }
 
     // план по потокам выручки (Частные/Расписание/Заказы/Сертификаты) и по категориям повода —
@@ -11334,12 +11417,12 @@
     return {
       dateStr, ym, plan,
       leadsTodayCount, leadsByCatToday, leadsMTDCount, leadsByCatMTD, leadsPlanPct, leadsPace,
-      revenueToday, revenueMTD, revenuePlanPct, revenuePace,
+      revenueToday, revenueMTD, revenuePlanPct, revenuePace, revenueForecastMonth,
       privateRevenueToday, privateByCatToday, scheduleRevenueToday, ordersRevenueToday, certsRevenueToday,
       privateRevenueMTD, privateByCatMTD, scheduleRevenueMTD, ordersRevenueMTD, certsRevenueMTD,
       scheduleRevenuePlan, privateRevenuePlan, ordersRevenuePlan, certsRevenuePlan,
       profitToday, profitPlanPct, profitPace,
-      convDayPct, convMonthPct, rentabilityPct,
+      convDayPct, convMonthPct, soldToday, soldMonthAll, leadsMonthAllCount: leadsMonthAll.length, rentabilityPct,
       occupancyPct, avgCheck,
       netProfitMonth,
     };
@@ -11380,6 +11463,8 @@
     lines.push('');
     lines.push(`▫️ВЫРУЧКА (месяц): ${rubStr(d.revenueMTD)} руб. (${pctStr(d.revenuePlanPct)} от плана)${paceStr(d.revenuePace, true)}`);
     lines.push('');
+    lines.push(`📈 Выручка (весь ${MONTHS[parseDate(d.dateStr).getMonth()]}, прогноз): ${rubStr(d.revenueForecastMonth)} руб.`);
+    lines.push('');
     lines.push(`▫️ПРИБЫЛЬ: ${rubStr(d.profitToday)} руб. (${pctStr(d.profitPlanPct)})${paceStr(d.profitPace, true)}`);
     if(d.netProfitMonth !== null){
       lines.push('');
@@ -11402,8 +11487,8 @@
     lines.push(`▪️Итого за месяц: ${rubStr(d.revenueMTD)} руб.`);
     lines.push('');
     lines.push('———');
-    lines.push(`Конверсия дня: ${pctStr(d.convDayPct)} (продажи/заявки, в штуках)`);
-    lines.push(`Конверсия (месяц): ${pctStr(d.convMonthPct)} (продажи/заявки, в штуках)`);
+    lines.push(`Конверсия дня: ${pctStr(d.convDayPct)}, ${d.soldToday}/${d.leadsTodayCount}`);
+    lines.push(`Конверсия (месяц): ${pctStr(d.convMonthPct)}, ${d.soldMonthAll}/${d.leadsMonthAllCount}`);
     lines.push(`Рентабельность: ${pctStr(d.rentabilityPct)}`);
     lines.push(`% заполняемости (месяц): ${d.occupancyPct}%`);
     lines.push(`Средний чек (месяц): ${d.avgCheck===null ? '—' : rubStr(d.avgCheck)+' руб.'}`);
@@ -17031,8 +17116,8 @@
             <label>Дата</label>
             <input type="date" id="dr-date" value="${dateStr}">
           </div>
-          <div style="font-size:11.5px;color:var(--ink-soft);font-family:var(--font-mono);margin-top:-6px;">«Руб.» у ПРИБЫЛИ — цифры за сам этот день. ЗАЯВКИ и ВЫРУЧКА (и их разбивка по категориям/Частным/Расписанию/Заказам/Сертификатам) — нарастающим итогом с начала месяца по эту дату. Проценты у ЗАЯВОК и у ВЫРУЧКИ/ПРИБЫЛИ — нарастающим итогом с начала месяца по эту дату, относительно месячного плана. «Темп» у ЗАЯВОК/ВЫРУЧКИ/ПРИБЫЛИ — сравнение с тем, сколько от плана ОБЫЧНО набрано к этому же числу в этом месяце прошлого года (а не поровну по дням — мероприятия бронируют заранее, и к концу месяца темп естественно замедляется); если данных за прошлый год по этому дню нет — темп честно не считается, вместо него пометка «нет данных» (занести их можно в «Выполнение плана»). Остальные проценты в скобках (у категорий заявок, у Частных/Расписания/Заказов/Сертификатов и у категорий внутри Частных) — это % выполнения МЕСЯЧНОГО ПЛАНА именно по этой категории/потоку (план задаётся в настройке плана на месяц), а не доля от суммы строкой выше. Если план по категории не задан — вместо процента честно показывается «план не задан». «Чистая прибыль» (видна только руководителю), «% заполняемости» и «Средний чек» — тоже про весь месяц целиком, а не про этот день: заполняемость показывает, насколько заполнен месяц (включая уже забронированные будущие даты), а средний чек за один день слишком случаен, поэтому считается нарастающим итогом с начала месяца.</div>
           <textarea id="dr-text" readonly style="width:100%;box-sizing:border-box;min-height:420px;font-family:var(--font-mono);font-size:13px;line-height:1.5;border:1px solid var(--line-strong);border-radius:var(--radius);padding:10px 12px;resize:vertical;background:var(--paper-2);">${escapeHtml(text)}</textarea>
+          <div style="font-size:11.5px;color:var(--ink-soft);font-family:var(--font-mono);">«Руб.» у ПРИБЫЛИ — цифры за сам этот день. ЗАЯВКИ и ВЫРУЧКА (и их разбивка по категориям/Частным/Расписанию/Заказам/Сертификатам) — нарастающим итогом с начала месяца по эту дату. Проценты у ЗАЯВОК и у ВЫРУЧКИ/ПРИБЫЛИ — нарастающим итогом с начала месяца по эту дату, относительно месячного плана. «Темп» у ЗАЯВОК/ВЫРУЧКИ/ПРИБЫЛИ — сравнение с тем, сколько от плана ОБЫЧНО набрано к этому же числу в этом месяце прошлого года (а не поровну по дням — мероприятия бронируют заранее, и к концу месяца темп естественно замедляется); если данных за прошлый год по этому дню нет — темп честно не считается, вместо него пометка «нет данных» (занести их можно в «Выполнение плана»). Остальные проценты в скобках (у категорий заявок, у Частных/Расписания/Заказов/Сертификатов и у категорий внутри Частных) — это % выполнения МЕСЯЧНОГО ПЛАНА именно по этой категории/потоку (план задаётся в настройке плана на месяц), а не доля от суммы строкой выше. Если план по категории не задан — вместо процента честно показывается «план не задан». «Выручка (прогноз)», «Чистая прибыль» (видна только руководителю), «% заполняемости» и «Средний чек» — тоже про весь месяц целиком, а не про этот день: «Выручка (прогноз)» и заполняемость считают ВСЕ мероприятия/заказы/сертификаты месяца, включая уже забронированные будущие даты (поэтому обычно больше, чем «ВЫРУЧКА (месяц)» выше — та только по эту дату), а средний чек за один день слишком случаен, поэтому считается нарастающим итогом с начала месяца.</div>
           <div class="modal-actions">
             <span></span>
             <div style="display:flex;gap:8px;">
@@ -17584,6 +17669,7 @@
                 <div class="title">${openSlot?'🙋 ':''}${escapeHtml(e.title)}</div>
                 ${isAll ? `<div class="host" style="display:flex;align-items:center;gap:6px;">${spaceBadge(getSpace(e.spaceId),'sm')}${escapeHtml(getSpace(e.spaceId).name)} · ${escapeHtml(allHostNamesDisplay(e))}${e.product?' · '+escapeHtml(e.product):''}${showsDishesAndRental(e.status)&&e.dishes?' · 🍽 '+(e.dishes==='needed'?'нужна посуда':'без посуды'):''}${rentalSuffix(e)}${legalSuffix(e)}</div>` : `<div class="host">${escapeHtml(allHostNamesDisplay(e))}${e.product?' · '+escapeHtml(e.product):''}${showsDishesAndRental(e.status)&&e.dishes?' · 🍽 '+(e.dishes==='needed'?'нужна посуда':'без посуды'):''}${rentalSuffix(e)}${legalSuffix(e)}</div>`}
                 ${openSlot ? `<div class="notes" style="color:var(--status-cyan);">🙋 ${available.length ? 'Свободны: '+escapeHtml(available.join(', ')) : 'Пока никто не откликнулся'}</div>` : ''}
+                ${isPrivateEventStatus(e.status) && e.ageCategory ? `<div class="notes">🎂 ${escapeHtml(e.ageCategory)}</div>` : ''}
                 ${e.notes ? `<div class="notes" title="${escapeHtml(e.notes)}">💬 ${escapeHtml(e.notes)}</div>` : ''}
                 ${remainder>0 ? `<div class="notes" style="color:var(--status-red);">💳 Остаток: ${formatMoney(remainder)}</div>` : ''}
               </div>
@@ -17862,6 +17948,10 @@
                 <input type="number" id="f-rental-after" value="${ev.rentalAfter!==undefined&&ev.rentalAfter!==null?ev.rentalAfter:0}" min="0" step="15" placeholder="0">
               </div>
             </div>
+          </div>
+          <div class="field" id="age-category-field" style="display:${isPrivateEventStatus(ev.status)?'block':'none'};">
+            <label>Возрастная категория <span style="font-weight:400;color:var(--ink-soft);">— необязательно, чтобы админы и мастера знали, кто придёт</span></label>
+            <input type="text" id="f-age-category" value="${escapeHtml(ev.ageCategory||'')}" placeholder="например: дети / взрослые">
           </div>
           ${isNew ? `
           <div class="field" id="lead-link-field" style="display:${EVENT_STATUSES_NEEDING_LEAD.includes(ev.status||'confirmed')?'block':'none'};">
@@ -18338,6 +18428,8 @@
           if(dishesField) dishesField.style.display = showsDishesAndRental('offsite') ? 'block' : 'none';
           const rentalField = overlay.querySelector('#rental-field');
           if(rentalField) rentalField.style.display = showsDishesAndRental('offsite') ? 'block' : 'none';
+          const ageCategoryField = overlay.querySelector('#age-category-field');
+          if(ageCategoryField) ageCategoryField.style.display = isPrivateEventStatus('offsite') ? 'block' : 'none';
         }
       }
     });
@@ -19150,6 +19242,8 @@
       if(dishesField) dishesField.style.display = showsDishesAndRental(statusValue) ? 'block' : 'none';
       const rentalField = overlay.querySelector('#rental-field');
       if(rentalField) rentalField.style.display = showsDishesAndRental(statusValue) ? 'block' : 'none';
+      const ageCategoryField = overlay.querySelector('#age-category-field');
+      if(ageCategoryField) ageCategoryField.style.display = isPrivateEventStatus(statusValue) ? 'block' : 'none';
       const leadLinkField = overlay.querySelector('#lead-link-field');
       if(leadLinkField) leadLinkField.style.display = EVENT_STATUSES_NEEDING_LEAD.includes(statusValue) ? 'block' : 'none';
       if(statusValue === 'offsite' && spaceSelect && state.spaces.find(s=>s.id==='s5')){
@@ -19366,6 +19460,8 @@
       const rentalBeforeRaw = overlay.querySelector('#f-rental-before').value;
       const rentalAfterRaw = overlay.querySelector('#f-rental-after').value;
       const notesVal = overlay.querySelector('#f-notes').value.trim();
+      const ageCategoryFieldEl = overlay.querySelector('#f-age-category');
+      const ageCategoryVal = ageCategoryFieldEl ? ageCategoryFieldEl.value.trim() : '';
       // "Гости по отдельности" теперь единственное место, где фиксируется, кто пришёл — считаем оттуда
       const guestListForSave = guestListArr.map(g=>({
         id: g.id, name: (g.name||'').trim(), seats: Math.max(1, parseInt(g.seats)||1),
@@ -19539,6 +19635,7 @@
         dishesWasher: (overlay.querySelector('#f-dishes').value === 'needed' && overlay.querySelector('#f-dishes-payment').value === 'paid' && overlay.querySelector('#f-dishes-washer')) ? (overlay.querySelector('#f-dishes-washer').value || '') : '',
         rentalBefore: rentalBeforeVal,
         rentalAfter: rentalAfterVal,
+        ageCategory: isPrivateEventStatus(overlay.querySelector('#f-status').value || 'confirmed') ? ageCategoryVal : '',
         notes: overlay.querySelector('#f-notes').value.trim(),
         masterReport: (()=>{
           const source = overlay.querySelector('#f-report-source').value.trim();
