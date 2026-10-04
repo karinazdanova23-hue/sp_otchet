@@ -867,11 +867,13 @@
   // (продажа сертификата/изделия), а не ведут саму "Книгу": "Сейф" там не осмысленный вариант.
   const SALE_PAYMENT_ACCOUNTS = ['Точка','Наличные','Юклиент','ЮрСчет'];
 
-  // статусы "Поздравлений с ДР" — те же 5 статусов, что были в Google-таблице менеджеров (цветные
-  // плашки); "bought" дополнительно создаёт/убирает связанную заявку в "Конверсии" (см. attachOutreachBoughtModalEvents)
+  // статусы "Поздравлений с ДР" — изначально те же 5 статусов, что были в Google-таблице менеджеров
+  // (цветные плашки), плюс "discussing" ("Общаемся по предложению") — добавлен позже; "bought"
+  // дополнительно создаёт/убирает связанную заявку в "Конверсии" (см. attachOutreachBoughtModalEvents)
   const OUTREACH_STATUSES = [
     { key:'in_progress', label:'В процессе', bg:'#F5E6BE', fg:'#8A6D1F' },
     { key:'written', label:'Написали', bg:'#D7E3F0', fg:'#5A6E86' },
+    { key:'discussing', label:'Общаемся по предложению', bg:'#E4DCF0', fg:'#6E5A9A' },
     { key:'bought', label:'Купили', bg:'#E3EEE0', fg:'#75804F' },
     { key:'ignored', label:'Игнор предложения', bg:'#F3DCCF', fg:'#9A5B35' },
     { key:'no_sale', label:'Пообщались и не продали', bg:'#EFD4D0', fg:'#A3402F' },
@@ -1417,6 +1419,12 @@
     birthdayOutreach: null,
     outreachSearchQuery: '',
     outreachViewMode: 'due', // due | all
+    // ручной архив данных за прошлые периоды (с бумаги, до начала работы с этим приложением) — менеджеры
+    // заносят сюда фактические цифры за конкретный день прошлого года, чтобы "Выполнение плана" могло
+    // сравнивать темп этого года день-в-день с прошлым, даже если в самом приложении истории нет
+    // (см. monthProgressRatioLastYear)
+    historyDaily: null,
+    historyDailyEditDate: null,
   };
 
   function pad(n){ return n<10 ? '0'+n : ''+n; }
@@ -1763,6 +1771,11 @@
     }catch(e){ state.marketingSpend = []; }
 
     try{
+      const hd = await window.storage.get('history-daily', true);
+      state.historyDaily = hd ? JSON.parse(hd.value) : [];
+    }catch(e){ state.historyDaily = []; }
+
+    try{
       const sup = await window.storage.get('suppliers', true);
       state.suppliers = sup ? JSON.parse(sup.value) : [];
     }catch(e){ state.suppliers = []; }
@@ -1860,6 +1873,7 @@
     state._auditLogBaseline = JSON.parse(JSON.stringify(state.auditLog));
     state._closedMonthsBaseline = state.closedMonths.slice();
     state._marketingSpendBaseline = JSON.parse(JSON.stringify(state.marketingSpend));
+    state._historyDailyBaseline = JSON.parse(JSON.stringify(state.historyDaily));
     state._suppliersBaseline = JSON.parse(JSON.stringify(state.suppliers));
     state._stockReceiptsBaseline = JSON.parse(JSON.stringify(state.stockReceipts));
     state._daysOffBaseline = JSON.parse(JSON.stringify(state.daysOff));
@@ -2423,6 +2437,7 @@
       suppliers: state.suppliers,
       stockReceipts: state.stockReceipts,
       daysOff: state.daysOff,
+      historyDaily: state.historyDaily,
     }, null, 2);
   }
 
@@ -2931,6 +2946,12 @@
     await saveCollectionMerged('marketing-spend', state.marketingSpend, state._marketingSpendBaseline, (finalArr)=>{
       state.marketingSpend = finalArr;
       state._marketingSpendBaseline = JSON.parse(JSON.stringify(finalArr));
+    });
+  }
+  async function saveHistoryDaily(){
+    await saveCollectionMerged('history-daily', state.historyDaily, state._historyDailyBaseline, (finalArr)=>{
+      state.historyDaily = finalArr;
+      state._historyDailyBaseline = JSON.parse(JSON.stringify(finalArr));
     });
   }
   async function saveSuppliers(){
@@ -10275,6 +10296,8 @@
       overlay.innerHTML = renderDailyReportModal();
     } else if(state.modal.type === 'netprofit-edit'){
       overlay.innerHTML = renderNetProfitEditModal();
+    } else if(state.modal.type === 'history-daily-edit'){
+      overlay.innerHTML = renderHistoryDailyEditModal();
     } else if(state.modal.type === 'netprofit-calc'){
       overlay.innerHTML = renderNetProfitCalcModal();
     } else if(state.modal.type === 'hostess-bonus-edit'){
@@ -10326,6 +10349,13 @@
       overlay.addEventListener('click', (e)=>{ if(e.target === overlay){ overlay.remove(); state.modal = {type:'hosts-list'}; render(); } });
       const closeBtn = overlay.querySelector('.modal-close');
       if(closeBtn) closeBtn.onclick = ()=>{ overlay.remove(); state.modal = {type:'hosts-list'}; render(); };
+    } else if(state.modal.type === 'history-daily-edit'){
+      // открыта поверх "Выполнение плана" (из модалки аналитики у владельца) — закрытие должно
+      // вернуть именно её, а не просто обнулять модалку, иначе владелец "вываливается" на пустой фон
+      const returnTo = state.modal.returnTo || null;
+      overlay.addEventListener('click', (e)=>{ if(e.target === overlay){ overlay.remove(); state.modal = returnTo; render(); } });
+      const closeBtn = overlay.querySelector('.modal-close');
+      if(closeBtn) closeBtn.onclick = ()=>{ overlay.remove(); state.modal = returnTo; render(); };
     } else {
       // у мероприятия — клик мимо окна (по тёмному фону) больше не закрывает его и не сбрасывает
       // несохранённые правки; закрыть можно только явно — крестиком или «Отмена». Для всех остальных
@@ -10359,6 +10389,7 @@
     else if(state.modal.type === 'plan-edit'){ attachPlanEditModalEvents(overlay); }
     else if(state.modal.type === 'daily-report'){ attachDailyReportModalEvents(overlay); }
     else if(state.modal.type === 'netprofit-edit'){ attachNetProfitEditModalEvents(overlay); }
+    else if(state.modal.type === 'history-daily-edit'){ attachHistoryDailyEditModalEvents(overlay); }
     else if(state.modal.type === 'netprofit-calc'){ attachNetProfitCalcModalEvents(overlay); }
     else if(state.modal.type === 'hostess-bonus-edit'){ attachHostessBonusEditModalEvents(overlay); }
     else if(state.modal.type === 'yearsummary-edit'){ attachYearSummaryEditModalEvents(overlay); }
@@ -11153,9 +11184,23 @@
     const share = (i.masterShare!==undefined && i.masterShare!==null && !isNaN(i.masterShare)) ? Number(i.masterShare) : 0;
     return Math.max(0, amount - share);
   }
+  // темп по показателю отчёта дня — та же логика, что в "Выполнение плана" (см. monthProgressRatioLastYear):
+  // сравниваем факт с начала месяца по эту дату с тем, какая доля плана ОБЫЧНО набрана к этому же числу
+  // в этом месяце прошлого года (а не делим план поровну по дням — мероприятия бронируют заранее, и
+  // к концу месяца темп естественно замедляется). Если данных за прошлый год нет — темп не считаем
+  // вовсе (status:'nodata'), вместо подмены его обманчивым линейным расчётом.
+  function dailyReportPace(key, ym, cutoffDay, target, mtdValue){
+    if(target===undefined || target===null || !(target>0)) return null;
+    const lyRatio = monthProgressRatioLastYear(key, ym, cutoffDay);
+    if(lyRatio===null) return { status:'nodata', expectedByNow:null };
+    const expectedByNow = Math.round(target*lyRatio);
+    return { status: mtdValue>=expectedByNow ? 'ahead' : 'behind', expectedByNow };
+  }
+
   function computeDailyReport(dateStr){
     const ym = dateStr.slice(0,7);
     const plan = (state.monthlyPlans && state.monthlyPlans[ym]) || {};
+    const cutoffDay = parseDate(dateStr).getDate();
 
     // ЗАЯВКИ — «шт» за сам день, «%» — нарастающим итогом с начала месяца по этот день включительно, к плану на месяц
     const leadsToday = state.leads.filter(l=>l.requestDate===dateStr);
@@ -11170,6 +11215,7 @@
     leadsMonthToDate.forEach(l=>{ const cat=dailyReportLeadCategory(l); leadsByCatMTD[cat]=(leadsByCatMTD[cat]||0)+1; });
     const leadsMTDCount = leadsMonthToDate.length;
     const leadsPlanPct = (plan.leadsCount!==undefined && plan.leadsCount!==null && plan.leadsCount>0) ? Math.round(leadsMonthToDate.length/plan.leadsCount*100) : null;
+    const leadsPace = dailyReportPace('leadsCount', ym, cutoffDay, plan.leadsCount, leadsMonthToDate.length);
 
     // ВЫРУЧКА — четыре потока: Частные (все продукты, кроме «Мастер-класс»), Расписание («Мастер-класс»),
     // Заказы (Книга → «Заказ»), Сертификаты (продажи сертификатов)
@@ -11198,6 +11244,7 @@
     const revenueToday = privateRevenueToday + scheduleRevenueToday + ordersRevenueToday + certsRevenueToday;
     const revenueMTD = privateRevenueMTD + scheduleRevenueMTD + ordersRevenueMTD + certsRevenueMTD;
     const revenuePlanPct = (plan.revenue!==undefined && plan.revenue!==null && plan.revenue>0) ? Math.round(revenueMTD/plan.revenue*100) : null;
+    const revenuePace = dailyReportPace('revenue', ym, cutoffDay, plan.revenue, revenueMTD);
 
     const privateByCatToday = {};
     DAILY_REPORT_PRIVATE_CATS.forEach(c=>{ privateByCatToday[c]=0; });
@@ -11218,6 +11265,7 @@
     const profitToday = eventsProfitToday + certsRevenueToday + ordersProfitToday;
     const profitMTD = eventsProfitMTD + certsRevenueMTD + ordersProfitMTD;
     const profitPlanPct = (plan.profit!==undefined && plan.profit!==null && plan.profit>0) ? Math.round(profitMTD/plan.profit*100) : null;
+    const profitPace = dailyReportPace('profit', ym, cutoffDay, plan.profit, profitMTD);
 
     // Конверсия — по дате заявки; «месяц» — весь месяц целиком (как во вкладке «Конверсия»), «день» — только этот день
     const soldToday = leadsToday.filter(l=>l.sold).length;
@@ -11255,13 +11303,23 @@
       netProfitMonth = snap.npTotalRevenue - npTotalExpensesM;
     }
 
+    // план по потокам выручки (Частные/Расписание/Заказы/Сертификаты) и по категориям повода —
+    // «Расписание» берёт план из «Мастер-класс» в разбивке по продуктам (это один и тот же продукт),
+    // «Частные» — сумма плана по категориям повода (см. byPrivateCat), «Заказы»/«Сертификаты» — отдельные поля
+    const scheduleRevenuePlan = (plan.byProduct && plan.byProduct['Мастер-класс']) || null;
+    const byPrivateCatPlanValues = Object.values(plan.byPrivateCat||{});
+    const privateRevenuePlan = byPrivateCatPlanValues.length ? byPrivateCatPlanValues.reduce((s,v)=>s+(Number(v)||0),0) : null;
+    const ordersRevenuePlan = plan.ordersRevenuePlan!==undefined ? plan.ordersRevenuePlan : null;
+    const certsRevenuePlan = plan.certsRevenuePlan!==undefined ? plan.certsRevenuePlan : null;
+
     return {
       dateStr, ym, plan,
-      leadsTodayCount, leadsByCatToday, leadsMTDCount, leadsByCatMTD, leadsPlanPct,
-      revenueToday, revenueMTD, revenuePlanPct,
+      leadsTodayCount, leadsByCatToday, leadsMTDCount, leadsByCatMTD, leadsPlanPct, leadsPace,
+      revenueToday, revenueMTD, revenuePlanPct, revenuePace,
       privateRevenueToday, privateByCatToday, scheduleRevenueToday, ordersRevenueToday, certsRevenueToday,
       privateRevenueMTD, privateByCatMTD, scheduleRevenueMTD, ordersRevenueMTD, certsRevenueMTD,
-      profitToday, profitPlanPct,
+      scheduleRevenuePlan, privateRevenuePlan, ordersRevenuePlan, certsRevenuePlan,
+      profitToday, profitPlanPct, profitPace,
       convDayPct, convMonthPct, rentabilityPct,
       occupancyPct, avgCheck,
       netProfitMonth,
@@ -11269,40 +11327,58 @@
   }
   function pctStr(pct){ return pct===null ? '—' : pct+'%'; }
   function shareStr(part, whole){ return whole>0 ? Math.round(part/whole*100)+'%' : '0%'; }
+  // % выполнения ПЛАНА по конкретной категории/потоку (не доля от общего итога) — так же, как это было
+  // в старом бумажном/телеграм-формате «Дорогой дневник»: процент рядом с каждой категорией показывает,
+  // сколько набрано к этому дню от МЕСЯЧНОГО плана именно этой категории. Если план по ней не задан —
+  // честно показываем это, а не подставляем долю от итога (которая отвечает на другой вопрос).
+  function catPctStr(actual, target){
+    if(target===undefined || target===null || !(target>0)) return 'план не задан';
+    return Math.round((actual||0)/target*100)+'%';
+  }
   function rubStr(n){ return Math.round(n||0).toLocaleString('ru-RU'); }
+  // текстовое представление темпа для "Отчёта дня" — та же пометка ahead/behind/nodata, что в
+  // "Выполнение плана", но в одну строку для текстового отчёта
+  function paceStr(p, isMoney){
+    if(!p) return '';
+    if(p.status === 'nodata') return ' · темп: 📋 нет данных за этот день прошлого года';
+    const fmt = v => isMoney ? rubStr(v)+' руб.' : v+' шт';
+    return ` · темп: ${p.status==='ahead' ? '✅ в темпе' : '⚠ отстаём'} (план на сегодня: ${fmt(p.expectedByNow)})`;
+  }
   function buildDailyReportText(dateStr){
     const d = computeDailyReport(dateStr);
     const dateLabel = formatDateText(dateStr);
     const lines = [];
     lines.push(`${dateLabel}🍁`);
     lines.push('');
-    lines.push(`▫️ЗАЯВКИ (месяц): ${d.leadsMTDCount} шт (${pctStr(d.leadsPlanPct)} от выполнения плана)`);
+    lines.push(`▫️ЗАЯВКИ (месяц): ${d.leadsMTDCount} шт (${pctStr(d.leadsPlanPct)} от выполнения плана)${paceStr(d.leadsPace, false)}`);
     lines.push('');
     DAILY_REPORT_LEAD_CATS.forEach(cat=>{
-      lines.push(`- ${cat} ${d.leadsByCatMTD[cat]||0} шт (${shareStr(d.leadsByCatMTD[cat]||0, d.leadsMTDCount)})`);
+      const target = d.plan.byLeadCat ? d.plan.byLeadCat[cat] : null;
+      lines.push(`- ${cat} ${d.leadsByCatMTD[cat]||0} шт (${catPctStr(d.leadsByCatMTD[cat]||0, target)})`);
     });
     lines.push('');
     lines.push('——');
     lines.push('');
-    lines.push(`▫️ВЫРУЧКА (месяц): ${rubStr(d.revenueMTD)} руб. (${pctStr(d.revenuePlanPct)} от плана)`);
+    lines.push(`▫️ВЫРУЧКА (месяц): ${rubStr(d.revenueMTD)} руб. (${pctStr(d.revenuePlanPct)} от плана)${paceStr(d.revenuePace, true)}`);
     lines.push('');
-    lines.push(`▫️ПРИБЫЛЬ: ${rubStr(d.profitToday)} руб. (${pctStr(d.profitPlanPct)})`);
+    lines.push(`▫️ПРИБЫЛЬ: ${rubStr(d.profitToday)} руб. (${pctStr(d.profitPlanPct)})${paceStr(d.profitPace, true)}`);
     if(d.netProfitMonth !== null){
       lines.push('');
       lines.push(`🔒 Чистая прибыль (весь ${MONTHS[parseDate(d.dateStr).getMonth()]}, прогноз): ${rubStr(d.netProfitMonth)} руб.`);
     }
     lines.push('');
-    lines.push(`▪️Частные: ${rubStr(d.privateRevenueMTD)} руб. (${shareStr(d.privateRevenueMTD, d.revenueMTD)}):`);
+    lines.push(`▪️Частные: ${rubStr(d.privateRevenueMTD)} руб. (${catPctStr(d.privateRevenueMTD, d.privateRevenuePlan)}):`);
     lines.push('');
     DAILY_REPORT_PRIVATE_CATS.forEach(cat=>{
-      lines.push(`- ${cat} ${rubStr(d.privateByCatMTD[cat]||0)} руб. (${shareStr(d.privateByCatMTD[cat]||0, d.privateRevenueMTD)})`);
+      const target = d.plan.byPrivateCat ? d.plan.byPrivateCat[cat] : null;
+      lines.push(`- ${cat} ${rubStr(d.privateByCatMTD[cat]||0)} руб. (${catPctStr(d.privateByCatMTD[cat]||0, target)})`);
     });
     lines.push('');
-    lines.push(`▪️Расписание ${rubStr(d.scheduleRevenueMTD)} руб. (${shareStr(d.scheduleRevenueMTD, d.revenueMTD)})`);
+    lines.push(`▪️Расписание ${rubStr(d.scheduleRevenueMTD)} руб. (${catPctStr(d.scheduleRevenueMTD, d.scheduleRevenuePlan)})`);
     lines.push('');
-    lines.push(`▪️Заказы ${rubStr(d.ordersRevenueMTD)} руб. (${shareStr(d.ordersRevenueMTD, d.revenueMTD)})`);
+    lines.push(`▪️Заказы ${rubStr(d.ordersRevenueMTD)} руб. (${catPctStr(d.ordersRevenueMTD, d.ordersRevenuePlan)})`);
     lines.push('');
-    lines.push(`▪️Сертификаты ${rubStr(d.certsRevenueMTD)} руб. (${shareStr(d.certsRevenueMTD, d.revenueMTD)})`);
+    lines.push(`▪️Сертификаты ${rubStr(d.certsRevenueMTD)} руб. (${catPctStr(d.certsRevenueMTD, d.certsRevenuePlan)})`);
     lines.push('');
     lines.push(`▪️Итого за месяц: ${rubStr(d.revenueMTD)} руб.`);
     lines.push('');
@@ -11483,13 +11559,15 @@
         return {...m, target, pctOfTarget: target>0?Math.round(m.value/target*100):0, expectedByNow: null, paceStatus, projected: null};
       }
       const pctOfTarget = target>0 ? Math.round(m.value/target*100) : 0;
-      // ориентир на "сегодня" — по тому, какая доля месяца обычно набрана к этому числу (прошлый год),
-      // а не равномерно по дням: мероприятия бронируют заранее, и к концу месяца темп естественно
-      // замедляется (новые продажи уже идут в счёт следующего месяца)
+      // ориентир на "сегодня" — по тому, какая доля месяца обычно набрана к этому числу (прошлый год,
+      // из мероприятий/заявок или вручную внесённых данных — см. historyDaily). Без этих данных темп
+      // честно не считаем вовсе (раньше был запасной равномерный расчёт по дням — отказались от него,
+      // он вводил в заблуждение: мероприятия бронируют заранее, и к концу месяца темп естественно
+      // замедляется, "план/30×число" занижал реальный темп). Вместо этого — просьба внести данные.
       const lyRatio = daysElapsed>0 ? monthProgressRatioLastYear(m.key, planYm, daysElapsed) : null;
       const usedLastYear = lyRatio !== null;
-      const expectedByNow = daysElapsed>0 ? Math.round(target * (usedLastYear ? lyRatio : daysElapsed/daysInMonth)) : 0;
-      const paceStatus = daysElapsed===0 ? 'notstarted' : (m.value >= expectedByNow ? 'ahead' : 'behind');
+      const expectedByNow = usedLastYear ? Math.round(target * lyRatio) : null;
+      const paceStatus = daysElapsed===0 ? 'notstarted' : (!usedLastYear ? 'nodata' : (m.value >= expectedByNow ? 'ahead' : 'behind'));
       const projected = daysElapsed>0 ? Math.round(m.value / daysElapsed * daysInMonth) : null;
       return {...m, target, pctOfTarget, expectedByNow, paceStatus, projected, usedLastYear};
     });
@@ -11513,8 +11591,8 @@
         const pctOfTarget = target>0 ? Math.round(value/target*100) : 0;
         const lyRatio = daysElapsed>0 ? monthProgressRatioLastYear('product', planYm, daysElapsed, product) : null;
         const usedLastYear = lyRatio !== null;
-        const expectedByNow = daysElapsed>0 ? Math.round(target * (usedLastYear ? lyRatio : daysElapsed/daysInMonth)) : 0;
-        const paceStatus = daysElapsed===0 ? 'notstarted' : (value >= expectedByNow ? 'ahead' : 'behind');
+        const expectedByNow = usedLastYear ? Math.round(target * lyRatio) : null;
+        const paceStatus = daysElapsed===0 ? 'notstarted' : (!usedLastYear ? 'nodata' : (value >= expectedByNow ? 'ahead' : 'behind'));
         const projected = daysElapsed>0 ? Math.round(value / daysElapsed * daysInMonth) : null;
         return { key:'product', label: product, value, format:'money', target, pctOfTarget, expectedByNow, paceStatus, projected, isProduct:true, usedLastYear };
       });
@@ -11915,7 +11993,7 @@
       .reduce((s,c)=> s + certRemaining(c), 0);
     const certOutstandingMarketingCount = state.certificates.filter(c=> c.purpose==='marketing' && certRemaining(c) > 0).length;
 
-    const PLAN_STATUS_LABEL = { ahead:'✅ в темпе', behind:'⚠ отстаём', notstarted:'—' };
+    const PLAN_STATUS_LABEL = { ahead:'✅ в темпе', behind:'⚠ отстаём', notstarted:'—', nodata:'📋 нет данных за прошлый год' };
     const forwardForecastHtml = `
       <div class="analytics-section" style="border-top:1px solid var(--line);padding-top:16px;margin-top:4px;">
         <h4 style="margin-top:0;">Забронировано вперёд</h4>
@@ -11929,7 +12007,8 @@
         `).join('')}
       </div>
     `;
-    const analyticsPanel_plan = (hasAnyPlan ? `        <div style="font-size:11.5px;color:var(--ink-soft);font-family:var(--font-mono);margin-bottom:10px;">День ${daysElapsed} из ${daysInMonth}. «Нужно к этому дню» — ориентир по тому, сколько от плана обычно набрано к этому числу в этом же месяце прошлого года (а не равномерно по дням — мероприятия бронируют заранее, и к концу месяца темп естественно замедляется, новые продажи уже идут в счёт следующего месяца). «Прогноз» — куда придём, если сохраним текущий темп.</div>
+    const historyDailyBtnHtml = `<div style="margin-bottom:10px;"><button class="btn btn-ghost" id="btn-add-history-daily">📝 Занести данные за этот день в прошлом году</button></div>`;
+    const analyticsPanel_plan = (hasAnyPlan ? historyDailyBtnHtml + `        <div style="font-size:11.5px;color:var(--ink-soft);font-family:var(--font-mono);margin-bottom:10px;">День ${daysElapsed} из ${daysInMonth}. «Нужно к этому дню» — ориентир по тому, сколько от плана обычно набрано к этому числу в этом же месяце прошлого года (мероприятия бронируют заранее, и к концу месяца темп естественно замедляется, поэтому не делим план поровну по дням). Если за этот день прошлого года данных нет, темп не считаем — вместо этого просим занести данные. «Прогноз» — куда придём, если сохраним текущий темп.</div>
         ${[...planProgress.filter(p=>p.target!==null), ...customPlanProgress].map(p=>`
           <div style="margin-bottom:16px;padding:10px 12px;background:var(--paper-2);border-radius:var(--radius);border-left:3px solid ${p.paceStatus==='ahead'?'var(--status-green)':(p.paceStatus==='behind'?'var(--status-red)':'var(--line-strong)')};">
             <div style="display:flex;justify-content:space-between;align-items:baseline;">
@@ -11937,8 +12016,11 @@
               <span style="font-size:12px;color:${p.paceStatus==='ahead'?'var(--status-green)':(p.paceStatus==='behind'?'var(--status-red)':'var(--ink-soft)')};">${PLAN_STATUS_LABEL[p.paceStatus]}</span>
             </div>
             <div style="font-family:var(--font-mono);font-size:15px;margin-top:4px;">${p.format==='money'?formatMoney(p.value):(p.format==='pct'?p.value+'%':p.value)} <span style="color:var(--ink-soft);font-size:12px;">из ${p.format==='money'?formatMoney(p.target):(p.format==='pct'?p.target+'%':p.target)}${p.format!=='pct'?' ('+p.pctOfTarget+'%)':''}</span></div>
-            <div class="stat-bar-track" style="margin-top:6px;"><div class="stat-bar-fill" style="width:${Math.min(100,p.format==='pct'?(p.target>0?Math.round(p.value/p.target*100):0):p.pctOfTarget)}%;background:${p.paceStatus==='behind'?'var(--status-red)':'var(--status-green)'};"></div></div>
-            ${daysElapsed>0 && p.format!=='pct' ? `<div style="font-size:11.5px;color:var(--ink-soft);margin-top:6px;">Нужно к этому дню: ${p.format==='money'?formatMoney(p.expectedByNow):p.expectedByNow} · Прогноз на конец месяца: ${p.format==='money'?formatMoney(p.projected):p.projected}${p.usedLastYear===false?' <span style="opacity:.75;">(равномерно по дням — нет данных за прошлый год)</span>':''}</div>` : ''}
+            <div class="stat-bar-track" style="margin-top:6px;"><div class="stat-bar-fill" style="width:${Math.min(100,p.format==='pct'?(p.target>0?Math.round(p.value/p.target*100):0):p.pctOfTarget)}%;background:${p.paceStatus==='behind'?'var(--status-red)':(p.paceStatus==='nodata'?'var(--line-strong)':'var(--status-green)')};"></div></div>
+            ${daysElapsed>0 && p.format!=='pct' ? (p.usedLastYear===false
+              ? `<div style="font-size:11.5px;color:var(--ink-soft);margin-top:6px;">Прогноз на конец месяца: ${p.format==='money'?formatMoney(p.projected):p.projected}. <span style="color:var(--accent);">📋 Нет данных за этот день прошлого года — нажмите «Занести данные» выше, чтобы увидеть темп.</span></div>`
+              : `<div style="font-size:11.5px;color:var(--ink-soft);margin-top:6px;">Нужно к этому дню: ${p.format==='money'?formatMoney(p.expectedByNow):p.expectedByNow} · Прогноз на конец месяца: ${p.format==='money'?formatMoney(p.projected):p.projected}</div>`
+            ) : ''}
           </div>
         `).join('')}
         ${productPlanProgress.length>0 ? `
@@ -11950,13 +12032,16 @@
               <span style="font-size:12px;color:${p.paceStatus==='ahead'?'var(--status-green)':(p.paceStatus==='behind'?'var(--status-red)':'var(--ink-soft)')};">${PLAN_STATUS_LABEL[p.paceStatus]}</span>
             </div>
             <div style="font-family:var(--font-mono);font-size:15px;margin-top:4px;">${formatMoney(p.value)} <span style="color:var(--ink-soft);font-size:12px;">из ${formatMoney(p.target)} (${p.pctOfTarget}%)</span></div>
-            <div class="stat-bar-track" style="margin-top:6px;"><div class="stat-bar-fill" style="width:${Math.min(100,p.pctOfTarget)}%;background:${p.paceStatus==='behind'?'var(--status-red)':'var(--status-green)'};"></div></div>
-            ${daysElapsed>0 ? `<div style="font-size:11.5px;color:var(--ink-soft);margin-top:6px;">Нужно к этому дню: ${formatMoney(p.expectedByNow)} · Прогноз на конец месяца: ${formatMoney(p.projected)}${p.usedLastYear===false?' <span style="opacity:.75;">(равномерно по дням — нет данных за прошлый год)</span>':''}</div>` : ''}
+            <div class="stat-bar-track" style="margin-top:6px;"><div class="stat-bar-fill" style="width:${Math.min(100,p.pctOfTarget)}%;background:${p.paceStatus==='behind'?'var(--status-red)':(p.paceStatus==='nodata'?'var(--line-strong)':'var(--status-green)')};"></div></div>
+            ${daysElapsed>0 ? (p.usedLastYear===false
+              ? `<div style="font-size:11.5px;color:var(--ink-soft);margin-top:6px;">Прогноз на конец месяца: ${formatMoney(p.projected)}. <span style="color:var(--accent);">📋 Нет данных за этот день прошлого года — нажмите «Занести данные» выше, чтобы увидеть темп.</span></div>`
+              : `<div style="font-size:11.5px;color:var(--ink-soft);margin-top:6px;">Нужно к этому дню: ${formatMoney(p.expectedByNow)} · Прогноз на конец месяца: ${formatMoney(p.projected)}</div>`
+            ) : ''}
           </div>
         `).join('')}
         ` : ''}
       </div>
-` : `        <div style="color:var(--ink-soft);font-size:13px;">План на этот месяц ещё не задан. Нажмите «🎯 План» вверху, чтобы задать целевые показатели.</div>
+` : historyDailyBtnHtml + `        <div style="color:var(--ink-soft);font-size:13px;">План на этот месяц ещё не задан. Нажмите «🎯 План» вверху, чтобы задать целевые показатели.</div>
       </div>
 `) + forwardForecastHtml;
 
@@ -13440,13 +13525,15 @@
         return {...m, target, pctOfTarget: target>0?Math.round(m.value/target*100):0, expectedByNow: null, paceStatus, projected: null};
       }
       const pctOfTarget = target>0 ? Math.round(m.value/target*100) : 0;
-      // ориентир на "сегодня" — по тому, какая доля месяца обычно набрана к этому числу (прошлый год),
-      // а не равномерно по дням: мероприятия бронируют заранее, и к концу месяца темп естественно
-      // замедляется (новые продажи уже идут в счёт следующего месяца)
+      // ориентир на "сегодня" — по тому, какая доля месяца обычно набрана к этому числу (прошлый год,
+      // из мероприятий/заявок или вручную внесённых данных — см. historyDaily). Без этих данных темп
+      // честно не считаем вовсе (раньше был запасной равномерный расчёт по дням — отказались от него,
+      // он вводил в заблуждение: мероприятия бронируют заранее, и к концу месяца темп естественно
+      // замедляется, "план/30×число" занижал реальный темп). Вместо этого — просьба внести данные.
       const lyRatio = daysElapsed>0 ? monthProgressRatioLastYear(m.key, planYm, daysElapsed) : null;
       const usedLastYear = lyRatio !== null;
-      const expectedByNow = daysElapsed>0 ? Math.round(target * (usedLastYear ? lyRatio : daysElapsed/daysInMonth)) : 0;
-      const paceStatus = daysElapsed===0 ? 'notstarted' : (m.value >= expectedByNow ? 'ahead' : 'behind');
+      const expectedByNow = usedLastYear ? Math.round(target * lyRatio) : null;
+      const paceStatus = daysElapsed===0 ? 'notstarted' : (!usedLastYear ? 'nodata' : (m.value >= expectedByNow ? 'ahead' : 'behind'));
       const projected = daysElapsed>0 ? Math.round(m.value / daysElapsed * daysInMonth) : null;
       return {...m, target, pctOfTarget, expectedByNow, paceStatus, projected, usedLastYear};
     });
@@ -13466,13 +13553,13 @@
         const pctOfTarget = target>0 ? Math.round(value/target*100) : 0;
         const lyRatio = daysElapsed>0 ? monthProgressRatioLastYear('product', planYm, daysElapsed, product) : null;
         const usedLastYear = lyRatio !== null;
-        const expectedByNow = daysElapsed>0 ? Math.round(target * (usedLastYear ? lyRatio : daysElapsed/daysInMonth)) : 0;
-        const paceStatus = daysElapsed===0 ? 'notstarted' : (value >= expectedByNow ? 'ahead' : 'behind');
+        const expectedByNow = usedLastYear ? Math.round(target * lyRatio) : null;
+        const paceStatus = daysElapsed===0 ? 'notstarted' : (!usedLastYear ? 'nodata' : (value >= expectedByNow ? 'ahead' : 'behind'));
         const projected = daysElapsed>0 ? Math.round(value / daysElapsed * daysInMonth) : null;
         return { key:'product', label: product, value, format:'money', target, pctOfTarget, expectedByNow, paceStatus, projected, isProduct:true, usedLastYear };
       });
     const hasAnyPlan = planProgress.some(p=>p.target !== null) || customPlanProgress.length > 0 || productPlanProgress.length > 0;
-    const PP_STATUS_LABEL = { ahead:'✅ в темпе', behind:'⚠ отстаём', notstarted:'—' };
+    const PP_STATUS_LABEL = { ahead:'✅ в темпе', behind:'⚠ отстаём', notstarted:'—', nodata:'📋 нет данных за прошлый год' };
 
     const rowHtml = p => `
           <div style="margin-bottom:16px;padding:10px 12px;background:var(--paper-2);border-radius:var(--radius);border-left:3px solid ${p.paceStatus==='ahead'?'var(--status-green)':(p.paceStatus==='behind'?'var(--status-red)':'var(--line-strong)')};">
@@ -13481,8 +13568,11 @@
               <span style="font-size:12px;color:${p.paceStatus==='ahead'?'var(--status-green)':(p.paceStatus==='behind'?'var(--status-red)':'var(--ink-soft)')};">${PP_STATUS_LABEL[p.paceStatus]}</span>
             </div>
             <div style="font-family:var(--font-mono);font-size:15px;margin-top:4px;">${p.format==='money'?formatMoney(p.value):(p.format==='pct'?p.value+'%':p.value)} <span style="color:var(--ink-soft);font-size:12px;">из ${p.format==='money'?formatMoney(p.target):(p.format==='pct'?p.target+'%':p.target)}${p.format!=='pct'?' ('+p.pctOfTarget+'%)':''}</span></div>
-            <div class="stat-bar-track" style="margin-top:6px;"><div class="stat-bar-fill" style="width:${Math.min(100,p.format==='pct'?(p.target>0?Math.round(p.value/p.target*100):0):p.pctOfTarget)}%;background:${p.paceStatus==='behind'?'var(--status-red)':'var(--status-green)'};"></div></div>
-            ${daysElapsed>0 && p.format!=='pct' ? `<div style="font-size:11.5px;color:var(--ink-soft);margin-top:6px;">Нужно к этому дню: ${p.format==='money'?formatMoney(p.expectedByNow):p.expectedByNow} · Прогноз на конец месяца: ${p.format==='money'?formatMoney(p.projected):p.projected}${p.usedLastYear===false?' <span style="opacity:.75;">(равномерно по дням — нет данных за прошлый год)</span>':''}</div>` : ''}
+            <div class="stat-bar-track" style="margin-top:6px;"><div class="stat-bar-fill" style="width:${Math.min(100,p.format==='pct'?(p.target>0?Math.round(p.value/p.target*100):0):p.pctOfTarget)}%;background:${p.paceStatus==='behind'?'var(--status-red)':(p.paceStatus==='nodata'?'var(--line-strong)':'var(--status-green)')};"></div></div>
+            ${daysElapsed>0 && p.format!=='pct' ? (p.usedLastYear===false
+              ? `<div style="font-size:11.5px;color:var(--ink-soft);margin-top:6px;">Прогноз на конец месяца: ${p.format==='money'?formatMoney(p.projected):p.projected}. <span style="color:var(--accent);">📋 Нет данных за этот день прошлого года — нажмите «Занести данные» выше, чтобы увидеть темп.</span></div>`
+              : `<div style="font-size:11.5px;color:var(--ink-soft);margin-top:6px;">Нужно к этому дню: ${p.format==='money'?formatMoney(p.expectedByNow):p.expectedByNow} · Прогноз на конец месяца: ${p.format==='money'?formatMoney(p.projected):p.projected}</div>`
+            ) : ''}
           </div>
     `;
     const productRowHtml = p => `
@@ -13492,8 +13582,11 @@
               <span style="font-size:12px;color:${p.paceStatus==='ahead'?'var(--status-green)':(p.paceStatus==='behind'?'var(--status-red)':'var(--ink-soft)')};">${PP_STATUS_LABEL[p.paceStatus]}</span>
             </div>
             <div style="font-family:var(--font-mono);font-size:15px;margin-top:4px;">${formatMoney(p.value)} <span style="color:var(--ink-soft);font-size:12px;">из ${formatMoney(p.target)} (${p.pctOfTarget}%)</span></div>
-            <div class="stat-bar-track" style="margin-top:6px;"><div class="stat-bar-fill" style="width:${Math.min(100,p.pctOfTarget)}%;background:${p.paceStatus==='behind'?'var(--status-red)':'var(--status-green)'};"></div></div>
-            ${daysElapsed>0 ? `<div style="font-size:11.5px;color:var(--ink-soft);margin-top:6px;">Нужно к этому дню: ${formatMoney(p.expectedByNow)} · Прогноз на конец месяца: ${formatMoney(p.projected)}${p.usedLastYear===false?' <span style="opacity:.75;">(равномерно по дням — нет данных за прошлый год)</span>':''}</div>` : ''}
+            <div class="stat-bar-track" style="margin-top:6px;"><div class="stat-bar-fill" style="width:${Math.min(100,p.pctOfTarget)}%;background:${p.paceStatus==='behind'?'var(--status-red)':(p.paceStatus==='nodata'?'var(--line-strong)':'var(--status-green)')};"></div></div>
+            ${daysElapsed>0 ? (p.usedLastYear===false
+              ? `<div style="font-size:11.5px;color:var(--ink-soft);margin-top:6px;">Прогноз на конец месяца: ${formatMoney(p.projected)}. <span style="color:var(--accent);">📋 Нет данных за этот день прошлого года — нажмите «Занести данные» выше, чтобы увидеть темп.</span></div>`
+              : `<div style="font-size:11.5px;color:var(--ink-soft);margin-top:6px;">Нужно к этому дню: ${formatMoney(p.expectedByNow)} · Прогноз на конец месяца: ${formatMoney(p.projected)}</div>`
+            ) : ''}
           </div>
     `;
 
@@ -13508,8 +13601,9 @@
       </div>
       <div class="analytics-section" style="padding:14px 16px;">
         <h4 style="margin-top:0;">🎯 Выполнение плана</h4>
+        <div style="margin-bottom:10px;"><button class="btn btn-ghost" id="btn-add-history-daily">📝 Занести данные за этот день в прошлом году</button></div>
         ${hasAnyPlan ? `
-          <div style="font-size:11.5px;color:var(--ink-soft);font-family:var(--font-mono);margin-bottom:10px;">День ${daysElapsed} из ${daysInMonth}. «Нужно к этому дню» — ориентир по тому, сколько от плана обычно набрано к этому числу в этом же месяце прошлого года (а не равномерно по дням — мероприятия бронируют заранее, и к концу месяца темп естественно замедляется, новые продажи уже идут в счёт следующего месяца). «Прогноз» — куда придём, если сохраним текущий темп.</div>
+          <div style="font-size:11.5px;color:var(--ink-soft);font-family:var(--font-mono);margin-bottom:10px;">День ${daysElapsed} из ${daysInMonth}. «Нужно к этому дню» — ориентир по тому, сколько от плана обычно набрано к этому числу в этом же месяце прошлого года (мероприятия бронируют заранее, и к концу месяца темп естественно замедляется, поэтому не делим план поровну по дням). Если за этот день прошлого года данных нет, темп не считаем — вместо этого просим занести данные. «Прогноз» — куда придём, если сохраним текущий темп.</div>
           ${[...planProgress.filter(p=>p.target!==null), ...customPlanProgress].map(rowHtml).join('')}
           ${productPlanProgress.length>0 ? `<h4 style="margin-top:4px;">По продуктам (сезонность)</h4>${productPlanProgress.map(productRowHtml).join('')}` : ''}
         ` : `<div style="color:var(--ink-soft);font-size:13px;">План на этот месяц ещё не задан.</div>`}
@@ -13524,6 +13618,12 @@
     if(prev) prev.onclick = ()=>{ state.analyticsCursor = new Date(state.analyticsCursor.getFullYear(), state.analyticsCursor.getMonth()-1, 1); render(); };
     if(next) next.onclick = ()=>{ state.analyticsCursor = new Date(state.analyticsCursor.getFullYear(), state.analyticsCursor.getMonth()+1, 1); render(); };
     if(today) today.onclick = ()=>{ state.analyticsCursor = new Date(new Date().getFullYear(), new Date().getMonth(), 1); render(); };
+    const addHistoryDailyBtn = document.getElementById('btn-add-history-daily');
+    if(addHistoryDailyBtn) addHistoryDailyBtn.onclick = ()=>{
+      state.historyDailyEditDate = null;
+      state.modal = {type:'history-daily-edit', returnTo: null};
+      render();
+    };
   }
 
   function renderPersonalHostessSalaryView(monthLabel, hostessSalary, hostessSalaryH1, hostessSalaryH2, totalHostessSalary, hostessAdjustmentDetails, hostessBonusesForMonth){
@@ -14162,6 +14262,7 @@
         if(Array.isArray(pendingImportData.suppliers)) await rawReplace('suppliers', 'suppliers', '_suppliersBaseline', pendingImportData.suppliers);
         if(Array.isArray(pendingImportData.stockReceipts)) await rawReplace('stockReceipts', 'stock-receipts', '_stockReceiptsBaseline', pendingImportData.stockReceipts);
         if(Array.isArray(pendingImportData.daysOff)) await rawReplace('daysOff', 'days-off', '_daysOffBaseline', pendingImportData.daysOff);
+        if(Array.isArray(pendingImportData.historyDaily)) await rawReplace('historyDaily', 'history-daily', '_historyDailyBaseline', pendingImportData.historyDaily);
         if(Array.isArray(pendingImportData.customExpenseCategories)) await rawReplace('customExpenseCategories', 'custom-expense-categories', '_customExpenseCategoriesBaseline', pendingImportData.customExpenseCategories);
         if(Array.isArray(pendingImportData.customMarketingDirections)) await rawReplace('customMarketingDirections', 'custom-marketing-directions', '_customMarketingDirectionsBaseline', pendingImportData.customMarketingDirections);
         pendingImportData = null;
@@ -16003,6 +16104,12 @@
       state.modal = {type:'yearsummary-edit'};
       render();
     };
+    const addHistoryDailyBtn = overlay.querySelector('#btn-add-history-daily');
+    if(addHistoryDailyBtn) addHistoryDailyBtn.onclick = ()=>{
+      state.historyDailyEditDate = null;
+      state.modal = {type:'history-daily-edit', returnTo: {type:'analytics-panel', panel: state.modal.panel}};
+      render();
+    };
   }
 
   // Финмодель: из чего состоит выручка и расходы месяца, с долей каждой строки от выручки,
@@ -16688,6 +16795,123 @@
       .reduce((s,e)=> s + eventRevenueForecast(e), 0);
   }
 
+  // дата по умолчанию для "Занести данные за этот день в прошлом году" — ровно год назад от сегодня
+  function defaultHistoryDailyDate(){
+    const t = new Date();
+    return fmtDate(new Date(t.getFullYear()-1, t.getMonth(), t.getDate()));
+  }
+
+  function renderHistoryDailyEditModal(){
+    const editDate = state.historyDailyEditDate || defaultHistoryDailyDate();
+    const existing = state.historyDaily.find(h=>h.date===editDate) || {};
+    const lyYm = editDate.slice(0,7);
+    const [lyY, lyM] = lyYm.split('-').map(Number);
+    const monthRows = state.historyDaily.filter(h=> h.date && h.date.startsWith(lyYm)).sort((a,b)=> a.date.localeCompare(b.date));
+    return `
+      <div class="modal" style="max-width:460px;">
+        <div class="modal-head">
+          <h3>📝 Данные за прошлый год</h3>
+          <button class="modal-close">×</button>
+        </div>
+        <div class="modal-body">
+          <div style="font-size:12px;color:var(--ink-soft);margin-top:-6px;">Впишите, что реально было в этот день год назад (с бумажных записей) — выручка, число заявок/мероприятий/гостей. Система использует эти цифры, чтобы сравнивать темп этого года день-в-день с прошлым годом (см. «Выполнение плана»). Можно вносить не только за сегодняшнее число, но и подряд за прошедшие дни месяца — чем больше дней внесено, тем точнее сравнение.</div>
+          <div class="field">
+            <label>Дата (в прошлом году)</label>
+            <input type="date" id="hd-date" value="${editDate}">
+          </div>
+          <div class="row2">
+            <div class="field">
+              <label>Выручка за этот день (₽)</label>
+              <input type="number" id="hd-revenue" value="${existing.revenue!==undefined&&existing.revenue!==null?existing.revenue:''}" min="0" placeholder="0">
+            </div>
+            <div class="field">
+              <label>Заявок за этот день</label>
+              <input type="number" id="hd-leads" value="${existing.leadsCount!==undefined&&existing.leadsCount!==null?existing.leadsCount:''}" min="0" placeholder="0">
+            </div>
+          </div>
+          <div class="row2">
+            <div class="field">
+              <label>Мероприятий за этот день</label>
+              <input type="number" id="hd-events" value="${existing.eventsCount!==undefined&&existing.eventsCount!==null?existing.eventsCount:''}" min="0" placeholder="0">
+            </div>
+            <div class="field">
+              <label>Гостей за этот день</label>
+              <input type="number" id="hd-guests" value="${existing.guestsCount!==undefined&&existing.guestsCount!==null?existing.guestsCount:''}" min="0" placeholder="0">
+            </div>
+          </div>
+          <div class="modal-actions">
+            <div>${existing.id ? `<button class="btn-danger" id="hd-del">Удалить запись</button>` : '<span></span>'}</div>
+            <div style="display:flex;gap:8px;">
+              <button class="btn btn-ghost" id="hd-cancel">Отмена</button>
+              <button class="btn btn-primary" id="hd-save">Сохранить</button>
+            </div>
+          </div>
+          ${monthRows.length>0 ? `
+          <div style="border-top:1px solid var(--line);padding-top:12px;margin-top:4px;">
+            <label style="font-family:var(--font-display);font-size:13px;font-weight:600;">Уже внесено за ${escapeHtml(MONTHS[lyM-1])} ${lyY}:</label>
+            <div style="margin-top:6px;">
+              ${monthRows.map(h=>`
+                <div class="stat-row hd-row" data-hd-date="${h.date}" style="cursor:pointer;padding:4px 0;">
+                  <div class="stat-label" style="font-size:12.5px;">${formatDateText(h.date)}${h.date===editDate?' <span style="color:var(--accent);">(редактируете)</span>':''}</div>
+                  <div style="flex:1;font-family:var(--font-mono);font-size:12.5px;text-align:right;color:var(--ink-soft);">${h.revenue?formatMoney(h.revenue):'—'}${h.leadsCount?' · '+h.leadsCount+' зяв.':''}</div>
+                </div>
+              `).join('')}
+            </div>
+          </div>
+          ` : ''}
+        </div>
+      </div>
+    `;
+  }
+
+  function attachHistoryDailyEditModalEvents(overlay){
+    const returnTo = state.modal.returnTo || null;
+    const closeToReturn = ()=>{ state.modal = returnTo; render(); };
+    const cancelBtn = overlay.querySelector('#hd-cancel');
+    if(cancelBtn) cancelBtn.onclick = closeToReturn;
+    const dateInput = overlay.querySelector('#hd-date');
+    if(dateInput) dateInput.onchange = ()=>{
+      state.historyDailyEditDate = dateInput.value;
+      render();
+    };
+    const delBtn = overlay.querySelector('#hd-del');
+    if(delBtn) delBtn.onclick = async ()=>{
+      const editDate = state.historyDailyEditDate || defaultHistoryDailyDate();
+      state.historyDaily = state.historyDaily.filter(h=>h.date!==editDate);
+      await saveHistoryDaily();
+      render();
+    };
+    overlay.querySelectorAll('.hd-row').forEach(row=>{
+      row.onclick = ()=>{
+        state.historyDailyEditDate = row.dataset.hdDate;
+        render();
+      };
+    });
+    const saveBtn = overlay.querySelector('#hd-save');
+    if(saveBtn) saveBtn.onclick = async ()=>{
+      const dateVal = overlay.querySelector('#hd-date').value;
+      if(!dateVal){ overlay.querySelector('#hd-date').style.borderColor = 'var(--danger)'; return; }
+      const numOrNull = v=> (v!=='' && v!==null && v!==undefined && !isNaN(v)) ? Number(v) : null;
+      const revenueVal = numOrNull(overlay.querySelector('#hd-revenue').value);
+      const leadsVal = numOrNull(overlay.querySelector('#hd-leads').value);
+      const eventsVal = numOrNull(overlay.querySelector('#hd-events').value);
+      const guestsVal = numOrNull(overlay.querySelector('#hd-guests').value);
+      const idx = state.historyDaily.findIndex(h=>h.date===dateVal);
+      const record = {
+        id: idx>=0 ? state.historyDaily[idx].id : uid(),
+        date: dateVal,
+        revenue: revenueVal,
+        leadsCount: leadsVal,
+        eventsCount: eventsVal,
+        guestsCount: guestsVal,
+      };
+      if(idx>=0) state.historyDaily[idx] = record; else state.historyDaily.push(record);
+      await saveHistoryDaily();
+      state.historyDailyEditDate = dateVal;
+      render();
+    };
+  }
+
   // Какая доля месячного итога ОБЫЧНО уже набрана к этому числу — по факту того же месяца ГОД НАЗАД,
   // а не равномерно по дням. Нужно для "Выполнения плана": мероприятия бронируют заранее, и к концу
   // месяца темп естественно замедляется (новые продажи уже идут в счёт СЛЕДУЮЩЕГО месяца), поэтому
@@ -16699,24 +16923,37 @@
     const lyYm = (y-1)+'-'+pad(m);
     const lyDaysInMonth = new Date(y-1, m, 0).getDate();
     const cutoffDate = lyYm+'-'+pad(Math.min(cutoffDayNum, lyDaysInMonth));
+    // ручные записи "за этот день прошлого года" (см. historyDaily/saveHistoryDaily) — заносятся
+    // менеджерами с бумажных записей, когда в самом приложении истории за этот период ещё нет
+    // (нет мероприятий/заявок с такими датами). Складываем с тем, что уже есть в приложении, а не
+    // подменяем — если за часть месяца данные пришли из реальных мероприятий, а за часть — вручную,
+    // обе суммы просто складываются.
     function valueByCutoff(cutoff){
       const inRange = (dateStr)=> dateStr && dateStr.startsWith(lyYm) && (!cutoff || dateStr <= cutoff);
+      const manualRows = state.historyDaily.filter(h=> inRange(h.date));
       switch(key){
         case 'revenue': {
           const evRev = state.events.filter(e=> inRange(e.date)).reduce((s,e)=> s+eventRevenueForecast(e), 0);
           const certRev = state.certificates.filter(c=> inRange(c.saleDate) && c.purpose!=='marketing' && c.status!=='refunded').reduce((s,c)=> s+((c.amount!==undefined&&c.amount!==null&&!isNaN(c.amount))?Number(c.amount):0), 0);
           const itemRev = state.itemSales.filter(x=> inRange(x.date)).reduce((s,x)=> s+((x.revenue!==undefined&&x.revenue!==null&&!isNaN(x.revenue))?Number(x.revenue):0), 0);
           const orderRev = state.orders.filter(x=> inRange(x.date)).reduce((s,x)=> s+((x.revenue!==undefined&&x.revenue!==null&&!isNaN(x.revenue))?Number(x.revenue):0), 0);
-          return evRev + certRev + itemRev + orderRev;
+          const manualRev = manualRows.reduce((s,h)=> s+((h.revenue!==undefined&&h.revenue!==null&&!isNaN(h.revenue))?Number(h.revenue):0), 0);
+          return evRev + certRev + itemRev + orderRev + manualRev;
         }
         case 'profit':
           return state.events.filter(e=> inRange(e.date)).reduce((s,e)=> s+eventProfitForecast(e), 0);
-        case 'eventsCount':
-          return state.events.filter(e=> inRange(e.date)).length;
-        case 'guestsCount':
-          return state.events.filter(e=> inRange(e.date)).reduce((s,e)=> s+((e.guests!==undefined&&e.guests!==null&&!isNaN(e.guests))?Number(e.guests):0), 0);
-        case 'leadsCount':
-          return state.leads.filter(l=> l.requestDate && l.requestDate.startsWith(lyYm) && (!cutoff || l.requestDate<=cutoff)).length;
+        case 'eventsCount': {
+          const manualCount = manualRows.reduce((s,h)=> s+((h.eventsCount!==undefined&&h.eventsCount!==null&&!isNaN(h.eventsCount))?Number(h.eventsCount):0), 0);
+          return state.events.filter(e=> inRange(e.date)).length + manualCount;
+        }
+        case 'guestsCount': {
+          const manualGuests = manualRows.reduce((s,h)=> s+((h.guestsCount!==undefined&&h.guestsCount!==null&&!isNaN(h.guestsCount))?Number(h.guestsCount):0), 0);
+          return state.events.filter(e=> inRange(e.date)).reduce((s,e)=> s+((e.guests!==undefined&&e.guests!==null&&!isNaN(e.guests))?Number(e.guests):0), 0) + manualGuests;
+        }
+        case 'leadsCount': {
+          const manualLeads = manualRows.reduce((s,h)=> s+((h.leadsCount!==undefined&&h.leadsCount!==null&&!isNaN(h.leadsCount))?Number(h.leadsCount):0), 0);
+          return state.leads.filter(l=> l.requestDate && l.requestDate.startsWith(lyYm) && (!cutoff || l.requestDate<=cutoff)).length + manualLeads;
+        }
         case 'product':
           return state.events.filter(e=> inRange(e.date) && e.product===product).reduce((s,e)=> s+eventRevenueForecast(e), 0);
         default:
@@ -16775,7 +17012,7 @@
             <label>Дата</label>
             <input type="date" id="dr-date" value="${dateStr}">
           </div>
-          <div style="font-size:11.5px;color:var(--ink-soft);font-family:var(--font-mono);margin-top:-6px;">«Руб.» у ПРИБЫЛИ — цифры за сам этот день. ЗАЯВКИ и ВЫРУЧКА (и их разбивка по категориям/Частным/Расписанию/Заказам/Сертификатам) — нарастающим итогом с начала месяца по эту дату. Проценты у ЗАЯВОК и у ВЫРУЧКИ/ПРИБЫЛИ — нарастающим итогом с начала месяца по эту дату, относительно месячного плана. Остальные проценты в скобках — доля от суммы строкой выше. «Чистая прибыль» (видна только руководителю), «% заполняемости» и «Средний чек» — тоже про весь месяц целиком, а не про этот день: заполняемость показывает, насколько заполнен месяц (включая уже забронированные будущие даты), а средний чек за один день слишком случаен, поэтому считается нарастающим итогом с начала месяца.</div>
+          <div style="font-size:11.5px;color:var(--ink-soft);font-family:var(--font-mono);margin-top:-6px;">«Руб.» у ПРИБЫЛИ — цифры за сам этот день. ЗАЯВКИ и ВЫРУЧКА (и их разбивка по категориям/Частным/Расписанию/Заказам/Сертификатам) — нарастающим итогом с начала месяца по эту дату. Проценты у ЗАЯВОК и у ВЫРУЧКИ/ПРИБЫЛИ — нарастающим итогом с начала месяца по эту дату, относительно месячного плана. «Темп» у ЗАЯВОК/ВЫРУЧКИ/ПРИБЫЛИ — сравнение с тем, сколько от плана ОБЫЧНО набрано к этому же числу в этом месяце прошлого года (а не поровну по дням — мероприятия бронируют заранее, и к концу месяца темп естественно замедляется); если данных за прошлый год по этому дню нет — темп честно не считается, вместо него пометка «нет данных» (занести их можно в «Выполнение плана»). Остальные проценты в скобках (у категорий заявок, у Частных/Расписания/Заказов/Сертификатов и у категорий внутри Частных) — это % выполнения МЕСЯЧНОГО ПЛАНА именно по этой категории/потоку (план задаётся в настройке плана на месяц), а не доля от суммы строкой выше. Если план по категории не задан — вместо процента честно показывается «план не задан». «Чистая прибыль» (видна только руководителю), «% заполняемости» и «Средний чек» — тоже про весь месяц целиком, а не про этот день: заполняемость показывает, насколько заполнен месяц (включая уже забронированные будущие даты), а средний чек за один день слишком случаен, поэтому считается нарастающим итогом с начала месяца.</div>
           <textarea id="dr-text" readonly style="width:100%;box-sizing:border-box;min-height:420px;font-family:var(--font-mono);font-size:13px;line-height:1.5;border:1px solid var(--line-strong);border-radius:var(--radius);padding:10px 12px;resize:vertical;background:var(--paper-2);">${escapeHtml(text)}</textarea>
           <div class="modal-actions">
             <span></span>
@@ -16881,6 +17118,26 @@
             `;}).join('')}
           </div>
           <div class="field" style="border-top:1px solid var(--line);padding-top:16px;">
+            <label style="font-family:var(--font-display);font-size:15px;font-weight:600;">План по категориям повода</label>
+            <div style="font-size:11.5px;color:var(--ink-soft);margin-top:-4px;margin-bottom:8px;">Для «Отчёта дня» — чтобы % рядом с каждой категорией (Дни рождения, Корпоративы и т.д.) показывал выполнение плана именно по ней, а не долю от общего итога. Необязательно заполнять все — у кого пусто, у того вместо % будет «план не задан».</div>
+            ${DAILY_REPORT_LEAD_CATS.map(cat=>{
+              const leadsVal = (plan.byLeadCat && plan.byLeadCat[cat]!==undefined && plan.byLeadCat[cat]!==null) ? plan.byLeadCat[cat] : '';
+              const revVal = (plan.byPrivateCat && plan.byPrivateCat[cat]!==undefined && plan.byPrivateCat[cat]!==null) ? plan.byPrivateCat[cat] : '';
+              const showRevenue = cat !== 'Заказ';
+              return `
+              <div class="row2" style="grid-template-columns: 1.1fr 95px ${showRevenue?'105px':''}; margin-bottom:4px;align-items:center;">
+                <label style="font-size:13px;margin:0;">${escapeHtml(cat)}</label>
+                <input type="number" class="plan-catlead-input" data-cat="${escapeHtml(cat)}" value="${leadsVal}" min="0" step="1" placeholder="заявок, шт">
+                ${showRevenue ? `<input type="number" class="plan-catrev-input" data-cat="${escapeHtml(cat)}" value="${revVal}" min="0" step="1000" placeholder="выручка, ₽">` : ''}
+              </div>
+            `;}).join('')}
+            <div class="row2" style="grid-template-columns: 1.1fr 95px 105px; margin-top:8px;align-items:center;">
+              <label style="font-size:13px;margin:0;">Заказы / Сертификаты</label>
+              <input type="number" id="plan-orders-revenue" value="${plan.ordersRevenuePlan!==undefined&&plan.ordersRevenuePlan!==null?plan.ordersRevenuePlan:''}" min="0" step="1000" placeholder="заказы, ₽">
+              <input type="number" id="plan-certs-revenue" value="${plan.certsRevenuePlan!==undefined&&plan.certsRevenuePlan!==null?plan.certsRevenuePlan:''}" min="0" step="1000" placeholder="сертиф., ₽">
+            </div>
+          </div>
+          <div class="field" style="border-top:1px solid var(--line);padding-top:16px;">
             <label style="font-family:var(--font-display);font-size:15px;font-weight:600;">Свои показатели</label>
             <div style="font-size:11.5px;color:var(--ink-soft);margin-top:-4px;margin-bottom:8px;">Для показателей, которых нет в списке выше — например, «Отзывов собрано» или «Новых подписчиков». Факт по ним обновляете вручную.</div>
             <div id="plan-custom-list">${renderPlanCustomRows(plan.custom||[])}</div>
@@ -16978,6 +17235,16 @@
         if(v!=='') byProduct[inp.dataset.product] = parseInt(v);
       });
       const byProductSum = Object.values(byProduct).reduce((s,v)=>s+v, 0);
+      const byLeadCat = {};
+      overlay.querySelectorAll('.plan-catlead-input').forEach(inp=>{
+        const v = inp.value.trim();
+        if(v!=='') byLeadCat[inp.dataset.cat] = parseInt(v);
+      });
+      const byPrivateCat = {};
+      overlay.querySelectorAll('.plan-catrev-input').forEach(inp=>{
+        const v = inp.value.trim();
+        if(v!=='') byPrivateCat[inp.dataset.cat] = parseInt(v);
+      });
       let revenueVal = readVal('plan-revenue');
       // если общая выручка не задана явно, а по продуктам что-то вписано — считаем её суммой
       if(revenueVal===null && byProductSum>0) revenueVal = byProductSum;
@@ -16998,6 +17265,10 @@
         conversionPct: readVal('plan-conversion'),
         custom: cleanedCustom,
         byProduct,
+        byLeadCat,
+        byPrivateCat,
+        ordersRevenuePlan: readVal('plan-orders-revenue'),
+        certsRevenuePlan: readVal('plan-certs-revenue'),
       };
       overlay.remove();
       requireAdminUnlock(async ()=>{
