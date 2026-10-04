@@ -11381,21 +11381,35 @@
     DAILY_REPORT_PRIVATE_CATS.forEach(c=>{ privateByCatMTD[c]=0; });
     privateEventsMTD.forEach(e=>{ const cat=dailyReportEventCategory(e); privateByCatMTD[cat]=(privateByCatMTD[cat]||0)+eventRevenueForecast(e); });
 
-    // то же самое (Частные/Расписание/Заказы/Сертификаты), но ПРОГНОЗ на весь месяц целиком — включая
-    // уже забронированные будущие даты, а не только «по эту дату» (как privateRevenueMTD и т.п. выше) —
+    // то же самое (Частные/Расписание/Заказы/Сертификаты/Изделия/Прочее), но ПРОГНОЗ на весь месяц целиком —
+    // включая уже забронированные будущие даты, а не только «по эту дату» (как privateRevenueMTD и т.п. выше) —
     // это декомпозиция строки «Выручка (прогноз)» по потокам: из чего складывается общая сумма, которую
     // студия планирует получить за месяц (то, что уже продано/забронировано, по каждому потоку отдельно).
+    // Источники для каждого потока взяты ТЕ ЖЕ, что и в computeNetProfitSnapshot() (а не MTD-варианты выше —
+    // те считают "Заказы" по зеркальным записям в "Книге", а не по самому разделу "Заказы"), поэтому сумма
+    // потоков ниже сходится день в день с «Выручка (прогноз)» (которая и есть npTotalRevenue).
     const eventsWholeMonth = state.events.filter(e=>e.date && e.date.startsWith(ym));
     const privateRevenueForecast = eventsWholeMonth.filter(e=>!isSchedule(e)).reduce((s,e)=>s+eventRevenueForecast(e),0);
     const scheduleRevenueForecast = eventsWholeMonth.filter(isSchedule).reduce((s,e)=>s+eventRevenueForecast(e),0);
     const privateByCatForecast = {};
     DAILY_REPORT_PRIVATE_CATS.forEach(c=>{ privateByCatForecast[c]=0; });
     eventsWholeMonth.filter(e=>!isSchedule(e)).forEach(e=>{ const cat=dailyReportEventCategory(e); privateByCatForecast[cat]=(privateByCatForecast[cat]||0)+eventRevenueForecast(e); });
-    const ordersRevenueForecast = state.incomes.filter(i=>i.date && i.date.startsWith(ym) && isOrderLike(i))
-      .reduce((s,i)=>s+((i.amount!==undefined&&i.amount!==null&&!isNaN(i.amount))?Number(i.amount):0),0);
+    // "Заказы" — из самого раздела "Заказы" (state.orders), как в npOrdersRevenue, а не из зеркальных записей
+    // "Книги" — у заказа может не быть зеркальной записи в Книге вовсе (если он не заведён через "Книга → Доходы").
+    const ordersRevenueForecast = state.orders.filter(x=>x.date && x.date.startsWith(ym))
+      .reduce((s,x)=>s+((x.revenue!==undefined&&x.revenue!==null&&!isNaN(x.revenue))?Number(x.revenue):0),0);
     const certsRevenueForecast = state.certificates.filter(c=>c.saleDate && c.saleDate.startsWith(ym) && c.purpose!=='marketing' && c.status!=='refunded')
       .reduce((s,c)=>s+((c.amount!==undefined&&c.amount!==null&&!isNaN(c.amount))?Number(c.amount):0),0);
-    const revenueForecastByStreams = privateRevenueForecast + scheduleRevenueForecast + ordersRevenueForecast + certsRevenueForecast;
+    // "Изделия" — продажа готовых изделий со стеллажа (раздел "Сертификаты / Изделия → Изделия"), как в npItemSalesRevenue.
+    const itemSalesRevenueForecast = state.itemSales.filter(x=>x.date && x.date.startsWith(ym))
+      .reduce((s,x)=>s+((x.revenue!==undefined&&x.revenue!==null&&!isNaN(x.revenue))?Number(x.revenue):0),0);
+    // "Прочее" — доходы, вписанные прямо в "Книгу → Доходы" вручную, не привязанные ни к одному из потоков выше
+    // (как npOtherIncomeRevenue) — без этой строки сумма потоков не сходилась бы с «Выручка (прогноз)».
+    const certIncomeIdsSetDR = new Set(state.certificates.filter(c=>c.incomeId).map(c=>c.incomeId));
+    const otherIncomeRevenueForecast = state.incomes
+      .filter(i=>i.date && i.date.startsWith(ym) && !i.autoFromEvent && !i.autoFromPayment && !i.itemSaleId && !i.orderId && !i.eventId && !i.safeTransfer && !certIncomeIdsSetDR.has(i.id))
+      .reduce((s,i)=>s+((i.amount!==undefined&&i.amount!==null&&!isNaN(i.amount))?Number(i.amount):0),0);
+    const revenueForecastByStreams = privateRevenueForecast + scheduleRevenueForecast + ordersRevenueForecast + certsRevenueForecast + itemSalesRevenueForecast + otherIncomeRevenueForecast;
 
     // ПРИБЫЛЬ — по мероприятиям (выручка минус материалы и ЗП мастерам), плюс заказы (за вычетом доли мастера),
     // плюс сертификаты целиком (у них нет своей себестоимости — общие расходы студии сюда не входят,
@@ -11459,7 +11473,7 @@
       revenueToday, revenueMTD, revenuePlanPct, revenuePace, revenueForecastMonth,
       privateRevenueToday, privateByCatToday, scheduleRevenueToday, ordersRevenueToday, certsRevenueToday,
       privateRevenueMTD, privateByCatMTD, scheduleRevenueMTD, ordersRevenueMTD, certsRevenueMTD,
-      privateRevenueForecast, privateByCatForecast, scheduleRevenueForecast, ordersRevenueForecast, certsRevenueForecast, revenueForecastByStreams,
+      privateRevenueForecast, privateByCatForecast, scheduleRevenueForecast, ordersRevenueForecast, certsRevenueForecast, itemSalesRevenueForecast, otherIncomeRevenueForecast, revenueForecastByStreams,
       scheduleRevenuePlan, privateRevenuePlan, ordersRevenuePlan, certsRevenuePlan,
       profitToday, profitPlanPct, profitPace,
       convDayPct, convMonthPct, soldToday, soldMonthAll, leadsMonthAllCount: leadsMonthAll.length, rentabilityPct,
@@ -11471,7 +11485,7 @@
   // у уже прошедшего дня их нужно замораживать (см. computeDailyReport/recordDailyReportSnapshot),
   // иначе они молча пересчитывались бы из сегодняшних живых данных и росли даже у отчёта за давно
   // прошедшую дату. netProfitMonth — отдельно, он не всегда посчитан (не у каждой роли).
-  const DAILY_REPORT_FORECAST_FIELDS = ['revenueForecastMonth','privateRevenueForecast','scheduleRevenueForecast','ordersRevenueForecast','certsRevenueForecast','revenueForecastByStreams'];
+  const DAILY_REPORT_FORECAST_FIELDS = ['revenueForecastMonth','privateRevenueForecast','scheduleRevenueForecast','ordersRevenueForecast','certsRevenueForecast','itemSalesRevenueForecast','otherIncomeRevenueForecast','revenueForecastByStreams'];
   // "Отчёт дня" для конкретной даты — поверх "живых" цифр (computeDailyReportLive) подставляет
   // ЗАМОРОЖЕННЫЙ на тот день снимок у полей из DAILY_REPORT_FORECAST_FIELDS плюс netProfitMonth и
   // privateByCatForecast. "Сегодня" снимком не подменяем — там цифра должна быть живой, день ещё не
@@ -11561,6 +11575,12 @@
     lines.push(`▪️Заказы (прогноз) ${rubStr(d.ordersRevenueForecast)} руб. (${catPctStr(d.ordersRevenueForecast, d.ordersRevenuePlan)})`);
     lines.push('');
     lines.push(`▪️Сертификаты (прогноз) ${rubStr(d.certsRevenueForecast)} руб. (${catPctStr(d.certsRevenueForecast, d.certsRevenuePlan)})`);
+    lines.push('');
+    lines.push(`▪️Изделия (прогноз) ${rubStr(d.itemSalesRevenueForecast)} руб. (${catPctStr(d.itemSalesRevenueForecast, null)})`);
+    if(d.otherIncomeRevenueForecast){
+      lines.push('');
+      lines.push(`▪️Прочее (прогноз) ${rubStr(d.otherIncomeRevenueForecast)} руб. (${catPctStr(d.otherIncomeRevenueForecast, null)})`);
+    }
     lines.push('');
     lines.push(`▪️Итого (прогноз): ${rubStr(d.revenueForecastByStreams)} руб.`);
     lines.push('');
