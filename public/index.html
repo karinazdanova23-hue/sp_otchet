@@ -8973,11 +8973,30 @@
       return true;
     }
 
+    // скачивание через Blob + object URL, а не canvas.toDataURL() + прямая ссылка-"data:" — в Safari
+    // (а Карина и часть менеджеров заходят именно с Mac/Safari) скачивание по клику на <a download>
+    // с длинной "data:"-ссылкой ненадёжно работает именно для JPEG (PNG обычно проходит, JPEG может
+    // просто не скачаться — ни ошибки, ни файла), а Blob-ссылка скачивается во всех браузерах одинаково.
     function downloadAs(format, ext, mime){
-      const link = document.createElement('a');
-      link.download = 'Сертификат ' + (numberEl.value ? '№'+numberEl.value : '') + '.' + ext;
-      link.href = canvas.toDataURL(mime, mime==='image/jpeg' ? 0.92 : undefined);
-      link.click();
+      return new Promise((resolve)=>{
+        const quality = mime==='image/jpeg' ? 0.92 : undefined;
+        canvas.toBlob((blob)=>{
+          if(!blob){
+            showGapWarningBanner('Не получилось подготовить файл сертификата для скачивания — попробуйте ещё раз.');
+            resolve(false);
+            return;
+          }
+          const url = URL.createObjectURL(blob);
+          const link = document.createElement('a');
+          link.download = 'Сертификат ' + (numberEl.value ? '№'+numberEl.value : '') + '.' + ext;
+          link.href = url;
+          document.body.appendChild(link);
+          link.click();
+          document.body.removeChild(link);
+          setTimeout(()=> URL.revokeObjectURL(url), 2000);
+          resolve(true);
+        }, mime, quality);
+      });
     }
     const downloadPngBtn = overlay.querySelector('#gc-download-png');
     const downloadJpgBtn = overlay.querySelector('#gc-download-jpg');
@@ -8991,7 +9010,7 @@
       try{
         const ok = await saveToBookAndCertificates();
         if(!ok) return;
-        downloadAs(format, ext, mime);
+        await downloadAs(format, ext, mime);
       } finally {
         downloadInFlight = false;
         downloadPngBtn.disabled = false; downloadJpgBtn.disabled = false;
