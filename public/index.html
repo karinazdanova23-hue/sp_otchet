@@ -527,6 +527,35 @@
   .rating-btn:hover{ border-color: var(--ink); }
   .rating-btn.active{ background: var(--ink); color: var(--white); border-color: var(--ink); }
 
+  /* вкладка "Отчёты": лента отчётов мастеров с реакциями и комментариями */
+  .rf-card{ background: var(--white); border:1px solid var(--line-strong); border-radius: var(--radius); padding: 14px 16px; margin-bottom: 14px; }
+  .rf-head{ display:flex; justify-content:space-between; gap:10px; flex-wrap:wrap; align-items:baseline; }
+  .rf-title{ font-family: var(--font-display); font-size:16px; font-weight:600; }
+  .rf-meta{ font-size:12.5px; color: var(--ink-soft); font-family: var(--font-mono); margin-top:2px; }
+  .rf-rating{ font-family: var(--font-mono); font-weight:600; font-size:13px; padding:2px 9px; border-radius:999px; background:#E3EEE0; color: var(--status-green); white-space:nowrap; }
+  .rf-rating.low{ background:#F3E1DE; color: var(--status-red); }
+  .rf-field{ font-size:13.5px; margin-top:8px; line-height:1.45; }
+  .rf-field b{ font-weight:600; }
+  .rf-reactions{ display:flex; gap:8px; flex-wrap:wrap; margin-top:12px; }
+  .rf-react-btn{
+    display:inline-flex; align-items:center; gap:6px; border:1px solid var(--line-strong); background: var(--paper);
+    border-radius:999px; padding:5px 12px; font-size:14px; cursor:pointer; font-family: var(--font-body); color: var(--ink);
+  }
+  .rf-react-btn:hover{ border-color: var(--ink); }
+  .rf-react-btn.mine{ background: var(--ink); color: var(--white); border-color: var(--ink); }
+  .rf-react-btn .n{ font-family: var(--font-mono); font-size:12.5px; }
+  .rf-comments{ margin-top:12px; border-top:1px solid var(--line); padding-top:10px; display:flex; flex-direction:column; gap:8px; }
+  .rf-comment{ font-size:13.5px; line-height:1.45; background: var(--paper-2); border-radius: var(--radius); padding:7px 10px; }
+  .rf-comment .who{ font-weight:600; }
+  .rf-comment .when{ color: var(--ink-soft); font-size:11.5px; font-family: var(--font-mono); margin-left:6px; }
+  .rf-comment .rf-del{ float:right; border:none; background:transparent; color: var(--ink-soft); cursor:pointer; font-size:13px; }
+  .rf-comment .rf-del:hover{ color: var(--danger); }
+  .rf-form{ display:flex; gap:8px; margin-top:10px; }
+  .rf-form textarea{
+    flex:1; min-height:38px; border:1px solid var(--line-strong); border-radius: var(--radius); padding:8px 10px;
+    font-family: var(--font-body); font-size:13.5px; background: var(--paper); resize: vertical;
+  }
+
   .mi-row{
     display:grid; grid-template-columns: 1.3fr 90px 90px auto 32px; gap: 8px; align-items:center;
     margin-bottom: 8px;
@@ -1192,7 +1221,9 @@
       Object.values(day).forEach(entry=>{ if(entry && entry.name) names.add(entry.name.trim()); });
     });
     Object.keys(state.hostessPersonalPasswords||{}).forEach(n=>{ if(n) names.add(n.trim()); });
-    return Array.from(names).filter(Boolean).sort();
+    HOSTESS_LIST.forEach(n=>{ if(n) names.add(n.trim()); });
+    const notAdmins = new Set((state.staffNotAdmins||[]).map(n=>(n||'').trim().toLowerCase()));
+    return Array.from(names).filter(n=> n && !notAdmins.has(n.toLowerCase())).sort();
   }
   // менеджер, назначенный на день (график менеджеров — просто имя на весь день, без смен по времени)
   function managerForDate(dateStr){
@@ -1493,6 +1524,14 @@
     daysOff: null,
     managerSalaryCursor: new Date(new Date().getFullYear(), new Date().getMonth(), 1),
     birthdayOutreach: null,
+    // вкладка "Отчёты" — комментарии и реакции (лайк/плач/огонь) сотрудников к отчётам мастеров
+    reportComments: null,
+    reportReactions: null,
+    reportsFeedCursor: new Date(new Date().getFullYear(), new Date().getMonth(), 1),
+    feedDrafts: {},        // неотправленные тексты комментариев по id мероприятия (чтобы не терялись при перерисовке)
+    feedDisplayName: {},   // как подписывать комментарии ролям без личного входа (хранится на этом устройстве)
+    feedNameLoadedFor: null,
+    feedFreshAt: 0,
     outreachSearchQuery: '',
     outreachViewMode: 'due', // due | all
     // ручной архив данных за прошлые периоды (с бумаги, до начала работы с этим приложением) — менеджеры
@@ -1684,6 +1723,7 @@
     if(view==='cashbox') return roleCanAccessCashbox(state.currentRole);
     if(view==='analytics') return roleCanAccessAnalytics(state.currentRole) || !!state.loggedInMasterName || !!state.loggedInHostessName;
     if(view==='my-orders') return !!state.loggedInMasterName;
+    if(view==='reportsfeed') return true; // лента отчётов — для всех сотрудников (после входа)
     if(view==='planprogress') return roleCanSeePlanProgress(state.currentRole);
     if(view==='procurement') return roleCanAccessProcurement(state.currentRole);
     return false;
@@ -1768,6 +1808,17 @@
       if(hl){ state.hostsList = JSON.parse(hl.value); }
       else { state.hostsList = DEFAULT_HOSTS_LIST; await storageSetWithRetry('hosts-list', JSON.stringify(DEFAULT_HOSTS_LIST)); }
     }catch(e){ state.hostsList = DEFAULT_HOSTS_LIST; }
+
+    // состав администраторов/менеджеров, изменённый руководителем в «Настройках доступа → Сотрудники»
+    try{
+      const sr = await window.storage.get('staff-roster', true);
+      if(sr){
+        const r = JSON.parse(sr.value);
+        if(Array.isArray(r.hostess)) HOSTESS_LIST.splice(0, HOSTESS_LIST.length, ...r.hostess);
+        if(Array.isArray(r.manager)) MANAGER_LIST.splice(0, MANAGER_LIST.length, ...r.manager);
+        state.staffNotAdmins = Array.isArray(r.notAdmins) ? r.notAdmins : [];
+      }
+    }catch(e){}
 
     // свои категории расходов, которые кто-либо добавил прямо из формы расхода в "Книге" —
     // общие на всех (хранятся на сервере), в дополнение к базовому списку EXPENSE_CATEGORIES
@@ -1908,6 +1959,15 @@
     });
 
     try{
+      const rc = await window.storage.get('report-comments', true);
+      state.reportComments = rc ? JSON.parse(rc.value) : [];
+    }catch(e){ state.reportComments = []; }
+    try{
+      const rr = await window.storage.get('report-reactions', true);
+      state.reportReactions = rr ? JSON.parse(rr.value) : [];
+    }catch(e){ state.reportReactions = []; }
+
+    try{
       const ref = await window.storage.get('refunds', true);
       state.refunds = ref ? JSON.parse(ref.value) : [];
     }catch(e){ state.refunds = []; }
@@ -1967,6 +2027,8 @@
     state._contentPostsBaseline = JSON.parse(JSON.stringify(state.contentPosts));
     state._certificatesBaseline = JSON.parse(JSON.stringify(state.certificates));
     state._birthdayOutreachBaseline = JSON.parse(JSON.stringify(state.birthdayOutreach));
+    state._reportCommentsBaseline = JSON.parse(JSON.stringify(state.reportComments));
+    state._reportReactionsBaseline = JSON.parse(JSON.stringify(state.reportReactions));
     state._refundsBaseline = JSON.parse(JSON.stringify(state.refunds));
     state._incomesBaseline = JSON.parse(JSON.stringify(state.incomes));
     state._expensesBaseline = JSON.parse(JSON.stringify(state.expenses));
@@ -2007,6 +2069,9 @@
 
     setInterval(checkForRemoteChanges, 45000);
     window.addEventListener('focus', checkForRemoteChanges);
+    // лента отчётов обновляется сама (чужие комментарии/реакции), пока открыта — не через общий
+    // "токен изменений", иначе каждый лайк заставлял бы всех остальных обновлять страницу
+    setInterval(()=>{ if(state.view === 'reportsfeed') refreshFeedFromServer(); }, 30000);
   }
 
   function randInt(min, max){ return Math.floor(Math.random()*(max-min+1))+min; }
@@ -2407,7 +2472,7 @@
   }
 
   function buildCsv(){
-    const header = ['Дата','Время','Длительность (мин)','Кол-во человек','Выручка (₽)','Пространство','Название','Продукт','Ведущий (основной)','Все ведущие','Зарплата мастерам всего (₽)','Статус','Посуда','Аренда до (мин)','Аренда после (мин)','Плательщик','Компания','Договор','Плат. поручение','Акт','Заметки'];
+    const header = ['Дата','Время','Длительность (мин)','Кол-во человек','Выручка (₽)','Пространство','Название','Продукт','Ведущий (основной)','Все ведущие','Зарплата мастерам всего (₽)','Статус','Посуда','Аренда до (мин)','Аренда после (мин)','Плательщик','Компания','Договор','Счёт','Акт','Заметки'];
     const rows = [...state.events].sort((a,b)=>(a.date+a.time).localeCompare(b.date+b.time)).map(e=>[
       e.date, e.time, e.duration||'', (e.guests!==undefined&&e.guests!==null)?e.guests:'', (e.price!==undefined&&e.price!==null)?e.price:'', getSpace(e.spaceId).name, e.title, e.product||'', e.host||'', allHostNamesDisplay(e), eventTotalMasterPay(e)||'', STATUS_LABEL[e.status]||e.status||'', (e.dishes==='needed'?'Нужна':e.dishes==='not_needed'?'Без посуды':''), e.rentalBefore||'', e.rentalAfter||'',
       e.payerType==='legal'?'Юр.лицо':'Физ.лицо', e.companyName||'',
@@ -3264,6 +3329,63 @@
   function loadLeadPhoto(leadId){ return loadAttachedPhoto('lead-photo-'+leadId); }
   function saveLeadPhoto(leadId, dataUrl){ return saveAttachedPhoto('lead-photo-'+leadId, dataUrl); }
   function deleteLeadPhoto(leadId){ return deleteAttachedPhoto('lead-photo-'+leadId); }
+
+  // документы по мероприятиям с юр.лицом (договор, счёт, акт) — сами файлы лежат отдельными ключами (как
+  // фото чеков), а в мероприятии хранится только флаг "документ есть" (documents.<вид>) и метаданные
+  // файла (documentFiles.<вид> = {name, type, size}) — так общий массив мероприятий не раздувается.
+  // Ключ paymentOrder исторически назывался "платёжное поручение" — в интерфейсе теперь «Счёт», ключ
+  // оставлен прежним, чтобы не потерять уже сохранённые данные.
+  const LEGAL_DOC_KINDS = [
+    { key:'contract',     label:'Договор' },
+    { key:'paymentOrder', label:'Счёт' },
+    { key:'act',          label:'Акт' },
+  ];
+  // как и с отчётами мастеров: требование привязано к ДАТЕ МЕРОПРИЯТИЯ, чтобы старые (до октября)
+  // мероприятия с юр.лицами не превратились задним числом в «не хватает документов» в верхнем баннере
+  const LEGAL_DOCS_REQUIRED_FROM = '2026-10-01';
+  const EVENT_DOC_MAX_BYTES = 2.5 * 1024 * 1024; // PDF/Word храним как есть — ограничиваем размер; фото сжимаем
+  function eventDocStorageKey(eventId, kind){ return 'event-doc-'+eventId+'-'+kind; }
+  function fileToDataUrl(file){
+    return new Promise((resolve, reject)=>{
+      const reader = new FileReader();
+      reader.onload = ()=> resolve(reader.result);
+      reader.onerror = ()=> reject(new Error('file read failed'));
+      reader.readAsDataURL(file);
+    });
+  }
+  // готовит файл документа к сохранению: фото сжимаем, остальное (PDF, Word) — как есть, но не больше лимита.
+  // Возвращает {dataUrl, name, type, size} или бросает Error с текстом, который можно показать пользователю.
+  async function prepareEventDocFile(file){
+    const isImage = !!(file.type && file.type.startsWith('image/'));
+    if(isImage){
+      const dataUrl = await compressImageFile(file, 1800, 0.8);
+      return { dataUrl, name: file.name, type: 'image/jpeg', size: Math.round(dataUrl.length*0.75) };
+    }
+    const okType = file.type === 'application/pdf' || /\.(pdf|doc|docx)$/i.test(file.name||'');
+    if(!okType) throw new Error('Можно прикрепить PDF, Word (doc/docx) или фото.');
+    if(file.size > EVENT_DOC_MAX_BYTES) throw new Error('Файл слишком большой (больше 2,5 МБ). Сожмите PDF или сфотографируйте документ.');
+    const dataUrl = await fileToDataUrl(file);
+    return { dataUrl, name: file.name, type: file.type || 'application/octet-stream', size: file.size };
+  }
+  // data: ссылки браузеры не дают открывать по клику (блокируют переход верхнего окна) — открываем через Blob
+  function openDataUrlInNewTab(dataUrl, fileName){
+    try{
+      const [head, b64] = dataUrl.split(',');
+      const mime = (head.match(/data:([^;]+)/)||[])[1] || 'application/octet-stream';
+      const bin = atob(b64);
+      const bytes = new Uint8Array(bin.length);
+      for(let i=0;i<bin.length;i++) bytes[i] = bin.charCodeAt(i);
+      const url = URL.createObjectURL(new Blob([bytes], {type: mime}));
+      const w = window.open(url, '_blank');
+      if(!w){
+        const a = document.createElement('a');
+        a.href = url; a.download = fileName || 'document'; a.click();
+      }
+      setTimeout(()=>URL.revokeObjectURL(url), 60000);
+    }catch(err){
+      showGapWarningBanner('Не удалось открыть файл.');
+    }
+  }
   async function saveRefunds(){
     await saveCollectionMerged('refunds', state.refunds, state._refundsBaseline, (finalArr)=>{
       state.refunds = finalArr;
@@ -3633,6 +3755,8 @@
       html += renderCashboxView();
     } else if(state.view === 'procurement'){
       html += renderProcurementView();
+    } else if(state.view === 'reportsfeed'){
+      html += renderReportsFeedView();
     }
     app.innerHTML = html;
     attachHeaderEvents();
@@ -3646,6 +3770,7 @@
     else if(state.view === 'procurement'){ attachProcurementEvents(); }
     else if(state.view === 'book'){ attachBookEvents(); }
     else if(state.view === 'cashbox'){ attachCashboxEvents(); }
+    else if(state.view === 'reportsfeed'){ attachReportsFeedEvents(); }
 
     if(state.modal){ renderModal(); }
   }
@@ -3738,6 +3863,13 @@
     const cutoffStr = fmtDate(cutoff) > REPORTS_REQUIRED_FROM ? fmtDate(cutoff) : REPORTS_REQUIRED_FROM;
     const missingReports = state.events.filter(e=> e.host && e.host.trim() && e.date && e.date>=cutoffStr && e.date<=today && !hasMasterReport(e)).length;
     if(missingReports > 0 && reportsRequiredNow() && !['manager','assistant'].includes(state.currentRole)) alerts.push({icon:'📝', text:`Не сдано отчётов за 2 недели: ${missingReports}`});
+
+    // мероприятия с юр.лицом, у которых не хватает договора/счёта/акта — видят менеджер и руководитель;
+    // клик открывает список с переходом в нужное мероприятие
+    if(['manager','owner'].includes(state.currentRole)){
+      const noDocsCount = eventsWithMissingLegalDocs().length;
+      if(noDocsCount > 0) alerts.push({icon:'📎', text:`Юр.лица — не хватает документов (договор / счёт / акт): ${noDocsCount}`, legalDocs:true});
+    }
 
     return alerts;
   }
@@ -3930,6 +4062,7 @@
     if(roleCanAccessProcurement(role)){
       buttons.push({key:'procurement', html: `<button data-view="procurement" class="${state.view==='procurement'?'active':''}">📦 Закупки</button>`});
     }
+    buttons.push({key:'reportsfeed', html: `<button data-view="reportsfeed" class="${state.view==='reportsfeed'?'active':''}">💬 Отчёты</button>`});
     const priority = NAV_PRIORITY_BY_ROLE[role] || [];
     const priorityIndex = (key)=>{ const i = priority.indexOf(key); return i===-1 ? 999 : i; };
     buttons.sort((a,b)=> priorityIndex(a.key) - priorityIndex(b.key)); // стабильная сортировка — порядок остальных кнопок не меняется
@@ -3968,7 +4101,7 @@
       </div>
       ${alerts.length ? `
       <div class="daily-alerts-banner">
-        ${alerts.map(a=>`<span class="daily-alert-item${a.view?' clickable':''}" ${a.view?`data-alert-view="${a.view}" data-alert-certview="${a.certView||''}"`:''}>${a.icon} ${escapeHtml(a.text)}</span>`).join('')}
+        ${alerts.map(a=>`<span class="daily-alert-item${(a.view||a.legalDocs)?' clickable':''}" ${a.view?`data-alert-view="${a.view}" data-alert-certview="${a.certView||''}"`:''} ${a.legalDocs?'data-alert-legaldocs="1"':''}>${a.icon} ${escapeHtml(a.text)}</span>`).join('')}
       </div>
       ` : ''}
     `;
@@ -5180,6 +5313,251 @@
         });
       };
     });
+  }
+
+  // ============================================================================================
+  // Вкладка "Отчёты": сотрудники читают отчёты мастеров друг друга, ставят реакции и пишут комментарии.
+  // Комментарии подписываются личным именем (мастер/администратор/менеджер — по личному входу; остальные
+  // роли один раз указывают, как их подписывать — запоминается на этом устройстве).
+  // Хранится в двух общих списках ('report-comments', 'report-reactions') со слиянием по id — как и
+  // остальные данные, но БЕЗ "токена изменений": чужой лайк не должен просить всех обновлять страницу.
+  // ============================================================================================
+  const FEED_REACTIONS = [
+    { key:'like', emoji:'👍', label:'Лайк' },
+    { key:'cry',  emoji:'😢', label:'Плач' },
+    { key:'fire', emoji:'🔥', label:'Огонь' },
+  ];
+  const FEED_COMMENT_MAX = 1000;
+
+  function feedIdentity(){
+    const role = state.currentRole;
+    if(state.loggedInMasterName && state.loggedInMasterName.trim()) return { name: state.loggedInMasterName.trim(), role:'master' };
+    if(state.loggedInHostessName && state.loggedInHostessName.trim()) return { name: state.loggedInHostessName.trim(), role:'hostess' };
+    if(state.loggedInManagerName && state.loggedInManagerName.trim()) return { name: state.loggedInManagerName.trim(), role:'manager' };
+    const saved = state.feedDisplayName && state.feedDisplayName[role];
+    return saved ? { name: saved, role } : null;
+  }
+  function feedNameEditable(){
+    return !(state.loggedInMasterName || state.loggedInHostessName || state.loggedInManagerName);
+  }
+  async function loadFeedDisplayName(){
+    const role = state.currentRole;
+    if(!role || state.feedNameLoadedFor === role) return;
+    state.feedNameLoadedFor = role;
+    const r = await personalStorageGet('feed-display-name-'+role);
+    if(r && r.value){ state.feedDisplayName[role] = r.value; render(); }
+  }
+  function formatFeedTime(iso){
+    const d = new Date(iso);
+    if(isNaN(d.getTime())) return '';
+    return pad(d.getDate())+'.'+pad(d.getMonth()+1)+' '+pad(d.getHours())+':'+pad(d.getMinutes());
+  }
+
+  // сохранение одного из двух списков ленты: слияние по id (чужие добавления не теряются), без bumpSyncToken
+  let feedSaveChain = Promise.resolve();
+  let feedSavesInFlight = 0;
+  function saveFeedCollection(storageKey, stateKey, baselineKey){
+    feedSavesInFlight++;
+    const run = async ()=>{
+      const { upserts, deletes } = diffForMerge(state[baselineKey], state[stateKey]);
+      let serverArray = null;
+      try{
+        const res = await window.storage.get(storageKey, true);
+        serverArray = res ? JSON.parse(res.value) : [];
+      }catch(e){ serverArray = null; }
+      let finalArr;
+      if(serverArray === null){ finalArr = state[stateKey] || []; }
+      else {
+        const delSet = new Set(deletes);
+        const map = new Map(serverArray.filter(Boolean).filter(x=>!delSet.has(x.id)).map(x=>[x.id, x]));
+        upserts.forEach(x=> map.set(x.id, x));
+        finalArr = Array.from(map.values());
+      }
+      let ok = false;
+      for(let i=0;i<3 && !ok;i++){
+        try{ ok = !!(await window.storage.set(storageKey, JSON.stringify(finalArr), true)); }catch(e){ ok = false; }
+        if(!ok && i<2) await sleep(500*(i+1));
+      }
+      if(!ok){ showSaveError(); return false; }
+      state[stateKey] = finalArr;
+      state[baselineKey] = JSON.parse(JSON.stringify(finalArr));
+      return true;
+    };
+    const p = feedSaveChain.then(run, run);
+    feedSaveChain = p.catch(()=>{});
+    return p.finally(()=>{ feedSavesInFlight--; });
+  }
+
+  async function refreshFeedFromServer(){
+    if(feedSavesInFlight > 0) return;
+    state.feedFreshAt = Date.now();
+    let changed = false;
+    try{
+      const rc = await window.storage.get('report-comments', true);
+      const rr = await window.storage.get('report-reactions', true);
+      if(feedSavesInFlight > 0) return; // пока читали, пошло своё сохранение — не затираем его
+      if(rc && rc.value !== JSON.stringify(state.reportComments)){ state.reportComments = JSON.parse(rc.value); state._reportCommentsBaseline = JSON.parse(JSON.stringify(state.reportComments)); changed = true; }
+      if(rr && rr.value !== JSON.stringify(state.reportReactions)){ state.reportReactions = JSON.parse(rr.value); state._reportReactionsBaseline = JSON.parse(JSON.stringify(state.reportReactions)); changed = true; }
+    }catch(e){ return; }
+    if(!changed) return; // ничего нового — не перерисовываем (чтобы страница не дёргалась)
+    const active = document.activeElement;
+    const typing = active && active.classList && active.classList.contains('rf-input');
+    if(state.view === 'reportsfeed' && !state.modal && !typing) render();
+  }
+
+  function feedReportsForMonth(){
+    const c = state.reportsFeedCursor;
+    const ym = c.getFullYear()+'-'+pad(c.getMonth()+1);
+    return state.events
+      .filter(e=> e.date && e.date.startsWith(ym) && hasMasterReport(e))
+      .sort((a,b)=> (b.date+(b.time||'')).localeCompare(a.date+(a.time||'')));
+  }
+
+  function renderFeedCard(e){
+    const r = e.masterReport;
+    const me = feedIdentity();
+    const comments = (state.reportComments||[]).filter(c=>c.eventId===e.id).sort((a,b)=> (a.createdAt||'').localeCompare(b.createdAt||''));
+    const reactions = (state.reportReactions||[]).filter(x=>x.eventId===e.id);
+    const space = getSpace(e.spaceId);
+    const low = Number(r.rating) < 5;
+    const draft = (state.feedDrafts && state.feedDrafts[e.id]) || '';
+    return `
+      <div class="rf-card" data-rf-card="${e.id}">
+        <div class="rf-head">
+          <div>
+            <div class="rf-title">${escapeHtml(e.title||'Без названия')} ${space ? spaceBadge(space,'xs') : ''}</div>
+            <div class="rf-meta">${formatDateText(e.date)}${e.time?' · '+escapeHtml(e.time):''} · ведёт: ${escapeHtml(allHostNamesDisplay(e))}${(e.guests!==undefined&&e.guests!==null&&e.guests!=='')?' · гостей: '+escapeHtml(String(e.guests)):''}</div>
+          </div>
+          <span class="rf-rating${low?' low':''}">★ ${escapeHtml(String(r.rating))}/5</span>
+        </div>
+        <div class="rf-field"><b>Откуда гости узнали про СП:</b> ${escapeHtml(r.source||'—')}</div>
+        <div class="rf-field"><b>Профессии гостей:</b> ${escapeHtml(r.professions||'—')}</div>
+        ${r.unique && r.unique.trim() ? `<div class="rf-field"><b>Уникальное на МК:</b> ${escapeHtml(r.unique)}</div>` : ''}
+        ${low && r.ratingComment && r.ratingComment.trim() ? `<div class="rf-field" style="color:var(--status-red);"><b>Расшифровка оценки:</b> ${escapeHtml(r.ratingComment)}</div>` : ''}
+
+        <div class="rf-reactions">
+          ${FEED_REACTIONS.map(rt=>{
+            const list = reactions.filter(x=>x.type===rt.key);
+            const mine = !!(me && list.some(x=>x.author===me.name));
+            const names = list.map(x=>x.author).join(', ');
+            return `<button type="button" class="rf-react-btn${mine?' mine':''}" data-rf-react="${rt.key}" data-eid="${e.id}" title="${escapeHtml(names ? rt.label+': '+names : rt.label)}">${rt.emoji}<span class="n">${list.length||''}</span></button>`;
+          }).join('')}
+        </div>
+
+        ${comments.length ? `
+        <div class="rf-comments">
+          ${comments.map(c=>{
+            const canDel = !!(me && c.author===me.name) || state.currentRole==='owner';
+            return `<div class="rf-comment"><span class="who">${escapeHtml(c.author||'—')}</span>${c.authorRole?` <span class="when">${escapeHtml(ROLE_LABELS[c.authorRole]||'')}</span>`:''}<span class="when">${formatFeedTime(c.createdAt)}</span>${canDel?`<button type="button" class="rf-del" data-cid="${c.id}" title="Удалить комментарий">✕</button>`:''}<div style="margin-top:3px;white-space:pre-wrap;">${escapeHtml(c.text||'')}</div></div>`;
+          }).join('')}
+        </div>` : ''}
+
+        <div class="rf-form">
+          <textarea class="rf-input" data-eid="${e.id}" maxlength="${FEED_COMMENT_MAX}" placeholder="${me ? 'Написать комментарий как «'+escapeHtml(me.name)+'»…' : 'Сначала укажите, как вас подписывать (выше)'}" ${me?'':'disabled'}>${escapeHtml(draft)}</textarea>
+          <button type="button" class="btn btn-primary rf-send" data-eid="${e.id}" ${me?'':'disabled'}>Отправить</button>
+        </div>
+      </div>
+    `;
+  }
+
+  function renderReportsFeedView(){
+    // имя для ролей без личного входа лежит в личном хранилище устройства — подгружаем один раз
+    loadFeedDisplayName();
+    // при открытии вкладки (и не чаще раза в 15 сек) подтягиваем чужие комментарии/реакции
+    if(Date.now() - state.feedFreshAt > 15000){ state.feedFreshAt = Date.now(); setTimeout(refreshFeedFromServer, 0); }
+    const c = state.reportsFeedCursor;
+    const label = MONTHS[c.getMonth()].charAt(0).toUpperCase()+MONTHS[c.getMonth()].slice(1)+' '+c.getFullYear();
+    const list = feedReportsForMonth();
+    const me = feedIdentity();
+    return `
+      <div class="analytics-wrap" style="max-width:820px;margin:0 auto;padding:0 16px 40px;">
+        <h2 style="font-family:var(--font-display);margin:18px 0 4px;">💬 Отчёты мастеров</h2>
+        <div style="font-size:12.5px;color:var(--ink-soft);margin-bottom:12px;">Читайте отчёты друг друга, ставьте 👍 😢 🔥 и пишите комментарии — они подписываются вашим именем и видны всем сотрудникам.</div>
+        ${feedNameEditable() ? `
+        <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:14px;padding:10px 12px;border:1px dashed var(--line-strong);border-radius:var(--radius);background:var(--paper-2);">
+          <span style="font-size:13px;">${me ? 'Вы пишете как:' : 'Как вас подписывать?'}</span>
+          <input type="text" id="rf-name-input" value="${escapeHtml(me?me.name:'')}" placeholder="Ваше имя" maxlength="40" style="border:1px solid var(--line-strong);border-radius:var(--radius);padding:7px 10px;font-size:13.5px;background:var(--white);">
+          <button type="button" class="btn btn-ghost" id="rf-name-save">${me ? 'Изменить' : 'Сохранить'}</button>
+        </div>` : `<div style="font-size:12.5px;margin-bottom:12px;">Вы пишете как: <b>${escapeHtml(me ? me.name : '')}</b></div>`}
+        <div style="display:flex;align-items:center;gap:10px;margin-bottom:14px;">
+          <button type="button" class="btn btn-ghost" id="rf-prev">←</button>
+          <b style="min-width:140px;text-align:center;">${escapeHtml(label)}</b>
+          <button type="button" class="btn btn-ghost" id="rf-next">→</button>
+          <span style="font-size:12.5px;color:var(--ink-soft);margin-left:auto;">Отчётов: ${list.length}</span>
+        </div>
+        ${list.length ? list.map(renderFeedCard).join('') : `<div style="color:var(--ink-soft);font-size:13.5px;">В этом месяце пока нет сданных отчётов.</div>`}
+      </div>
+    `;
+  }
+
+  function bindFeedCard(card){
+    const eid = card.dataset.rfCard;
+    const input = card.querySelector('.rf-input');
+    if(input) input.addEventListener('input', ()=>{ state.feedDrafts[eid] = input.value; });
+    card.querySelectorAll('.rf-react-btn').forEach(btn=>{
+      btn.onclick = async ()=>{
+        const me = feedIdentity();
+        if(!me){ showGapWarningBanner('Сначала укажите, как вас подписывать.'); return; }
+        const type = btn.dataset.rfReact;
+        const id = `${eid}|${type}|${me.name}`;
+        const idx = state.reportReactions.findIndex(x=>x.id===id);
+        if(idx >= 0) state.reportReactions.splice(idx, 1);
+        else state.reportReactions.push({ id, eventId: eid, type, author: me.name, role: me.role, createdAt: new Date().toISOString() });
+        rerenderFeedCard(eid); // сразу показываем результат, сохранение идёт следом
+        await saveFeedCollection('report-reactions', 'reportReactions', '_reportReactionsBaseline');
+        rerenderFeedCard(eid);
+      };
+    });
+    const sendBtn = card.querySelector('.rf-send');
+    if(sendBtn) sendBtn.onclick = async ()=>{
+      const me = feedIdentity();
+      if(!me){ showGapWarningBanner('Сначала укажите, как вас подписывать.'); return; }
+      const text = ((input && input.value) || '').trim().slice(0, FEED_COMMENT_MAX);
+      if(!text) return;
+      state.reportComments.push({ id: uid(), eventId: eid, author: me.name, authorRole: me.role, text, createdAt: new Date().toISOString() });
+      state.feedDrafts[eid] = '';
+      rerenderFeedCard(eid);
+      await saveFeedCollection('report-comments', 'reportComments', '_reportCommentsBaseline');
+      rerenderFeedCard(eid);
+    };
+    card.querySelectorAll('.rf-del').forEach(btn=>{
+      btn.onclick = ()=>{
+        const cid = btn.dataset.cid;
+        showConfirmDeletePopup('Удалить этот комментарий?', async ()=>{
+          state.reportComments = state.reportComments.filter(x=>x.id !== cid);
+          rerenderFeedCard(eid);
+          await saveFeedCollection('report-comments', 'reportComments', '_reportCommentsBaseline');
+          rerenderFeedCard(eid);
+        });
+      };
+    });
+  }
+  function rerenderFeedCard(eid){
+    const card = document.querySelector(`[data-rf-card="${eid}"]`);
+    const e = state.events.find(x=>x.id===eid);
+    if(!card || !e) return;
+    const wrap = document.createElement('div');
+    wrap.innerHTML = renderFeedCard(e).trim();
+    const fresh = wrap.firstElementChild;
+    card.replaceWith(fresh);
+    bindFeedCard(fresh);
+  }
+
+  function attachReportsFeedEvents(){
+    document.querySelectorAll('[data-rf-card]').forEach(bindFeedCard);
+    const prev = document.getElementById('rf-prev');
+    const next = document.getElementById('rf-next');
+    if(prev) prev.onclick = ()=>{ const c = state.reportsFeedCursor; state.reportsFeedCursor = new Date(c.getFullYear(), c.getMonth()-1, 1); render(); };
+    if(next) next.onclick = ()=>{ const c = state.reportsFeedCursor; state.reportsFeedCursor = new Date(c.getFullYear(), c.getMonth()+1, 1); render(); };
+    const nameSave = document.getElementById('rf-name-save');
+    const nameInput = document.getElementById('rf-name-input');
+    if(nameSave && nameInput) nameSave.onclick = async ()=>{
+      const v = nameInput.value.trim().slice(0, 40);
+      if(!v){ showGapWarningBanner('Впишите имя, которым вас подписывать.'); return; }
+      state.feedDisplayName[state.currentRole] = v;
+      await personalStorageSet('feed-display-name-'+state.currentRole, v);
+      render();
+    };
   }
 
   function renderCertificatesView(){
@@ -10235,6 +10613,11 @@
 
     document.querySelectorAll('.daily-alert-item.clickable').forEach(item=>{
       item.onclick = ()=>{
+        if(item.dataset.alertLegaldocs){
+          state.modal = {type:'legal-docs-missing'};
+          render();
+          return;
+        }
         const targetView = item.dataset.alertView;
         const targetCertView = item.dataset.alertCertview;
         const go = ()=>{
@@ -10381,6 +10764,8 @@
       overlay.innerHTML = renderRoleLoginModal();
     } else if(state.modal.type === 'code-settings'){
       overlay.innerHTML = renderCodeSettingsModal();
+    } else if(state.modal.type === 'staff-edit'){
+      overlay.innerHTML = renderStaffEditModal();
     } else if(state.modal.type === 'export'){
       overlay.innerHTML = renderExportModal();
     } else if(state.modal.type === 'quick-host'){
@@ -10455,6 +10840,8 @@
       overlay.innerHTML = renderSafeDepositModal();
     } else if(state.modal.type === 'safe-withdraw'){
       overlay.innerHTML = renderSafeWithdrawModal();
+    } else if(state.modal.type === 'legal-docs-missing'){
+      overlay.innerHTML = renderLegalDocsMissingModal();
     }
     document.body.appendChild(overlay);
 
@@ -10488,6 +10875,7 @@
     else if(state.modal.type === 'code'){ attachCodeModalEvents(overlay); }
     else if(state.modal.type === 'role-login'){ attachRoleLoginModalEvents(overlay); }
     else if(state.modal.type === 'code-settings'){ attachCodeSettingsModalEvents(overlay); }
+    else if(state.modal.type === 'staff-edit'){ attachStaffEditModalEvents(overlay); }
     else if(state.modal.type === 'quick-host'){ attachQuickHostModalEvents(overlay); }
     else if(state.modal.type === 'quick-report'){ attachQuickReportModalEvents(overlay); }
     else if(state.modal.type === 'quick-shift'){ attachQuickShiftModalEvents(overlay); }
@@ -10525,6 +10913,47 @@
     else if(state.modal.type === 'tochka-reconcile'){ attachTochkaReconcileModalEvents(overlay); }
     else if(state.modal.type === 'safe-deposit'){ attachSafeDepositModalEvents(overlay); }
     else if(state.modal.type === 'safe-withdraw'){ attachSafeWithdrawModalEvents(overlay); }
+    else if(state.modal.type === 'legal-docs-missing'){ attachLegalDocsMissingModalEvents(overlay); }
+  }
+
+  // список мероприятий с юр.лицом, где не хватает договора/счёта/акта (открывается кликом по верхнему баннеру)
+  function renderLegalDocsMissingModal(){
+    const list = eventsWithMissingLegalDocs();
+    return `
+      <div class="modal" style="max-width:560px;">
+        <div class="modal-head">
+          <h3>📎 Не хватает документов</h3>
+          <button class="modal-close">×</button>
+        </div>
+        <div class="modal-body">
+          <div style="font-size:12.5px;color:var(--ink-soft);margin-top:-6px;">Мероприятия с юр.лицом (с 1 октября 2026): к каждому нужно прикрепить файлы договора, счёта и акта. Акт ждём только после даты мероприятия. Нажмите на строку — откроется мероприятие.</div>
+          ${list.length === 0 ? `<div style="color:var(--status-green);font-size:13.5px;">✓ По всем мероприятиям с юр.лицами документы прикреплены.</div>` : list.map(e=>`
+            <div class="stat-row legal-doc-row" data-eid="${e.id}" style="cursor:pointer;">
+              <div class="stat-label" style="width:100%;flex:1;">
+                <b>${escapeHtml(e.companyName || 'Юр.лицо')}</b> — ${escapeHtml(e.title||'без названия')} · ${formatDateText(e.date)}
+                <div style="color:var(--status-red);font-size:12px;margin-top:2px;">Не хватает: ${missingDocsDue(e).join(', ')}</div>
+              </div>
+            </div>
+          `).join('')}
+          <div class="modal-actions">
+            <span></span>
+            <button class="btn btn-ghost" id="btn-close-legal-docs">Закрыть</button>
+          </div>
+        </div>
+      </div>
+    `;
+  }
+  function attachLegalDocsMissingModalEvents(overlay){
+    const closeBtn = overlay.querySelector('#btn-close-legal-docs');
+    if(closeBtn) closeBtn.onclick = ()=>{ state.modal = null; overlay.remove(); };
+    overlay.querySelectorAll('.legal-doc-row').forEach(row=>{
+      row.onclick = ()=>{
+        const ev = state.events.find(x=>x.id === row.dataset.eid);
+        if(!ev) return;
+        state.modal = {type:'event', event:{...ev}, isNew:false, keepAll:true};
+        render();
+      };
+    });
   }
 
   function renderRoleLoginModal(){
@@ -10707,6 +11136,12 @@
               <input type="text" class="role-code-input" data-role="${r}" placeholder="${escapeHtml(state.roleCodes[r])}" value="${escapeHtml(state.roleCodes[r])}">
             </div>
           `).join('')}
+          ${isOwnerRole ? `
+            <div style="border-top:1px solid var(--line);margin-top:8px;padding-top:14px;">
+              <button class="btn" id="btn-staff-edit" style="width:100%;">👥 Сотрудники: имена и должности</button>
+              <div style="font-size:12px;color:var(--ink-soft);margin-top:6px;">Можно переименовать человека (имя заменится во всей истории) или изменить должность: мастер / администратор / менеджер.</div>
+            </div>
+          ` : ''}
           ${state.unlockedAdmin ? `
             <div style="border-top:1px solid var(--line);margin-top:8px;padding-top:14px;">
               <div style="font-size:13px;font-weight:600;margin-bottom:4px;">Пароли мастеров</div>
@@ -10751,6 +11186,8 @@
   }
 
   function attachCodeSettingsModalEvents(overlay){
+    const staffBtn = overlay.querySelector('#btn-staff-edit');
+    if(staffBtn) staffBtn.onclick = ()=>{ overlay.remove(); state.modal = {type:'staff-edit'}; render(); };
     overlay.querySelector('#btn-relock').onclick = ()=>{
       state.currentRole = null;
       state.unlocked = false;
@@ -10832,6 +11269,197 @@
       }
       recordAction("Пароли сохранены");
       state.modal = null;
+      overlay.remove();
+      render();
+    };
+  }
+
+
+  // ===== Сотрудники: имя и должность (только руководитель) =====
+  function staffEditPeople(){
+    const out = [], seen = new Set();
+    const add = (n)=>{ n = (n||'').trim(); if(!n) return; const k = n.toLowerCase(); if(seen.has(k)) return; seen.add(k); out.push(n); };
+    (state.hostsList||[]).forEach(add);
+    getAllAdminNames().forEach(add);
+    MANAGER_LIST.forEach(add);
+    return out;
+  }
+  function staffRowHtml(name, roles){
+    const chk = (k, label)=> `<label style="display:flex;align-items:center;gap:4px;font-size:12px;"><input type="checkbox" class="staff-role" data-r="${k}" ${roles[k]?'checked':''}> ${label}</label>`;
+    return `<div class="staff-row" data-orig="${escapeHtml(name)}" style="border:1px solid var(--line);border-radius:10px;padding:8px 10px;margin-bottom:8px;">
+      <input type="text" class="staff-name" value="${escapeHtml(name)}" placeholder="Имя" style="width:100%;margin-bottom:6px;">
+      <div style="display:flex;gap:12px;flex-wrap:wrap;">${chk('master','Мастер')}${chk('hostess','Администратор')}${chk('manager','Менеджер')}</div>
+    </div>`;
+  }
+  function renderStaffEditModal(){
+    const lc = (arr)=> new Set((arr||[]).map(n=>(n||'').trim().toLowerCase()));
+    const masters = lc(state.hostsList), admins = lc(getAllAdminNames()), managers = lc(MANAGER_LIST);
+    const rows = staffEditPeople().map(n=>{ const k = n.toLowerCase(); return staffRowHtml(n, {master:masters.has(k), hostess:admins.has(k), manager:managers.has(k)}); }).join('');
+    return `
+      <div class="modal" style="max-width:460px;">
+        <div class="modal-head">
+          <h3>Сотрудники</h3>
+          <button class="modal-close">×</button>
+        </div>
+        <div class="modal-body">
+          <div style="font-size:13px;color:var(--ink-soft);margin-top:-6px;">Измените имя — оно заменится везде: в мероприятиях, графиках, зарплате, расходах, отчётах и комментариях. Должностей может быть несколько. Пароль при смене имени сохраняется; при снятии должности пароль этой должности удаляется.</div>
+          <div id="staff-rows">${rows}</div>
+          <button class="btn" id="staff-add" style="width:100%;margin-bottom:8px;">+ Добавить сотрудника</button>
+          <div id="staff-error" style="color:var(--danger);font-size:13px;min-height:16px;"></div>
+          <div class="modal-actions">
+            <button class="btn" id="staff-cancel">Отмена</button>
+            <button class="btn btn-primary" id="staff-save">Сохранить</button>
+          </div>
+        </div>
+      </div>`;
+  }
+  function makeStaffRenamer(map){
+    const lm = {};
+    Object.keys(map).forEach(a=>{ lm[a.trim().toLowerCase()] = map[a]; });
+    return (v)=>{
+      if(typeof v !== 'string') return v;
+      const k = v.trim().toLowerCase();
+      return Object.prototype.hasOwnProperty.call(lm, k) ? lm[k] : v;
+    };
+  }
+  // rows: [{orig, name, roles:{master,hostess,manager}}] — применяет переименование по всем данным и обновляет составы
+  async function applyStaffEdit(rows){
+    const map = {};
+    rows.forEach(r=>{ if(r.orig && r.orig !== r.name) map[r.orig] = r.name; });
+    const rn = makeStaffRenamer(map);
+    const hasMap = Object.keys(map).length > 0;
+    const finalKey = (n)=> (n||'').trim().toLowerCase();
+    const final = {};
+    rows.forEach(r=>{ final[finalKey(r.name)] = r.roles; });
+    const origAdmins = new Set(getAllAdminNames().map(finalKey));
+
+    if(hasMap){
+      const setField = (o, k)=>{ if(o && typeof o[k] === 'string'){ const v = rn(o[k]); if(v !== o[k]){ o[k] = v; return true; } } return false; };
+      const mapArr = (arr)=>{ let c = false; (arr||[]).forEach((x, i)=>{ const v = rn(x); if(v !== x){ arr[i] = v; c = true; } }); return c; };
+      let ch;
+      ch = false;
+      (state.events||[]).forEach(e=>{
+        ch = setField(e,'host') || ch; ch = setField(e,'dishesWasher') || ch;
+        if(Array.isArray(e.availableMasters)) ch = mapArr(e.availableMasters) || ch;
+        (e.additionalHosts||[]).forEach(h=>{ ch = setField(h,'name') || ch; });
+        (e.materialsItems||[]).forEach(m=>{ ch = setField(m,'payTo') || ch; });
+      });
+      if(ch) await saveEvents();
+      ch = false;
+      (state.orders||[]).forEach(o=>{ ch = setField(o,'masterName') || ch; (o.additionalMasters||[]).forEach(m=>{ ch = setField(m,'name') || ch; }); });
+      if(ch) await saveOrders();
+      ch = false; (state.itemSales||[]).forEach(o=>{ ch = setField(o,'masterName') || ch; }); if(ch) await saveItemSales();
+      ch = false; (state.salaryAdjustments||[]).forEach(o=>{ ch = setField(o,'masterName') || ch; }); if(ch) await saveSalaryAdjustments();
+      ch = false; (state.incomes||[]).forEach(o=>{ ch = setField(o,'masterName') || ch; }); if(ch) await saveIncomes();
+      ch = false; (state.expenses||[]).forEach(o=>{ ch = setField(o,'master') || ch; ch = setField(o,'responsible') || ch; }); if(ch) await saveExpenses();
+      ch = false; (state.daysOff||[]).forEach(o=>{ ch = setField(o,'name') || ch; }); if(ch) await saveDaysOff();
+      ch = false;
+      Object.values(state.hostessShifts||{}).forEach(day=>{
+        Object.keys(day||{}).forEach(k=>{
+          const en = day[k];
+          if(typeof en === 'string'){ const v = rn(en); if(v !== en){ day[k] = v; ch = true; } }
+          else if(en && typeof en === 'object') ch = setField(en,'name') || ch;
+        });
+      });
+      if(ch) await saveHostessShifts();
+      ch = false;
+      Object.keys(state.managerShifts||{}).forEach(d=>{ const v = rn(state.managerShifts[d]); if(v !== state.managerShifts[d]){ state.managerShifts[d] = v; ch = true; } });
+      if(ch) await saveManagerShifts();
+      // карты, где имя — ключ
+      const rekey = (obj)=>{ let c = false; const out = {}; Object.keys(obj||{}).forEach(k=>{ const nk = rn(k); if(nk !== k) c = true; out[nk] = obj[k]; }); return {out, c}; };
+      { const r = rekey(state.masterPayOverrides); if(r.c){ state.masterPayOverrides = r.out; await saveMasterPayOverrides(); } }
+      ch = false;
+      Object.keys(state.hostessBonuses||{}).forEach(ym=>{ const r = rekey(state.hostessBonuses[ym]); if(r.c){ state.hostessBonuses[ym] = r.out; ch = true; } });
+      if(ch) await saveHostessBonuses();
+      // шаблоны мероприятий: «кому платить» в автоправилах материалов
+      ch = false;
+      const walkRules = (o)=>{ if(Array.isArray(o)) o.forEach(walkRules); else if(o && typeof o === 'object'){ if(typeof o.payeeMaster === 'string') ch = setField(o,'payeeMaster') || ch; Object.values(o).forEach(v=>{ if(v && typeof v === 'object') walkRules(v); }); } };
+      walkRules(state.eventTypes);
+      if(ch) await saveEventTypes();
+      // отчёты-лента
+      ch = false; (state.reportComments||[]).forEach(c=>{ ch = setField(c,'author') || ch; });
+      if(ch) await saveFeedCollection('report-comments', 'reportComments', '_reportCommentsBaseline');
+      ch = false;
+      (state.reportReactions||[]).forEach(r=>{ if(setField(r,'author')){ r.id = `${r.eventId}|${r.type}|${r.author}`; ch = true; } });
+      if(ch) await saveFeedCollection('report-reactions', 'reportReactions', '_reportReactionsBaseline');
+      // вошедший сейчас под переименованным именем
+      ['loggedInMasterName','loggedInHostessName','loggedInManagerName'].forEach(k=>{ if(state[k]) state[k] = rn(state[k]); });
+    }
+
+    // составы
+    const keepOrder = (list, role)=>{
+      const out = [], seen = new Set();
+      (list||[]).forEach(n=>{ const nn = rn(n); const k = finalKey(nn); if(!k || seen.has(k)) return; if(final[k] && final[k][role]){ seen.add(k); out.push(nn.trim()); } });
+      rows.forEach(r=>{ const k = finalKey(r.name); if(r.roles[role] && !seen.has(k)){ seen.add(k); out.push(r.name); } });
+      return out;
+    };
+    state.hostsList = keepOrder(state.hostsList, 'master');
+    await saveHostsList();
+    const newAdmins = keepOrder(HOSTESS_LIST, 'hostess');
+    const newManagers = keepOrder(MANAGER_LIST, 'manager');
+    HOSTESS_LIST.splice(0, HOSTESS_LIST.length, ...newAdmins);
+    MANAGER_LIST.splice(0, MANAGER_LIST.length, ...newManagers);
+    const notAdmins = new Set((state.staffNotAdmins||[]).map(n=>rn(n)).map(finalKey));
+    rows.forEach(r=>{
+      const k = finalKey(r.name);
+      if(r.roles.hostess) notAdmins.delete(k);
+      else if(origAdmins.has(finalKey(r.orig || r.name)) || origAdmins.has(k)) notAdmins.add(k);
+    });
+    state.staffNotAdmins = Array.from(notAdmins);
+    await storageSetWithRetry('staff-roster', JSON.stringify({ hostess: HOSTESS_LIST.slice(), manager: MANAGER_LIST.slice(), notAdmins: state.staffNotAdmins }));
+
+    // пароли: переезжают на новое имя; пароль снятой должности удаляется
+    const movePw = (obj, role)=>{
+      const out = {};
+      Object.keys(obj||{}).forEach(k=>{ const nk = rn(k); const f = final[finalKey(nk)]; if(f && f[role]) out[nk] = obj[k]; });
+      return out;
+    };
+    state.masterPersonalPasswords = movePw(state.masterPersonalPasswords, 'master');
+    state.hostessPersonalPasswords = movePw(state.hostessPersonalPasswords, 'hostess');
+    state.managerPersonalPasswords = movePw(state.managerPersonalPasswords, 'manager');
+    await storageSetWithRetry('master-passwords', JSON.stringify(state.masterPersonalPasswords));
+    await storageSetWithRetry('hostess-passwords', JSON.stringify(state.hostessPersonalPasswords));
+    await storageSetWithRetry('manager-passwords', JSON.stringify(state.managerPersonalPasswords));
+
+    const parts = Object.keys(map).map(a=>`${a} → ${map[a]}`);
+    recordAction('Сотрудники обновлены', parts.length ? ('Переименованы: ' + parts.join(', ')) : 'Изменены должности');
+  }
+  function attachStaffEditModalEvents(overlay){
+    const back = ()=>{ overlay.remove(); state.modal = {type:'code-settings'}; render(); };
+    overlay.addEventListener('click', (e)=>{ if(e.target === overlay) back(); });
+    const closeBtn = overlay.querySelector('.modal-close'); if(closeBtn) closeBtn.onclick = back;
+    overlay.querySelector('#staff-cancel').onclick = back;
+    overlay.querySelector('#staff-add').onclick = ()=>{
+      const wrap = document.createElement('div');
+      wrap.innerHTML = staffRowHtml('', {master:true, hostess:false, manager:false});
+      const row = wrap.firstElementChild;
+      overlay.querySelector('#staff-rows').appendChild(row);
+      const inp = row.querySelector('.staff-name'); if(inp) inp.focus();
+    };
+    overlay.querySelector('#staff-save').onclick = async ()=>{
+      const err = overlay.querySelector('#staff-error');
+      const rows = [...overlay.querySelectorAll('.staff-row')].map(r=>({
+        orig: r.dataset.orig || '',
+        name: r.querySelector('.staff-name').value.trim().replace(/\s+/g,' '),
+        roles: {
+          master: r.querySelector('.staff-role[data-r="master"]').checked,
+          hostess: r.querySelector('.staff-role[data-r="hostess"]').checked,
+          manager: r.querySelector('.staff-role[data-r="manager"]').checked,
+        },
+      })).filter(r=> r.orig || r.name);
+      const seen = new Set();
+      for(const r of rows){
+        if(!r.name){ err.textContent = `У сотрудника «${r.orig}» пустое имя.`; return; }
+        if(r.name.includes('|')){ err.textContent = `В имени «${r.name}» нельзя использовать знак «|».`; return; }
+        const k = r.name.toLowerCase();
+        if(seen.has(k)){ err.textContent = `Имя «${r.name}» повторяется — у каждого сотрудника должно быть своё.`; return; }
+        seen.add(k);
+        if(!r.roles.master && !r.roles.hostess && !r.roles.manager){ err.textContent = `Отметьте должность для «${r.name}».`; return; }
+      }
+      const btn = overlay.querySelector('#staff-save'); btn.disabled = true;
+      try{ await applyStaffEdit(rows); }
+      catch(e){ console.error(e); err.textContent = 'Не удалось сохранить, попробуйте ещё раз.'; btn.disabled = false; return; }
+      state.modal = {type:'code-settings'};
       overlay.remove();
       render();
     };
@@ -17607,10 +18235,28 @@
     if(e.payerType !== 'legal') return [];
     const d = e.documents || {};
     const missing = [];
-    if(!d.contract) missing.push('Договор');
-    if(!d.paymentOrder) missing.push('Платёжное поручение');
-    if(!d.act) missing.push('Акт');
+    LEGAL_DOC_KINDS.forEach(k=>{ if(!d[k.key]) missing.push(k.label); });
     return missing;
+  }
+  // для верхнего баннера менеджеру/руководителю: мероприятие с юр.лицом, не отменённое и не "слот", от даты
+  // LEGAL_DOCS_REQUIRED_FROM. Акт подписывают после оказания услуги — до даты мероприятия его не требуем,
+  // а вот договор и счёт нужны заранее.
+  function missingDocsDue(e){
+    if(!e || e.payerType !== 'legal' || !e.date || e.date < LEGAL_DOCS_REQUIRED_FROM) return [];
+    if(e.status === 'cancelled' || e.status === 'slot') return [];
+    const d = e.documents || {};
+    const missing = [];
+    LEGAL_DOC_KINDS.forEach(k=>{
+      if(d[k.key]) return;
+      if(k.key === 'act' && e.date > todayStr()) return;
+      missing.push(k.label);
+    });
+    return missing;
+  }
+  function eventsWithMissingLegalDocs(){
+    return state.events
+      .filter(e=> missingDocsDue(e).length > 0)
+      .sort((a,b)=> (a.date+(a.time||'')).localeCompare(b.date+(b.time||'')));
   }
   function legalSuffix(e){
     if(e.payerType !== 'legal') return '';
@@ -18156,17 +18802,21 @@
           <div class="field" id="legal-field" style="display:${ev.payerType==='legal'?'block':'none'};">
             <label>Название компании</label>
             <input type="text" id="f-company-name" value="${escapeHtml(ev.companyName||'')}" placeholder="ООО «Ромашка»">
-            <label style="margin-top:10px;">Документы</label>
-            <div style="display:flex;flex-direction:column;gap:8px;">
-              <label style="display:flex;align-items:center;gap:8px;font-size:13.5px;font-weight:400;cursor:pointer;">
-                <input type="checkbox" id="f-doc-contract" ${ev.documents&&ev.documents.contract?'checked':''} style="width:16px;height:16px;">Договор
-              </label>
-              <label style="display:flex;align-items:center;gap:8px;font-size:13.5px;font-weight:400;cursor:pointer;">
-                <input type="checkbox" id="f-doc-payment" ${ev.documents&&ev.documents.paymentOrder?'checked':''} style="width:16px;height:16px;">Платёжное поручение
-              </label>
-              <label style="display:flex;align-items:center;gap:8px;font-size:13.5px;font-weight:400;cursor:pointer;">
-                <input type="checkbox" id="f-doc-act" ${ev.documents&&ev.documents.act?'checked':''} style="width:16px;height:16px;">Акт об оказании услуг
-              </label>
+            <label style="margin-top:10px;">Документы <span style="font-weight:400;color:var(--ink-soft);">— обязательно прикрепить файлы (PDF, Word или фото)</span></label>
+            <div style="display:flex;flex-direction:column;gap:10px;">
+              ${LEGAL_DOC_KINDS.map(k=>`
+                <div class="legal-doc-row-edit" data-doc="${k.key}" style="border:1px solid var(--line-strong);border-radius:var(--radius);padding:8px 10px;background:var(--white);">
+                  <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap;">
+                    <b style="font-size:13.5px;">${k.label} <span style="color:var(--status-red);">*</span></b>
+                    <span class="legal-doc-status" data-doc="${k.key}" style="font-size:12.5px;"></span>
+                  </div>
+                  <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;margin-top:6px;">
+                    <input type="file" class="legal-doc-file" data-doc="${k.key}" accept="application/pdf,image/*,.pdf,.doc,.docx" style="flex:1;min-width:180px;font-size:12.5px;">
+                    <button type="button" class="btn btn-ghost legal-doc-open" data-doc="${k.key}" style="display:none;">Открыть</button>
+                    <button type="button" class="btn btn-ghost legal-doc-remove" data-doc="${k.key}" style="display:none;">Удалить файл</button>
+                  </div>
+                </div>
+              `).join('')}
             </div>
           </div>
           <div class="field" style="${financeHiddenInEventModal()?'display:none;':''}">
@@ -19446,6 +20096,64 @@
       };
     });
 
+    // документы юр.лица (договор / счёт / акт) — файлы. pendingDocs[вид]: не задано — без изменений,
+    // 'REMOVE' — удалить файл, объект {dataUrl,name,type,size} — новый файл (запишется по "Сохранить")
+    const pendingDocs = {};
+    const evDocsFlags = state.modal.event.documents || {};
+    const evDocFiles = state.modal.event.documentFiles || {};
+    function refreshLegalDocRow(kind){
+      const p = pendingDocs[kind];
+      const statusEl = overlay.querySelector(`.legal-doc-status[data-doc="${kind}"]`);
+      const openBtn = overlay.querySelector(`.legal-doc-open[data-doc="${kind}"]`);
+      const removeBtn = overlay.querySelector(`.legal-doc-remove[data-doc="${kind}"]`);
+      if(!statusEl) return;
+      let text, color, canOpen = false, canRemove = false;
+      if(p && p !== 'REMOVE'){ text = `📎 ${p.name} — сохранится по кнопке «Сохранить»`; color = 'var(--status-green)'; canOpen = true; canRemove = true; }
+      else if(p === 'REMOVE'){ text = '⚠ не прикреплён (файл удалится по кнопке «Сохранить»)'; color = 'var(--status-red)'; }
+      else if(evDocsFlags[kind] && evDocFiles[kind]){ text = `✓ ${evDocFiles[kind].name || 'файл прикреплён'}`; color = 'var(--status-green)'; canOpen = true; canRemove = true; }
+      else if(evDocsFlags[kind]){ text = '✓ отмечен ранее (файла нет) — лучше прикрепить файл'; color = 'var(--status-green)'; canRemove = true; }
+      else { text = '⚠ не прикреплён'; color = 'var(--status-red)'; }
+      statusEl.textContent = text;
+      statusEl.style.color = color;
+      if(openBtn) openBtn.style.display = canOpen ? 'inline-block' : 'none';
+      if(removeBtn) removeBtn.style.display = canRemove ? 'inline-block' : 'none';
+    }
+    LEGAL_DOC_KINDS.forEach(k=> refreshLegalDocRow(k.key));
+    overlay.querySelectorAll('.legal-doc-file').forEach(input=>{
+      input.onchange = async ()=>{
+        const kind = input.dataset.doc;
+        const file = input.files && input.files[0];
+        if(!file) return;
+        try{
+          pendingDocs[kind] = await prepareEventDocFile(file);
+          refreshLegalDocRow(kind);
+        }catch(err){
+          showGapWarningBanner(err && err.message ? err.message : 'Не удалось обработать файл.');
+        }
+        input.value = '';
+      };
+    });
+    overlay.querySelectorAll('.legal-doc-open').forEach(btn=>{
+      btn.onclick = async ()=>{
+        const kind = btn.dataset.doc;
+        const p = pendingDocs[kind];
+        if(p && p !== 'REMOVE'){ openDataUrlInNewTab(p.dataUrl, p.name); return; }
+        const dataUrl = await loadAttachedPhoto(eventDocStorageKey(state.modal.event.id, kind));
+        if(dataUrl) openDataUrlInNewTab(dataUrl, (evDocFiles[kind]||{}).name);
+        else showGapWarningBanner('Файл не найден — прикрепите его заново.');
+      };
+    });
+    overlay.querySelectorAll('.legal-doc-remove').forEach(btn=>{
+      btn.onclick = ()=>{
+        const kind = btn.dataset.doc;
+        // новый, ещё не сохранённый файл: просто отменяем выбор (возвращается то, что было сохранено раньше);
+        // сохранённый файл / старая отметка без файла — помечаем на удаление
+        if(pendingDocs[kind] && pendingDocs[kind] !== 'REMOVE') delete pendingDocs[kind];
+        else pendingDocs[kind] = 'REMOVE';
+        refreshLegalDocRow(kind);
+      };
+    });
+
     const delBtn = overlay.querySelector('#btn-del');
     if(delBtn) delBtn.onclick = ()=>{
       if(state.currentRole !== 'owner'){
@@ -19459,6 +20167,10 @@
       const eventToDelete = state.modal.event;
       recordAction('Мероприятие удалено', `«${eventToDelete.title||'без названия'}» — ${eventToDelete.date||''} ${eventToDelete.time||''}`.trim());
       state.events = state.events.filter(x=>x.id !== eventToDelete.id);
+      // прикреплённые файлы документов юр.лица лежат отдельными ключами — убираем и их
+      for(const k of LEGAL_DOC_KINDS){
+        if(eventToDelete.documentFiles && eventToDelete.documentFiles[k.key]) await deleteAttachedPhoto(eventDocStorageKey(eventToDelete.id, k.key));
+      }
       // восстанавливаем остатки материалов, списанных этим мероприятием
       let catalogChanged = false;
       (eventToDelete.materialsItems||[]).forEach(m=>{
@@ -19515,6 +20227,7 @@
         payerType: 'individual',
         companyName: '',
         documents: {contract:false, paymentOrder:false, act:false},
+        documentFiles: {},
         masterReport: null,
         notes: '',
       };
@@ -19699,6 +20412,29 @@
         }
       }
 
+      // файлы документов юр.лица: записываем отдельными ключами; флаг "документ есть" ставим только если
+      // файл реально сохранился, иначе мероприятие показало бы «✓», а файла нет
+      const docsForSave = { contract:false, paymentOrder:false, act:false, ...(state.modal.event.documents || {}) };
+      const docFilesForSave = { ...(state.modal.event.documentFiles || {}) };
+      for(const k of LEGAL_DOC_KINDS){
+        const p = pendingDocs[k.key];
+        if(!p) continue;
+        const storageKey = eventDocStorageKey(state.modal.event.id, k.key);
+        if(p === 'REMOVE'){
+          await deleteAttachedPhoto(storageKey);
+          docsForSave[k.key] = false;
+          delete docFilesForSave[k.key];
+        } else {
+          const okSaved = await saveAttachedPhoto(storageKey, p.dataUrl);
+          if(!okSaved){
+            showGapWarningBanner(`Не удалось сохранить файл «${k.label}». Попробуйте ещё раз.`);
+            return;
+          }
+          docsForSave[k.key] = true;
+          docFilesForSave[k.key] = { name: p.name, type: p.type, size: p.size };
+        }
+      }
+
       const updated = {
         id: state.modal.event.id,
         spaceId: overlay.querySelector('#f-space').value,
@@ -19725,11 +20461,8 @@
         pickupItems: state.modal.event.pickupItems || [],
         payerType: overlay.querySelector('#f-payer-type').value || 'individual',
         companyName: overlay.querySelector('#f-company-name').value.trim(),
-        documents: {
-          contract: overlay.querySelector('#f-doc-contract').checked,
-          paymentOrder: overlay.querySelector('#f-doc-payment').checked,
-          act: overlay.querySelector('#f-doc-act').checked,
-        },
+        documents: docsForSave,
+        documentFiles: docFilesForSave,
         payments: (()=>{ try{ return JSON.parse(overlay.querySelector('#f-payments').value || '[]'); }catch(e){ return []; } })(),
         guestList: guestListForSave,
         title: title,
