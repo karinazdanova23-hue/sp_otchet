@@ -743,12 +743,12 @@
     .global-search-wrap{ width: 100%; order: -1; }
     #global-search-input{ width: 100% !important; box-sizing: border-box; }
 
+    /* меню разделов на телефоне переносится на несколько строк — все кнопки видны сразу, без прокрутки вбок */
     .view-switch{
-      flex-wrap: nowrap; overflow-x: auto; -webkit-overflow-scrolling: touch;
-      max-width: 100%; width: 100%; scrollbar-width: none;
+      flex-wrap: wrap; overflow: visible; gap: 3px;
+      max-width: 100%; width: 100%; box-sizing: border-box;
     }
-    .view-switch::-webkit-scrollbar{ display:none; }
-    .view-switch button{ flex-shrink: 0; padding: 7px 12px; font-size: 12.5px; white-space: nowrap; }
+    .view-switch button{ flex: 1 1 auto; padding: 7px 9px; font-size: 12px; white-space: nowrap; text-align: center; }
 
     .app-header .lock-btn{ padding: 7px 10px; font-size: 11.5px; }
 
