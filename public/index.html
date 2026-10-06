@@ -1998,7 +1998,7 @@
   // "Касса" — урезанная книга доходов/расходов только по наличным, для администраторов (роль "hostess"):
   // видят приход/расход наличными и остаток за день, но не общую сумму за месяц (та — только в полной
   // "Книге", к которой у роли "hostess" доступа нет); руководитель тоже видит её — для контроля за кассой.
-  function roleCanAccessCashbox(role){ return role === 'hostess' || role === 'owner'; }
+  function roleCanAccessCashbox(role){ return role === 'hostess' || role === 'admin' || role === 'owner'; }
   // отмечать себя выходным в календаре могут менеджеры, ассистент, старший администратор и руководитель —
   // каждый только сам за себя (см. canDayOffEntryBeRemovedByMe)
   function roleCanMarkDayOff(role){ return ['manager','assistant','admin','owner'].includes(role); }
@@ -20694,7 +20694,10 @@
       const cleanedMaterialsItems = materialsItemsDraft
         .map(m=>({name:(m.name||'').trim(), cost:(m.cost!==undefined&&m.cost!==null&&!isNaN(m.cost))?Number(m.cost):null, qty:(m.qty!==undefined&&m.qty!==null&&!isNaN(m.qty))?Number(m.qty):null, source:m.source==='master'?'master':'studio', payTo:m.source==='master'?(m.payTo||'').trim():'', expenseDate:(m.source==='master'&&m.payTo&&m.payTo.trim())?(m.expenseDate||'').trim():''}))
         .filter(m=>m.name && m.cost!==null);
-      const materialsMissing = cleanedMaterialsItems.length === 0;
+      // у занятия «по расписанию» (мастер-класс), на которое пока никто не записан, себестоимость можно не указывать —
+      // материалы добавят, когда появятся гости
+      const scheduleWithoutGuests = productVal === 'Мастер-класс' && (parseInt(guestsRaw)||0) === 0 && guestListForSave.length === 0;
+      const materialsMissing = cleanedMaterialsItems.length === 0 && !scheduleWithoutGuests;
       const rentalBeforeVal = showsDishesAndRental(statusVal) ? (parseInt(rentalBeforeRaw) || 0) : 0;
       const rentalAfterVal = showsDishesAndRental(statusVal) ? (parseInt(rentalAfterRaw) || 0) : 0;
 
@@ -20748,7 +20751,7 @@
         }
         const hostMissing = !hostVal && !PRODUCTS_WITHOUT_HOST.includes(productVal);
         if(!title || hostMissing || !dateVal || !timeVal || !durationVal || durationVal<=0 || guestsRaw==='' || priceRaw==='' || Number(priceRaw)<0 || agreedPriceNegative || masterPayNegative || additionalHostsNegative || materialsNegative || !notesVal || guestNamesMissing || redoEventMissing || materialsMissing || dishesMissing){
-          showGapWarningBanner(redoEventMissing ? 'У гостя отмечена «Переделка» — укажите, к какому мероприятию это относится.' : 'Заполните все поля перед сохранением (для статуса «Слот» это необязательно). Себестоимость: добавьте хотя бы один материал с названием и суммой. Суммы (выручка, ЗП мастеру и со-ведущим, себестоимость) не могут быть отрицательными.');
+          showGapWarningBanner(redoEventMissing ? 'У гостя отмечена «Переделка» — укажите, к какому мероприятию это относится.' : 'Заполните все поля перед сохранением (для статуса «Слот» это необязательно). Себестоимость: добавьте хотя бы один материал с названием и суммой (для мастер-класса без гостей её можно пропустить). Суммы (выручка, ЗП мастеру и со-ведущим, себестоимость) не могут быть отрицательными.');
           if(firstInvalid && firstInvalid.scrollIntoView) firstInvalid.scrollIntoView({block:'center', behavior:'smooth'});
           return;
         }
