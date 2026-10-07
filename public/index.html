@@ -12896,7 +12896,6 @@
         const mMaterialsCost = mEvts.reduce((s,e)=> s + eventMaterialsCost(e), 0);
         // компенсация за материалы считается по дате расхода (может отличаться от месяца самого мероприятия), поэтому перебираем все мероприятия, а не только mEvts
         const mMastersSalary = mEvts.reduce((s,e)=> s + eventTotalMasterPay(e), 0)
-          + state.events.reduce((s,e)=> s + eventMasterMaterialPayments(e).filter(p=>p.date && p.date.startsWith(ym)).reduce((s2,p)=>s2+p.amount,0), 0)
           + state.itemSales.filter(x=>x.date && x.date.startsWith(ym)).reduce((s,x)=> s + Math.round(((x.revenue!==undefined&&x.revenue!==null&&!isNaN(x.revenue))?Number(x.revenue):0) * ITEM_SALE_MASTER_PCT / 100), 0)
           + state.orders.filter(x=>x.date && x.date.startsWith(ym)).reduce((s,x)=> s + orderTotalMasterShare(x), 0)
           + state.salaryAdjustments.filter(a=>a.date && a.date.startsWith(ym)).reduce((s,a)=> s + (Number(a.amount)||0), 0);
@@ -12987,10 +12986,6 @@
       const ym = summaryYear+'-'+pad(mIdx+1);
       state.events.filter(e=> e.date && e.date.startsWith(ym)).forEach(e=>{
         eventHostsWithPay(e).forEach(h=> addStaffPay(h.name, mIdx, h.pay));
-      });
-      // компенсация за материалы — по дате расхода, поэтому проверяем все мероприятия, а не только этого месяца
-      state.events.forEach(e=>{
-        eventMasterMaterialPayments(e).filter(p=>p.date && p.date.startsWith(ym)).forEach(p=> addStaffPay(p.name, mIdx, p.amount));
       });
       state.itemSales.filter(x=>x.date && x.date.startsWith(ym)).forEach(x=>{
         const share = Math.round(((x.revenue!==undefined&&x.revenue!==null&&!isNaN(x.revenue))?Number(x.revenue):0) * ITEM_SALE_MASTER_PCT / 100);
@@ -13832,7 +13827,7 @@
       eventMasterMaterialPayments(e).forEach(p=>{
         if(!p.date || !p.date.startsWith(monthYmForItemSales)) return;
         const half = parseInt(p.date.slice(8,10),10) <= 15 ? 'H1' : 'H2';
-        hostSalary[p.name] = (hostSalary[p.name]||0) + p.amount;
+        // возмещение себестоимости мастеру — НЕ часть зарплаты: считаем и показываем отдельно (hostMaterialsComp)
         hostMaterialsComp[p.name] = (hostMaterialsComp[p.name]||0) + p.amount;
         if(!masterEventDetails[p.name]) masterEventDetails[p.name] = [];
         const label = p.expenseDateOverride
@@ -13880,7 +13875,7 @@
       if(!masterAdjustmentDetails[name]) masterAdjustmentDetails[name] = [];
       masterAdjustmentDetails[name].push({ date: x.date, comment: x.comment||'', amount: Number(x.amount)||0 });
     });
-    const combinedMasterNames = Array.from(new Set([...Object.keys(hostSalary), ...Object.keys(itemSalesByMaster), ...Object.keys(ordersByMaster), ...Object.keys(adjustmentsByMaster)]));
+    const combinedMasterNames = Array.from(new Set([...Object.keys(hostSalary), ...Object.keys(hostMaterialsComp), ...Object.keys(itemSalesByMaster), ...Object.keys(ordersByMaster), ...Object.keys(adjustmentsByMaster)]));
     const combinedMasterTotals = combinedMasterNames.map(name=>{
       const fromEvents = hostSalary[name] || 0;
       const fromMaterialsComp = hostMaterialsComp[name] || 0;
@@ -13888,8 +13883,9 @@
       const fromOrders = ordersByMaster[name] || 0;
       const fromAdjustments = adjustmentsByMaster[name] || 0;
       return { name, fromEvents, fromMaterialsComp, fromItems, fromOrders, fromAdjustments, total: fromEvents + fromItems + fromOrders + fromAdjustments };
-    }).filter(x=>x.total!==0).sort((a,b)=>b.total-a.total);
+    }).filter(x=>x.total!==0 || x.fromMaterialsComp>0).sort((a,b)=>b.total-a.total);
     const combinedGrandTotal = combinedMasterTotals.reduce((s,x)=>s+x.total, 0);
+    const combinedMaterialsCompTotal = combinedMasterTotals.reduce((s,x)=>s+x.fromMaterialsComp, 0);
 
     // зарплата по половинам месяца: 1–15 и 16–конец (МК + изделия + заказы = сумма "к выдаче")
     const hostSalaryH1 = {}, hostSalaryH2 = {};
@@ -13906,8 +13902,8 @@
       eventMasterMaterialPayments(e).forEach(p=>{
         if(!p.date || !p.date.startsWith(monthYmForItemSales)) return;
         const day = parseInt(p.date.split('-')[2], 10) || 1;
-        if(day <= 15){ hostSalaryH1[p.name] = (hostSalaryH1[p.name]||0) + p.amount; totalSalaryH1 += p.amount; }
-        else { hostSalaryH2[p.name] = (hostSalaryH2[p.name]||0) + p.amount; totalSalaryH2 += p.amount; }
+        // возмещение себестоимости в начисления ЗП (1–15 / 16–конец) не входит — оно показывается отдельно
+        void day;
       });
     });
     state.itemSales.filter(x=> x.date && x.date.startsWith(monthYmForItemSales)).forEach(x=>{
@@ -14296,6 +14292,7 @@
       finContent = `
         <div class="analytics-section">
           <h4>ЗП по мастерам за месяц: ${formatMoney(combinedGrandTotal)}</h4>
+          ${combinedMaterialsCompTotal>0 ? `<div style="font-size:12.5px;color:var(--ink-soft);margin:-4px 0 8px;">🧾 Отдельно — возмещение себестоимости мастерам (не входит в ЗП): <b>${formatMoney(combinedMaterialsCompTotal)}</b></div>` : ''}
           ${combinedMasterTotals.length > SALARY_MASTERS_COLLAPSE_LIMIT ? `
             <div style="display:flex;align-items:center;gap:8px;margin-bottom:10px;flex-wrap:wrap;">
               <input type="text" id="salary-masters-search" value="${escapeHtml(state.salaryMastersSearch||'')}" placeholder="🔍 Найти мастера…" style="flex:1;max-width:260px;padding:7px 10px;border:1px solid var(--line-strong);border-radius:var(--radius);font-size:12.5px;font-family:var(--font-body);">
@@ -14312,8 +14309,8 @@
             return visible.map(x=>{
             const expanded = state.expandedSalaryMasters.has(x.name);
             const details = (masterEventDetails[x.name]||[]).sort((a,b)=> a.date.localeCompare(b.date));
-            const h1EventTotal = details.filter(d=>d.half==='H1').reduce((s,d)=>s+d.total,0);
-            const h2EventTotal = details.filter(d=>d.half==='H2').reduce((s,d)=>s+d.total,0);
+            const h1EventTotal = details.filter(d=>d.half==='H1' && d.kind!=='materials').reduce((s,d)=>s+d.total,0);
+            const h2EventTotal = details.filter(d=>d.half==='H2' && d.kind!=='materials').reduce((s,d)=>s+d.total,0);
             return `
             <div class="cert-year-group">
               <div class="cert-group-header" data-salarymaster="${escapeHtml(x.name)}">
@@ -14323,10 +14320,10 @@
               ${expanded ? `
                 <div style="padding:10px 14px;border-top:1px solid var(--line);">
                   <div style="font-size:12px;color:var(--ink-soft);margin-bottom:8px;">
-                    За МК: ${formatMoney(x.fromEvents)}${x.fromMaterialsComp>0?' (себес материалов: '+formatMoney(x.fromMaterialsComp)+')':''}${x.fromItems>0?' · за изделия: '+formatMoney(x.fromItems):''}${x.fromOrders>0?' · за заказы: '+formatMoney(x.fromOrders):''}${x.fromAdjustments!==0?' · корректировки: '+(x.fromAdjustments>0?'+':'')+formatMoney(x.fromAdjustments):''}
+                    За МК: ${formatMoney(x.fromEvents)}${x.fromMaterialsComp>0?' · 🧾 себес материалов (отдельно, не в ЗП): '+formatMoney(x.fromMaterialsComp):''}${x.fromItems>0?' · за изделия: '+formatMoney(x.fromItems):''}${x.fromOrders>0?' · за заказы: '+formatMoney(x.fromOrders):''}${x.fromAdjustments!==0?' · корректировки: '+(x.fromAdjustments>0?'+':'')+formatMoney(x.fromAdjustments):''}
                   </div>
                   ${details.length === 0 ? '<div style="color:var(--ink-soft);font-size:12.5px;">Нет мероприятий за этот месяц — вся сумма из изделий/заказов/корректировок выше.</div>' : ['H1','H2'].map(half=>{
-                    const halfDetails = details.filter(d=>d.half===half);
+                    const halfDetails = details.filter(d=>d.half===half && d.kind!=='materials');
                     const halfTotal = half==='H1' ? h1EventTotal : h2EventTotal;
                     const halfLabel = half==='H1' ? '1\u201315 число' : '16 \u2013 конец месяца';
                     return `
@@ -14348,6 +14345,7 @@
                       ` : ''}
                     </div>
                   `;}).join('')}
+                  ${renderMasterMaterialsCompBlock(details)}
                   ${(masterAdjustmentDetails[x.name]||[]).length > 0 ? `
                     <div style="margin-top:4px;padding-top:10px;border-top:1px dashed var(--line-strong);">
                       <div style="font-size:11px;color:var(--ink-soft);font-family:var(--font-mono);text-transform:uppercase;letter-spacing:0.03em;margin-bottom:4px;">Корректировки ЗП</div>
@@ -14980,6 +14978,23 @@
     `;
   }
 
+  // возмещение мастеру себестоимости материалов, которые он купил сам («Кому платить») — это не зарплата,
+  // поэтому показывается отдельным блоком и в «ЗП» / «Итог к выдаче» не входит
+  function renderMasterMaterialsCompBlock(details){
+    const rows = (details||[]).filter(d=>d.kind==='materials');
+    if(!rows.length) return '';
+    const total = rows.reduce((s,d)=>s+d.total, 0);
+    return `
+      <div style="margin-top:4px;padding-top:10px;border-top:1px dashed var(--line-strong);">
+        <div style="font-size:11px;color:var(--ink-soft);font-family:var(--font-mono);text-transform:uppercase;letter-spacing:0.03em;margin-bottom:4px;">🧾 Себестоимость материалов (возмещение) — не входит в ЗП: ${formatMoney(total)}</div>
+        ${rows.map(d=>`
+          <div class="stat-row" style="margin-bottom:5px;">
+            <div class="stat-label" style="width:170px;">${formatDateText(d.date)}</div>
+            <div style="flex:1;font-size:12.5px;">${escapeHtml(d.title)}</div>
+            <div style="font-family:var(--font-mono);font-size:12.5px;color:var(--accent);">${formatMoney(d.total)}</div>
+          </div>`).join('')}
+      </div>`;
+  }
   function renderPersonalMasterSalaryView(monthLabel, combinedMasterTotals, masterEventDetails, masterAdjustmentDetails, combinedGrandTotal){
     const myName = state.loggedInMasterName;
     const norm = s => (s||'').trim().toLowerCase();
@@ -14988,8 +15003,8 @@
     if(!resolvedName) resolvedName = combinedMasterTotals.find(x=>norm(x.name)===norm(myName))?.name;
     const mine = resolvedName ? combinedMasterTotals.find(x=>x.name===resolvedName) : null;
     const details = resolvedName ? (masterEventDetails[resolvedName]||[]).sort((a,b)=> a.date.localeCompare(b.date)) : [];
-    const h1EventTotal = details.filter(d=>d.half==='H1').reduce((s,d)=>s+d.total,0);
-    const h2EventTotal = details.filter(d=>d.half==='H2').reduce((s,d)=>s+d.total,0);
+    const h1EventTotal = details.filter(d=>d.half==='H1' && d.kind!=='materials').reduce((s,d)=>s+d.total,0);
+    const h2EventTotal = details.filter(d=>d.half==='H2' && d.kind!=='materials').reduce((s,d)=>s+d.total,0);
     const myAdjustments = resolvedName ? (masterAdjustmentDetails[resolvedName]||[]).sort((a,b)=>a.date.localeCompare(b.date)) : [];
     const myMissingReports = state.events
       .filter(e=> e.date && e.date<=todayStr() && isReportRequiredForEvent(e) && !hasMasterReport(e) && (norm(e.host)===norm(myName) || (e.additionalHosts||[]).some(h=>norm(h.name)===norm(myName))))
@@ -15036,10 +15051,10 @@
         <h4>Моя зарплата: ${formatMoney(mine ? mine.total : 0)}</h4>
         ${!mine ? `<div style="color:var(--ink-soft);font-size:13px;">${state.events.some(e=>norm(e.host)===norm(myName) || (e.additionalHosts||[]).some(h=>norm(h.name)===norm(myName))) ? 'В этом месяце пока нет ни мероприятий, ни других начислений.' : `Ваше имя «${escapeHtml(myName)}» пока ни разу не встречалось в расписании как ведущий. Возможно, в мероприятиях оно записано чуть иначе (например, с фамилией или сокращением) — сверьтесь с администратором.`}</div>` : `
           <div style="font-size:12px;color:var(--ink-soft);margin-bottom:10px;">
-            За МК: ${formatMoney(mine.fromEvents)}${mine.fromMaterialsComp>0?' (себес материалов: '+formatMoney(mine.fromMaterialsComp)+')':''}${mine.fromItems>0?' · за изделия: '+formatMoney(mine.fromItems):''}${mine.fromOrders>0?' · за заказы: '+formatMoney(mine.fromOrders):''}${mine.fromAdjustments!==0?' · корректировки: '+(mine.fromAdjustments>0?'+':'')+formatMoney(mine.fromAdjustments):''}
+            За МК: ${formatMoney(mine.fromEvents)}${mine.fromMaterialsComp>0?' · 🧾 себес материалов (отдельно, не в ЗП): '+formatMoney(mine.fromMaterialsComp):''}${mine.fromItems>0?' · за изделия: '+formatMoney(mine.fromItems):''}${mine.fromOrders>0?' · за заказы: '+formatMoney(mine.fromOrders):''}${mine.fromAdjustments!==0?' · корректировки: '+(mine.fromAdjustments>0?'+':'')+formatMoney(mine.fromAdjustments):''}
           </div>
           ${['H1','H2'].map(half=>{
-            const halfDetails = details.filter(d=>d.half===half);
+            const halfDetails = details.filter(d=>d.half===half && d.kind!=='materials');
             const halfTotal = half==='H1' ? h1EventTotal : h2EventTotal;
             const halfLabel = half==='H1' ? '1–15 число' : '16 – конец месяца';
             return `
@@ -15061,6 +15076,7 @@
               ` : ''}
             </div>
           `;}).join('')}
+          ${renderMasterMaterialsCompBlock(details)}
           ${myAdjustments.length > 0 ? `
             <div style="margin-top:4px;padding-top:10px;border-top:1px dashed var(--line-strong);">
               <div style="font-size:11px;color:var(--ink-soft);font-family:var(--font-mono);text-transform:uppercase;letter-spacing:0.03em;margin-bottom:4px;">Корректировки ЗП</div>
