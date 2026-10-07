@@ -4072,6 +4072,7 @@
     if(!canAccessView(state.view)){
       state.view = 'calendar';
     }
+    autoCaptureForecastSnapshot();
 
     if(state.view === 'today'){
       app.innerHTML = renderTodayView();
@@ -12512,7 +12513,7 @@
   // ОДИН раз, если снимка ещё не было (дальше он остаётся неизменным навсегда). Вызывается явно в
   // момент открытия "Отчёта дня"/смены даты в нём — не на каждый render(), чтобы не писать в
   // storage без необходимости.
-  function recordDailyReportSnapshot(dateStr){
+  function recordDailyReportSnapshot(dateStr, quiet){
     if(!state.dailyReportSnapshots) state.dailyReportSnapshots = {};
     const isToday = dateStr === todayStr();
     const existing = state.dailyReportSnapshots[dateStr];
@@ -12523,7 +12524,23 @@
     entry.privateByCatForecast = live.privateByCatForecast;
     if(state.currentRole === 'owner' && live.netProfitMonth !== null) entry.netProfitMonth = live.netProfitMonth;
     state.dailyReportSnapshots[dateStr] = entry;
-    saveDailyReportSnapshots();
+    if(quiet) saveDailySnapshotQuiet(dateStr, entry);
+    else saveDailyReportSnapshots();
+  }
+  // «тихое» сохранение одного дня: сливает с сервером и не будит у остальных баннер «обновите страницу»
+  // (иначе автоматический снимок каждые 20 минут надоедал бы всем)
+  let dailySnapQuietChain = Promise.resolve();
+  function saveDailySnapshotQuiet(dateStr, entry){
+    dailySnapQuietChain = dailySnapQuietChain.then(async ()=>{
+      try{
+        let serverMap = {};
+        try{ const res = await window.storage.get('daily-report-snapshots', true); if(res && res.value) serverMap = JSON.parse(res.value) || {}; }catch(e){ return; }
+        serverMap[dateStr] = entry;
+        const ok = await window.storage.set('daily-report-snapshots', JSON.stringify(serverMap), true);
+        if(ok) state._dailyReportSnapshotsBaseline = JSON.parse(JSON.stringify({ ...(state._dailyReportSnapshotsBaseline||{}), [dateStr]: entry }));
+      }catch(e){ /* не критично: снимок обновится при следующем открытии */ }
+    });
+    return dailySnapQuietChain;
   }
   function pctStr(pct){ return pct===null ? '—' : pct+'%'; }
   function shareStr(part, whole){ return whole>0 ? Math.round(part/whole*100)+'%' : '0%'; }
@@ -12544,6 +12561,32 @@
     const fmt = v => isMoney ? rubStr(v)+' руб.' : v+' шт';
     return ` · темп: ${p.status==='ahead' ? '✅ в темпе' : '⚠ отстаём'} (план на сегодня: ${fmt(p.expectedByNow)})`;
   }
+  // Чтобы «рост прогнозной выручки» было из чего строить, снимок на сегодня обновляется автоматически, пока кто-то из
+  // сотрудников пользуется приложением (не чаще раза в 20 минут) — а не только когда открывают «Отчёт дня».
+  function autoCaptureForecastSnapshot(){
+    try{
+      if(!['owner','admin','assistant','manager'].includes(state.currentRole)) return;
+      if(!state.loaded || !state.events || !state.dailyReportSnapshots) return;
+      const nowMs = Date.now();
+      if(state._forecastSnapAt && nowMs - state._forecastSnapAt < 20*60*1000 && state._forecastSnapDay === todayStr()) return;
+      state._forecastSnapAt = nowMs; state._forecastSnapDay = todayStr();
+      setTimeout(()=>{ try{ recordDailyReportSnapshot(todayStr(), true); }catch(e){} }, 0);
+    }catch(e){}
+  }
+  // «на сколько прогноз вырос за день»: сравниваем с замороженным значением предыдущего дня (если его нет — с ближайшим
+  // более ранним днём этого же месяца, тогда в скобках пишем, к какой дате относится прирост)
+  function forecastDeltaStr(dateStr, value){
+    const ym = dateStr.slice(0,7);
+    const snaps = state.dailyReportSnapshots || {};
+    const prevKeys = Object.keys(snaps).filter(k=> k.startsWith(ym) && k < dateStr && snaps[k] && typeof snaps[k].revenueForecastMonth === 'number').sort();
+    if(!prevKeys.length) return '';
+    const k = prevKeys[prevKeys.length-1];
+    const delta = Math.round(value - snaps[k].revenueForecastMonth);
+    const sign = delta > 0 ? '+' : delta < 0 ? '−' : '±';
+    const d = parseDate(dateStr), p = parseDate(k);
+    const isPrevDay = Math.round((d - p)/86400000) === 1;
+    return ` (${sign}${rubStr(Math.abs(delta))}${isPrevDay ? '' : ' к '+k.slice(8,10)+'.'+k.slice(5,7)})`;
+  }
   function buildDailyReportText(dateStr){
     const d = computeDailyReport(dateStr);
     const dateLabel = formatDateText(dateStr);
@@ -12561,7 +12604,7 @@
     lines.push('');
     lines.push(`▫️ВЫРУЧКА (месяц): ${rubStr(d.revenueMTD)} руб. (${pctStr(d.revenuePlanPct)} от плана)${paceStr(d.revenuePace, true)}`);
     lines.push('');
-    lines.push(`📈 Выручка (весь ${MONTHS[parseDate(d.dateStr).getMonth()]}, прогноз): ${rubStr(d.revenueForecastMonth)} руб.`);
+    lines.push(`📈 Выручка (весь ${MONTHS[parseDate(d.dateStr).getMonth()]}, прогноз): ${rubStr(d.revenueForecastMonth)} руб.${forecastDeltaStr(dateStr, d.revenueForecastMonth)}`);
     lines.push('');
     lines.push(`▫️ПРИБЫЛЬ: ${rubStr(d.profitToday)} руб. (${pctStr(d.profitPlanPct)})${paceStr(d.profitPace, true)}`);
     if(d.netProfitMonth !== null){
@@ -12589,6 +12632,7 @@
     }
     lines.push('');
     lines.push(`▪️Итого (прогноз): ${rubStr(d.revenueForecastByStreams)} руб.`);
+    lines.push('');
     lines.push('');
     lines.push('———');
     lines.push(`Конверсия дня: ${pctStr(d.convDayPct)}, ${d.soldToday}/${d.leadsTodayCount}`);
