@@ -930,7 +930,8 @@
   // брони. "Маркетинг" (промо-съёмки), "Слот" (открытый слот, ещё не забронирован) и "Отменено" — нет,
   // там либо нет гостя-покупателя, либо мероприятие могли сразу создать отменённым
   const EVENT_STATUSES_NEEDING_LEAD = ['confirmed','tentative','offsite'];
-  const MARKETING_DIRECTIONS = ['Офлайн маркетинг','Блогеры','Листовки','Розыгрыши','Рассылки','Гео-сервисы','Бартер','Партнёрства','Съёмки'];
+  const MARKETING_DIRECTIONS = ['Офлайн маркетинг','Блогеры','Листовки','Розыгрыши','Рассылки','Гео-сервисы','Бартер','Партнёрства','Съёмки','Изделия'];
+  const isItemsMarketingDirection = d => (d||'').trim().toLowerCase() === 'изделия';
 
   // ---------- Электронный подарочный сертификат (генератор изображения) ----------
   // статичные части шаблона — лого/QR, контакты, адрес, формулировки — задаются тут один раз;
@@ -2097,6 +2098,17 @@
       if(et){ state.eventTypes = JSON.parse(et.value); }
       else { state.eventTypes = DEFAULT_EVENT_TYPES; await storageSetWithRetry('event-types', JSON.stringify(DEFAULT_EVENT_TYPES)); }
     }catch(e){ state.eventTypes = DEFAULT_EVENT_TYPES; }
+    // один раз добавляем вид «Арт-свидание» (для слотов и расписания); если потом удалят — заново не возвращаем
+    try{
+      const flag = await window.storage.get('art-date-type-added', true);
+      if(!flag){
+        if(Array.isArray(state.eventTypes) && !state.eventTypes.some(t=>t.name==='Арт-свидание')){
+          state.eventTypes = [...state.eventTypes, {name:'Арт-свидание', duration:120, materialRules:[]}];
+          await window.storage.set('event-types', JSON.stringify(state.eventTypes), true);
+        }
+        await window.storage.set('art-date-type-added', '1', true);
+      }
+    }catch(e){}
 
     try{
       const hl = await window.storage.get('hosts-list', true);
@@ -2805,7 +2817,7 @@
     const rows = [...state.refunds].sort((a,b)=>(b.requestDate||'').localeCompare(a.requestDate||'')).map(r=>[
       r.requestDate||'', r.amount!==undefined&&r.amount!==null?r.amount:'', r.paymentDate||'', r.reason||'',
       REFUND_STATUS_LABEL[r.status||'in_progress'], r.source||'', r.fullName||'', r.accountNumber||'', r.bank||'', r.bik||'',
-      r.eventId ? linkedEventLabel(r.eventId) : '', (r.eventId && r.guestId) ? linkedRefundGuestLabel(r.eventId, r.guestId) : '', r.certId ? linkedCertLabel(r.certId) : ''
+      r.eventId ? linkedEventLabel(r.eventId) : (r.manualLabel||''), (r.eventId && r.guestId) ? linkedRefundGuestLabel(r.eventId, r.guestId) : '', r.certId ? linkedCertLabel(r.certId) : ''
     ]);
     const lines = [header, ...rows].map(r=>r.map(csvEscape).join(';'));
     return '\uFEFF' + lines.join('\r\n');
@@ -3226,7 +3238,8 @@
     });
   }
   function allMarketingDirections(){
-    return [...MARKETING_DIRECTIONS, ...(state.customMarketingDirections||[])];
+    const seen = new Set();
+    return [...MARKETING_DIRECTIONS, ...(state.customMarketingDirections||[])].filter(d=>{ const k=(d||'').trim().toLowerCase(); if(seen.has(k)) return false; seen.add(k); return true; });
   }
   async function saveHostsList(){
     await saveSetMerged('hosts-list', state.hostsList, state._hostsListBaseline, (finalArr)=>{
@@ -4996,6 +5009,12 @@
             <label>Сумма (₽)</label>
             <input type="number" id="ms-amount" value="${m.amount!==undefined&&m.amount!==null?m.amount:''}" min="0" step="100" placeholder="Например: 3000">
           </div>
+          <div class="field" id="ms-items-master-field" style="display:${isItemsMarketingDirection(m.direction)?'block':'none'};">
+            <label>Мастер, которому идёт эта сумма в ЗП</label>
+            <input type="text" id="ms-items-master" value="${escapeHtml(m.itemsMaster||'')}" placeholder="Начните вводить имя…" list="ms-items-master-list">
+            <datalist id="ms-items-master-list">${state.hostsList.map(h=>`<option value="${escapeHtml(h)}">`).join('')}</datalist>
+            <div style="font-size:11.5px;color:var(--ink-soft);margin-top:4px;">Сумма автоматически добавится мастеру в «Корректировки ЗП» (доплата) и попадёт в его зарплату. Расходом в «Книге → Маркетинг» отдельно не дублируется — иначе затрата посчиталась бы дважды.</div>
+          </div>
           <div class="field">
             <label>Привязать к мероприятию (необязательно)</label>
             <input type="text" id="ms-event-search" placeholder="Начните вводить дату или название…" list="ms-event-options" value="${escapeHtml(m.eventId ? (marketingEventOptions.find(o=>o.id===m.eventId)?.label || '') : '')}">
@@ -5149,6 +5168,8 @@
         }
       }
       bloggerField.style.display = directionSelect.value === 'Блогеры' ? 'block' : 'none';
+      const itemsMasterFieldEl = overlay.querySelector('#ms-items-master-field');
+      if(itemsMasterFieldEl) itemsMasterFieldEl.style.display = isItemsMarketingDirection(directionSelect.value) ? 'block' : 'none';
       refreshEventOptions();
       refreshBloggerGuestSection();
     };
@@ -5192,7 +5213,10 @@
       const reachRaw = overlay.querySelector('#ms-reach').value;
       const amountRaw = overlay.querySelector('#ms-amount').value;
       const commentVal = overlay.querySelector('#ms-comment').value.trim();
-      const eventIdVal = overlay.querySelector('#ms-event').value || '';
+      const isItemsDir = isItemsMarketingDirection(directionVal);
+      const itemsMasterVal = isItemsDir ? overlay.querySelector('#ms-items-master').value.trim() : '';
+      // у «Изделий» привязка к мероприятию не используется — сумма идёт мастеру в ЗП, иначе затрата задвоилась бы
+      const eventIdVal = isItemsDir ? '' : (overlay.querySelector('#ms-event').value || '');
 
       // трата на блогера считается по дате его реального визита (дата привязанного мероприятия),
       // а не по дате, когда запись завели в системе — даже если дату в поле не поправили руками
@@ -5216,7 +5240,7 @@
         const el = overlay.querySelector('#'+id);
         if(el){ el.style.borderColor = 'var(--danger)'; if(!firstInvalid) firstInvalid = el; }
       };
-      overlay.querySelectorAll('#ms-date,#ms-blogger-name,#ms-blogger-handle,#ms-amount').forEach(el=>el.style.borderColor='');
+      overlay.querySelectorAll('#ms-date,#ms-blogger-name,#ms-blogger-handle,#ms-amount,#ms-items-master').forEach(el=>el.style.borderColor='');
 
       if(!dateVal) markInvalid('ms-date');
       const bloggerNameMissing = directionVal === 'Блогеры' && !bloggerNameVal;
@@ -5225,8 +5249,10 @@
       if(bloggerMissing) markInvalid('ms-blogger-handle');
       if(amountRaw === '' || Number(amountRaw) < 0) markInvalid('ms-amount');
 
-      if(!dateVal || bloggerNameMissing || bloggerMissing || amountRaw==='' || Number(amountRaw)<0){
-        showGapWarningBanner(bloggerNameMissing ? 'Для направления «Блогеры» укажите имя блогера — с ним блогер запишется гостем.' : bloggerMissing ? 'Для направления «Блогеры» укажите ссылку на аккаунт блогера.' : 'Заполните дату и сумму. Сумма не может быть отрицательной.');
+      const itemsMasterMissing = isItemsDir && !itemsMasterVal;
+      if(itemsMasterMissing) markInvalid('ms-items-master');
+      if(!dateVal || bloggerNameMissing || bloggerMissing || itemsMasterMissing || amountRaw==='' || Number(amountRaw)<0){
+        showGapWarningBanner(itemsMasterMissing ? 'Для направления «Изделия» выберите мастера — сумма уйдёт ему в ЗП.' : bloggerNameMissing ? 'Для направления «Блогеры» укажите имя блогера — с ним блогер запишется гостем.' : bloggerMissing ? 'Для направления «Блогеры» укажите ссылку на аккаунт блогера.' : 'Заполните дату и сумму. Сумма не может быть отрицательной.');
         if(firstInvalid && firstInvalid.scrollIntoView) firstInvalid.scrollIntoView({block:'center', behavior:'smooth'});
         return;
       }
@@ -5243,8 +5269,32 @@
         comment: commentVal,
         expenseId: state.modal.marketingSpend.expenseId || '',
         eventId: eventIdVal,
+        itemsMaster: itemsMasterVal,
+        adjId: state.modal.marketingSpend.adjId || '',
       };
-      updated.expenseId = await syncMarketingSpendExpense(updated);
+      if(isItemsDir){
+        // «Изделия»: сумма — доплата мастеру в ЗП (корректировка), а не расход «Маркетинг» в Книге
+        if(updated.expenseId){
+          state.expenses = state.expenses.filter(x=>x.id !== updated.expenseId);
+          updated.expenseId = '';
+          await saveExpenses();
+        }
+        const adjEntry = {
+          id: updated.adjId || uid(), date: updated.date, masterName: itemsMasterVal, amount: updated.amount, eventId: '',
+          comment: updated.comment ? `Маркетинг: изделия — ${updated.comment}` : 'Маркетинг: изделия', msRef: updated.id,
+        };
+        const aIdx = state.salaryAdjustments.findIndex(x=>x.id===adjEntry.id);
+        if(aIdx>=0) state.salaryAdjustments[aIdx] = adjEntry; else state.salaryAdjustments.push(adjEntry);
+        updated.adjId = adjEntry.id;
+        await saveSalaryAdjustments();
+      } else {
+        if(updated.adjId){
+          state.salaryAdjustments = state.salaryAdjustments.filter(x=>x.id !== updated.adjId);
+          updated.adjId = '';
+          await saveSalaryAdjustments();
+        }
+        updated.expenseId = await syncMarketingSpendExpense(updated);
+      }
 
       // если трата привязана к мероприятию — она же появляется в его себестоимости, чтобы карточка
       // мероприятия и панель "📣 Маркетинг" в Аналитике тоже видели эту сумму
@@ -5286,6 +5336,10 @@
         if(toDelete.expenseId){
           state.expenses = state.expenses.filter(x=>x.id !== toDelete.expenseId);
           await saveExpenses();
+        }
+        if(toDelete.adjId){
+          state.salaryAdjustments = state.salaryAdjustments.filter(x=>x.id !== toDelete.adjId);
+          await saveSalaryAdjustments();
         }
         if(toDelete.eventId){
           const ev = state.events.find(e=>e.id===toDelete.eventId);
@@ -5784,6 +5838,7 @@
         <div class="rf-head">
           <div>
             <div class="rf-title">${escapeHtml(e.title||'Без названия')} ${space ? spaceBadge(space,'xs') : ''}</div>
+            ${(()=>{ const occ = e.product==='Мастер-класс' ? 'Расписание' : (e.product||''); const lbl = [occ, e.status==='offsite'?'выездное':''].filter(Boolean).join(' · '); return lbl ? `<div class="rf-meta" style="margin-bottom:2px;"><b>Повод:</b> ${escapeHtml(lbl)}</div>` : ''; })()}
             <div class="rf-meta">${formatDateText(e.date)}${e.time?' · '+escapeHtml(e.time):''} · ведёт: ${escapeHtml(allHostNamesDisplay(e))}${(e.guests!==undefined&&e.guests!==null&&e.guests!=='')?' · гостей: '+escapeHtml(String(e.guests)):''}</div>
           </div>
           <span class="rf-rating${low?' low':''}">★ ${escapeHtml(String(r.rating))}/5</span>
@@ -6151,7 +6206,7 @@
               <div class="cell">${r.paymentDate ? formatDateText(r.paymentDate) : '—'}</div>
               <div class="cell">${escapeHtml(r.source||'')}</div>
               <div><span class="cert-badge ${r.status==='refunded'?'used':'in_progress'}">${REFUND_STATUS_LABEL[r.status||'in_progress']}</span></div>
-              <div class="reason">${escapeHtml(r.reason||'')}${r.source==='Точка'&&r.fullName?' · '+escapeHtml(r.fullName):''}${r.eventId?' <span style="color:var(--ink-soft);font-size:11px;">🔗 '+escapeHtml(linkedEventLabel(r.eventId))+(r.guestId?' — '+escapeHtml(linkedRefundGuestLabel(r.eventId, r.guestId)):'')+'</span>':''}${r.certId?' <span style="color:var(--ink-soft);font-size:11px;">🎟 '+escapeHtml(linkedCertLabel(r.certId))+'</span>':''}</div>
+              <div class="reason">${escapeHtml(r.reason||'')}${r.source==='Точка'&&r.fullName?' · '+escapeHtml(r.fullName):''}${r.eventId?' <span style="color:var(--ink-soft);font-size:11px;">🔗 '+escapeHtml(linkedEventLabel(r.eventId))+(r.guestId?' — '+escapeHtml(linkedRefundGuestLabel(r.eventId, r.guestId)):'')+'</span>':''}${r.manualLabel?' <span style="color:var(--ink-soft);font-size:11px;">📝 '+escapeHtml(r.manualLabel)+'</span>':''}${r.certId?' <span style="color:var(--ink-soft);font-size:11px;">🎟 '+escapeHtml(linkedCertLabel(r.certId))+'</span>':''}</div>
             </div>
           `).join('')}
         </div>
@@ -10370,6 +10425,24 @@
     };
   }
 
+  // удалили мероприятие целиком — снимаем все списания сертификатов, сделанные на него, и пересчитываем статус
+  // сертификата (нет списаний → «в процессе», остался остаток → «частично», иначе «использован»). Возвращённые не трогаем.
+  function restoreCertsAfterEventDelete(eventId){
+    let changed = false;
+    (state.certificates||[]).forEach(c=>{
+      if(c.status === 'refunded') return;
+      if(Array.isArray(c.redemptions) && c.redemptions.some(r=>r.eventId===eventId)){
+        c.redemptions = c.redemptions.filter(r=>r.eventId!==eventId);
+        c.status = certRemaining(c) <= 0 ? 'used' : (c.redemptions.length > 0 ? 'partial' : 'in_progress');
+        if(c.redemptions.length === 0) c.useDate = '';
+        changed = true;
+      } else if(!Array.isArray(c.redemptions) && c.eventId === eventId){
+        c.eventId = ''; c.useDate = ''; c.status = 'in_progress';
+        changed = true;
+      }
+    });
+    return changed;
+  }
   function renderRefundModal(refund, isNew){
     // тип возврата определяет весь дальнейший алгоритм заполнения формы:
     // "мероприятие" — обязательно выбрать и мероприятие, и конкретного человека в нём;
@@ -10429,6 +10502,26 @@
           </div>
           <div id="refund-event-block" style="display:${isEventType?'block':'none'};">
             <div class="field">
+              <label>Какое мероприятие</label>
+              <div class="status-select-wrap">
+                <div class="dishes-opt ${!refund.manualLabel?'active':''}" data-refundmode="app">
+                  <span class="dot" style="background:var(--status-blue)"></span>Из приложения
+                </div>
+                <div class="dishes-opt ${refund.manualLabel?'active':''}" data-refundmode="manual">
+                  <span class="dot" style="background:var(--status-purple)"></span>Нет в приложении — вписать вручную
+                </div>
+              </div>
+              <input type="hidden" id="r-mode" value="${refund.manualLabel?'manual':'app'}">
+            </div>
+            <div id="refund-event-manual" style="display:${refund.manualLabel?'block':'none'};">
+              <div class="field">
+                <label>Подпись (что за мероприятие)</label>
+                <input type="text" id="r-manual-label" value="${escapeHtml(refund.manualLabel||'')}" placeholder="Например: ДР Иванова, 12.09, Мастерская">
+                <div style="font-size:11.5px;color:var(--ink-soft);margin-top:6px;">Мероприятия нет в приложении — выручка ничего не вычитает автоматически, возврат просто записывается в список с этой подписью.</div>
+              </div>
+            </div>
+            <div id="refund-event-app" style="display:${refund.manualLabel?'none':'block'};">
+            <div class="field">
               <label>Мероприятие</label>
               <input type="text" id="r-event-search" placeholder="Начните вводить дату, название или пространство…" list="r-event-options" value="${escapeHtml(refund.eventId ? (eventSelectOptions().find(o=>o.id===refund.eventId)?.label || '') : '')}">
               <datalist id="r-event-options">${eventSelectOptions().map(o=>`<option value="${escapeHtml(o.label)}">`).join('')}</datalist>
@@ -10439,6 +10532,7 @@
               <label>Кому из гостей возвращаем</label>
               <select id="r-guest"><option value="">Сначала выберите мероприятие…</option></select>
               <div style="font-size:11.5px;color:var(--ink-soft);margin-top:6px;">Отменится запись именно этого гостя — остальные гости мероприятия не затрагиваются (само мероприятие пометится «Отменено» только если так вернули уже всех гостей).</div>
+            </div>
             </div>
             <div class="field">
               <label>Источник</label>
@@ -10587,6 +10681,17 @@
     });
     updateTochkaFieldVisibility();
 
+    overlay.querySelectorAll('[data-refundmode]').forEach(opt=>{
+      opt.onclick = ()=>{
+        overlay.querySelectorAll('[data-refundmode]').forEach(o=>o.classList.remove('active'));
+        opt.classList.add('active');
+        const manual = opt.dataset.refundmode === 'manual';
+        overlay.querySelector('#r-mode').value = manual ? 'manual' : 'app';
+        overlay.querySelector('#refund-event-manual').style.display = manual ? 'block' : 'none';
+        overlay.querySelector('#refund-event-app').style.display = manual ? 'none' : 'block';
+      };
+    });
+
     overlay.querySelectorAll('[data-refundstatus]').forEach(opt=>{
       opt.onclick = ()=>{
         overlay.querySelectorAll('[data-refundstatus]').forEach(o=>o.classList.remove('active'));
@@ -10697,10 +10802,14 @@
       }
 
       // при типе "мероприятие" обязательны и само мероприятие, и конкретный человек
-      const linkedEventIdForCheck = typeVal === 'event' ? (overlay.querySelector('#r-event').value || '') : '';
+      const manualMode = typeVal === 'event' && overlay.querySelector('#r-mode').value === 'manual';
+      const manualLabelVal = manualMode ? overlay.querySelector('#r-manual-label').value.trim() : '';
+      const linkedEventIdForCheck = (typeVal === 'event' && !manualMode) ? (overlay.querySelector('#r-event').value || '') : '';
       let eventMissing = false, guestMissing = false;
       let linkedGuestIdForCheck = '';
-      if(typeVal === 'event'){
+      if(manualMode){
+        if(!manualLabelVal){ eventMissing = true; markInvalid('r-manual-label'); }
+      } else if(typeVal === 'event'){
         if(!linkedEventIdForCheck){ eventMissing = true; markInvalid('r-event-search'); }
         linkedGuestIdForCheck = refundGuestSelect.value || '';
         if(linkedEventIdForCheck && !linkedGuestIdForCheck){ guestMissing = true; markInvalid('r-guest'); }
@@ -10756,7 +10865,7 @@
 
       if(!requestDateVal || amountRaw==='' || Number(amountRaw)<0 || !paymentDateVal || !reasonVal || tochkaMissing || refundExceedsReceived || refundExceedsCertRemaining || eventMissing || guestMissing || certMissing){
         showGapWarningBanner(eventMissing
-          ? 'Выберите мероприятие, за которое оформляется возврат.'
+          ? (manualMode ? 'Впишите подпись: что за мероприятие.' : 'Выберите мероприятие, за которое оформляется возврат.')
           : guestMissing
           ? 'Выберите, кому из гостей возвращаем.'
           : certMissing
@@ -10791,6 +10900,7 @@
         linkType: typeVal,
         eventId: linkedEventIdForCheck,
         guestId: typeVal === 'event' ? linkedGuestIdForCheck : '',
+        manualLabel: manualMode ? manualLabelVal : '',
         certId: linkedCertIdForCheck,
         fullName: source==='Точка' ? fullNameVal : '',
         accountNumber: source==='Точка' ? accountVal : '',
@@ -19201,14 +19311,6 @@
             <div style="font-size:11px;color:var(--ink-soft);margin-top:4px;">${roleCanQuickAddEventType(state.currentRole) ? 'Нет нужного вида в списке? Выберите «+ Добавить новый вид…» прямо здесь — он сразу появится в списке. Настроить для него статьи расхода материалов можно позже в «📋 Виды мероприятий» (доступно администраторам).' : 'Нет нужного вида в списке? Добавьте его в «📋 Виды мероприятий» в шапке — тогда он появится здесь.'}</div>
           </div>
           <div class="field">
-            <label>Направление (для фильтра в календаре)</label>
-            <select id="f-direction">
-              <option value="">— как название —</option>
-              ${Array.from(new Set([...(ev.direction?[ev.direction]:[]), ...state.eventTypes.map(t=>t.name)])).sort((a,b)=>a.localeCompare(b,'ru')).map(t=>`<option value="${escapeHtml(t)}" ${ev.direction===t?'selected':''}>${escapeHtml(t)}</option>`).join('')}
-            </select>
-            <div style="font-size:11px;color:var(--ink-soft);margin-top:4px;">По умолчанию направление совпадает с названием. Меняйте только если хотите, чтобы в фильтре календаря это мероприятие числилось под другим направлением.</div>
-          </div>
-          <div class="field">
             <label>Количество человек</label>
             <input type="number" id="f-guests" value="${ev.guests!==undefined && ev.guests!==null ? ev.guests : ''}" min="0" step="1" placeholder="Например: 8">
           </div>
@@ -20646,6 +20748,8 @@
         state.incomes = state.incomes.filter(x=>!removeIds.has(x.id));
         await saveIncomes();
       }
+      // сертификаты, которыми оплачивали это мероприятие, получают сумму обратно
+      if(restoreCertsAfterEventDelete(eventToDelete.id)) await saveCertificates();
       await saveEvents();
       state.modal = null; overlay.remove(); render();
       });
@@ -20929,7 +21033,8 @@
         payments: (()=>{ try{ return JSON.parse(overlay.querySelector('#f-payments').value || '[]'); }catch(e){ return []; } })(),
         guestList: guestListForSave,
         title: title,
-        direction: overlay.querySelector('#f-direction') ? (overlay.querySelector('#f-direction').value || '') : (state.modal.event.direction || ''),
+        // поле «Направление» убрано: направление = название. Старое значение сохраняем, только пока название не менялось.
+        direction: ((state.modal.event.title||'')===title) ? (state.modal.event.direction || '') : '',
         product: overlay.querySelector('#f-product').value || '',
         status: overlay.querySelector('#f-status').value || 'confirmed',
         dishes: overlay.querySelector('#f-dishes').value || '',
