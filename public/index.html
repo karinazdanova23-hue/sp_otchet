@@ -1373,7 +1373,7 @@
     const maybe = r.rows.filter(x=>x.needMin === 0 && x.needMax > 0);
     const ok = r.rows.filter(x=>x.needMax === 0);
     const range = (x)=> x.lo === x.hi ? `${x.lo}` : `${x.lo}–${x.hi}`;
-    return `<details class="recs-panel" open style="border:1px solid var(--line-strong);border-radius:var(--radius);padding:10px 14px;margin-bottom:14px;background:var(--white);">
+    return `<details class="recs-panel" ${state.recsPanelOpen ? 'open' : ''} style="border:1px solid var(--line-strong);border-radius:var(--radius);padding:10px 14px;margin-bottom:14px;background:var(--white);">
       <summary style="cursor:pointer;font-weight:600;font-size:13.5px;">📋 Что ещё поставить по рекомендациям ${need.length ? `<span style="color:var(--status-red);font-weight:600;">(${need.length})</span>` : '<span style="color:var(--status-green);">✓ всё в норме</span>'}</summary>
       <div style="margin-top:10px;font-size:13px;">
         ${r.openSlots > 0 ? `<div style="margin-bottom:8px;color:var(--ink-soft);font-size:12.5px;">Остаток считается по уже поставленным направлениям. Ещё не превращено в направления слотов: <b>${r.openSlots}</b> — они в подсчёт пока не входят.</div>` : ''}
@@ -11085,6 +11085,10 @@
     if(todayBtn) todayBtn.onclick = ()=>{ state.cursor = new Date(new Date().getFullYear(), new Date().getMonth(), 1); render(); };
     const wishesOpenBtn = document.getElementById('wishes-open');
     if(wishesOpenBtn) wishesOpenBtn.onclick = ()=>{ state.modal = {type:'wishes', tab:'new'}; render(); };
+    // панель рекомендаций по умолчанию свёрнута (занимает одну строку с числом того, что нужно поставить);
+    // если её раскрыли — остаётся раскрытой, пока человек сам не свернёт или не перезагрузит приложение
+    const recsPanelEl = document.querySelector('details.recs-panel');
+    if(recsPanelEl) recsPanelEl.addEventListener('toggle', ()=>{ state.recsPanelOpen = recsPanelEl.open; });
     const recsEditBtn = document.getElementById('recs-edit');
     if(recsEditBtn) recsEditBtn.onclick = (ev)=>{ ev.preventDefault(); ev.stopPropagation(); state.modal = {type:'schedule-recs'}; render(); };
 
@@ -12448,9 +12452,15 @@
 
     // СРЕДНИЙ ЧЕК — выручка мероприятий (без сертификатов/заказов) на гостя, нарастающим итогом за месяц —
     // как в «Сводке по годам». За один день цифра слишком случайная (1-2 мероприятия), поэтому не по дню.
-    const eventsRevenueMTD = privateRevenueMTD + scheduleRevenueMTD;
-    const guestsMTD = eventsMonthToDate.reduce((s,e)=> s + ((e.guests!==undefined&&e.guests!==null&&!isNaN(e.guests))?Number(e.guests):0), 0);
-    const avgCheck = guestsMTD>0 ? Math.round(eventsRevenueMTD/guestsMTD) : null;
+    // Теперь — по ВСЕМУ месяцу (с уже проданными будущими датами) и в разбивке по продуктам: так цифра
+    // меняется с каждой новой продажей, а у отчёта за прошлую дату замораживается снимком (см. AVG_CHECK_FIELDS).
+    const avgGuestsOf = e => (e.guests!==undefined&&e.guests!==null&&!isNaN(e.guests)) ? Number(e.guests) : 0;
+    const avgBase = eventsWholeMonth.filter(e=>e.status!=='cancelled' && avgGuestsOf(e)>0);
+    const avgCalc = list => { const g=list.reduce((s,e)=>s+avgGuestsOf(e),0); return g>0 ? Math.round(list.reduce((s,e)=>s+eventRevenueForecast(e),0)/g) : null; };
+    const avgCheck = avgCalc(avgBase);
+    const avgCheckByCat = {};
+    DAILY_REPORT_PRIVATE_CATS.forEach(c=>{ avgCheckByCat[c] = avgCalc(avgBase.filter(e=>!isSchedule(e) && dailyReportEventCategory(e)===c)); });
+    avgCheckByCat['Расписание'] = avgCalc(avgBase.filter(isSchedule));
 
     // ЧИСТАЯ ПРИБЫЛЬ — только для владельца, та же формула, что в панели «🔒 Чистая прибыль».
     // Это прогноз на ВЕСЬ месяц целиком, а не «на сегодня» — аренда и оклады не делятся по дням,
@@ -12484,7 +12494,7 @@
       scheduleRevenuePlan, privateRevenuePlan, ordersRevenuePlan, certsRevenuePlan,
       profitToday, profitPlanPct, profitPace,
       convDayPct, convMonthPct, soldToday, soldMonthAll, leadsMonthAllCount: leadsMonthAll.length, rentabilityPct,
-      occupancyPct, avgCheck,
+      occupancyPct, avgCheck, avgCheckByCat,
       netProfitMonth,
     };
   }
@@ -12506,6 +12516,7 @@
     DAILY_REPORT_FORECAST_FIELDS.forEach(f=>{ if(snap[f]!==undefined && snap[f]!==null) live[f] = snap[f]; });
     if(snap.netProfitMonth!==undefined && snap.netProfitMonth!==null) live.netProfitMonth = snap.netProfitMonth;
     if(snap.privateByCatForecast) live.privateByCatForecast = snap.privateByCatForecast;
+    if(snap.avgCheckByCat){ live.avgCheckByCat = snap.avgCheckByCat; live.avgCheck = (snap.avgCheck===undefined ? null : snap.avgCheck); }
     return live;
   }
   // фиксирует снимок прогнозных цифр на эту дату: для "сегодня" обновляет его каждый раз (день ещё
@@ -12522,6 +12533,7 @@
     const entry = existing ? {...existing} : {};
     DAILY_REPORT_FORECAST_FIELDS.forEach(f=>{ entry[f] = live[f]; });
     entry.privateByCatForecast = live.privateByCatForecast;
+    entry.avgCheck = live.avgCheck; entry.avgCheckByCat = live.avgCheckByCat;
     if(state.currentRole === 'owner' && live.netProfitMonth !== null) entry.netProfitMonth = live.netProfitMonth;
     state.dailyReportSnapshots[dateStr] = entry;
     if(quiet) saveDailySnapshotQuiet(dateStr, entry);
@@ -12602,15 +12614,9 @@
     lines.push('');
     lines.push('——');
     lines.push('');
-    lines.push(`▫️ВЫРУЧКА (месяц): ${rubStr(d.revenueMTD)} руб. (${pctStr(d.revenuePlanPct)} от плана)${paceStr(d.revenuePace, true)}`);
-    lines.push('');
     lines.push(`📈 Выручка (весь ${MONTHS[parseDate(d.dateStr).getMonth()]}, прогноз): ${rubStr(d.revenueForecastMonth)} руб.${forecastDeltaStr(dateStr, d.revenueForecastMonth)}`);
     lines.push('');
     lines.push(`▫️ПРИБЫЛЬ: ${rubStr(d.profitToday)} руб. (${pctStr(d.profitPlanPct)})${paceStr(d.profitPace, true)}`);
-    if(d.netProfitMonth !== null){
-      lines.push('');
-      lines.push(`🔒 Чистая прибыль (весь ${MONTHS[parseDate(d.dateStr).getMonth()]}, прогноз): ${rubStr(d.netProfitMonth)} руб.`);
-    }
     lines.push('');
     lines.push(`▪️Частные (прогноз): ${rubStr(d.privateRevenueForecast)} руб. (${catPctStr(d.privateRevenueForecast, d.privateRevenuePlan)}):`);
     lines.push('');
@@ -12640,6 +12646,10 @@
     lines.push(`Рентабельность: ${pctStr(d.rentabilityPct)}`);
     lines.push(`% заполняемости (месяц): ${d.occupancyPct}%`);
     lines.push(`Средний чек (месяц): ${d.avgCheck===null ? '—' : rubStr(d.avgCheck)+' руб.'}`);
+    [...DAILY_REPORT_PRIVATE_CATS,'Расписание'].forEach(c=>{
+      const v = d.avgCheckByCat ? d.avgCheckByCat[c] : null;
+      if(v!==null && v!==undefined) lines.push(`- ${c}: ${rubStr(v)} руб.`);
+    });
     return lines.join('\n');
   }
 
@@ -18287,7 +18297,7 @@
             <input type="date" id="dr-date" value="${dateStr}">
           </div>
           <textarea id="dr-text" readonly style="width:100%;box-sizing:border-box;min-height:420px;font-family:var(--font-mono);font-size:13px;line-height:1.5;border:1px solid var(--line-strong);border-radius:var(--radius);padding:10px 12px;resize:vertical;background:var(--paper-2);">${escapeHtml(text)}</textarea>
-          <div style="font-size:11.5px;color:var(--ink-soft);font-family:var(--font-mono);">«Руб.» у ПРИБЫЛИ — цифры за сам этот день. ЗАЯВКИ и ВЫРУЧКА (месяц) — нарастающим итогом с начала месяца по эту дату. Проценты у ЗАЯВОК и у ВЫРУЧКИ/ПРИБЫЛИ — нарастающим итогом с начала месяца по эту дату, относительно месячного плана. «Темп» у ЗАЯВОК/ВЫРУЧКИ/ПРИБЫЛИ — сравнение с тем, сколько от плана ОБЫЧНО набрано к этому же числу в этом месяце прошлого года (а не поровну по дням — мероприятия бронируют заранее, и к концу месяца темп естественно замедляется); если данных за прошлый год по этому дню нет — темп честно не считается, вместо него пометка «нет данных» (занести их можно в «Выполнение плана»). Остальные проценты в скобках (у категорий заявок и у категорий внутри Частных) — это % выполнения МЕСЯЧНОГО ПЛАНА именно по этой категории/потоку (план задаётся в настройке плана на месяц), а не доля от суммы строкой выше. Если план по категории не задан — вместо процента честно показывается «план не задан». «Выручка (прогноз)», «Чистая прибыль» (видна только руководителю), блок ▪️Частные/Расписание/Заказы/Сертификаты/Итого, «% заполняемости» и «Средний чек» — тоже про весь месяц целиком, а не про этот день: все они считают ВСЕ мероприятия/заказы/сертификаты месяца, включая уже забронированные будущие даты (поэтому обычно больше, чем «ВЫРУЧКА (месяц)» выше — та только по эту дату) — блок ▪️ показывает, из чего состоит эта прогнозная сумма по потокам (Частные/Расписание/Заказы/Сертификаты), а средний чек за один день слишком случаен, поэтому считается нарастающим итогом с начала месяца. Все прогнозные цифры (Выручка (прогноз), Чистая прибыль, блок ▪️) у СЕГОДНЯШНЕГО дня всегда живые (пересчитываются из текущих данных), а у уже ПРОШЕДШЕГО дня — замораживаются при первом открытии отчёта за этот день и дальше не меняются, даже если позже добавится новая бронь на этот месяц — так цифра показывает, что было известно именно на тот день, а не сегодняшнее состояние брони.</div>
+          <div style="font-size:11.5px;color:var(--ink-soft);font-family:var(--font-mono);">«Руб.» у ПРИБЫЛИ — цифры за сам этот день. ЗАЯВКИ и ВЫРУЧКА (месяц) — нарастающим итогом с начала месяца по эту дату. Проценты у ЗАЯВОК и у ВЫРУЧКИ/ПРИБЫЛИ — нарастающим итогом с начала месяца по эту дату, относительно месячного плана. «Темп» у ЗАЯВОК/ВЫРУЧКИ/ПРИБЫЛИ — сравнение с тем, сколько от плана ОБЫЧНО набрано к этому же числу в этом месяце прошлого года (а не поровну по дням — мероприятия бронируют заранее, и к концу месяца темп естественно замедляется); если данных за прошлый год по этому дню нет — темп честно не считается, вместо него пометка «нет данных» (занести их можно в «Выполнение плана»). Остальные проценты в скобках (у категорий заявок и у категорий внутри Частных) — это % выполнения МЕСЯЧНОГО ПЛАНА именно по этой категории/потоку (план задаётся в настройке плана на месяц), а не доля от суммы строкой выше. Если план по категории не задан — вместо процента честно показывается «план не задан». «Выручка (прогноз)», «Чистая прибыль» (видна только руководителю), блок ▪️Частные/Расписание/Заказы/Сертификаты/Итого, «% заполняемости» и «Средний чек» — тоже про весь месяц целиком, а не про этот день: все они считают ВСЕ мероприятия/заказы/сертификаты месяца, включая уже забронированные будущие даты (поэтому обычно больше, чем «ВЫРУЧКА (месяц)» выше — та только по эту дату) — блок ▪️ показывает, из чего состоит эта прогнозная сумма по потокам (Частные/Расписание/Заказы/Сертификаты), а «Средний чек» считается по гостям и выручке всех мероприятий месяца (в разбивке по продуктам), поэтому меняется с каждой новой продажей и у прошедшей даты замораживается. Все прогнозные цифры (Выручка (прогноз), Чистая прибыль, блок ▪️) у СЕГОДНЯШНЕГО дня всегда живые (пересчитываются из текущих данных), а у уже ПРОШЕДШЕГО дня — замораживаются при первом открытии отчёта за этот день и дальше не меняются, даже если позже добавится новая бронь на этот месяц — так цифра показывает, что было известно именно на тот день, а не сегодняшнее состояние брони.</div>
           <div class="modal-actions">
             <span></span>
             <div style="display:flex;gap:8px;">
