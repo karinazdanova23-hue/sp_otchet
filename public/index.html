@@ -3076,13 +3076,33 @@
   async function saveCollectionMerged(storageKey, currentArray, baselineArray, applyMerged, keyFn){
     const kf = keyFn || (x=>x.id);
     const { upserts, deletes } = diffForMerge(baselineArray, currentArray, kf);
-    let serverArray;
+    let serverArray = null;
+    let serverUnreadable = false; // ответ пришёл, но это не список (повреждён)
+    // сверяемся с сервером до трёх раз; если запрос не проходит (сеть/сервер) — НЕ записываем свой список целиком:
+    // он может быть устаревшим и затереть чужие/более новые записи. Данные остаются в этой вкладке,
+    // человек видит предупреждение «не удалось сохранить» и может повторить. (Ключа нет — это не ошибка, сервер отвечает пусто.)
+    let fetched = false, res = null;
+    for(let attempt=0; attempt<3 && !fetched; attempt++){
+      try{
+        res = await window.storage.get(storageKey, true);
+        fetched = true;
+      }catch(e){
+        if(attempt<2) await sleep(500*(attempt+1));
+      }
+    }
+    if(!fetched){
+      console.error('merge-save aborted: server unreachable for', storageKey);
+      showSaveError();
+      return;
+    }
     try{
-      const res = await window.storage.get(storageKey, true);
       serverArray = res ? JSON.parse(res.value) : [];
+      if(!Array.isArray(serverArray)) throw new Error('not array');
     }catch(e){
-      // сервер недоступен для сверки — сохраняем как раньше (весь локальный список), чтобы хотя бы
-      // не потерять то, что успели ввести именно в этой вкладке; безопасное слияние тут невозможно
+      serverUnreadable = true;
+    }
+    if(serverUnreadable){
+      // содержимое на сервере повреждено — сверять не с чем, сохраняем локальный список целиком
       await storageSetWithRetry(storageKey, JSON.stringify(currentArray));
       applyMerged(currentArray);
       return;
