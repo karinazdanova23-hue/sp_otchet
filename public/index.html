@@ -1136,21 +1136,28 @@
     const mainLineHeight = mainFontPx * 1.25;
     drawLines(mainWrapped, 'normal '+mainFontPx+'px "'+GIFT_CERT_FONT_FAMILY_XB+'", Arial, sans-serif', mainLineHeight);
 
-    y += H*0.035;
+    // чем больше строк основного текста, тем плотнее остальные блоки — чтобы QR не наезжал на текст
+    const extraLines = Math.max(0, mainWrapped.length - 2);
+    const gapK = extraLines >= 2 ? 0.55 : (extraLines === 1 ? 0.8 : 1);
+    y += H*0.035*gapK;
     drawLines(GIFT_CERT_VALIDITY_TEXT.split('\n'), 'normal '+Math.round(H*0.018)+'px "'+GIFT_CERT_FONT_FAMILY_BODY+'", Arial, sans-serif', H*0.026, '#4A4A46');
 
-    y += H*0.03;
+    y += H*0.03*gapK;
     drawLines(GIFT_CERT_CONTACTS_TEXT.split('\n'), 'normal '+Math.round(H*0.018)+'px "'+GIFT_CERT_FONT_FAMILY_BODY+'", Arial, sans-serif', H*0.026, '#4A4A46');
 
-    y += H*0.03;
+    y += H*0.03*gapK;
     drawLines(GIFT_CERT_FOOTER_TEXT.split('\n'), 'normal '+Math.round(H*0.018)+'px "'+GIFT_CERT_FONT_FAMILY_BODY+'", Arial, sans-serif', H*0.026, '#171512');
+    const textBottom = y - H*0.026 + H*0.008; // низ последней строки текста
 
-    // QR + лого — фиксированное место у низа карточки, как в образце
+    // QR — у низа карточки, но не выше конца текста (иначе перекрывает надписи): если текста много,
+    // опускаем QR под него и при необходимости немного уменьшаем, чтобы он остался на карточке
     if(opts.qrImg){
-      const qrSize = W*0.2;
-      const qrX = cx - qrSize/2;
-      const qrY = cardY + cardH*0.80;
-      ctx.drawImage(opts.qrImg, qrX, qrY, qrSize, qrSize);
+      const cardBottom = cardY + cardH;
+      const qrY = Math.max(cardY + cardH*0.80, textBottom + H*0.012);
+      const qrSize = Math.min(W*0.2, cardBottom - H*0.014 - qrY);
+      if(qrSize > 0){
+        ctx.drawImage(opts.qrImg, cx - qrSize/2, qrY, qrSize, qrSize);
+      }
     }
 
     // дата приобретения — под карточкой, на фоне
@@ -2120,6 +2127,37 @@
       const sr2 = await window.storage.get('schedule-recs', true);
       state.scheduleRecs = sr2 ? JSON.parse(sr2.value) : DEFAULT_SCHEDULE_RECS.map(r=>({...r}));
     }catch(e){ state.scheduleRecs = DEFAULT_SCHEDULE_RECS.map(r=>({...r})); }
+    // один раз добавляем виды/рекомендации для ноябрьского расписания: Акрил ЛАНЧ, Панно-ваза, Арт-свидание
+    try{
+      const flag2 = await window.storage.get('schedule-types-recs-v2', true);
+      if(!flag2){
+        const addTypes = [{name:'Акрил ЛАНЧ', duration:90}, {name:'Панно-ваза', duration:120}];
+        let typesChanged = false;
+        addTypes.forEach(t=>{ if(Array.isArray(state.eventTypes) && !state.eventTypes.some(x=>x.name===t.name)){ state.eventTypes = [...state.eventTypes, {...t, materialRules:[]}]; typesChanged = true; } });
+        if(typesChanged) await window.storage.set('event-types', JSON.stringify(state.eventTypes), true);
+        const addRecs = [{title:'Панно-ваза', min:1, max:1, period:'week'}, {title:'Акрил ЛАНЧ', min:1, max:2, period:'week'}, {title:'Арт-свидание', min:5, max:5, period:'week'}];
+        let recsChanged = false;
+        addRecs.forEach(r=>{ if(Array.isArray(state.scheduleRecs) && !state.scheduleRecs.some(x=>(x.title||'').toLowerCase()===r.title.toLowerCase())){ state.scheduleRecs = [...state.scheduleRecs, r]; recsChanged = true; } });
+        if(recsChanged) await window.storage.set('schedule-recs', JSON.stringify(state.scheduleRecs), true);
+        await window.storage.set('schedule-types-recs-v2', '1', true);
+      }
+    }catch(e){}
+    try{
+      const flag3 = await window.storage.get('schedule-types-recs-v3', true);
+      if(!flag3){
+        const NM='Керамика, кино и вино';
+        if(Array.isArray(state.eventTypes) && !state.eventTypes.some(x=>x.name===NM)){
+          const old = state.eventTypes.find(x=>x.name==='Кинопоказ');
+          state.eventTypes = [...state.eventTypes, {name:NM, duration:(old&&old.duration)||150, materialRules:[]}];
+          await window.storage.set('event-types', JSON.stringify(state.eventTypes), true);
+        }
+        if(Array.isArray(state.scheduleRecs) && !state.scheduleRecs.some(x=>x.title===NM)){
+          state.scheduleRecs = state.scheduleRecs.map(x=> x.title==='Кинопоказ' ? {...x, title:NM} : x);
+          await window.storage.set('schedule-recs', JSON.stringify(state.scheduleRecs), true);
+        }
+        await window.storage.set('schedule-types-recs-v3', '1', true);
+      }
+    }catch(e){}
 
     try{
       const sw = await window.storage.get('schedule-wishes', true);
