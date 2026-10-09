@@ -843,6 +843,17 @@
     s1: 'Обычно здесь: смола, акрил, аффирмации, дофаминовые картины',
   };
 
+  // заполняемость мероприятия по расписанию: «записано / мест в пространстве», например 0/8 или 2/8
+  function scheduleGuestsCount(e){
+    const g = (e.guests!==undefined && e.guests!==null && e.guests!=='' && !isNaN(e.guests)) ? Number(e.guests) : 0;
+    return Math.max(g, Array.isArray(e.guestList) ? e.guestList.length : 0);
+  }
+  function scheduleFillText(e){
+    if(!e || e.product !== 'Мастер-класс' || (e.status||'confirmed') !== 'confirmed') return '';
+    const cap = SPACE_CAPACITY[e.spaceId];
+    if(cap === null || cap === undefined) return '';
+    return scheduleGuestsCount(e) + '/' + cap;
+  }
   const STATUS_LABEL = { confirmed: 'По расписанию', tentative: 'Частник', marketing: 'Маркетинг', offsite: 'Выезд', slot: 'Слот', cancelled: 'Отменено' };
   // ЗП менеджеров: единая на всех (не привязана к конкретному сотруднику) — оклад + проценты от выручки студии за месяц
   const MANAGER_SALARY_BASE = 10000;
@@ -1759,6 +1770,8 @@
     certSearchQuery: '',
     certView: 'certificates',
     refunds: null,
+    deposits: [],
+    depositSearchQuery: '',
     eventTypes: null,
     incomes: null,
     expenses: null,
@@ -2331,6 +2344,11 @@
     }catch(e){ state.refunds = []; }
 
     try{
+      const dp = await window.storage.get('deposits', true);
+      state.deposits = dp ? JSON.parse(dp.value) : [];
+    }catch(e){ state.deposits = []; }
+
+    try{
       const inc = await window.storage.get('incomes', true);
       state.incomes = inc ? JSON.parse(inc.value) : [];
     }catch(e){ state.incomes = []; }
@@ -2388,6 +2406,7 @@
     state._reportCommentsBaseline = JSON.parse(JSON.stringify(state.reportComments));
     state._reportReactionsBaseline = JSON.parse(JSON.stringify(state.reportReactions));
     state._refundsBaseline = JSON.parse(JSON.stringify(state.refunds));
+    state._depositsBaseline = JSON.parse(JSON.stringify(state.deposits));
     state._incomesBaseline = JSON.parse(JSON.stringify(state.incomes));
     state._expensesBaseline = JSON.parse(JSON.stringify(state.expenses));
     state._leadsBaseline = JSON.parse(JSON.stringify(state.leads));
@@ -2921,6 +2940,7 @@
       events: state.events,
       certificates: state.certificates,
       refunds: state.refunds,
+      deposits: state.deposits,
       leads: state.leads,
       incomes: state.incomes,
       expenses: state.expenses,
@@ -3705,6 +3725,9 @@
   function loadReceiptPhoto(certId){ return loadAttachedPhoto('receipt-photo-'+certId); }
   function saveReceiptPhoto(certId, dataUrl){ return saveAttachedPhoto('receipt-photo-'+certId, dataUrl); }
   function deleteReceiptPhoto(certId){ return deleteAttachedPhoto('receipt-photo-'+certId); }
+  function loadDepositPhoto(id){ return loadAttachedPhoto('deposit-photo-'+id); }
+  function saveDepositPhoto(id, dataUrl){ return saveAttachedPhoto('deposit-photo-'+id, dataUrl); }
+  function deleteDepositPhoto(id){ return deleteAttachedPhoto('deposit-photo-'+id); }
   function loadLeadPhoto(leadId){ return loadAttachedPhoto('lead-photo-'+leadId); }
   function saveLeadPhoto(leadId, dataUrl){ return saveAttachedPhoto('lead-photo-'+leadId, dataUrl); }
   function deleteLeadPhoto(leadId){ return deleteAttachedPhoto('lead-photo-'+leadId); }
@@ -3829,6 +3852,12 @@
     await saveCollectionMerged('expenses', state.expenses, state._expensesBaseline, (finalArr)=>{
       state.expenses = finalArr;
       state._expensesBaseline = JSON.parse(JSON.stringify(finalArr));
+    });
+  }
+  async function saveDeposits(){
+    await saveCollectionMerged('deposits', state.deposits, state._depositsBaseline, (finalArr)=>{
+      state.deposits = finalArr;
+      state._depositsBaseline = JSON.parse(JSON.stringify(finalArr));
     });
   }
   async function saveLeads(){
@@ -4583,7 +4612,7 @@
           ${managerLine ? `<div class="cal-manager" title="Менеджер: ${escapeHtml(managerLine)}">👔 ${escapeHtml(managerLine)}</div>` : ''}
           ${dayOffEntries.length ? `<div class="cal-dayoff-line" title="Выходной: ${escapeHtml(dayOffEntries.map(x=>`${x.name} (${ROLE_LABELS[x.role]||x.role})`).join(', '))}">🚫 ${escapeHtml(dayOffEntries.map(x=>x.name).join(', '))}</div>` : ''}
           <div class="cal-events">
-            ${shown.map(e=>`<div class="cal-evt-chip" style="background:${statusColor(e.status)}">${isAll?spaceBadge(getSpace(e.spaceId),'xs'):''}<span class="t">${e.time}</span><span class="evt-title">${escapeHtml(e.title)}</span></div>`).join('')}
+            ${shown.map(e=>`<div class="cal-evt-chip" style="background:${statusColor(e.status)}">${isAll?spaceBadge(getSpace(e.spaceId),'xs'):''}<span class="t">${e.time}</span><span class="evt-title">${escapeHtml(e.title)}</span>${scheduleFillText(e)?`<span class="evt-fill" style="margin-left:4px;font-family:var(--font-mono);font-size:10.5px;opacity:0.95;white-space:nowrap;">${scheduleFillText(e)}</span>`:''}</div>`).join('')}
             ${extra>0?`<div class="cal-more">+${extra} ещё</div>`:''}
           </div>
         </div>
@@ -4671,7 +4700,7 @@
               <div class="title">${escapeHtml(e.title)}</div>
               <div class="space" style="display:flex;align-items:center;gap:6px;">${spaceBadge(sp,'sm')}${escapeHtml(sp.name)}${e.product?' · '+escapeHtml(e.product):''}</div>
             </div>
-            <div class="duration">${e.duration ? formatDuration(e.duration) : ''}${(e.guests!==undefined&&e.guests!==null&&e.guests!=='')?'<br>👤 '+e.guests:''}</div>
+            <div class="duration">${e.duration ? formatDuration(e.duration) : ''}${scheduleFillText(e) ? '<br>👤 '+scheduleFillText(e) : ((e.guests!==undefined&&e.guests!==null&&e.guests!=='')?'<br>👤 '+e.guests:'')}</div>
           </div>
         `;
       }
@@ -6074,9 +6103,13 @@
         ${!hideRefundsConversion ? `<button data-certview="conversion" class="${state.certView==='conversion'?'active':''}">Конверсия</button>` : ''}
         <button data-certview="item-sales" class="${state.certView==='item-sales'?'active':''}">Изделия</button>
         ${!isHostessLimited ? `<button data-certview="orders" class="${state.certView==='orders'?'active':''}">Заказ</button>` : ''}
+        ${!isHostessLimited ? `<button data-certview="deposits" class="${state.certView==='deposits'?'active':''}">💰 Депозиты${depositsOpenCount()>0?` <span style="display:inline-block;background:var(--status-red);color:#fff;border-radius:9px;padding:0 6px;font-size:10.5px;margin-left:3px;">${depositsOpenCount()}</span>`:''}</button>` : ''}
         ${!isHostessLimited ? `<button data-certview="outreach" class="${state.certView==='outreach'?'active':''}">🎉 Поздравления${outreachDueCount()>0?` <span style="display:inline-block;min-width:18px;padding:0 5px;border-radius:9px;background:var(--status-red);color:#fff;font-size:11px;font-weight:600;line-height:18px;text-align:center;">${outreachDueCount()}</span>`:''}</button>` : ''}
       </div>
     `;
+    if(state.certView === 'deposits' && !isHostessLimited){
+      return subTabsHtml + renderDepositsView();
+    }
     if(state.certView === 'outreach'){
       return subTabsHtml + renderOutreachView();
     }
@@ -6247,6 +6280,201 @@
     `;
   }
 
+  // -------------------- депозиты --------------------
+  // депозит — деньги гостя, которые студия удерживает и должна ему: имя, телефон, сумма, за что и чек
+  // об оплате (фото хранится отдельным ключом, как у заявок/сертификатов)
+  function depositsOpenList(){ return (state.deposits||[]).filter(d=>(d.status||'open')==='open'); }
+  function depositsOpenCount(){ return depositsOpenList().length; }
+  function renderDepositsView(){
+    const all = state.deposits || [];
+    const q = (state.depositSearchQuery||'').trim().toLowerCase();
+    const list = all.filter(d=> !q || [d.name,d.phone,d.comment].join(' ').toLowerCase().includes(q))
+      .sort((a,b)=> ((a.status||'open')==='open'?0:1)-((b.status||'open')==='open'?0:1) || (b.date||'').localeCompare(a.date||''));
+    const openSum = depositsOpenList().reduce((s,d)=> s + (Number(d.amount)||0), 0);
+    const returnedSum = all.filter(d=>d.status==='returned').reduce((s,d)=> s + (Number(d.amount)||0), 0);
+    return `
+      <div class="analytics-summary" style="margin-bottom:14px;">
+        <div class="summary-card" style="border-left:4px solid var(--status-red);"><div class="num" style="font-size:22px;color:var(--status-red);">${formatMoney(openSum)}</div><div class="label">Должны гостям (${depositsOpenCount()})</div></div>
+        <div class="summary-card" style="border-left:4px solid var(--status-green);"><div class="num" style="font-size:22px;color:var(--status-green);">${formatMoney(returnedSum)}</div><div class="label">Уже возвращено</div></div>
+        <div class="summary-card"><div class="num">${all.length}</div><div class="label">Всего депозитов</div></div>
+      </div>
+      <div class="cert-toolbar">
+        <div class="field" style="max-width:300px;margin:0;flex:1;">
+          <input type="text" id="deposit-search" value="${escapeHtml(state.depositSearchQuery||'')}" placeholder="Поиск по имени, телефону, комментарию…">
+        </div>
+        <button class="btn btn-primary" id="btn-add-deposit">+ Добавить депозит</button>
+      </div>
+      ${list.length === 0 ? `<div class="host-empty">${q?'Ничего не найдено':'Депозитов пока нет'}</div>` : `
+        <div class="cert-list">
+          ${list.map(d=>{
+            const open = (d.status||'open')==='open';
+            return `
+            <div class="refund-row" data-depid="${d.id}" style="grid-template-columns: 90px 160px 130px 100px 1fr 110px;${open?'':'opacity:0.65;'}">
+              <div class="cell">${d.date ? formatDateText(d.date) : '—'}</div>
+              <div class="cell" style="font-weight:600;">${escapeHtml(d.name||'—')}</div>
+              <div class="cell">${escapeHtml(d.phone||'')}</div>
+              <div class="amount">${formatMoney(Number(d.amount)||0)}</div>
+              <div class="reason" title="${escapeHtml(d.comment||'')}">${escapeHtml(d.comment||'')}${d.hasPhoto?' <span title="Есть чек">📎</span>':' <span title="Чек не приложен" style="color:var(--status-red);">· нет чека</span>'}</div>
+              <div><span class="cert-badge ${open?'in_progress':'used'}">${open?'Ждёт возврата':'Возвращён'}</span></div>
+            </div>`;
+          }).join('')}
+        </div>
+      `}
+    `;
+  }
+  function renderDepositModal(dep, isNew){
+    const st = dep.status || 'open';
+    return `
+      <div class="modal" style="max-width:460px;">
+        <div class="modal-head">
+          <h3>${isNew ? 'Новый депозит' : 'Депозит'}</h3>
+          <button class="modal-close">×</button>
+        </div>
+        <div class="modal-body">
+          <div class="row2">
+            <div class="field">
+              <label>Дата внесения</label>
+              <input type="date" id="dp-date" value="${dep.date||''}">
+            </div>
+            <div class="field">
+              <label>Сумма, которую должны (₽)</label>
+              <input type="number" id="dp-amount" value="${dep.amount!==undefined&&dep.amount!==null?dep.amount:''}" min="0" step="100" placeholder="Например: 3000">
+            </div>
+          </div>
+          <div class="row2">
+            <div class="field">
+              <label>Имя гостя</label>
+              <input type="text" id="dp-name" value="${escapeHtml(dep.name||'')}" placeholder="Имя">
+            </div>
+            <div class="field">
+              <label>Номер телефона гостя</label>
+              <input type="text" id="dp-phone" value="${escapeHtml(dep.phone||'')}" placeholder="8 9xx xxx-xx-xx">
+            </div>
+          </div>
+          <div class="field">
+            <label>Комментарий — за что депозит</label>
+            <textarea id="dp-comment" placeholder="Например: предоплата за день рождения 12.11, Лофт">${escapeHtml(dep.comment||'')}</textarea>
+          </div>
+          <div class="field">
+            <label>Чек — подтверждение оплаты</label>
+            <div id="dp-photo-preview" style="margin-bottom:8px;">${dep.hasPhoto ? '<div style="font-size:12.5px;color:var(--ink-soft);">Загрузка чека…</div>' : '<div style="font-size:12.5px;color:var(--ink-soft);">Чек не прикреплён</div>'}</div>
+            <input type="file" id="dp-photo-file" accept="image/*">
+            <button type="button" class="btn btn-ghost" id="btn-remove-dp-photo" style="margin-top:6px;display:${dep.hasPhoto?'inline-block':'none'};">Удалить чек</button>
+          </div>
+          <div class="field">
+            <label>Статус</label>
+            <div class="status-select-wrap">
+              <div class="dishes-opt ${st==='open'?'active':''}" data-depstatus="open"><span class="dot" style="background:#C08A3E"></span>Ждёт возврата</div>
+              <div class="dishes-opt ${st==='returned'?'active':''}" data-depstatus="returned"><span class="dot" style="background:var(--status-green)"></span>Возвращён</div>
+            </div>
+            <input type="hidden" id="dp-status" value="${st}">
+          </div>
+          <div class="field" id="dp-returned-field" style="display:${st==='returned'?'block':'none'};">
+            <label>Дата возврата</label>
+            <input type="date" id="dp-returned-date" value="${dep.returnedDate||''}">
+          </div>
+          <div class="modal-actions">
+            <div>${!isNew ? `<button class="btn-danger" id="btn-del-dep">Удалить</button>` : '<span></span>'}</div>
+            <div style="display:flex;gap:8px;">
+              <button class="btn btn-ghost" id="btn-cancel-dep">Отмена</button>
+              <button class="btn btn-primary" id="btn-save-dep">Сохранить</button>
+            </div>
+          </div>
+        </div>
+      </div>
+    `;
+  }
+  function attachDepositModalEvents(overlay){
+    const dep0 = state.modal.deposit;
+    const cancelBtn = overlay.querySelector('#btn-cancel-dep');
+    if(cancelBtn) cancelBtn.onclick = ()=>{ state.modal = null; overlay.remove(); };
+    // фото: null — без изменений, 'REMOVE' — удалить, иначе — новый dataURL (сохраняется при «Сохранить»)
+    let pendingPhoto = null;
+    const prevEl = overlay.querySelector('#dp-photo-preview');
+    const fileInput = overlay.querySelector('#dp-photo-file');
+    const removeBtn = overlay.querySelector('#btn-remove-dp-photo');
+    function showPhoto(dataUrl){
+      if(!prevEl) return;
+      if(dataUrl){
+        prevEl.innerHTML = `<a href="${dataUrl}" target="_blank" rel="noopener"><img src="${dataUrl}" style="max-width:200px;max-height:200px;border-radius:var(--radius);border:1px solid var(--line-strong);display:block;"></a>`;
+        if(removeBtn) removeBtn.style.display = 'inline-block';
+      } else {
+        prevEl.innerHTML = `<div style="font-size:12.5px;color:var(--ink-soft);">Чек не прикреплён</div>`;
+        if(removeBtn) removeBtn.style.display = 'none';
+      }
+    }
+    if(dep0.hasPhoto){
+      loadDepositPhoto(dep0.id).then(d=>{ if(pendingPhoto === null && overlay.isConnected) showPhoto(d); });
+    }
+    if(fileInput) fileInput.onchange = async ()=>{
+      const file = fileInput.files && fileInput.files[0];
+      if(!file) return;
+      if(!file.type || !file.type.startsWith('image/')){
+        showGapWarningBanner('Можно прикрепить только изображение (фото или скриншот чека).');
+        fileInput.value = '';
+        return;
+      }
+      try{ pendingPhoto = await compressImageFile(file); showPhoto(pendingPhoto); }
+      catch(e){ showGapWarningBanner('Не удалось обработать фото. Попробуйте другое изображение.'); }
+    };
+    if(removeBtn) removeBtn.onclick = ()=>{ pendingPhoto = 'REMOVE'; showPhoto(null); };
+
+    overlay.querySelectorAll('[data-depstatus]').forEach(opt=>{
+      opt.onclick = ()=>{
+        overlay.querySelectorAll('[data-depstatus]').forEach(o=>o.classList.remove('active'));
+        opt.classList.add('active');
+        overlay.querySelector('#dp-status').value = opt.dataset.depstatus;
+        const rf = overlay.querySelector('#dp-returned-field');
+        if(rf) rf.style.display = opt.dataset.depstatus==='returned' ? 'block' : 'none';
+        const rd = overlay.querySelector('#dp-returned-date');
+        if(rd && opt.dataset.depstatus==='returned' && !rd.value) rd.value = todayStr();
+      };
+    });
+
+    const delBtn = overlay.querySelector('#btn-del-dep');
+    if(delBtn) delBtn.onclick = ()=>{
+      showConfirmDeletePopup('Удалить этот депозит вместе с чеком? Действие необратимо.', async ()=>{
+        state.deposits = state.deposits.filter(x=>x.id !== dep0.id);
+        if(dep0.hasPhoto) await deleteDepositPhoto(dep0.id);
+        await saveDeposits();
+        state.modal = null; overlay.remove(); render();
+      });
+    };
+
+    overlay.querySelector('#btn-save-dep').onclick = async ()=>{
+      const val = id=> (overlay.querySelector('#'+id)||{}).value||'';
+      ['dp-date','dp-amount','dp-name','dp-phone','dp-comment'].forEach(id=>{ const el = overlay.querySelector('#'+id); if(el) el.style.borderColor=''; });
+      const date = val('dp-date'), name = val('dp-name').trim(), phone = val('dp-phone').trim(), comment = val('dp-comment').trim();
+      const amountRaw = val('dp-amount');
+      const status = val('dp-status') || 'open';
+      const bad = [];
+      if(!date) bad.push('dp-date');
+      if(!name) bad.push('dp-name');
+      if(!phone) bad.push('dp-phone');
+      if(amountRaw==='' || isNaN(amountRaw) || Number(amountRaw) <= 0) bad.push('dp-amount');
+      if(!comment) bad.push('dp-comment');
+      if(bad.length){
+        bad.forEach(id=>{ const el = overlay.querySelector('#'+id); if(el) el.style.borderColor = 'var(--danger)'; });
+        showGapWarningBanner('Заполните дату, имя, телефон, сумму и комментарий — за что депозит.');
+        const el = overlay.querySelector('#'+bad[0]); if(el && el.scrollIntoView) el.scrollIntoView({block:'center', behavior:'smooth'});
+        return;
+      }
+      const updated = {
+        id: dep0.id, date, name, phone, amount: Number(amountRaw), comment, status,
+        returnedDate: status==='returned' ? (val('dp-returned-date') || todayStr()) : '',
+        hasPhoto: dep0.hasPhoto || false,
+        createdBy: dep0.createdBy || state.loggedInManagerName || ROLE_LABELS[state.currentRole] || '',
+      };
+      if(pendingPhoto === 'REMOVE'){ await deleteDepositPhoto(updated.id); updated.hasPhoto = false; }
+      else if(pendingPhoto){ await saveDepositPhoto(updated.id, pendingPhoto); updated.hasPhoto = true; }
+      const idx = state.deposits.findIndex(x=>x.id===updated.id);
+      if(idx >= 0) state.deposits[idx] = updated; else state.deposits.push(updated);
+      await saveDeposits();
+      recordAction('Депозит сохранён', `${updated.name}, ${updated.amount} ₽`);
+      state.modal = null; overlay.remove(); render();
+    };
+  }
+
   function renderRefundsView(){
     const { navHtml, period } = buildPeriodNav('refundsCursor', 'refundsMode', 'refunds-nav');
     const refundsAll = state.refunds.filter(r=>period.inPeriod(r.requestDate));
@@ -6401,6 +6629,28 @@
       };
     });
 
+    const addDepositBtn = document.getElementById('btn-add-deposit');
+    if(addDepositBtn) addDepositBtn.onclick = ()=>{
+      requireUnlock(()=>{
+        state.modal = {type:'deposit', isNew:true, deposit:{ id: uid(), date: todayStr(), name:'', phone:'', amount:null, comment:'', status:'open', returnedDate:'', hasPhoto:false }};
+        render();
+      });
+    };
+    document.querySelectorAll('.refund-row[data-depid]').forEach(row=>{
+      row.onclick = ()=>{
+        const d = state.deposits.find(x=>x.id===row.dataset.depid);
+        if(!d) return;
+        requireUnlock(()=>{ state.modal = {type:'deposit', isNew:false, deposit:{...d}}; render(); });
+      };
+    });
+    const depSearch = document.getElementById('deposit-search');
+    if(depSearch){
+      depSearch.oninput = ()=>{
+        state.depositSearchQuery = depSearch.value; render();
+        const f = document.getElementById('deposit-search');
+        if(f){ f.focus(); const v = f.value; f.value=''; f.value = v; }
+      };
+    }
     const addRefundBtn = document.getElementById('btn-add-refund');
     if(addRefundBtn) addRefundBtn.onclick = ()=>{
       requireUnlock(()=>{
@@ -11434,6 +11684,8 @@
       overlay.innerHTML = renderRefundModal(state.modal.refund, state.modal.isNew);
     } else if(state.modal.type === 'income'){
       overlay.innerHTML = renderIncomeModal(state.modal.income, state.modal.isNew);
+    } else if(state.modal.type === 'deposit'){
+      overlay.innerHTML = renderDepositModal(state.modal.deposit, state.modal.isNew);
     } else if(state.modal.type === 'lead'){
       overlay.innerHTML = renderLeadModal(state.modal.lead, state.modal.isNew);
     } else if(state.modal.type === 'item-sale'){
@@ -11517,6 +11769,7 @@
     else if(state.modal.type === 'outreach-bought'){ attachOutreachBoughtModalEvents(overlay); }
     else if(state.modal.type === 'refund'){ attachRefundModalEvents(overlay); }
     else if(state.modal.type === 'income'){ attachIncomeModalEvents(overlay); }
+    else if(state.modal.type === 'deposit'){ attachDepositModalEvents(overlay); }
     else if(state.modal.type === 'lead'){ attachLeadModalEvents(overlay); }
     else if(state.modal.type === 'item-sale'){ attachItemSaleModalEvents(overlay); }
     else if(state.modal.type === 'order'){ attachOrderModalEvents(overlay); }
@@ -14913,6 +15166,14 @@
             <div class="label">${STATUS_LABEL[key]}</div>
           </div>
         `).join('')}
+        ${(()=>{
+          const sched = evts.filter(e=>(e.status||'confirmed')==='confirmed');
+          const gc = e=> Math.max((e.guests!==undefined&&e.guests!==null&&!isNaN(e.guests))?Number(e.guests):0, Array.isArray(e.guestList)?e.guestList.length:0);
+          const emptyN = sched.filter(e=>gc(e)===0).length, withN = sched.length - emptyN;
+          return `
+        <div class="summary-card" style="border-left:4px solid var(--status-red);" title="Мероприятия «По расписанию», где пока 0 гостей"><div class="num" style="color:var(--status-red);">${emptyN}</div><div class="label">Расписание: пустые группы</div></div>
+        <div class="summary-card" style="border-left:4px solid var(--status-green);" title="Мероприятия «По расписанию», где записан хотя бы 1 гость"><div class="num" style="color:var(--status-green);">${withN}</div><div class="label">Расписание: с гостями (1+)</div></div>`;
+        })()}
         <div class="summary-card"><div class="num">${totalGuests}</div><div class="label">Гостей всего</div></div>
         ${!isAdminFinRestricted ? `
         <div class="summary-card"><div class="num" style="font-size:22px;">${formatMoney(totalRevenueAllSources)}</div><div class="label">Выручка за месяц <span style="font-weight:400;">(прогноз)</span></div></div>
@@ -15703,7 +15964,7 @@
       reader.onload = ()=>{
         try{
           const data = JSON.parse(reader.result);
-          const KNOWN_FIELDS = ['spaces','events','certificates','refunds','leads','incomes','expenses','eventTypes','hostsList','materialsCatalog','itemSales','orders','salaryAdjustments','masterPayRates','masterPayOverrides','monthlyPlans','hostessShifts','managerShifts','netProfitManual','hostessBonuses','yearSummaryManual','auditLog','closedMonths','marketingSpend','marketingPlans','contentPosts','suppliers','stockReceipts','daysOff'];
+          const KNOWN_FIELDS = ['spaces','events','certificates','refunds','deposits','leads','incomes','expenses','eventTypes','hostsList','materialsCatalog','itemSales','orders','salaryAdjustments','masterPayRates','masterPayOverrides','monthlyPlans','hostessShifts','managerShifts','netProfitManual','hostessBonuses','yearSummaryManual','auditLog','closedMonths','marketingSpend','marketingPlans','contentPosts','suppliers','stockReceipts','daysOff'];
           const hasAnyKnownField = KNOWN_FIELDS.some(f => data[f] !== undefined);
           if(!hasAnyKnownField) throw new Error('bad shape');
           pendingImportData = data;
@@ -15753,6 +16014,7 @@
         if(Array.isArray(pendingImportData.events)) await rawReplace('events', 'events', '_eventsBaseline', pendingImportData.events);
         if(Array.isArray(pendingImportData.certificates)) await rawReplace('certificates', 'certificates', '_certificatesBaseline', pendingImportData.certificates);
         if(Array.isArray(pendingImportData.refunds)) await rawReplace('refunds', 'refunds', '_refundsBaseline', pendingImportData.refunds);
+        if(Array.isArray(pendingImportData.deposits)) await rawReplace('deposits', 'deposits', '_depositsBaseline', pendingImportData.deposits);
         if(Array.isArray(pendingImportData.leads)) await rawReplace('leads', 'leads', '_leadsBaseline', pendingImportData.leads);
         if(Array.isArray(pendingImportData.incomes)) await rawReplace('incomes', 'incomes', '_incomesBaseline', pendingImportData.incomes);
         if(Array.isArray(pendingImportData.expenses)) await rawReplace('expenses', 'expenses', '_expensesBaseline', pendingImportData.expenses);
@@ -19098,7 +19360,7 @@
             ${warnHtml}
             <div class="day-evt${openSlot?' open-master-slot':''}" data-eid="${e.id}" ${masterRowNoClick?'style="cursor:default;"':''}>
               <div class="left">
-                <div class="time"><span class="chip-dot" style="background:${statusColor(e.status)};display:inline-block;margin-right:6px;"></span>${e.time}${e.duration?' · '+formatDuration(e.duration):''}${(e.guests!==undefined&&e.guests!==null&&e.guests!=='')?' · 👤 '+e.guests:''}</div>
+                <div class="time"><span class="chip-dot" style="background:${statusColor(e.status)};display:inline-block;margin-right:6px;"></span>${e.time}${e.duration?' · '+formatDuration(e.duration):''}${scheduleFillText(e) ? ' · 👤 '+scheduleFillText(e) : ((e.guests!==undefined&&e.guests!==null&&e.guests!=='')?' · 👤 '+e.guests:'')}</div>
                 <div class="title">${openSlot?'🙋 ':''}${escapeHtml(e.title)}</div>
                 ${isAll ? `<div class="host" style="display:flex;align-items:center;gap:6px;">${spaceBadge(getSpace(e.spaceId),'sm')}${escapeHtml(getSpace(e.spaceId).name)} · ${escapeHtml(allHostNamesDisplay(e))}${e.product?' · '+escapeHtml(e.product):''}${showsDishesAndRental(e.status)&&e.dishes?' · 🍽 '+(e.dishes==='needed'?'нужна посуда':'без посуды'):''}${rentalSuffix(e)}${legalSuffix(e)}</div>` : `<div class="host">${escapeHtml(allHostNamesDisplay(e))}${e.product?' · '+escapeHtml(e.product):''}${showsDishesAndRental(e.status)&&e.dishes?' · 🍽 '+(e.dishes==='needed'?'нужна посуда':'без посуды'):''}${rentalSuffix(e)}${legalSuffix(e)}</div>`}
                 ${openSlot ? `<div class="notes" style="color:var(--status-cyan);">🙋 ${available.length ? 'Свободны: '+escapeHtml(available.join(', ')) : 'Пока никто не откликнулся'}</div>` : ''}
@@ -19437,6 +19699,7 @@
           <div class="field">
             <label>Количество человек</label>
             <input type="number" id="f-guests" value="${ev.guests!==undefined && ev.guests!==null ? ev.guests : ''}" min="0" step="1" placeholder="Например: 8">
+            <div id="guests-fill-hint" style="font-size:12px;color:var(--ink-soft);margin-top:4px;font-family:var(--font-mono);"></div>
           </div>
           <div class="field" id="items-count-field" style="display:${isCeramicsEvent(ev.title)?'block':'none'};">
             <label>Изделий изготовлено (шт) <span style="font-weight:400;color:var(--ink-soft);">— обычно равно числу гостей, но кто-то мог сделать 2</span></label>
@@ -19841,6 +20104,23 @@
         showCapacityConfirmPopup(sp.name, capacity, guests);
       }
     }
+    // «записано / мест» — только для мероприятий по расписанию (продукт «Мастер-класс»)
+    function updateGuestsFillHint(){
+      const hint = overlay.querySelector('#guests-fill-hint');
+      if(!hint) return;
+      const prodEl = overlay.querySelector('#f-product');
+      const cap = spaceSelect ? SPACE_CAPACITY[spaceSelect.value] : null;
+      if(!prodEl || prodEl.value !== 'Мастер-класс' || cap === null || cap === undefined){ hint.textContent = ''; return; }
+      const listN = Array.isArray(state.modal.event && state.modal.event.guestList) ? state.modal.event.guestList.length : 0;
+      const n = Math.max(parseInt(guestsInput && guestsInput.value) || 0, listN);
+      hint.textContent = 'Записано: ' + n + '/' + cap;
+    }
+    updateGuestsFillHint();
+    ['input','change'].forEach(ev=>{
+      if(guestsInput) guestsInput.addEventListener(ev, updateGuestsFillHint);
+      if(spaceSelect) spaceSelect.addEventListener(ev, updateGuestsFillHint);
+      const pe = overlay.querySelector('#f-product'); if(pe) pe.addEventListener(ev, updateGuestsFillHint);
+    });
     if(guestsInput) guestsInput.addEventListener('change', checkSpaceCapacity);
     if(spaceSelect) spaceSelect.addEventListener('change', checkSpaceCapacity);
 
