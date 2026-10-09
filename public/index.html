@@ -901,6 +901,10 @@
   // статусы "Поздравлений с ДР" — изначально те же 5 статусов, что были в Google-таблице менеджеров
   // (цветные плашки), плюс "discussing" ("Общаемся по предложению") — добавлен позже; "bought"
   // дополнительно создаёт/убирает связанную заявку в "Конверсии" (см. attachOutreachBoughtModalEvents)
+  // лимит рассылки менеджера: 2 сообщения в час, рабочий день 10:00–19:00 → 18 сообщений в день
+  const OUTREACH_PER_HOUR = 2, OUTREACH_WORK_FROM = 10, OUTREACH_WORK_TO = 19;
+  const OUTREACH_DAILY_LIMIT = OUTREACH_PER_HOUR * (OUTREACH_WORK_TO - OUTREACH_WORK_FROM);
+  const OUTREACH_MAX_EARLIER_DAYS = 7; // насколько раньше исходной даты можно написать, чтобы разгрузить день
   const OUTREACH_STATUSES = [
     { key:'in_progress', label:'В процессе', bg:'#F5E6BE', fg:'#8A6D1F' },
     { key:'written', label:'Написали', bg:'#D7E3F0', fg:'#5A6E86' },
@@ -1417,7 +1421,6 @@
   }
   function attachScheduleRecsModalEvents(overlay){
     const close = ()=>{ state.modal = null; overlay.remove(); render(); };
-    overlay.addEventListener('click', (e)=>{ if(e.target === overlay) close(); });
     const cb = overlay.querySelector('.modal-close'); if(cb) cb.onclick = close;
     overlay.querySelector('#recs-cancel').onclick = close;
     const bindDel = (root)=> root.querySelectorAll('.recs-del').forEach(b=> b.onclick = ()=> b.closest('.recs-row').remove());
@@ -1559,7 +1562,6 @@
   function attachWishesModalEvents(overlay){
     const ui = state.modal;
     const close = ()=>{ state.modal = null; overlay.remove(); render(); };
-    overlay.addEventListener('click', (e)=>{ if(e.target === overlay) close(); });
     const cb = overlay.querySelector('.modal-close'); if(cb) cb.onclick = close;
     const redraw = ()=>{ overlay.remove(); render(); };
     const keepDraft = ()=>{
@@ -1736,7 +1738,7 @@
     spaces: null,
     events: null,
     view: 'calendar', // calendar | host
-    activeSpaceId: 's1',
+    activeSpaceId: 'all',
     calFilterDirection: '',
     calFilterHost: '',
     cursor: new Date(new Date().getFullYear(), new Date().getMonth(), 1),
@@ -6360,6 +6362,8 @@
     }
     const btnOutreachDue = document.getElementById('btn-outreach-due');
     if(btnOutreachDue) btnOutreachDue.onclick = ()=>{ state.outreachViewMode = 'due'; render(); };
+    const btnOutreachRebalance = document.getElementById('btn-outreach-rebalance');
+    if(btnOutreachRebalance) btnOutreachRebalance.onclick = ()=> showOutreachRebalancePopup();
     const btnOutreachAll = document.getElementById('btn-outreach-all');
     if(btnOutreachAll) btnOutreachAll.onclick = ()=>{ state.outreachViewMode = 'all'; render(); };
     // смена статуса "Поздравления" прямо в списке — тот же набор из 5 статусов, что был в таблице.
@@ -6944,6 +6948,73 @@
     return counts;
   }
 
+  const RU_MONTHS_GEN = ['января','февраля','марта','апреля','мая','июня','июля','августа','сентября','октября','ноября','декабря'];
+  // день рождения по подписи «7 октября» → ISO-дата (год — ближайший после даты написания); null, если не разобрать
+  function outreachBirthdayIso(o){
+    const m = String(o.birthDateLabel||'').trim().toLowerCase().match(/(\d{1,2})\s+([а-яё]+)/);
+    if(!m || !o.writeDate) return null;
+    const mi = RU_MONTHS_GEN.indexOf(m[2]); if(mi < 0) return null;
+    const wd = parseDate(o.writeDate);
+    let y = wd.getFullYear();
+    let d = new Date(y, mi, Number(m[1]));
+    if(d.getTime() < wd.getTime() - 20*86400000) d = new Date(y+1, mi, Number(m[1]));
+    return fmtDate(d);
+  }
+  function addDaysIso(iso, n){ const d = parseDate(iso); d.setDate(d.getDate()+n); return fmtDate(d); }
+  // раскладывает записи «В процессе» по дням так, чтобы в день было не больше OUTREACH_DAILY_LIMIT:
+  // сначала те, у кого раньше день рождения; не раньше сегодня, не раньше чем на 7 дней до исходной даты
+  // и не позже дня рождения (если не успеваем — запись остаётся на ближайшем свободном дне и считается «не успеваем»)
+  function planOutreachByLimit(){
+    const today = todayStr();
+    const items = (state.birthdayOutreach||[]).filter(o=> (o.status||'in_progress')==='in_progress' && o.writeDate);
+    const info = items.map(o=>{
+      const bd = outreachBirthdayIso(o);
+      const deadline = bd || addDaysIso(o.writeDate, 7);
+      let earliest = addDaysIso(o.writeDate, -OUTREACH_MAX_EARLIER_DAYS);
+      if(earliest < today) earliest = today;
+      return { o, deadline, earliest };
+    }).sort((a,b)=> a.deadline.localeCompare(b.deadline) || a.o.writeDate.localeCompare(b.o.writeDate));
+    const load = {};
+    const result = [];
+    info.forEach(x=>{
+      let day = x.earliest;
+      if(day > x.deadline) day = today; // дедлайн уже прошёл — ставим с сегодняшнего дня
+      let guard = 0;
+      while((load[day]||0) >= OUTREACH_DAILY_LIMIT && guard++ < 800) day = addDaysIso(day, 1);
+      load[day] = (load[day]||0) + 1;
+      result.push({ o:x.o, newDate: day, late: day > x.deadline });
+    });
+    return { result, load, changed: result.filter(r=> r.newDate !== r.o.writeDate), late: result.filter(r=>r.late) };
+  }
+  function showOutreachRebalancePopup(){
+    const plan = planOutreachByLimit();
+    const wrap = document.createElement('div');
+    wrap.style.cssText = 'position:fixed;inset:0;background:rgba(42,37,32,0.5);display:flex;align-items:center;justify-content:center;z-index:220;padding:20px;';
+    wrap.innerHTML = `
+      <div style="background:var(--white);border-radius:4px;max-width:440px;width:100%;padding:22px 22px 18px;box-shadow:0 20px 60px rgba(0,0,0,0.3);font-family:var(--font-body);">
+        <div style="font-family:var(--font-display);font-weight:600;font-size:16px;margin-bottom:10px;">Пересчитать сроки по лимиту</div>
+        <div style="font-size:13.5px;color:var(--ink);line-height:1.55;margin-bottom:18px;">
+          Лимит: ${OUTREACH_PER_HOUR} сообщения в час, ${OUTREACH_WORK_FROM}:00–${OUTREACH_WORK_TO}:00 — не больше ${OUTREACH_DAILY_LIMIT} в день.<br>
+          Записей «В процессе»: <b>${plan.result.length}</b>. Сменится срок у <b>${plan.changed.length}</b>.<br>
+          ${plan.late.length ? `<span style="color:var(--status-red);">Не успеваем до дня рождения: <b>${plan.late.length}</b> (останутся на ближайшем свободном дне).</span><br>` : 'Все успеваем до дня рождения.<br>'}
+          <span style="color:var(--ink-soft);font-size:12px;">Раньше исходной даты записи переносятся не больше чем на ${OUTREACH_MAX_EARLIER_DAYS} дней и не раньше сегодня; позже дня рождения — не переносятся. Статусы «Написали/Купили» и т.д. не затрагиваются.</span>
+        </div>
+        <div style="display:flex;justify-content:flex-end;gap:8px;">
+          <button id="ob-no" style="border:1px solid var(--line-strong);background:var(--white);color:var(--ink);padding:9px 18px;border-radius:4px;font-size:13.5px;cursor:pointer;">Отмена</button>
+          <button id="ob-yes" class="btn btn-primary" ${plan.changed.length?'':'disabled'}>Пересчитать</button>
+        </div>
+      </div>`;
+    document.body.appendChild(wrap);
+    wrap.querySelector('#ob-no').onclick = ()=> wrap.remove();
+    wrap.querySelector('#ob-yes').onclick = async ()=>{
+      plan.changed.forEach(r=>{ if(!r.o.origWriteDate) r.o.origWriteDate = r.o.writeDate; r.o.writeDate = r.newDate; });
+      wrap.remove();
+      await saveBirthdayOutreach();
+      recordAction('Сроки поздравлений пересчитаны', `Изменено записей: ${plan.changed.length}, лимит ${OUTREACH_DAILY_LIMIT} в день`);
+      render();
+    };
+  }
+
   function renderOutreachView(){
     const today = todayStr();
     const all = state.birthdayOutreach || [];
@@ -7007,7 +7078,7 @@
         const pending = items.filter(o=>(o.status||'in_progress')==='in_progress').length;
         return `
           <div class="analytics-section">
-            <h4 style="color:${d<today&&pending>0?'var(--status-red)':'inherit'};">${formatOutreachDate(d)}${d===today?' · сегодня':(d<today?' · просрочено':'')} <span style="font-size:12px;color:var(--ink-soft);font-weight:400;">(в процессе: ${pending} из ${items.length})</span></h4>
+            <h4 style="color:${d<today&&pending>0?'var(--status-red)':'inherit'};">${formatOutreachDate(d)}${d===today?' · сегодня':(d<today?' · просрочено':'')} <span style="font-size:12px;color:var(--ink-soft);font-weight:400;">(в процессе: ${pending} из ${items.length})${(d>=today&&pending>OUTREACH_DAILY_LIMIT)?` <span style="color:var(--status-red);font-weight:600;">· больше лимита ${OUTREACH_DAILY_LIMIT}</span>`:''}</span></h4>
             <div class="cert-list">${items.map(row).join('')}</div>
           </div>
         `;
@@ -7017,6 +7088,7 @@
     }
 
     return `
+      <div style="font-size:12px;color:var(--ink-soft);margin-bottom:10px;">Лимит: ${OUTREACH_PER_HOUR} сообщения в час, ${OUTREACH_WORK_FROM}:00–${OUTREACH_WORK_TO}:00 → до ${OUTREACH_DAILY_LIMIT} в день. Сегодня в плане: ${todayCnt + overdue} из ${OUTREACH_DAILY_LIMIT}${(todayCnt+overdue)>OUTREACH_DAILY_LIMIT?' — больше лимита, нажмите «Пересчитать сроки»':''}.</div>
       <div class="analytics-summary" style="margin-bottom:12px;">
         <div class="summary-card" style="border-left:4px solid ${todayCnt>0?'var(--status-blue)':'var(--status-green)'};"><div class="num">${todayCnt}</div><div class="label">Сегодня нужно написать</div></div>
         <div class="summary-card" style="border-left:4px solid ${overdue>0?'var(--status-red)':'var(--status-green)'};"><div class="num" style="color:${overdue>0?'var(--status-red)':'inherit'};">${overdue}</div><div class="label">Просрочено</div></div>
@@ -7034,6 +7106,7 @@
         <div style="display:flex;gap:8px;">
           <button class="btn ${state.outreachViewMode==='due'?'btn-primary':'btn-ghost'}" id="btn-outreach-due" style="font-size:12px;">Нужно написать</button>
           <button class="btn ${state.outreachViewMode==='all'?'btn-primary':'btn-ghost'}" id="btn-outreach-all" style="font-size:12px;">Весь список</button>
+          <button class="btn btn-ghost" id="btn-outreach-rebalance" style="font-size:12px;" title="Разложить сроки так, чтобы в день было не больше ${OUTREACH_DAILY_LIMIT} сообщений">⏱ Пересчитать сроки</button>
         </div>
       </div>
       <div class="field" style="max-width:300px;margin-bottom:14px;">
@@ -11395,23 +11468,17 @@
     document.body.appendChild(overlay);
 
     if(state.modal.type === 'master-tariff'){
-      overlay.addEventListener('click', (e)=>{ if(e.target === overlay){ overlay.remove(); state.modal = {type:'hosts-list'}; render(); } });
       const closeBtn = overlay.querySelector('.modal-close');
       if(closeBtn) closeBtn.onclick = ()=>{ overlay.remove(); state.modal = {type:'hosts-list'}; render(); };
     } else if(state.modal.type === 'history-daily-edit'){
       // открыта поверх "Выполнение плана" (из модалки аналитики у владельца) — закрытие должно
       // вернуть именно её, а не просто обнулять модалку, иначе владелец "вываливается" на пустой фон
       const returnTo = state.modal.returnTo || null;
-      overlay.addEventListener('click', (e)=>{ if(e.target === overlay){ overlay.remove(); state.modal = returnTo; render(); } });
       const closeBtn = overlay.querySelector('.modal-close');
       if(closeBtn) closeBtn.onclick = ()=>{ overlay.remove(); state.modal = returnTo; render(); };
     } else {
-      // у мероприятия — клик мимо окна (по тёмному фону) больше не закрывает его и не сбрасывает
-      // несохранённые правки; закрыть можно только явно — крестиком или «Отмена». Для всех остальных
-      // модалок клик по фону работает как раньше.
-      if(state.modal.type !== 'event'){
-        overlay.addEventListener('click', (e)=>{ if(e.target === overlay){ state.modal = null; state.pendingAction = null; draftEventTypes = null; draftHostsList = null; draftPayRates = null; draftMaterialsCatalog = null; overlay.remove(); } });
-      }
+      // клик мимо окна (по тёмному фону) никогда не закрывает ни одно окно и не сбрасывает
+      // несохранённые правки; закрыть можно только явно — крестиком или кнопкой «Отмена»/«Закрыть».
       const closeBtn = overlay.querySelector('.modal-close');
       if(closeBtn) closeBtn.onclick = ()=>{ state.modal = null; state.pendingAction = null; draftEventTypes = null; draftHostsList = null; draftPayRates = null; draftMaterialsCatalog = null; overlay.remove(); };
     }
@@ -11977,7 +12044,6 @@
   }
   function attachStaffEditModalEvents(overlay){
     const back = ()=>{ overlay.remove(); state.modal = {type:'code-settings'}; render(); };
-    overlay.addEventListener('click', (e)=>{ if(e.target === overlay) back(); });
     const closeBtn = overlay.querySelector('.modal-close'); if(closeBtn) closeBtn.onclick = back;
     overlay.querySelector('#staff-cancel').onclick = back;
     overlay.querySelector('#staff-add').onclick = ()=>{
@@ -14492,7 +14558,7 @@
             return `
             <div class="cert-year-group">
               <div class="cert-group-header" data-salarymaster="${escapeHtml(x.name)}">
-                <span>${expanded?'▾':'▸'} ${escapeHtml(x.name)}</span>
+                <span>${expanded?'▾':'▸'} ${escapeHtml(x.name)} <span style="font-family:var(--font-mono);font-size:11.5px;color:var(--ink-soft);font-weight:400;">· ${details.filter(d=>d.kind==='session').length} МК</span></span>
                 <span style="font-family:var(--font-mono);font-size:12px;color:var(--ink-soft);">${formatMoney(x.total)}${combinedGrandTotal>0?' · '+Math.round(x.total/combinedGrandTotal*100)+'%':''}</span>
               </div>
               ${expanded ? `
