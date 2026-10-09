@@ -844,10 +844,13 @@
   };
 
   // заполняемость мероприятия по расписанию: «записано / мест в пространстве», например 0/8 или 2/8
-  function scheduleGuestsCount(e){
-    const g = (e.guests!==undefined && e.guests!==null && e.guests!=='' && !isNaN(e.guests)) ? Number(e.guests) : 0;
-    return Math.max(g, Array.isArray(e.guestList) ? e.guestList.length : 0);
+  // считаем ТОЛЬКО по фактическим записям гостей (есть имя или номер, не возврат); число в поле
+  // «Количество человек» не учитывается — иначе туда можно вписать заранее и «посадка» будет ложной
+  function realGuestsFromList(list){
+    return (Array.isArray(list) ? list : []).filter(g=> g && !g.refunded && (String(g.name||'').trim() || String(g.phone||'').trim()))
+      .reduce((n,g)=> n + (Number(g.seats)>0 ? Math.round(Number(g.seats)) : 1), 0);
   }
+  function scheduleGuestsCount(e){ return realGuestsFromList(e && e.guestList); }
   function scheduleFillText(e){
     if(!e || e.product !== 'Мастер-класс' || (e.status||'confirmed') !== 'confirmed') return '';
     const cap = SPACE_CAPACITY[e.spaceId];
@@ -4677,7 +4680,14 @@
       body = `<div class="host-empty">Пока нет ни одного мероприятия с указанным ведущим.<br>Добавьте события в разделе «По пространствам».</div>`;
     } else {
       if(!state.activeHost || !hosts.includes(state.activeHost)) state.activeHost = hosts[0];
-      const chips = `<div class="host-chips">${hosts.map(h=>`<div class="host-chip ${h===state.activeHost?'active':''}" data-host="${escapeHtml(h)}">${escapeHtml(h)}</div>`).join('')}</div>`;
+      // сколько мероприятий у каждого ведущего в текущем месяце (без отменённых) — показываем на кнопке имени
+      const curYm = todayStr().slice(0,7);
+      const hostMonthCount = {};
+      state.events.forEach(e=>{
+        if(!e.date || !e.date.startsWith(curYm) || e.status==='cancelled') return;
+        eventHostsWithPay(e).forEach(h=>{ hostMonthCount[h.name] = (hostMonthCount[h.name]||0) + 1; });
+      });
+      const chips = `<div class="host-chips">${hosts.map(h=>`<div class="host-chip ${h===state.activeHost?'active':''}" data-host="${escapeHtml(h)}">${escapeHtml(h)}${hostMonthCount[h]?` <span style="opacity:0.7;font-size:0.85em;">· ${hostMonthCount[h]}</span>`:''}</div>`).join('')}</div>`;
 
       const evts = state.events.filter(e => {
         const names = eventHostsWithPay(e).map(h=>h.name);
@@ -4705,11 +4715,34 @@
         `;
       }
 
+      // сводка по месяцам для выбранного ведущего: сколько мероприятий всего, из них по расписанию и сколько ещё впереди
+      const monthStats = {};
+      evts.filter(e=>e.date && e.status!=='cancelled').forEach(e=>{
+        const ym = e.date.slice(0,7);
+        const m = monthStats[ym] || (monthStats[ym] = {total:0, schedule:0, done:0});
+        m.total++;
+        if(e.product==='Мастер-класс') m.schedule++;
+        if(e.date < today) m.done++;
+      });
+      const monthRows = Object.keys(monthStats).sort().reverse().map(ym=>{
+        const m = monthStats[ym];
+        const [yy, mm] = ym.split('-').map(Number);
+        const isCur = ym === today.slice(0,7);
+        return `<div style="display:flex;gap:14px;align-items:baseline;padding:6px 0;border-bottom:1px solid var(--line);${isCur?'font-weight:600;':''}">
+          <div style="width:150px;">${MONTHS[mm-1]} ${yy}${isCur?' · сейчас':''}</div>
+          <div style="font-family:var(--font-mono);font-size:15px;width:60px;">${m.total}</div>
+          <div style="font-size:12.5px;color:var(--ink-soft);">мероприятий · по расписанию ${m.schedule} · проведено ${m.done} · впереди ${m.total - m.done}</div>
+        </div>`;
+      }).join('');
       body = `
         <div class="host-picker">
           <label>Ведущий</label>
           ${chips}
         </div>
+        ${monthRows ? `<div style="margin:-6px 0 18px;padding:10px 14px;background:var(--white);border:1px solid var(--line);border-radius:var(--radius);">
+          <div style="font-size:12px;color:var(--ink-soft);font-family:var(--font-mono);margin-bottom:4px;">Сколько мероприятий у ${escapeHtml(state.activeHost)} по месяцам</div>
+          ${monthRows}
+        </div>` : ''}
         <div class="host-list">
           ${upcoming.length ? `<div class="host-group-label">Предстоящие</div>` + upcoming.map(row).join('') : ''}
           ${past.length ? `<div class="host-group-label">Прошедшие</div>` + past.map(row).join('') : ''}
@@ -15168,7 +15201,7 @@
         `).join('')}
         ${(()=>{
           const sched = evts.filter(e=>(e.status||'confirmed')==='confirmed');
-          const gc = e=> Math.max((e.guests!==undefined&&e.guests!==null&&!isNaN(e.guests))?Number(e.guests):0, Array.isArray(e.guestList)?e.guestList.length:0);
+          const gc = e=> scheduleGuestsCount(e);
           const emptyN = sched.filter(e=>gc(e)===0).length, withN = sched.length - emptyN;
           return `
         <div class="summary-card" style="border-left:4px solid var(--status-red);" title="Мероприятия «По расписанию», где пока 0 гостей"><div class="num" style="color:var(--status-red);">${emptyN}</div><div class="label">Расписание: пустые группы</div></div>
@@ -20111,9 +20144,11 @@
       const prodEl = overlay.querySelector('#f-product');
       const cap = spaceSelect ? SPACE_CAPACITY[spaceSelect.value] : null;
       if(!prodEl || prodEl.value !== 'Мастер-класс' || cap === null || cap === undefined){ hint.textContent = ''; return; }
-      const listN = Array.isArray(state.modal.event && state.modal.event.guestList) ? state.modal.event.guestList.length : 0;
-      const n = Math.max(parseInt(guestsInput && guestsInput.value) || 0, listN);
-      hint.textContent = 'Записано: ' + n + '/' + cap;
+      // берём актуальный список из скрытого поля (оно обновляется, пока вы правите «Гости по отдельности»)
+      let list = [];
+      try{ const h = overlay.querySelector('#f-guest-list'); list = h ? JSON.parse(h.value||'[]') : []; }catch(e){ list = (state.modal.event && state.modal.event.guestList) || []; }
+      const noPhone = list.filter(g=> g && !g.refunded && String(g.name||'').trim() && !String(g.phone||'').trim()).length;
+      hint.textContent = 'Записано: ' + realGuestsFromList(list) + '/' + cap + (noPhone ? ' · без номера: ' + noPhone : '') + ' (по списку гостей)';
     }
     updateGuestsFillHint();
     ['input','change'].forEach(ev=>{
@@ -20359,7 +20394,7 @@
     try{ guestListArr = guestListHidden ? JSON.parse(guestListHidden.value || '[]') : []; }catch(e){ guestListArr = []; }
     // старые мероприятия (до этого раздела) хранили имя гостя в отдельном поле, которого в форме больше нет —
     // переносим его в список гостей один раз при открытии, чтобы имя не "потерялось" из вида
-    function persistGuestList(){ if(guestListHidden) guestListHidden.value = JSON.stringify(guestListArr); }
+    function persistGuestList(){ if(guestListHidden) guestListHidden.value = JSON.stringify(guestListArr); if(typeof updateGuestsFillHint === 'function') updateGuestsFillHint(); }
     if(guestListArr.length === 0 && state.modal.event && state.modal.event.guestName && state.modal.event.guestName.trim()){
       guestListArr.push({ id: uid(), name: state.modal.event.guestName.trim(), seats: 1, items: 1, phone: '', comment: '', expected: null });
       persistGuestList();
