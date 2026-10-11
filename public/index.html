@@ -1775,6 +1775,8 @@
     refunds: null,
     deposits: [],
     depositSearchQuery: '',
+    cashShifts: [],
+    cashAdjustments: [],
     eventTypes: null,
     incomes: null,
     expenses: null,
@@ -2024,7 +2026,7 @@
   // "Касса" — урезанная книга доходов/расходов только по наличным, для администраторов (роль "hostess"):
   // видят приход/расход наличными и остаток за день, но не общую сумму за месяц (та — только в полной
   // "Книге", к которой у роли "hostess" доступа нет); руководитель тоже видит её — для контроля за кассой.
-  function roleCanAccessCashbox(role){ return role === 'hostess' || role === 'admin' || role === 'owner'; }
+  function roleCanAccessCashbox(role){ return ['hostess','admin','owner','assistant','manager'].includes(role); }
   // отмечать себя выходным в календаре могут менеджеры, ассистент, старший администратор и руководитель —
   // каждый только сам за себя (см. canDayOffEntryBeRemovedByMe)
   function roleCanMarkDayOff(role){ return ['manager','assistant','admin','owner'].includes(role); }
@@ -2352,6 +2354,15 @@
     }catch(e){ state.deposits = []; }
 
     try{
+      const csh = await window.storage.get('cash-shifts', true);
+      state.cashShifts = csh ? JSON.parse(csh.value) : [];
+    }catch(e){ state.cashShifts = []; }
+    try{
+      const cad = await window.storage.get('cash-adjustments', true);
+      state.cashAdjustments = cad ? JSON.parse(cad.value) : [];
+    }catch(e){ state.cashAdjustments = []; }
+
+    try{
       const inc = await window.storage.get('incomes', true);
       state.incomes = inc ? JSON.parse(inc.value) : [];
     }catch(e){ state.incomes = []; }
@@ -2410,6 +2421,8 @@
     state._reportReactionsBaseline = JSON.parse(JSON.stringify(state.reportReactions));
     state._refundsBaseline = JSON.parse(JSON.stringify(state.refunds));
     state._depositsBaseline = JSON.parse(JSON.stringify(state.deposits));
+    state._cashShiftsBaseline = JSON.parse(JSON.stringify(state.cashShifts));
+    state._cashAdjustmentsBaseline = JSON.parse(JSON.stringify(state.cashAdjustments));
     state._incomesBaseline = JSON.parse(JSON.stringify(state.incomes));
     state._expensesBaseline = JSON.parse(JSON.stringify(state.expenses));
     state._leadsBaseline = JSON.parse(JSON.stringify(state.leads));
@@ -2944,6 +2957,8 @@
       certificates: state.certificates,
       refunds: state.refunds,
       deposits: state.deposits,
+      cashShifts: state.cashShifts,
+      cashAdjustments: state.cashAdjustments,
       leads: state.leads,
       incomes: state.incomes,
       expenses: state.expenses,
@@ -3857,6 +3872,18 @@
       state._expensesBaseline = JSON.parse(JSON.stringify(finalArr));
     });
   }
+  async function saveCashShifts(){
+    await saveCollectionMerged('cash-shifts', state.cashShifts, state._cashShiftsBaseline, (finalArr)=>{
+      state.cashShifts = finalArr;
+      state._cashShiftsBaseline = JSON.parse(JSON.stringify(finalArr));
+    });
+  }
+  async function saveCashAdjustments(){
+    await saveCollectionMerged('cash-adjustments', state.cashAdjustments, state._cashAdjustmentsBaseline, (finalArr)=>{
+      state.cashAdjustments = finalArr;
+      state._cashAdjustmentsBaseline = JSON.parse(JSON.stringify(finalArr));
+    });
+  }
   async function saveDeposits(){
     await saveCollectionMerged('deposits', state.deposits, state._depositsBaseline, (finalArr)=>{
       state.deposits = finalArr;
@@ -4302,6 +4329,15 @@
     const outreachOverdue = outreachOverdueCount();
     if((outreachToday + outreachOverdue) > 0 && roleCanAccessManagersTab(state.currentRole)){
       alerts.push({icon:'🎉', text:`Поздравления: сегодня ${outreachToday}${outreachOverdue>0?`, просрочено ${outreachOverdue}`:''}`, view:'certificates', certView:'outreach'});
+    }
+
+    // касса: смена передана и не принята > 1 часа; нет приёмки/проверки кассы сегодня после 12:00
+    if(roleCanAccessCashbox(state.currentRole)){
+      const nowMs = Date.now();
+      const stale = (state.cashShifts||[]).filter(x=> x.type==='handover' && x.status==='pending' && x.ts && (nowMs - new Date(x.ts).getTime()) > 60*60*1000);
+      if(stale.length > 0) alerts.push({icon:'⏳', text:`Касса: смена не принята больше часа (${stale.map(x=>(x.by||'—')+' → '+(x.to||'—')).join('; ')})`, view:'cashbox'});
+      const hasToday = (state.cashShifts||[]).some(x=> x.date === today && (x.type==='accept' || x.type==='check'));
+      if(!hasToday && new Date().getHours() >= 12) alerts.push({icon:'💵', text:'Касса: сегодня нет приёмки или проверки кассы', view:'cashbox'});
     }
 
     // закончились отслеживаемые материалы
@@ -8773,12 +8809,16 @@
       .reduce((s,i)=> s + (Number(i.amount)||0), 0);
     const cashOut = state.expenses.filter(e=> e.source === 'Наличные' && e.date && e.date <= dateStr)
       .reduce((s,e)=> s + (Number(e.amount)||0), 0);
-    return cashIn - cashOut;
+    // ручные корректировки остатка (пересчёт кассы, ручные записи) — со знаком, не входят в «Книгу»/аналитику
+    const adj = (state.cashAdjustments||[]).filter(a=> a.account === 'cash' && a.date && a.date <= dateStr)
+      .reduce((s,a)=> s + (Number(a.amount)||0), 0);
+    return cashIn - cashOut + adj;
   }
   function safeBalanceNow(){
     const safeIn = state.incomes.filter(i=> i.account === 'Сейф').reduce((s,i)=> s + (Number(i.amount)||0), 0);
     const safeOut = state.expenses.filter(e=> e.source === 'Сейф').reduce((s,e)=> s + (Number(e.amount)||0), 0);
-    return safeIn - safeOut;
+    const adj = (state.cashAdjustments||[]).filter(a=> a.account === 'safe').reduce((s,a)=> s + (Number(a.amount)||0), 0);
+    return safeIn - safeOut + adj;
   }
   const CASHBOX_SAFE_THRESHOLD = 10000;
   function renderCashboxView(){
@@ -8811,7 +8851,103 @@
       </div>
     `;
 
+    const nowCash = cashOnHandAsOf(todayStr());
+    const nowSafe = safeBalanceNow();
+    const shifts = (state.cashShifts||[]).slice().sort((a,b)=> (b.ts||'').localeCompare(a.ts||''));
+    const lastShift = shifts[0];
+    const pending = shifts.filter(x=> x.type==='handover' && x.status==='pending');
+    const adjLog = (state.cashAdjustments||[]).slice().sort((a,b)=> (b.ts||'').localeCompare(a.ts||'') || (b.date||'').localeCompare(a.date||''));
+    const canDeleteAdj = ['owner','admin'].includes(state.currentRole);
+    const fmtTs = ts=>{ if(!ts) return ''; const d = new Date(ts); return pad(d.getDate())+'.'+pad(d.getMonth()+1)+' '+pad(d.getHours())+':'+pad(d.getMinutes()); };
+    const SHIFT_LABEL = { accept:'📥 Приёмка кассы', handover:'📤 Передача смены', check:'🔍 Проверка кассы' };
+    const diffHtml = (d)=> d===null||d===undefined ? '' : (d===0 ? '<span style="color:var(--status-green);">сходится</span>' : `<span style="color:var(--status-red);font-weight:600;">расхождение ${d>0?'+':'−'}${formatMoney(Math.abs(d))}</span>`);
+    const nowBlock = `
+      <div class="analytics-section" style="border:1px solid var(--line-strong);border-radius:var(--radius);padding:12px 14px;background:var(--white);margin-bottom:16px;">
+        <h4 style="margin-top:0;">💵 Деньги сейчас <span style="font-family:var(--font-mono);font-size:11px;color:var(--ink-soft);font-weight:400;">по записям на ${escapeHtml(formatDateText(todayStr()))}</span></h4>
+        <div class="analytics-summary" style="margin-bottom:8px;">
+          <div class="summary-card"><div class="num" style="font-size:22px;">${formatMoney(nowCash)}</div><div class="label">В кассе</div></div>
+          <div class="summary-card"><div class="num" style="font-size:22px;">${formatMoney(nowSafe)}</div><div class="label">В сейфе</div></div>
+          <div class="summary-card" style="border-left:4px solid var(--accent);"><div class="num" style="font-size:22px;">${formatMoney(nowCash + nowSafe)}</div><div class="label">Всего наличных</div></div>
+        </div>
+        <div style="font-size:12px;color:var(--ink-soft);margin-bottom:10px;">${lastShift ? `Последняя запись по смене: ${escapeHtml(SHIFT_LABEL[lastShift.type]||lastShift.type)} · ${escapeHtml(lastShift.by||'—')} · ${escapeHtml(fmtTs(lastShift.ts))}${lastShift.diffCash!==null&&lastShift.diffCash!==undefined?' · '+diffHtml(lastShift.diffCash):''}` : 'Приёмок и передач смены ещё не было. Если остаток не сходится — пересчитайте кассу и зафиксируйте.'}</div>
+        ${pending.length ? `<div class="daily-alerts-banner" style="margin-bottom:10px;"><span class="daily-alert-item">⏳ Смена передана и ещё не принята: ${pending.map(x=>escapeHtml((x.by||'—')+' → '+(x.to||'—'))).join('; ')}</span></div>` : ''}
+        <div style="display:flex;gap:8px;flex-wrap:wrap;">
+          <button class="btn btn-primary" id="btn-cash-accept">📥 Принять кассу</button>
+          <button class="btn btn-ghost" id="btn-cash-handover">📤 Передать смену</button>
+          <button class="btn btn-ghost" id="btn-cash-check">🔍 Проверить кассу</button>
+          <button class="btn btn-ghost" id="btn-cash-adjust">✏️ Ручная запись / исправить остаток</button>
+        </div>
+      </div>
+    `;
+    // сводка расхождений: по неделям и по людям (за последние 8 недель), считаются записи с посчитанной кассой
+    const weekStart = (ds)=>{ const d = new Date(ds+'T00:00:00'); const wd = (d.getDay()+6)%7; d.setDate(d.getDate()-wd); return fmtDate(d); };
+    const cutW = new Date(); cutW.setDate(cutW.getDate()-56);
+    const cutWStr = fmtDate(cutW);
+    const withDiff = (state.cashShifts||[]).filter(x=> x.date && x.date >= cutWStr && typeof x.diffCash === 'number');
+    function aggDiff(keyFn){
+      const m = {};
+      withDiff.forEach(x=>{
+        const k = keyFn(x); const r = m[k] || (m[k] = {k, n:0, bad:0, short:0, over:0});
+        r.n++;
+        if(x.diffCash < 0){ r.bad++; r.short += -x.diffCash; }
+        else if(x.diffCash > 0){ r.bad++; r.over += x.diffCash; }
+      });
+      return Object.values(m);
+    }
+    const byWeek = aggDiff(x=> weekStart(x.date)).sort((a,b)=> b.k.localeCompare(a.k));
+    const byPerson = aggDiff(x=> x.by || '—').sort((a,b)=> (b.short+b.over) - (a.short+a.over));
+    const discRow = (label, r)=>`
+      <div class="stat-row">
+        <div class="stat-label" style="flex:1;">${label}</div>
+        <div style="width:90px;font-size:12px;color:var(--ink-soft);">проверок: ${r.n}</div>
+        <div style="width:110px;font-size:12px;${r.bad?'color:var(--status-red);font-weight:600;':'color:var(--status-green);'}">${r.bad?'с расхождением: '+r.bad:'всё сходится'}</div>
+        <div style="width:210px;font-family:var(--font-mono);font-size:12px;">${r.short?'недостача −'+formatMoney(r.short):''}${r.short&&r.over?' · ':''}${r.over?'излишек +'+formatMoney(r.over):''}</div>
+      </div>`;
+    const discHtml = `
+      <div class="analytics-section">
+        <h4>Расхождения кассы <span style="font-size:11px;color:var(--ink-soft);font-weight:400;">за 8 недель, по приёмкам / передачам / проверкам</span></h4>
+        ${withDiff.length ? `
+          <div style="font-size:12px;font-weight:600;margin:6px 0 2px;">По неделям</div>
+          ${byWeek.map(r=> discRow('Неделя с '+escapeHtml(formatDateText(r.k)), r)).join('')}
+          <div style="font-size:12px;font-weight:600;margin:10px 0 2px;">По людям (кто вписал)</div>
+          ${byPerson.map(r=> discRow(escapeHtml(r.k), r)).join('')}
+        ` : `<div style="color:var(--ink-soft);font-size:13px;">Пока нет пересчётов кассы — данные появятся после первой приёмки или проверки.</div>`}
+      </div>
+    `;
+    const shiftLogHtml = `
+      ${discHtml}
+      <div class="analytics-section">
+        <h4>Приём-передача смены</h4>
+        ${shifts.length ? shifts.slice(0,40).map(x=>`
+          <div class="stat-row" style="align-items:flex-start;">
+            <div class="stat-label" style="width:100px;">${escapeHtml(fmtTs(x.ts))}</div>
+            <div style="flex:1;font-size:12.5px;">
+              <div style="font-weight:600;">${escapeHtml(SHIFT_LABEL[x.type]||x.type)} · вписал(а): ${escapeHtml(x.by||'—')}${x.type==='handover'?' → '+escapeHtml(x.to||'—'):''}
+                ${x.type==='handover' ? (x.status==='accepted' ? `<span style="color:var(--status-green);font-weight:400;"> · принял(а): ${escapeHtml(x.acceptedBy||'—')} ${escapeHtml(fmtTs(x.acceptedAt))}</span>` : `<span style="color:var(--status-red);font-weight:600;"> · ждёт приёма</span>`) : ''}
+              </div>
+              <div style="color:var(--ink-soft);">Посчитано в кассе: ${formatMoney(x.countedCash)} · по приложению было: ${formatMoney(x.expectedCash)} · ${diffHtml(x.diffCash)}${x.countedSafe!==null&&x.countedSafe!==undefined?` · сейф: ${formatMoney(x.countedSafe)} (было ${formatMoney(x.expectedSafe)}, ${diffHtml(x.diffSafe)})`:''}${x.fixed?' · остаток исправлен':''}</div>
+              ${x.comment ? `<div style="color:var(--ink-soft);">💬 ${escapeHtml(x.comment)}</div>` : ''}
+            </div>
+            ${(x.type==='handover' && x.status!=='accepted') ? `<button class="btn btn-primary" data-cash-accept-id="${x.id}" style="font-size:12px;padding:6px 10px;">Принять</button>` : ''}
+          </div>
+        `).join('') : `<div style="color:var(--ink-soft);font-size:13px;">Записей пока нет.</div>`}
+      </div>
+      <div class="analytics-section">
+        <h4>Ручные записи и исправления остатка</h4>
+        <div style="font-size:11.5px;color:var(--ink-soft);margin-bottom:8px;">Меняют остаток кассы/сейфа, но не попадают в «Книгу» и аналитику как выручка или расход.</div>
+        ${adjLog.length ? adjLog.slice(0,60).map(a=>`
+          <div class="stat-row">
+            <div class="stat-label" style="width:100px;">${escapeHtml(formatDateText(a.date))}</div>
+            <div style="width:130px;font-weight:600;">${a.account==='safe'?'Сейф':'Касса'} · ${escapeHtml(a.by||'—')}</div>
+            <div style="flex:1;font-size:12.5px;">${a.kind==='recount'?'🧮 ':'✏️ '}${escapeHtml(a.comment||'')}</div>
+            <div style="font-family:var(--font-mono);font-size:12.5px;color:${a.amount>=0?'var(--status-green)':'var(--status-red)'};">${a.amount>=0?'+':'−'}${formatMoney(Math.abs(a.amount))}</div>
+            ${canDeleteAdj ? `<button data-cash-adj-del="${a.id}" title="Удалить запись" style="border:none;background:none;cursor:pointer;color:var(--ink-soft);font-size:15px;">×</button>` : ''}
+          </div>
+        `).join('') : `<div style="color:var(--ink-soft);font-size:13px;">Ручных записей пока нет.</div>`}
+      </div>
+    `;
     return `
+      ${nowBlock}
       ${navHtml}
       <div style="font-size:11.5px;color:var(--ink-soft);margin:-8px 0 14px;">Все движения наличных и сейфа записываются в общую «Книгу» — записи помечены категорией/счётом «Сейф» и видны старшему администратору и руководителю там же.</div>
       <div class="analytics-summary" style="margin-bottom:16px;">
@@ -8864,6 +9000,7 @@
           </div>
         `).join('') : `<div style="color:var(--ink-soft);font-size:13px;">Движений по сейфу ещё не было.</div>`}
       </div>
+      ${shiftLogHtml}
     `;
   }
   function attachCashboxEvents(){
@@ -8873,10 +9010,194 @@
     if(prevBtn) prevBtn.onclick = ()=>{ state.cashboxDate = shiftDateStr(state.cashboxDate || todayStr(), -1); render(); };
     const nextBtn = document.getElementById('cashbox-next');
     if(nextBtn) nextBtn.onclick = ()=>{ state.cashboxDate = shiftDateStr(state.cashboxDate || todayStr(), 1); render(); };
+    [['btn-cash-accept','accept'],['btn-cash-handover','handover'],['btn-cash-check','check']].forEach(([id,kind])=>{
+      const b = document.getElementById(id);
+      if(b) b.onclick = ()=>{ state.modal = {type:'cash-shift', kind}; render(); };
+    });
+    const adjBtn = document.getElementById('btn-cash-adjust');
+    if(adjBtn) adjBtn.onclick = ()=>{ state.modal = {type:'cash-adjust'}; render(); };
+    document.querySelectorAll('[data-cash-accept-id]').forEach(b=>{
+      b.onclick = ()=>{ state.modal = {type:'cash-shift', kind:'accept', acceptId:b.dataset.cashAcceptId}; render(); };
+    });
+    document.querySelectorAll('[data-cash-adj-del]').forEach(b=>{
+      b.onclick = ()=>{
+        showConfirmDeletePopup('Удалить эту ручную запись? Остаток кассы/сейфа изменится обратно.', async ()=>{
+          state.cashAdjustments = state.cashAdjustments.filter(x=>x.id !== b.dataset.cashAdjDel);
+          await saveCashAdjustments();
+          render();
+        });
+      };
+    });
     const depositBtn = document.getElementById('btn-safe-deposit');
     if(depositBtn) depositBtn.onclick = ()=>{ state.modal = {type:'safe-deposit'}; render(); };
     const withdrawBtn = document.getElementById('btn-safe-withdraw');
     if(withdrawBtn) withdrawBtn.onclick = ()=>{ state.modal = {type:'safe-withdraw'}; render(); };
+  }
+  function cashNamesDatalist(){
+    const names = Array.from(new Set([...HOSTESS_LIST, ...(state.loggedInHostessName?[state.loggedInHostessName]:[])])).filter(Boolean);
+    return `<datalist id="cashbox-names-list">${names.map(n=>`<option value="${escapeHtml(n)}">`).join('')}</datalist>`;
+  }
+  // приём / передача смены / проверка кассы: кто вписал, сколько посчитано, сколько должно быть по приложению
+  function renderCashShiftModal(m){
+    const kind = m.kind || 'accept';
+    const expCash = cashOnHandAsOf(todayStr()), expSafe = safeBalanceNow();
+    const pend = m.acceptId ? (state.cashShifts||[]).find(x=>x.id===m.acceptId) : null;
+    const title = pend ? 'Принять смену' : ({accept:'Принять кассу', handover:'Передать смену', check:'Проверить кассу'}[kind]);
+    const defPerson = state.loggedInHostessName || '';
+    return `
+      <div class="modal" style="max-width:440px;">
+        <div class="modal-head"><h3>${title}</h3><button class="modal-close">×</button></div>
+        <div class="modal-body">
+          <div style="font-size:12.5px;color:var(--ink-soft);margin-top:-6px;">${pend ? `Смену передал(а) <b>${escapeHtml(pend.by||'—')}</b> (посчитано ${formatMoney(pend.countedCash)}). Пересчитайте деньги и впишите факт. ` : ''}По приложению сейчас: в кассе <b>${formatMoney(expCash)}</b>, в сейфе <b>${formatMoney(expSafe)}</b>.</div>
+          <div class="field">
+            <label>${kind==='handover' ? 'Кто передаёт (вы)' : (pend ? 'Кто принимает (вы)' : 'Кто вписал')}</label>
+            <input type="text" id="cs-by" value="${escapeHtml(defPerson)}" list="cashbox-names-list" placeholder="Имя">
+            ${cashNamesDatalist()}
+          </div>
+          ${kind==='handover' ? `<div class="field"><label>Кому передаёте</label><input type="text" id="cs-to" list="cashbox-names-list" placeholder="Имя следующего администратора"></div>` : ''}
+          <div class="field">
+            <label>Посчитано наличных в кассе (₽)</label>
+            <input type="number" id="cs-cash" min="0" step="1" placeholder="Сколько фактически лежит в кассе">
+          </div>
+          <div class="field">
+            <label>Посчитано в сейфе (₽) — необязательно</label>
+            <input type="number" id="cs-safe" min="0" step="1" placeholder="Если проверяли сейф">
+          </div>
+          <div id="cs-diff" style="font-size:12.5px;margin-bottom:8px;"></div>
+          <div class="field">
+            <label>Комментарий</label>
+            <input type="text" id="cs-comment" placeholder="Например: утренняя приёмка / недостача 200 ₽ — размен">
+          </div>
+          <label style="display:flex;gap:8px;align-items:flex-start;font-size:12.5px;margin-bottom:10px;cursor:pointer;">
+            <input type="checkbox" id="cs-fix" style="margin-top:3px;"> <span>Исправить остаток в приложении под пересчитанный (создастся запись-корректировка, видна в журнале)</span>
+          </label>
+          <div class="modal-actions">
+            <span></span>
+            <div style="display:flex;gap:8px;">
+              <button class="btn btn-ghost" id="cs-cancel">Отмена</button>
+              <button class="btn btn-primary" id="cs-save">${kind==='handover'?'Передать':(pend?'Принять':'Записать')}</button>
+            </div>
+          </div>
+        </div>
+      </div>`;
+  }
+  function attachCashShiftModalEvents(overlay){
+    const m = state.modal;
+    const kind = m.kind || 'accept';
+    const pend = m.acceptId ? (state.cashShifts||[]).find(x=>x.id===m.acceptId) : null;
+    const expCash = cashOnHandAsOf(todayStr()), expSafe = safeBalanceNow();
+    const cashEl = overlay.querySelector('#cs-cash'), safeEl = overlay.querySelector('#cs-safe'), diffEl = overlay.querySelector('#cs-diff');
+    const diffTxt = (label, d)=> d===0 ? `${label}: сходится` : `${label}: <b style="color:var(--status-red);">расхождение ${d>0?'+':'−'}${formatMoney(Math.abs(d))}</b>`;
+    function upd(){
+      const parts = [];
+      if(cashEl.value !== '') parts.push(diffTxt('Касса', Math.round((Number(cashEl.value)-expCash)*100)/100));
+      if(safeEl.value !== '') parts.push(diffTxt('Сейф', Math.round((Number(safeEl.value)-expSafe)*100)/100));
+      diffEl.innerHTML = parts.join(' · ');
+    }
+    cashEl.addEventListener('input', upd); safeEl.addEventListener('input', upd);
+    overlay.querySelector('#cs-cancel').onclick = ()=>{ state.modal = null; overlay.remove(); };
+    overlay.querySelector('#cs-save').onclick = async ()=>{
+      const by = overlay.querySelector('#cs-by').value.trim();
+      const toEl = overlay.querySelector('#cs-to');
+      const to = toEl ? toEl.value.trim() : '';
+      const comment = overlay.querySelector('#cs-comment').value.trim();
+      const fix = overlay.querySelector('#cs-fix').checked;
+      if(!by){ showGapWarningBanner('Впишите своё имя — кто вносит данные.'); return; }
+      if(cashEl.value === '' || isNaN(cashEl.value) || Number(cashEl.value) < 0){ showGapWarningBanner('Впишите, сколько наличных посчитано в кассе.'); return; }
+      if(kind==='handover' && !to){ showGapWarningBanner('Укажите, кому передаёте смену.'); return; }
+      const counted = Math.round(Number(cashEl.value)*100)/100;
+      const countedSafe = safeEl.value === '' ? null : Math.round(Number(safeEl.value)*100)/100;
+      const diffCash = Math.round((counted - expCash)*100)/100;
+      const diffSafe = countedSafe === null ? null : Math.round((countedSafe - expSafe)*100)/100;
+      const now = new Date();
+      const rec = {
+        id: uid(), ts: now.toISOString(), date: todayStr(), type: pend ? 'accept' : kind,
+        by, to, enteredRole: ROLE_LABELS[state.currentRole] || state.currentRole || '',
+        countedCash: counted, countedSafe, expectedCash: expCash, expectedSafe: expSafe, diffCash, diffSafe,
+        comment, fixed: false, status: kind==='handover' && !pend ? 'pending' : '', fromHandoverId: pend ? pend.id : '',
+      };
+      if(fix){
+        if(diffCash !== 0){
+          state.cashAdjustments.push({ id: uid(), ts: rec.ts, date: rec.date, account:'cash', amount: diffCash, kind:'recount', by, shiftId: rec.id,
+            comment: 'Пересчёт при ' + ({accept:'приёмке',handover:'передаче смены',check:'проверке'}[kind]) + (comment ? ' · ' + comment : '') });
+          rec.fixed = true;
+        }
+        if(diffSafe){
+          state.cashAdjustments.push({ id: uid(), ts: rec.ts, date: rec.date, account:'safe', amount: diffSafe, kind:'recount', by, shiftId: rec.id,
+            comment: 'Пересчёт сейфа' + (comment ? ' · ' + comment : '') });
+          rec.fixed = true;
+        }
+        if(rec.fixed) await saveCashAdjustments();
+      }
+      state.cashShifts.push(rec);
+      if(pend){
+        const i = state.cashShifts.findIndex(x=>x.id===pend.id);
+        if(i >= 0) state.cashShifts[i] = {...state.cashShifts[i], status:'accepted', acceptedBy: by, acceptedAt: rec.ts, acceptedShiftId: rec.id};
+      }
+      await saveCashShifts();
+      recordAction('Касса: ' + ({accept:'приёмка',handover:'передача смены',check:'проверка'}[rec.type]||rec.type), `${by}${to?' → '+to:''} · ${formatMoney(counted)}`);
+      state.modal = null; overlay.remove(); render();
+    };
+  }
+  // ручная запись поступления/расхода (в том числе задним числом) — для исправления остатка
+  function renderCashAdjustModal(){
+    const selDate = state.cashboxDate || todayStr();
+    return `
+      <div class="modal" style="max-width:420px;">
+        <div class="modal-head"><h3>Ручная запись по кассе</h3><button class="modal-close">×</button></div>
+        <div class="modal-body">
+          <div style="font-size:12.5px;color:var(--ink-soft);margin-top:-6px;">Для исправления остатка и восстановления истории. Запись меняет остаток, но не считается выручкой или расходом в «Книге» и аналитике.</div>
+          <div class="field"><label>Что</label>
+            <div class="status-select-wrap">
+              <div class="dishes-opt active" data-ca-sign="1"><span class="dot" style="background:var(--status-green)"></span>Поступление</div>
+              <div class="dishes-opt" data-ca-sign="-1"><span class="dot" style="background:var(--status-red)"></span>Расход</div>
+            </div>
+            <input type="hidden" id="ca-sign" value="1">
+          </div>
+          <div class="field"><label>Где</label>
+            <div class="status-select-wrap">
+              <div class="dishes-opt active" data-ca-acc="cash"><span class="dot" style="background:var(--accent)"></span>Касса</div>
+              <div class="dishes-opt" data-ca-acc="safe"><span class="dot" style="background:var(--ink-soft)"></span>Сейф</div>
+            </div>
+            <input type="hidden" id="ca-acc" value="cash">
+          </div>
+          <div class="row2">
+            <div class="field"><label>Дата</label><input type="date" id="ca-date" value="${selDate}"></div>
+            <div class="field"><label>Сумма (₽)</label><input type="number" id="ca-amount" min="0" step="1" placeholder="0"></div>
+          </div>
+          <div class="field"><label>Комментарий — что это</label><input type="text" id="ca-comment" placeholder="Например: не внесли выручку за 3.10 / размен"></div>
+          <div class="field"><label>Кто вписал</label><input type="text" id="ca-by" value="${escapeHtml(state.loggedInHostessName||'')}" list="cashbox-names-list" placeholder="Имя">${cashNamesDatalist()}</div>
+          <div class="modal-actions">
+            <span></span>
+            <div style="display:flex;gap:8px;">
+              <button class="btn btn-ghost" id="ca-cancel">Отмена</button>
+              <button class="btn btn-primary" id="ca-save">Сохранить</button>
+            </div>
+          </div>
+        </div>
+      </div>`;
+  }
+  function attachCashAdjustModalEvents(overlay){
+    overlay.querySelectorAll('[data-ca-sign]').forEach(o=>{ o.onclick = ()=>{ overlay.querySelectorAll('[data-ca-sign]').forEach(x=>x.classList.remove('active')); o.classList.add('active'); overlay.querySelector('#ca-sign').value = o.dataset.caSign; }; });
+    overlay.querySelectorAll('[data-ca-acc]').forEach(o=>{ o.onclick = ()=>{ overlay.querySelectorAll('[data-ca-acc]').forEach(x=>x.classList.remove('active')); o.classList.add('active'); overlay.querySelector('#ca-acc').value = o.dataset.caAcc; }; });
+    overlay.querySelector('#ca-cancel').onclick = ()=>{ state.modal = null; overlay.remove(); };
+    overlay.querySelector('#ca-save').onclick = async ()=>{
+      const sign = Number(overlay.querySelector('#ca-sign').value) || 1;
+      const account = overlay.querySelector('#ca-acc').value || 'cash';
+      const date = overlay.querySelector('#ca-date').value;
+      const amountRaw = overlay.querySelector('#ca-amount').value;
+      const comment = overlay.querySelector('#ca-comment').value.trim();
+      const by = overlay.querySelector('#ca-by').value.trim();
+      if(!date || amountRaw === '' || isNaN(amountRaw) || Number(amountRaw) <= 0 || !comment || !by){
+        showGapWarningBanner('Заполните дату, сумму, комментарий и кто вписал.');
+        return;
+      }
+      const amount = Math.round(Number(amountRaw)*100)/100 * sign;
+      state.cashAdjustments.push({ id: uid(), ts: new Date().toISOString(), date, account, amount, kind:'manual', by, comment });
+      await saveCashAdjustments();
+      recordAction('Касса: ручная запись', `${account==='safe'?'Сейф':'Касса'} ${amount>=0?'+':'−'}${formatMoney(Math.abs(amount))} · ${by}`);
+      state.modal = null; overlay.remove(); render();
+    };
   }
   function renderSafeDepositModal(){
     const selDate = state.cashboxDate || todayStr();
@@ -11743,6 +12064,10 @@
       overlay.innerHTML = renderStockReceiptModal();
     } else if(state.modal.type === 'tochka-reconcile'){
       overlay.innerHTML = renderTochkaReconcileModal(state.modal);
+    } else if(state.modal.type === 'cash-shift'){
+      overlay.innerHTML = renderCashShiftModal(state.modal);
+    } else if(state.modal.type === 'cash-adjust'){
+      overlay.innerHTML = renderCashAdjustModal();
     } else if(state.modal.type === 'safe-deposit'){
       overlay.innerHTML = renderSafeDepositModal();
     } else if(state.modal.type === 'safe-withdraw'){
@@ -11815,6 +12140,8 @@
     else if(state.modal.type === 'supplier-entry'){ attachSupplierModalEvents(overlay); }
     else if(state.modal.type === 'stock-receipt'){ attachStockReceiptModalEvents(overlay); }
     else if(state.modal.type === 'tochka-reconcile'){ attachTochkaReconcileModalEvents(overlay); }
+    else if(state.modal.type === 'cash-shift'){ attachCashShiftModalEvents(overlay); }
+    else if(state.modal.type === 'cash-adjust'){ attachCashAdjustModalEvents(overlay); }
     else if(state.modal.type === 'safe-deposit'){ attachSafeDepositModalEvents(overlay); }
     else if(state.modal.type === 'safe-withdraw'){ attachSafeWithdrawModalEvents(overlay); }
     else if(state.modal.type === 'legal-docs-missing'){ attachLegalDocsMissingModalEvents(overlay); }
@@ -15997,7 +16324,7 @@
       reader.onload = ()=>{
         try{
           const data = JSON.parse(reader.result);
-          const KNOWN_FIELDS = ['spaces','events','certificates','refunds','deposits','leads','incomes','expenses','eventTypes','hostsList','materialsCatalog','itemSales','orders','salaryAdjustments','masterPayRates','masterPayOverrides','monthlyPlans','hostessShifts','managerShifts','netProfitManual','hostessBonuses','yearSummaryManual','auditLog','closedMonths','marketingSpend','marketingPlans','contentPosts','suppliers','stockReceipts','daysOff'];
+          const KNOWN_FIELDS = ['spaces','events','certificates','refunds','deposits','cashShifts','cashAdjustments','leads','incomes','expenses','eventTypes','hostsList','materialsCatalog','itemSales','orders','salaryAdjustments','masterPayRates','masterPayOverrides','monthlyPlans','hostessShifts','managerShifts','netProfitManual','hostessBonuses','yearSummaryManual','auditLog','closedMonths','marketingSpend','marketingPlans','contentPosts','suppliers','stockReceipts','daysOff'];
           const hasAnyKnownField = KNOWN_FIELDS.some(f => data[f] !== undefined);
           if(!hasAnyKnownField) throw new Error('bad shape');
           pendingImportData = data;
@@ -16048,6 +16375,8 @@
         if(Array.isArray(pendingImportData.certificates)) await rawReplace('certificates', 'certificates', '_certificatesBaseline', pendingImportData.certificates);
         if(Array.isArray(pendingImportData.refunds)) await rawReplace('refunds', 'refunds', '_refundsBaseline', pendingImportData.refunds);
         if(Array.isArray(pendingImportData.deposits)) await rawReplace('deposits', 'deposits', '_depositsBaseline', pendingImportData.deposits);
+        if(Array.isArray(pendingImportData.cashShifts)) await rawReplace('cashShifts', 'cash-shifts', '_cashShiftsBaseline', pendingImportData.cashShifts);
+        if(Array.isArray(pendingImportData.cashAdjustments)) await rawReplace('cashAdjustments', 'cash-adjustments', '_cashAdjustmentsBaseline', pendingImportData.cashAdjustments);
         if(Array.isArray(pendingImportData.leads)) await rawReplace('leads', 'leads', '_leadsBaseline', pendingImportData.leads);
         if(Array.isArray(pendingImportData.incomes)) await rawReplace('incomes', 'incomes', '_incomesBaseline', pendingImportData.incomes);
         if(Array.isArray(pendingImportData.expenses)) await rawReplace('expenses', 'expenses', '_expensesBaseline', pendingImportData.expenses);
@@ -21267,7 +21596,7 @@
       // подстраховка на случай обхода отключённого поля: мастер, который сейчас не ведёт это мероприятие,
       // никак не может поменять ведущего — даже если в поле что-то оказалось (см. блокировку поля выше)
       const hostFieldLockedForMaster = state.currentRole === 'master' && state.modal.event && state.modal.event.host && state.modal.event.host !== state.loggedInMasterName;
-      const hostVal = hostFieldLockedForMaster ? state.modal.event.host : overlay.querySelector('#f-host').value.trim();
+      let hostVal = hostFieldLockedForMaster ? state.modal.event.host : overlay.querySelector('#f-host').value.trim();
       const dateVal = overlay.querySelector('#f-date').value;
       const timeVal = overlay.querySelector('#f-time').value;
       const durationVal = parseInt(overlay.querySelector('#f-duration').value) || 0;
@@ -21387,6 +21716,26 @@
       const finalAdditionalHosts = additionalHostsDraft
         .map(h=>({ name: (h.name||'').trim(), masterPay: h.masterPay, masterPayAuto: h.masterPayAuto }))
         .filter(h=>h.name);
+      // ведущих можно выбирать только из списка «Мастера» (чтобы не плодить дубли вроде «Оля»/«Ольга»).
+      // Уже стоявшие на этом мероприятии имена не трогаем — иначе старые записи нельзя было бы пересохранить.
+      {
+        const listLC = new Map((state.hostsList||[]).map(h=>[String(h).trim().toLowerCase(), String(h).trim()]));
+        const prevEv = state.modal.event || {};
+        const prevNames = new Set([prevEv.host, ...(prevEv.additionalHosts||[]).map(h=>h.name), ...(prevEv.availableMasters||[])].filter(Boolean).map(n=>String(n).trim().toLowerCase()));
+        const canon = n=> listLC.get(String(n||'').trim().toLowerCase());
+        const bad = [];
+        const check = n=>{ const k = String(n||'').trim().toLowerCase(); if(k && !listLC.has(k) && !prevNames.has(k)) bad.push(String(n).trim()); };
+        check(hostVal); finalAdditionalHosts.forEach(h=>check(h.name));
+        if(bad.length){
+          const hostEl = overlay.querySelector('#f-host');
+          if(hostEl && bad.includes(hostVal)){ hostEl.style.borderColor = 'var(--danger)'; if(hostEl.scrollIntoView) hostEl.scrollIntoView({block:'center', behavior:'smooth'}); }
+          showGapWarningBanner('Мастера «' + bad.join('», «') + '» нет в списке. Выберите из списка или сначала добавьте мастера в «Мастера».');
+          return;
+        }
+        // приводим написание к тому, что в списке (регистр), чтобы это был один и тот же мастер
+        if(canon(hostVal)) hostVal = canon(hostVal);
+        finalAdditionalHosts.forEach(h=>{ if(canon(h.name)) h.name = canon(h.name); });
+      }
       const allNamesForThisEvent = [hostVal, ...finalAdditionalHosts.map(h=>h.name)].filter(Boolean);
 
       if(allNamesForThisEvent.length){
