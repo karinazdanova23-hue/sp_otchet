@@ -15492,7 +15492,34 @@
         </div>
       `;
     } else if(activeFinTab === 'salary'){
-      finContent = `
+      // «К выдаче мастерам»: сколько нужно привезти на выплату 16-го (за 1–15) и 2-го (за 16–конец), с учётом уже выплаченного
+      const canSeePayout = ['owner','assistant'].includes(state.currentRole) && !state.loggedInMasterName && !state.loggedInHostessName;
+      const payoutHalfHtml = (label, dueDate, accruedMap, paidMap, total)=>{
+        const names = Array.from(new Set([...Object.keys(accruedMap), ...Object.keys(paidMap)]));
+        const rows = names.map(n=>({ name:n, accrued: accruedMap[n]||0, paid: paidMap[n]||0 })).map(r=>({...r, left: r.accrued - r.paid}))
+          .filter(r=>r.accrued!==0 || r.paid!==0).sort((a,b)=>b.left-a.left);
+        const paidTotal = rows.reduce((sum,r)=>sum+r.paid,0);
+        const leftTotal = rows.reduce((sum,r)=>sum+Math.max(0,r.left),0);
+        return `
+          <div style="margin-bottom:12px;">
+            <div style="display:flex;justify-content:space-between;gap:10px;flex-wrap:wrap;align-items:baseline;">
+              <div style="font-size:13.5px;font-weight:600;">${label} — выдача ${dueDate.slice(8,10)}.${dueDate.slice(5,7)}</div>
+              <div style="font-family:var(--font-mono);font-size:14px;font-weight:600;">${formatMoney(leftTotal)}${paidTotal>0?` <span style="font-weight:400;font-size:11.5px;color:var(--ink-soft);">(начислено ${formatMoney(total)}, выплачено ${formatMoney(paidTotal)})</span>`:''}</div>
+            </div>
+            ${rows.length===0 ? '<div style="color:var(--ink-soft);font-size:12.5px;">Начислений нет.</div>' : `
+            <details style="margin-top:4px;"><summary style="cursor:pointer;font-size:12px;color:var(--ink-soft);">по мастерам (${rows.length})</summary>
+              ${rows.map(r=>`<div class="stat-row" style="margin-top:4px;"><div class="stat-label" style="width:170px;">${escapeHtml(r.name)}</div><div style="flex:1;font-size:12.5px;font-family:var(--font-mono);">${formatMoney(Math.max(0,r.left))}${r.paid>0?` <span style="color:var(--ink-soft);font-size:11px;">· начислено ${formatMoney(r.accrued)}, выплачено ${formatMoney(r.paid)}</span>`:''}</div></div>`).join('')}
+            </details>`}
+          </div>`;
+      };
+      const payoutBlock = canSeePayout ? `
+        <div class="analytics-section" style="border:1px solid var(--line-strong);border-radius:var(--radius);padding:12px 14px;margin-bottom:14px;">
+          <h4 style="margin-top:0;">💵 К выдаче мастерам</h4>
+          <div style="font-size:11.5px;color:var(--ink-soft);margin-bottom:8px;">Суммы по начислениям за месяц выше (МК, изделия, заказы, корректировки) минус уже выплаченное по расходам «Зарплата». Возмещение себестоимости материалов сюда не входит${combinedMaterialsCompTotal>0?' (отдельно: '+formatMoney(combinedMaterialsCompTotal)+')':''}. Способ выдачи (наличные/перевод) приложение не различает — это общая сумма.</div>
+          ${payoutHalfHtml('За 1–15 число', dueDateH1, hostSalaryH1, hostPaidH1, totalSalaryH1)}
+          ${payoutHalfHtml('За 16 – конец месяца', dueDateH2, hostSalaryH2, hostPaidH2, totalSalaryH2)}
+        </div>` : '';
+      finContent = payoutBlock + `
         <div class="analytics-section">
           <h4>ЗП по мастерам за месяц: ${formatMoney(combinedGrandTotal)}</h4>
           ${combinedMaterialsCompTotal>0 ? `<div style="font-size:12.5px;color:var(--ink-soft);margin:-4px 0 8px;">🧾 Отдельно — возмещение себестоимости мастерам (не входит в ЗП): <b>${formatMoney(combinedMaterialsCompTotal)}</b></div>` : ''}
