@@ -140,8 +140,44 @@
   .analytics-section h4{
     font-family: var(--font-display); font-size: 16px; font-weight: 600; margin: 0 0 14px;
   }
+  .analytics-section > h4.collapsible-h4{ cursor:pointer; user-select:none; display:flex; align-items:center; gap:8px; }
+  .analytics-section > h4.collapsible-h4::before{ content:'▾'; font-size:13px; color:var(--ink-soft); transition: transform .15s ease; display:inline-block; }
+  .analytics-section.is-collapsed > h4.collapsible-h4::before{ transform: rotate(-90deg); }
+  .analytics-section.is-collapsed > h4.collapsible-h4{ margin-bottom:0; }
   .stat-row{ display:flex; align-items:center; gap: 12px; margin-bottom: 9px; cursor:default; }
   .stat-row.clickable{ cursor:pointer; }
+  /* месяц меняется только общей панелью «Месяц для всех разделов» — внутренние стрелки скрыты */
+  #ms-prev,
+  #ms-next,
+  #ms-today,
+  #mst-prev,
+  #mst-next,
+  #mst-today,
+  #mp-prev,
+  #mp-next,
+  #mp-today,
+  #ms-sal-prev,
+  #ms-sal-next,
+  #ms-sal-today,
+  #book-prev,
+  #book-next,
+  #book-today,
+  #an-prev,
+  #an-next,
+  #an-today,
+  #pp-prev,
+  #pp-next,
+  #pp-today,
+  #pb-prev,
+  #pb-next,
+  #pb-today,
+  [id$="-nav-prev"],
+  [id$="-nav-next"],
+  [id$="-nav-today"],
+  #conv-prev,
+  #conv-next,
+  #conv-today{ display:none !important; }
+
   .stat-row .stat-label{ width: 170px; font-size: 13px; flex-shrink:0; display:flex; align-items:center; gap:6px; }
   .stat-row .stat-bar-track{ flex:1; background: var(--paper-2); height: 10px; border-radius: 3px; overflow:hidden; }
   .stat-row .stat-bar-fill{ height:100%; border-radius:3px; }
@@ -497,6 +533,7 @@
   .day-evt .left .title{ font-size: 14px; font-weight: 500; margin-top: 2px; }
   .day-evt .left .host{ font-size: 12px; color: var(--ink-soft); margin-top: 2px; }
   .day-evt .left .notes{ font-size: 12px; color: var(--ink-soft); margin-top: 2px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .day-evt .left .notes.notes-full{ overflow:visible; text-overflow:clip; white-space:pre-wrap; word-break:break-word; }
   .quick-host-btn{
     flex-shrink:0; border: 1px solid var(--line-strong); background: var(--white);
     padding: 6px 10px; border-radius: var(--radius); font-size: 11.5px; color: var(--ink-soft);
@@ -834,7 +871,7 @@
     {id:'s5', name:'Выезд', color:'#5C6B73', hex:'#5C6B73', letter:'В'},
   ];
   // вместимость по ФИКСИРОВАННОМУ id пространства (не зависит от того, как его переименовали)
-  const SPACE_CAPACITY = { s1:8, s2:10, s3:14, s4:16, s5:null };
+  const SPACE_CAPACITY = { s1:8, s2:10, s3:14, s4:12, s5:null };
   // ориентир по тому, что обычно проводится в каком пространстве — только подсказка при выборе
   // пространства, ничего не блокирует (сама Карина: «приоритетно, но необязательно»)
   const SPACE_HINTS = {
@@ -849,6 +886,13 @@
   function realGuestsFromList(list){
     return (Array.isArray(list) ? list : []).filter(g=> g && !g.refunded && (String(g.name||'').trim() || String(g.phone||'').trim()))
       .reduce((n,g)=> n + (Number(g.seats)>0 ? Math.round(Number(g.seats)) : 1), 0);
+  }
+  // имена записанных гостей (без телефонов) — для мастера; «Анна ×2», если занято несколько мест
+  function guestNamesText(e){
+    return (e && Array.isArray(e.guestList) ? e.guestList : [])
+      .filter(g=> g && !g.refunded && String(g.name||'').trim())
+      .map(g=> String(g.name).trim() + (Number(g.seats)>1 ? ' ×'+Math.round(Number(g.seats)) : ''))
+      .join(', ');
   }
   function scheduleGuestsCount(e){ return realGuestsFromList(e && e.guestList); }
   function scheduleFillText(e){
@@ -897,6 +941,126 @@
     'Аня Керамика','Женя','Алёна Грекова','Алёна Художник','Кристина Керамика','Арина Керамика',
     'Даша Художница','Алеся Художница','Ира Хост','Лиза Вета','Лиза Аушина',
   ];
+
+
+  // ===== УТВЕРЖДЁННЫЙ СПРАВОЧНИК: названия мероприятий и кто может их вести (таблица «Мероприятия и ведущие») =====
+  // Новые мероприятия можно создавать только с этими названиями и только с этими ведущими.
+  // Старые мероприятия с прежними названиями/именами не трогаем — они остаются как есть.
+  const OFFICIAL_EVENT_CATALOG = [
+    ["Керамика (лепка из глины)", ["Аня", "Арина", "Василена", "Женя", "Ира", "Кристина", "Олюсик"]],
+    ["Гончарный круг", ["Василена", "Женя", "Ира", "Олюсик"]],
+    ["Панно-ваза", ["Дашулик", "Олюсик"]],
+    ["Дофаминовая ваза", ["Василена", "Даша", "Дашулик", "Наташа", "Ольга", "Олюсик"]],
+    ["Свободный акрил (рисование акрилом)", ["Алёна", "Дашулик", "Олюсик"]],
+    ["Картина-аффирмация", ["Алёна", "Василена", "Дашулик", "Олюсик"]],
+    ["3D-аффирмации", ["Алёна", "Василена", "Дашулик", "Олюсик"]],
+    ["Фактурные картины", ["Алёна", "Василена", "Дашулик", "Олюсик"]],
+    ["Фактурная луна с подсветкой", ["Алёна", "Василена", "Дашулик", "Олюсик"]],
+    ["Фактура скорости", ["Алёна", "Дашулик", "Олюсик"]],
+    ["Фактурный бранч", ["Алёна", "Дашулик", "Олюсик"]],
+    ["Ботанический барельеф", ["Василена", "Наташа", "Олюсик"]],
+    ["Объёмные фрукты", ["Олюсик"]],
+    ["Дофаминовая картина", ["Алёна", "Василена", "Дашулик", "Олюсик"]],
+    ["Рисование вином", ["Алёна", "Дашулик", "Ира", "Олюсик"]],
+    ["Этюд вином «Греческий образ»", ["Алёна", "Олюсик"]],
+    ["Космическая акварель", ["Алёна", "Олюсик"]],
+    ["Кофейная живопись", ["Алёна", "Дашулик", "Ира", "Олюсик"]],
+    ["Портреты в стиле Pinterest", ["Алёна", "Дашулик", "Олюсик"]],
+    ["Коты-мемы", ["Алёна", "Дашулик", "Олюсик"]],
+    ["Арт-портрет", ["Алёна", "Дашулик", "Олюсик"]],
+    ["Неоновая арт-вечеринка", ["Алёна", "Дашулик", "Олюсик"]],
+    ["Флюид-арт «Мишки»", ["Наташа"]],
+    ["Роспись одежды", ["Алёна", "Василена", "Дашулик", "Олюсик"]],
+    ["Роспись неваляшки", ["Алёна", "Дашулик", "Олюсик"]],
+    ["Роспись значков", ["Алёна", "Олюсик"]],
+    ["Роспись подносов", ["Алёна", "Олюсик"]],
+    ["Роспись брелоков", ["Алёна", "Олюсик"]],
+    ["Роспись гипсовых фигур", ["Алёна", "Дашулик", "Олюсик"]],
+    ["Роспись тарелок", ["Алёна", "Олюсик"]],
+    ["Декор кружки", ["Алёна", "Олюсик"]],
+    ["Декорирование рамок", ["Алёна", "Олюсик"]],
+    ["Витражи", ["Олюсик"]],
+    ["Изготовление свечи", ["Василена", "Даша", "Дашулик", "Наташа", "Олюсик"]],
+    ["Свеча и диффузор", ["Василена", "Даша", "Дашулик", "Наташа", "Олюсик"]],
+    ["Авторские духи (авторский парфюм)", ["Василена", "Даша", "Дашулик", "Наташа", "Олюсик"]],
+    ["Эпоксидная смола", ["Наташа", "Ольга"]],
+    ["Украшения из эпоксидной смолы", ["Наташа"]],
+    ["Антистресс-картина из эпоксидной смолы", ["Наташа", "Ольга"]],
+    ["Тафтинг (создание ковра, в т.ч. на девичнике)", ["Василена", "Даша", "Олюсик"]],
+    ["Ковровая вышивка", ["Даша", "Олюсик"]],
+    ["Винная дегустация", ["Анжей"]],
+    ["Пивная дегустация", ["Михаил"]],
+    ["Астровстреча", ["Елена"]],
+    ["Таро-вечер", ["Елена"]],
+    ["Хиромантия", ["Елена"]],
+    ["Рисование скетчей-портретов", ["Алёна", "Дашулик", "Ира", "Олюсик"]],
+    ["Картина желаний (карта желаний)", ["Олюсик"]],
+    ["Картина с отпечатками гостей", ["Алёна", "Дашулик"]],
+    ["Картина по номерам", ["Алёна", "Дашулик"]],
+    ["Отпечатки ладошек", ["Алёна", "Василена", "Дашулик"]],
+    ["Аквагрим", ["Алёна", "Дашулик", "Ира"]],
+    ["Написание картины", ["Алёна", "Дашулик", "Ира"]],
+    ["Роспись стен", ["Алёна", "Арина", "Олюсик"]],
+    ["Оформление витрины магазина", ["Алёна", "Арина", "Олюсик"]],
+    ["Изделия из эпоксидной смолы или керамики", ["Ира", "Наташа"]],
+    ["Венки", ["Даша", "Дашулик", "Наташа"]],
+    ["Новогодние мастер-классы", ["Алёна", "Даша", "Дашулик"]],
+    ["Обвесы", ["Даша", "Дашулик", "Олюсик"]],
+    ["Ковры на заказ", ["Даша"]],
+    ["Рисование питомцев в абстрактном стиле", ["Алёна"]],
+    ["Арт-ланч «Керамика»", ["Аня", "Арина", "Василена", "Женя", "Ира", "Кристина", "Олюсик"]],
+    ["Арт-ланч «Авторские духи»", ["Василена", "Даша", "Дашулик", "Наташа", "Олюсик"]],
+    ["Арт-ланч «Картина акрилом»", ["Алёна", "Дашулик", "Олюсик"]],
+    ["Арт-свидание «Керамика»", ["Аня", "Арина", "Василена", "Женя", "Ира", "Кристина", "Олюсик"]],
+    ["Арт-свидание «Гончарный круг»", ["Василена", "Женя", "Ира", "Олюсик"]],
+    ["Арт-свидание «Свободный акрил»", ["Алёна", "Дашулик", "Олюсик"]],
+    ["Арт-свидание «Картина-аффирмация»", ["Алёна", "Василена", "Дашулик", "Олюсик"]],
+    ["Арт-свидание «Фактурная картина»", ["Алёна", "Василена", "Дашулик", "Олюсик"]],
+    ["Арт-свидание «Фактурная луна с подсветкой»", ["Алёна", "Василена", "Дашулик", "Олюсик"]],
+    ["Арт-свидание «Фактура скорости»", ["Алёна", "Дашулик", "Олюсик"]],
+    ["Арт-свидание «Авторские духи»", ["Василена", "Даша", "Дашулик", "Наташа", "Олюсик"]],
+    ["Арт-свидание «Свечи и диффузоры»", ["Василена", "Даша", "Дашулик", "Наташа", "Олюсик"]],
+    ["Арт-свидание «Эпоксидная смола»", ["Наташа", "Ольга"]],
+    ["Арт-свидание «Тафтинг»", ["Василена", "Даша", "Олюсик"]]
+  ];
+  const OFFICIAL_HOSTS = ['Алёна','Анжей','Аня','Арина','Василена','Даша','Дашулик','Елена','Женя','Ира','Кристина','Михаил','Наташа','Ольга','Олюсик'];
+  // служебные названия (не из таблицы), которые тоже разрешены; ведущим может быть любой из OFFICIAL_HOSTS
+  const SERVICE_EVENT_TITLES = ['Аренда','Кинопоказ','Керамика, кино и вино','Мафия','Аудит','Слот',
+    'Марафон: Керамика','Марафон: Духи','Марафон: Свечи','Марафон: Дофаминовые картины','Марафон: Роспись тыкв','Марафон: Фактурные картины'];
+  // старое название вида (для переноса длительности и статей расхода на новое название)
+  const OFFICIAL_TITLE_LEGACY_TYPE = {"Керамика (лепка из глины)": "Керамика", "Гончарный круг": "Круг", "Панно-ваза": "Панно-ваза", "Дофаминовая ваза": "Вазы", "Свободный акрил (рисование акрилом)": "Акрил", "Картина-аффирмация": "Аффирмации", "3D-аффирмации": "3д аффирмации", "Фактурные картины": "Фактурные", "Фактурная луна с подсветкой": "Фактурная луна", "Ботанический барельеф": "Барельеф", "Дофаминовая картина": "Дофаминовая картина", "Рисование вином": "Рисование вином", "Роспись одежды": "Роспись одежды", "Роспись неваляшки": "Неваляшки", "Изготовление свечи": "Свечи", "Свеча и диффузор": "Свечи+диффузоры", "Авторские духи (авторский парфюм)": "Духи", "Эпоксидная смола": "Смола", "Украшения из эпоксидной смолы": "Украшения из смолы", "Тафтинг (создание ковра, в т.ч. на девичнике)": "Тафтинг", "Винная дегустация": "Винная дегустация", "Пивная дегустация": "Пивная дегустация", "Хиромантия": "Хиромантия", "Астровстреча": "Астро", "Таро-вечер": "Таро", "Картина желаний (карта желаний)": "Карта желаний", "Арт-ланч «Керамика»": "Керамика ЛАНЧ", "Арт-ланч «Авторские духи»": "Духи ЛАНЧ", "Арт-ланч «Картина акрилом»": "Акрил ЛАНЧ", "Арт-свидание «Керамика»": "Керамика", "Арт-свидание «Гончарный круг»": "Круг", "Арт-свидание «Свободный акрил»": "Акрил", "Арт-свидание «Картина-аффирмация»": "Аффирмации", "Арт-свидание «Фактурная картина»": "Фактурные", "Арт-свидание «Фактурная луна с подсветкой»": "Фактурная луна", "Арт-свидание «Фактура скорости»": "Фактурные", "Арт-свидание «Авторские духи»": "Духи", "Арт-свидание «Свечи и диффузоры»": "Свечи+диффузоры", "Арт-свидание «Эпоксидная смола»": "Смола", "Арт-свидание «Тафтинг»": "Тафтинг"};
+  // при расчёте зарплаты: если для нового имени нет своих ставок, берём ставки прежнего имени
+  const HOST_PAY_ALIASES = {'Ира':['Ира Керамика','Ира Хост'],'Аня':['Аня Керамика'],'Алёна':['Алёна Грекова','Алёна Художник'],'Кристина':['Кристина Керамика'],'Арина':['Арина Керамика']};
+  const LEGACY_TO_OFFICIAL_LC = (()=>{ const m = {}; Object.keys(OFFICIAL_TITLE_LEGACY_TYPE).forEach(n=>{ if(n.startsWith('Арт-свидание')) return; m[OFFICIAL_TITLE_LEGACY_TYPE[n].toLowerCase()] = n.toLowerCase(); }); return m; })();
+  function legacyTitleToOfficial(lcTitle){ return LEGACY_TO_OFFICIAL_LC[lcTitle] || null; }
+  // живой справочник (его правят руководитель, ассистент и менеджер в «📚 Мероприятия и ведущие»); пока не загружен — берём исходный из таблицы
+  function eventCatalogList(){
+    return (state.eventCatalog && state.eventCatalog.length) ? state.eventCatalog : OFFICIAL_EVENT_CATALOG.map(([t,h])=>({title:t, hosts:h}));
+  }
+  function officialHostsAll(){
+    const set = new Set(OFFICIAL_HOSTS);
+    eventCatalogList().forEach(c=>(c.hosts||[]).forEach(h=>set.add(h)));
+    return Array.from(set).sort((a,b)=>a.localeCompare(b,'ru'));
+  }
+  function roleCanEditEventCatalog(role){ return ['owner','assistant','manager'].includes(role); }
+  function officialEventEntry(title){
+    const t = String(title||'').trim().toLowerCase();
+    const c = eventCatalogList().find(x=>x.title.toLowerCase()===t);
+    return c ? [c.title, c.hosts||[]] : null;
+  }
+  function isAllowedEventTitle(title){
+    const t = String(title||'').trim().toLowerCase();
+    if(!t) return true;
+    return !!officialEventEntry(t) || SERVICE_EVENT_TITLES.some(x=>x.toLowerCase()===t);
+  }
+  function allowedHostsForTitle(title){
+    const e = officialEventEntry(title);
+    return e ? e[1] : officialHostsAll();
+  }
+  function isHostAllowedForTitle(host, title){
+    const h = String(host||'').trim().toLowerCase();
+    return allowedHostsForTitle(title).some(x=>x.toLowerCase()===h);
+  }
 
   const CERT_CHANNELS = ['Лично','ТГ','ВК','Инста','Сайт','Макс'];
   const CERT_TYPES = ['Электронный','Печатный'];
@@ -1377,6 +1541,9 @@
     group.forEach(e=>{
       const k = ((e.direction && e.direction.trim()) || e.title || '').trim().toLowerCase();
       if(k) counts[k] = (counts[k]||0) + 1;
+      // старое название вида считаем и за новое утверждённое (рекомендации перенесены на новые названия)
+      const canon = legacyTitleToOfficial(k);
+      if(canon && canon !== k) counts[canon] = (counts[canon]||0) + 1;
     });
     const rows = (state.scheduleRecs||[]).map(r=>{
       const f = r.period === 'week' ? days/7 : 1;
@@ -1767,6 +1934,7 @@
     pendingAction: null,
     analyticsCursor: new Date(new Date().getFullYear(), new Date().getMonth(), 1),
     expandedHost: null,
+    directionStatusFilter: 'all',
     analyticsFinTab: 'revenue',
     compareMode: false,
     certificates: null,
@@ -1815,6 +1983,8 @@
     eventsIntegritySnapshot: null,
     eventsIntegrityAlerts: null,
     closedMonths: null,
+    priceTierTemplates: {},
+    eventCatalog: null,
     marketingSpend: null,
     marketingPlans: null,
     marketingView: 'spend',
@@ -1868,6 +2038,19 @@
     // сегодняшних живых данных каждый раз, а показывали то, что было известно на тот день
     dailyReportSnapshots: null,
   };
+  // ОБЩИЙ МЕСЯЦ: все «курсоры месяца» (календарь, аналитика, книга, маркетинг, возвраты, зарплаты и т.д.)
+  // читают и пишут одно значение — выбрал месяц в одном месте, он сменился везде.
+  const GLOBAL_MONTH_KEYS = ['cursor','analyticsCursor','bookCursor','refundsCursor','itemSalesCursor','ordersCursor','salaryAdjCursor','conversionCursor','marketingSpendCursor','marketingStatsCursor','marketingPlanCursor','procurementBudgetCursor','managerSalaryCursor','reportsFeedCursor'];
+  (function(){
+    let gm = new Date(new Date().getFullYear(), new Date().getMonth(), 1);
+    GLOBAL_MONTH_KEYS.forEach(k=>{
+      Object.defineProperty(state, k, {
+        get(){ return gm; },
+        set(v){ const d = (v && typeof v.getFullYear === 'function' && !isNaN(v.getTime())) ? v : new Date(); gm = new Date(d.getFullYear(), d.getMonth(), 1); },
+        enumerable:false, configurable:true
+      });
+    });
+  })();
 
   function pad(n){ return n<10 ? '0'+n : ''+n; }
   function fmtDate(d){ return d.getFullYear()+'-'+pad(d.getMonth()+1)+'-'+pad(d.getDate()); }
@@ -2179,6 +2362,53 @@
       }
     }catch(e){}
 
+    // один раз вносим утверждённый справочник: недостающие названия — в «Виды мероприятий» (длительность и статьи
+    // расхода берём у прежнего вида), недостающих ведущих — в список мастеров, рекомендации по расписанию — на новые названия
+    try{
+      const flagCat = await window.storage.get('catalog-v1', true);
+      if(!flagCat){
+        if(Array.isArray(state.eventTypes)){
+          let tc = false;
+          OFFICIAL_EVENT_CATALOG.forEach(([name])=>{
+            if(state.eventTypes.some(x=>x.name.toLowerCase()===name.toLowerCase())) return;
+            const oldName = OFFICIAL_TITLE_LEGACY_TYPE[name];
+            const old = oldName && state.eventTypes.find(x=>x.name===oldName);
+            state.eventTypes = [...state.eventTypes, {name, duration:(old&&old.duration)||120, materialRules:(old&&old.materialRules?old.materialRules:[]).map(r=>({...r}))}];
+            tc = true;
+          });
+          if(tc) await window.storage.set('event-types', JSON.stringify(state.eventTypes), true);
+        }
+        if(Array.isArray(state.hostsList)){
+          const lc = new Set(state.hostsList.map(h=>String(h).trim().toLowerCase()));
+          const add = OFFICIAL_HOSTS.filter(h=>!lc.has(h.toLowerCase()));
+          if(add.length){ state.hostsList = [...state.hostsList, ...add]; await window.storage.set('hosts-list', JSON.stringify(state.hostsList), true); }
+        }
+        if(Array.isArray(state.scheduleRecs)){
+          let rc = false;
+          const have = new Set(state.scheduleRecs.map(r=>(r.title||'').toLowerCase()));
+          const out = [];
+          state.scheduleRecs.forEach(r=>{
+            const newName = Object.keys(OFFICIAL_TITLE_LEGACY_TYPE).find(n=>OFFICIAL_TITLE_LEGACY_TYPE[n]===r.title && !n.startsWith('Арт-свидание'));
+            if(newName && !have.has(newName.toLowerCase())){ out.push({...r, title:newName}); have.add(newName.toLowerCase()); rc = true; }
+            else out.push(r);
+          });
+          if(rc){ state.scheduleRecs = out; await window.storage.set('schedule-recs', JSON.stringify(state.scheduleRecs), true); }
+        }
+        await window.storage.set('catalog-v1', '1', true);
+      }
+    }catch(e){}
+
+    // живой справочник «название → кто может вести» (правится в «📚 Мероприятия и ведущие»)
+    try{
+      const ec = await window.storage.get('event-catalog', true);
+      if(ec){ state.eventCatalog = JSON.parse(ec.value); }
+      else {
+        state.eventCatalog = OFFICIAL_EVENT_CATALOG.map(([t,h])=>({title:t, hosts:[...h]}));
+        await storageSetWithRetry('event-catalog', JSON.stringify(state.eventCatalog));
+      }
+      if(!Array.isArray(state.eventCatalog)) throw new Error('bad');
+    }catch(e){ state.eventCatalog = OFFICIAL_EVENT_CATALOG.map(([t,h])=>({title:t, hosts:[...h]})); }
+
     try{
       const sw = await window.storage.get('schedule-wishes', true);
       state.scheduleWishes = sw ? JSON.parse(sw.value) : [];
@@ -2271,6 +2501,11 @@
       const al = await window.storage.get('audit-log', true);
       state.auditLog = al ? JSON.parse(al.value) : [];
     }catch(e){ state.auditLog = []; }
+
+    try{
+      const ptt = await window.storage.get('price-tier-templates', true);
+      state.priceTierTemplates = ptt ? (JSON.parse(ptt.value) || {}) : {};
+    }catch(e){ state.priceTierTemplates = {}; }
 
     try{
       const cm = await window.storage.get('closed-months', true);
@@ -2392,6 +2627,7 @@
     // правок в этой вкладке; без этого следующий save() не сможет отличить "я это изменил" от
     // "это уже было" и рисковал бы либо затереть чужое, либо не сохранить своё
     state._eventTypesBaseline = JSON.parse(JSON.stringify(state.eventTypes));
+    state._eventCatalogBaseline = JSON.parse(JSON.stringify(state.eventCatalog||[]));
     state._hostsListBaseline = state.hostsList.slice();
     state._customExpenseCategoriesBaseline = (state.customExpenseCategories||[]).slice();
     state._customMarketingDirectionsBaseline = (state.customMarketingDirections||[]).slice();
@@ -3320,6 +3556,12 @@
       state._eventTypesBaseline = JSON.parse(JSON.stringify(finalArr));
     }, x=>normName(x.name));
   }
+  async function saveEventCatalog(){
+    await saveCollectionMerged('event-catalog', state.eventCatalog, state._eventCatalogBaseline, (finalArr)=>{
+      state.eventCatalog = finalArr;
+      state._eventCatalogBaseline = JSON.parse(JSON.stringify(finalArr));
+    }, x=>normName(x.title));
+  }
   async function saveCustomExpenseCategories(){
     await saveSetMerged('custom-expense-categories', state.customExpenseCategories||[], state._customExpenseCategoriesBaseline, (finalArr)=>{
       state.customExpenseCategories = finalArr;
@@ -4047,14 +4289,14 @@
     }
     return list;
   }
-  function renderAdditionalHostRows(list, guests){
+  function renderAdditionalHostRows(list, guests, title){
     return list.map((h,i)=>`
       <div class="row2" data-ah-idx="${i}" style="margin-bottom:8px;align-items:flex-end;">
         <div>
           <input type="text" class="ah-name" value="${escapeHtml(h.name||'')}" placeholder="Имя мастера" list="host-suggestions">
         </div>
         <div style="display:flex;gap:6px;">
-          <input type="number" class="ah-pay" data-auto="${h.masterPayAuto===false?'false':'true'}" value="${(h.masterPay!==undefined&&h.masterPay!==null)?h.masterPay:masterPayForGuests(guests, h.name)}" min="0" step="50" style="flex:1;">
+          <input type="number" class="ah-pay" data-auto="${h.masterPayAuto===false?'false':'true'}" value="${(h.masterPay!==undefined&&h.masterPay!==null)?h.masterPay:masterPayForGuests(guests, h.name, title)}" min="0" step="50" style="flex:1;">
           <button type="button" class="ah-del" data-idx="${i}" style="border:1px solid var(--line-strong);background:var(--white);border-radius:var(--radius);padding:0 12px;color:var(--danger);cursor:pointer;">✕</button>
         </div>
       </div>
@@ -4082,6 +4324,18 @@
         <button type="button" class="rd-del" data-idx="${i}" title="Удалить">✕</button>
       </div>
     `).join('');
+  }
+  // «вилка» цены: ступени «от N гостей — сумма». Админ меняет число гостей — прогнозная выручка и остаток пересчитываются сами
+  function renderPriceTierRow(t, editable){
+    const dis = editable ? '' : 'disabled';
+    return `<div class="tier-row" style="display:flex;align-items:center;gap:8px;margin-bottom:6px;">
+      <span style="font-size:12.5px;color:var(--ink-soft);">от</span>
+      <input type="number" class="tier-from" min="1" step="1" value="${t && t.from!==undefined && t.from!==null ? t.from : ''}" placeholder="чел." style="width:80px;" ${dis}>
+      <span style="font-size:12.5px;color:var(--ink-soft);">чел. —</span>
+      <input type="number" class="tier-price" min="0" step="100" value="${t && t.price!==undefined && t.price!==null ? t.price : ''}" placeholder="сумма, ₽" style="width:120px;" ${dis}>
+      <span style="font-size:12.5px;color:var(--ink-soft);">₽</span>
+      ${editable ? `<button type="button" class="tier-del" title="Убрать ступень" style="border:none;background:none;cursor:pointer;color:var(--ink-soft);font-size:16px;">×</button>` : ''}
+    </div>`;
   }
   function renderMaterialsItemRows(list){
     return list.map((m,i)=>{
@@ -4215,6 +4469,7 @@
 
     let html = '';
     html += renderHeader();
+    html += renderGlobalMonthBar();
     if(state.view === 'calendar'){
       html += renderSpaceTabs();
       html += renderCalendar();
@@ -4241,6 +4496,7 @@
     }
     app.innerHTML = html;
     attachHeaderEvents();
+    attachGlobalMonthBar();
     if(state.view === 'calendar'){ attachCalendarEvents(); }
     else if(state.view === 'host'){ attachHostEvents(); }
     else if(state.view === 'analytics'){ attachAnalyticsEvents(); }
@@ -4566,6 +4822,40 @@
     return buttons.map(b=>b.html).join('');
   }
 
+  // общая панель выбора месяца — действует на все разделы
+  function renderGlobalMonthBar(){
+    const c = state.cursor;
+    const y = c.getFullYear(), m = c.getMonth();
+    const nowY = new Date().getFullYear();
+    const years = []; for(let yy = nowY-3; yy <= nowY+2; yy++) years.push(yy);
+    if(!years.includes(y)) years.push(y);
+    years.sort((a,b)=>a-b);
+    const isNow = (y === nowY && m === new Date().getMonth());
+    return `
+      <div class="global-month-bar no-print" style="position:sticky;top:0;z-index:40;box-shadow:0 2px 6px rgba(0,0,0,.06);display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin:0 0 12px;padding:8px 12px;background:var(--paper-2);border:1px solid var(--line);border-radius:var(--radius);">
+        <span style="font-size:12px;color:var(--ink-soft);">Месяц для всех разделов:</span>
+        <button class="btn btn-ghost" id="gm-prev" title="Предыдущий месяц" style="padding:4px 10px;">‹</button>
+        <select id="gm-month" style="padding:5px 8px;border:1px solid var(--line-strong);border-radius:var(--radius);background:var(--white);font-family:var(--font-body);">
+          ${MONTHS.map((nm,i)=>`<option value="${i}" ${i===m?'selected':''}>${escapeHtml(nm.charAt(0).toUpperCase()+nm.slice(1))}</option>`).join('')}
+        </select>
+        <select id="gm-year" style="padding:5px 8px;border:1px solid var(--line-strong);border-radius:var(--radius);background:var(--white);font-family:var(--font-body);">
+          ${years.map(yy=>`<option value="${yy}" ${yy===y?'selected':''}>${yy}</option>`).join('')}
+        </select>
+        <button class="btn btn-ghost" id="gm-next" title="Следующий месяц" style="padding:4px 10px;">›</button>
+        <button class="btn btn-ghost" id="gm-today" ${isNow?'disabled':''} style="padding:4px 10px;">Текущий месяц</button>
+      </div>`;
+  }
+  function attachGlobalMonthBar(){
+    const g = id=>document.getElementById(id);
+    const go = (y,m)=>{ state.cursor = new Date(y, m, 1); render(); };
+    const c = ()=>state.cursor;
+    if(g('gm-prev')) g('gm-prev').onclick = ()=> go(c().getFullYear(), c().getMonth()-1);
+    if(g('gm-next')) g('gm-next').onclick = ()=> go(c().getFullYear(), c().getMonth()+1);
+    if(g('gm-today')) g('gm-today').onclick = ()=> go(new Date().getFullYear(), new Date().getMonth());
+    if(g('gm-month')) g('gm-month').onchange = e=> go(c().getFullYear(), parseInt(e.target.value,10));
+    if(g('gm-year')) g('gm-year').onchange = e=> go(parseInt(e.target.value,10), c().getMonth());
+  }
+
   function renderHeader(){
     const alerts = computeDailyAlerts();
     const role = state.currentRole;
@@ -4587,6 +4877,7 @@
           <button class="lock-btn ${role?'unlocked':''}" id="btn-lock">
             ${role ? '👤 '+((state.loggedInMasterName || state.loggedInHostessName || state.loggedInManagerName) ? escapeHtml(state.loggedInMasterName || state.loggedInHostessName || state.loggedInManagerName) : ROLE_LABELS[role])+' — выйти' : '🔒 Войти'}
           </button>
+          ${roleCanEditEventCatalog(role) ? `<button class="lock-btn no-print" id="btn-event-catalog">📚 Мероприятия и ведущие</button>` : ''}
           ${isAdminLevel ? `
           <button class="lock-btn" id="btn-role-settings">⚙ Настройки доступа</button>
           <button class="lock-btn" id="btn-export">⬇ Экспорт</button>
@@ -4745,6 +5036,8 @@
             <div class="info">
               <div class="title">${escapeHtml(e.title)}</div>
               <div class="space" style="display:flex;align-items:center;gap:6px;">${spaceBadge(sp,'sm')}${escapeHtml(sp.name)}${e.product?' · '+escapeHtml(e.product):''}</div>
+              ${e.notes ? `<div class="host-row-notes" style="font-size:12px;color:var(--ink-soft);margin-top:3px;white-space:pre-wrap;">💬 ${escapeHtml(e.notes)}</div>` : ''}
+              ${(state.currentRole==='master' && guestNamesText(e)) ? `<div class="host-row-notes guest-names" style="font-size:12px;color:var(--ink-soft);margin-top:3px;white-space:pre-wrap;">👥 ${escapeHtml(guestNamesText(e))}</div>` : ''}
             </div>
             <div class="duration">${e.duration ? formatDuration(e.duration) : ''}${scheduleFillText(e) ? '<br>👤 '+scheduleFillText(e) : ((e.guests!==undefined&&e.guests!==null&&e.guests!=='')?'<br>👤 '+e.guests:'')}</div>
           </div>
@@ -6004,7 +6297,7 @@
         <div class="rf-field"><b>Откуда гости узнали про СП:</b> ${escapeHtml(r.source||'—')}</div>
         <div class="rf-field"><b>Профессии гостей:</b> ${escapeHtml(r.professions||'—')}</div>
         ${r.unique && r.unique.trim() ? `<div class="rf-field"><b>Уникальное на МК:</b> ${escapeHtml(r.unique)}</div>` : ''}
-        ${low && r.ratingComment && r.ratingComment.trim() ? `<div class="rf-field" style="color:var(--status-red);"><b>Расшифровка оценки:</b> ${escapeHtml(r.ratingComment)}</div>` : ''}
+        ${r.ratingComment && r.ratingComment.trim() ? `<div class="rf-field" style="${low?'color:var(--status-red);':''}"><b>Расшифровка оценки:</b> ${escapeHtml(r.ratingComment)}</div>` : ''}
         ${r.hasPhoto ? `<div class="rf-field rf-photo" data-rp-eid="${e.id}"><span style="color:var(--ink-soft);font-size:12.5px;">Загрузка фото…</span></div>` : ''}
 
         <div class="rf-reactions">
@@ -6204,9 +6497,6 @@
   }
 
   function renderCertificatesListView(){
-    if(state.certExpandedGroups.size === 0 && state.certificates.length > 0){
-      state.certExpandedGroups.add('y:' + todayStr().slice(0,4));
-    }
     // сводка по месяцам (на основе даты продажи) — продажи и маркетинг считаются раздельно
     const salesTotals = {};
     const marketingTotals = {};
@@ -6225,7 +6515,7 @@
       summaryByYear[year].push(ym);
     });
     const summaryYears = Object.keys(summaryByYear).sort((a,b)=> b.localeCompare(a));
-    if(!state.certSummaryExpandedYears) state.certSummaryExpandedYears = new Set([todayStr().slice(0,4)]);
+    if(!state.certSummaryExpandedYears) state.certSummaryExpandedYears = new Set(); // по умолчанию свёрнуто
     // администратор (роль "hostess") видит отдельные сертификаты и их остатки, но не общую сумму по месяцам/годам —
     // это агрегированная финансовая цифра, закрыта по просьбе владелицы
     const monthlyHtml = (allMonths.length && state.currentRole !== 'hostess') ? `
@@ -6345,6 +6635,10 @@
       <div class="field" style="max-width:260px;margin-bottom:14px;">
         <input type="text" id="cert-search" value="${escapeHtml(query)}" placeholder="Поиск по номеру…" inputmode="numeric">
       </div>
+      ${(!query && certs.length>0) ? `<div style="display:flex;gap:8px;margin-bottom:8px;">
+        <button class="btn btn-ghost" id="cert-expand-all" style="padding:4px 10px;font-size:12px;">Развернуть всё</button>
+        <button class="btn btn-ghost" id="cert-collapse-all" style="padding:4px 10px;font-size:12px;">Свернуть всё</button>
+      </div>` : ''}
       ${listHtml}
     `;
   }
@@ -6573,7 +6867,7 @@
 
   function attachCertificatesEvents(){
     document.querySelectorAll('[data-certview]').forEach(btn=>{
-      btn.onclick = ()=>{ state.certView = btn.dataset.certview; render(); };
+      btn.onclick = ()=>{ state.certView = btn.dataset.certview; state.certSummaryExpandedYears = new Set(); render(); };
     });
 
     const msSalPrev = document.getElementById('ms-sal-prev');
@@ -6588,6 +6882,19 @@
     attachPeriodNav('ordersCursor', 'ordersMode', 'orders-nav');
     attachPeriodNav('conversionCursor', 'conversionMode', 'conv');
     attachPeriodNav('salaryAdjCursor', 'salaryAdjMode', 'salaryadj-nav');
+
+    const certCollapseBtn = document.getElementById('cert-collapse-all');
+    if(certCollapseBtn) certCollapseBtn.onclick = ()=>{ state.certExpandedGroups = new Set(); render(); };
+    const certExpandBtn = document.getElementById('cert-expand-all');
+    if(certExpandBtn) certExpandBtn.onclick = ()=>{
+      const set = new Set();
+      state.certificates.forEach(c=>{
+        const y = c.saleDate ? c.saleDate.slice(0,4) : 'без даты';
+        const ym = c.saleDate ? c.saleDate.slice(0,7) : 'без даты';
+        set.add('y:'+y); set.add('m:'+ym);
+      });
+      state.certExpandedGroups = set; render();
+    };
 
     document.querySelectorAll('[data-certgroup]').forEach(header=>{
       header.onclick = ()=>{
@@ -6857,6 +7164,10 @@
     const conversionPct = total>0 ? Math.round(soldCount/total*100) : 0;
     const soldRevenue = allLeadsInPeriod.filter(l=>l.sold).reduce((s,l)=> s+((l.revenue!==undefined&&l.revenue!==null&&!isNaN(l.revenue))?Number(l.revenue):0), 0);
     const soldWithoutEventCount = allLeadsInPeriod.filter(l=>l.sold && !l.eventId && !l.orderId).length;
+    const leadAmount = l=> (l.revenue!==undefined&&l.revenue!==null&&!isNaN(l.revenue)) ? Number(l.revenue) : 0;
+    const unsoldLeadsList = allLeadsInPeriod.filter(l=>!l.sold);
+    const unsoldRevenue = unsoldLeadsList.reduce((s,l)=> s+leadAmount(l), 0);
+    const unsoldNoAmountCount = unsoldLeadsList.filter(l=> !(l.revenue>0)).length;
 
     // обратная проверка: мероприятия без заявки — реальные (не маркетинговые съёмки/промо и не отменённые)
     // мероприятия в периоде, на которые не ссылается ни одна заявка (заявка.eventId). Мягкая проверка —
@@ -6893,12 +7204,13 @@
       const map = {};
       list.forEach(l=>{
         const k = keyFn(l);
-        if(!map[k]) map[k] = {total:0, sold:0, items:[]};
+        if(!map[k]) map[k] = {total:0, sold:0, soldSum:0, unsoldSum:0, items:[]};
         map[k].total++;
         if(l.sold) map[k].sold++;
+        if(l.sold) map[k].soldSum += leadAmount(l); else map[k].unsoldSum += leadAmount(l);
         map[k].items.push(l);
       });
-      return Object.entries(map).map(([k,v])=>({name:k, total:v.total, sold:v.sold, pct: v.total>0?Math.round(v.sold/v.total*100):0, avgDays: avgCycleDays(v.items)}))
+      return Object.entries(map).map(([k,v])=>({name:k, total:v.total, sold:v.sold, pct: v.total>0?Math.round(v.sold/v.total*100):0, soldSum:v.soldSum, unsoldSum:v.unsoldSum, avgDays: avgCycleDays(v.items)}))
         .sort((a,b)=>b.total-a.total);
     }
     const bySource = breakdown(l=>l.source||'—', allLeadsInPeriod);
@@ -6950,7 +7262,8 @@
         <div class="summary-card"><div class="num">${total}</div><div class="label">Всего заявок</div></div>
         <div class="summary-card"><div class="num" style="color:var(--status-green);">${soldCount}</div><div class="label">Продано</div></div>
         <div class="summary-card" style="border-left:4px solid var(--accent);"><div class="num">${conversionPct}%</div><div class="label">Конверсия</div></div>
-        <div class="summary-card"><div class="num" style="font-size:20px;">${formatMoney(soldRevenue)}</div><div class="label">Выручка проданных</div></div>
+        <div class="summary-card" style="border-left:4px solid var(--status-green);"><div class="num" style="font-size:20px;color:var(--status-green);">${formatMoney(soldRevenue)}</div><div class="label">Сумма проданного</div></div>
+        <div class="summary-card" style="border-left:4px solid var(--status-red);" title="Сумма по заявкам, которые ещё не проданы"><div class="num" style="font-size:20px;color:var(--status-red);">${formatMoney(unsoldRevenue)}</div><div class="label">Сумма не проданного</div>${unsoldNoAmountCount>0?`<div style="font-size:10.5px;color:var(--ink-soft);margin-top:2px;">без суммы: ${unsoldNoAmountCount} заяв.</div>`:''}</div>
         <div class="summary-card"><div class="num" style="font-size:20px;">${avgSalesCycle!==null?avgSalesCycle+' дн.':'—'}</div><div class="label">Средний срок продажи</div></div>
       </div>
       ${soldWithoutEventCount>0 ? `<div style="font-size:12.5px;color:var(--status-red);margin-bottom:16px;">⚠ ${soldWithoutEventCount} «проданных» заявок без привязки к мероприятию или заказу — откройте заявку и укажите, что из неё создано.</div>` : ''}
@@ -6997,19 +7310,19 @@
           <div class="stat-row">
             <div class="stat-label" style="width:140px;text-transform:capitalize;">${escapeHtml(x.label)}</div>
             <div class="stat-bar-track"><div class="stat-bar-fill" style="width:${Math.round(x.total/maxMonthTotal*100)}%;background:var(--ink);"></div></div>
-            <div class="stat-count" style="width:auto;font-size:12px;">${x.total} заявок · продано ${x.sold} (${x.pct}%)</div>
+            <div class="stat-count" style="width:auto;font-size:12px;">${x.total} заявок · продано ${x.sold} (${x.pct}%)${x.soldSum||x.unsoldSum?` · <span style="color:var(--status-green);">${formatMoney(x.soldSum)}</span> / <span style="color:var(--status-red);">${formatMoney(x.unsoldSum)}</span>`:''}</div>
           </div>
         `).join('')}
       </div>
       ` : ''}
       <div class="analytics-section">
         <h4>Ежедневная конверсия</h4>
-        <div style="font-size:11.5px;color:var(--ink-soft);font-family:var(--font-mono);margin-bottom:8px;">По дате заявки. Показывает, в какие дни приходят заявки и как они конвертируются в продажу.</div>
+        <div style="font-size:11.5px;color:var(--ink-soft);font-family:var(--font-mono);margin-bottom:8px;">По дате заявки. Показывает, в какие дни приходят заявки и как они конвертируются в продажу. Суммы: <span style="color:var(--status-green);">продано</span> / <span style="color:var(--status-red);">не продано</span>.</div>
         ${byDay.map(x=>`
           <div class="stat-row">
             <div class="stat-label" style="width:170px;text-transform:capitalize;">${escapeHtml(x.label)}</div>
             <div class="stat-bar-track"><div class="stat-bar-fill" style="width:${Math.round(x.total/maxDayTotal*100)}%;background:${x.pct>=50?'var(--status-green)':'var(--accent)'};"></div></div>
-            <div class="stat-count" style="width:auto;font-size:12px;">${x.total} · продано ${x.sold} (${x.pct}%)</div>
+            <div class="stat-count" style="width:auto;font-size:12px;">${x.total} · продано ${x.sold} (${x.pct}%)${x.soldSum||x.unsoldSum?` · <span style="color:var(--status-green);">${formatMoney(x.soldSum)}</span> / <span style="color:var(--status-red);">${formatMoney(x.unsoldSum)}</span>`:''}</div>
           </div>
         `).join('')}
       </div>
@@ -7020,7 +7333,7 @@
           <div class="stat-row">
             <div class="stat-label">${escapeHtml(x.name)}</div>
             <div class="stat-bar-track"><div class="stat-bar-fill" style="width:${Math.round(x.total/maxSourceTotal*100)}%;background:var(--accent);"></div></div>
-            <div class="stat-count" style="width:auto;font-size:12px;">${x.sold}/${x.total} · ${x.pct}%${x.avgDays!==null?' · ~'+x.avgDays+' дн.':''}</div>
+            <div class="stat-count" style="width:auto;font-size:12px;">${x.sold}/${x.total} · ${x.pct}%${x.soldSum||x.unsoldSum?` · <span style="color:var(--status-green);">${formatMoney(x.soldSum)}</span> / <span style="color:var(--status-red);">${formatMoney(x.unsoldSum)}</span>`:''}${x.avgDays!==null?' · ~'+x.avgDays+' дн.':''}</div>
           </div>
         `).join('')}
       </div>
@@ -7031,7 +7344,7 @@
           <div class="stat-row">
             <div class="stat-label">${escapeHtml(x.name)}</div>
             <div class="stat-bar-track"><div class="stat-bar-fill" style="width:${Math.round(x.total/maxProductTotal*100)}%;background:var(--ink);"></div></div>
-            <div class="stat-count" style="width:auto;font-size:12px;">${x.sold}/${x.total} · ${x.pct}%${x.avgDays!==null?' · ~'+x.avgDays+' дн.':''}</div>
+            <div class="stat-count" style="width:auto;font-size:12px;">${x.sold}/${x.total} · ${x.pct}%${x.soldSum||x.unsoldSum?` · <span style="color:var(--status-green);">${formatMoney(x.soldSum)}</span> / <span style="color:var(--status-red);">${formatMoney(x.unsoldSum)}</span>`:''}${x.avgDays!==null?' · ~'+x.avgDays+' дн.':''}</div>
           </div>
         `).join('')}
       </div>
@@ -11800,6 +12113,7 @@
     document.querySelectorAll('.view-switch button').forEach(b=>{
       b.onclick = ()=>{
         const targetView = b.dataset.view;
+        if(targetView !== state.view) state.certSummaryExpandedYears = new Set(); // при входе во вкладку суммы по месяцам свёрнуты
         state.view = targetView; render();
       };
     });
@@ -11874,6 +12188,8 @@
         render();
       });
     };
+    const ecBtn = document.getElementById('btn-event-catalog');
+    if(ecBtn) ecBtn.onclick = ()=>{ state.modal = {type:'event-catalog'}; render(); };
     const etBtn = document.getElementById('btn-event-types');
     if(etBtn) etBtn.onclick = ()=>{
       requireAdminUnlock(()=>{
@@ -12004,6 +12320,8 @@
       overlay.innerHTML = renderQuickManagerShiftModal(state.modal.shiftDate);
     } else if(state.modal.type === 'quick-add-slot'){
       overlay.innerHTML = renderQuickAddSlotModal(state.modal.event);
+    } else if(state.modal.type === 'event-catalog'){
+      overlay.innerHTML = renderEventCatalogModal();
     } else if(state.modal.type === 'event-types'){
       overlay.innerHTML = renderEventTypesModal();
     } else if(state.modal.type === 'materials-catalog'){
@@ -12110,6 +12428,7 @@
     else if(state.modal.type === 'quick-manager-shift'){ attachQuickManagerShiftModalEvents(overlay); }
     else if(state.modal.type === 'quick-add-slot'){ attachQuickAddSlotModalEvents(overlay); }
     else if(state.modal.type === 'export'){ attachExportModalEvents(overlay); }
+    else if(state.modal.type === 'event-catalog'){ attachEventCatalogModalEvents(overlay); }
     else if(state.modal.type === 'event-types'){ attachEventTypesModalEvents(overlay); }
     else if(state.modal.type === 'materials-catalog'){ attachMaterialsCatalogModalEvents(overlay); }
     else if(state.modal.type === 'hosts-list'){ attachHostsListModalEvents(overlay); }
@@ -12700,6 +13019,23 @@
     return state.events.filter(e=>e.date && e.date.startsWith(ym));
   }
 
+  // Реальная заполняемость: занятые места / все места в группах расписания («По расписанию» + «Слот»).
+  // Вместимость берётся у пространства (SPACE_CAPACITY). Частники, маркетинг, выезды и отменённые не считаются.
+  function occupancyOf(evts){
+    let seats = 0, cap = 0;
+    const bySpace = {};
+    (evts||[]).forEach(e=>{
+      if(e.status!=='confirmed' && e.status!=='slot') return;
+      const c = SPACE_CAPACITY[e.spaceId];
+      if(!c) return;
+      const g = Math.min((e.guests!==undefined&&e.guests!==null&&!isNaN(e.guests)) ? Number(e.guests) : 0, c);
+      cap += c; seats += g;
+      const b = bySpace[e.spaceId] || (bySpace[e.spaceId] = {seats:0, cap:0, groups:0});
+      b.seats += g; b.cap += c; b.groups++;
+    });
+    return { seats, cap, pct: cap>0 ? Math.round(seats/cap*100) : 0, bySpace };
+  }
+
   function computeQuickSummary(cursor){
     const evts = getMonthEvents(cursor);
     const totalRevenue = evts.reduce((s,e)=> s+eventRevenueForecast(e),0);
@@ -12714,7 +13050,7 @@
     return {
       total: evts.length,
       totalRevenue, totalProfit, totalGuests,
-      occupancyPct: Math.round(occupied/MONTH_CAPACITY_EVENTS*100),
+      occupancyPct: occupancyOf(evts).pct,
       productRevenue,
     };
   }
@@ -12859,9 +13195,26 @@
   function getMasterRates(masterName){
     const name = (masterName||'').trim();
     if(name && state.masterPayOverrides && state.masterPayOverrides[name]) return state.masterPayOverrides[name];
+    if(name && HOST_PAY_ALIASES[name] && state.masterPayOverrides){
+      const old = HOST_PAY_ALIASES[name].find(a=>state.masterPayOverrides[a]);
+      if(old) return state.masterPayOverrides[old];
+    }
     return state.masterPayRates || DEFAULT_MASTER_PAY_RATES;
   }
-  function masterPayForGuests(guests, masterName){
+  // Арт-ланчи — своя фиксированная ставка мастеру по числу гостей (одинаковая для всех мастеров): до 4 — 800 ₽, 5–6 — 1000 ₽, 7 и больше — 1200 ₽
+  function isArtLunchTitle(title){ return /ланч/i.test(String(title||'')); }
+  function artLunchPayForGuests(guests){
+    const g = Number(guests) || 0;
+    if(g <= 4) return 800;
+    if(g <= 6) return 1000;
+    return 1200;
+  }
+  // Гончарный круг — фиксированные 1300 ₽ мастеру при любом числе гостей (и старое название «Круг»)
+  function isPotterWheelTitle(title){ const t = String(title||'').trim().toLowerCase(); return t.includes('гончарн') || t === 'круг'; }
+  const POTTER_WHEEL_PAY = 1300;
+  function masterPayForGuests(guests, masterName, title){
+    if(isArtLunchTitle(title)) return artLunchPayForGuests(guests);
+    if(isPotterWheelTitle(title)) return POTTER_WHEEL_PAY;
     const g = Number(guests) || 0;
     const r = getMasterRates(masterName);
     if(g <= r.tier1Max) return r.tier1Flat;
@@ -12940,7 +13293,7 @@
   function eventMasterPay(e){
     if(!e.host || !e.host.trim()) return 0;
     if(e.masterPay !== undefined && e.masterPay !== null && !isNaN(e.masterPay)) return Number(e.masterPay);
-    return masterPayForGuests(e.guests, e.host);
+    return masterPayForGuests(e.guests, e.host, e.title);
   }
   // все ведущие мероприятия (основной + дополнительные) с их индивидуальной оплатой
   function eventHostsWithPay(e){
@@ -12950,7 +13303,7 @@
     }
     (e.additionalHosts || []).forEach(h=>{
       if(h.name && h.name.trim()){
-        const pay = (h.masterPay !== undefined && h.masterPay !== null && !isNaN(h.masterPay)) ? Number(h.masterPay) : masterPayForGuests(e.guests, h.name);
+        const pay = (h.masterPay !== undefined && h.masterPay !== null && !isNaN(h.masterPay)) ? Number(h.masterPay) : masterPayForGuests(e.guests, h.name, e.title);
         list.push({ name: h.name.trim(), pay });
       }
     });
@@ -13294,8 +13647,7 @@
     // будущие даты), а не только до сегодня — это ответ на вопрос «насколько заполнен месяц», а не «как мы
     // продвинулись». Выезды не считаются — у них нет ограничения по месту в студии.
     // (eventsWholeMonth уже посчитан выше, для прогнозной декомпозиции выручки по потокам)
-    const occupiedCount = eventsWholeMonth.filter(e=>e.status!=='offsite').length;
-    const occupancyPct = Math.round(occupiedCount/MONTH_CAPACITY_EVENTS*100);
+    const occupancyPct = occupancyOf(eventsWholeMonth).pct;
 
     // СРЕДНИЙ ЧЕК — выручка мероприятий (без сертификатов/заказов) на гостя, нарастающим итогом за месяц —
     // как в «Сводке по годам». За один день цифра слишком случайная (1-2 мероприятия), поэтому не по дню.
@@ -13562,15 +13914,14 @@
     Object.keys(STATUS_LABEL).forEach(k=>statusCounts[k]=0);
     evts.forEach(e=>{ const s = e.status || 'confirmed'; statusCounts[s] = (statusCounts[s]||0)+1; });
     const totalGuests = evts.reduce((sum,e)=> sum + ((e.guests!==undefined && e.guests!==null && !isNaN(e.guests)) ? Number(e.guests) : 0), 0);
-    const occupiedCount = evts.filter(e=>e.status!=='offsite').length; // выезды не занимают пространство студии
-    const occupancyPct = Math.round(occupiedCount/MONTH_CAPACITY_EVENTS*100);
+    const occupancyInfo = occupancyOf(evts);
+    const occupancyPct = occupancyInfo.pct;
 
     // заполняемость по каждому пространству студии (без учёта "Выезда" — у него нет ограничения по вместимости)
     const studioSpacesForOccupancy = state.spaces.filter(s=>s.id !== 's5');
-    const perSpaceCapacity = studioSpacesForOccupancy.length > 0 ? MONTH_CAPACITY_EVENTS / studioSpacesForOccupancy.length : MONTH_CAPACITY_EVENTS;
     const spaceOccupancyList = studioSpacesForOccupancy.map(s=>{
-      const count = evts.filter(e=>e.spaceId===s.id && e.status!=='offsite').length;
-      return { space: s, count, pct: Math.round(count/perSpaceCapacity*100) };
+      const b = occupancyInfo.bySpace[s.id] || {seats:0, cap:0, groups:0};
+      return { space: s, seats: b.seats, cap: b.cap, groups: b.groups, pct: b.cap>0 ? Math.round(b.seats/b.cap*100) : 0 };
     });
 
     // юр.лица — контроль документов
@@ -13791,7 +14142,7 @@
           leads: mLeads.length,
           conversionPct: mLeads.length>0 ? Math.round(mSoldLeads/mLeads.length*100) : null,
           profitabilityPct: mFullRevenue>0 ? Math.round(mProfit/mFullRevenue*100) : null,
-          occupancyPct: Math.round(mOccupied/MONTH_CAPACITY_EVENTS*100),
+          occupancyPct: occupancyOf(mEvts).pct,
           newGuests: (mManual.newGuests!==undefined && mManual.newGuests!==null) ? Number(mManual.newGuests) : null,
           materialsCost: mMaterialsCost,
           marketingCost: mMarketingCost,
@@ -14115,7 +14466,7 @@
       </div>
     `;
     const historyDailyBtnHtml = `<div style="margin-bottom:10px;"><button class="btn btn-ghost" id="btn-add-history-daily">📝 Занести данные за этот день в прошлом году</button></div>`;
-    const analyticsPanel_plan = (hasAnyPlan ? historyDailyBtnHtml + `        <div style="font-size:11.5px;color:var(--ink-soft);font-family:var(--font-mono);margin-bottom:10px;">День ${daysElapsed} из ${daysInMonth}. «Нужно к этому дню» — ориентир по тому, сколько от плана обычно набрано к этому числу в этом же месяце прошлого года (мероприятия бронируют заранее, и к концу месяца темп естественно замедляется, поэтому не делим план поровну по дням). Если за этот день прошлого года данных нет, темп не считаем — вместо этого просим занести данные. «Прогноз» — куда придём, если сохраним текущий темп.</div>
+    const analyticsPanel_plan = (hasAnyPlan ? historyDailyBtnHtml + `        <div style="font-size:11.5px;color:var(--ink-soft);font-family:var(--font-mono);margin-bottom:10px;">День ${daysElapsed} из ${daysInMonth}</div>
         ${[...planProgress.filter(p=>p.target!==null), ...customPlanProgress].map(p=>`
           <div style="margin-bottom:16px;padding:10px 12px;background:var(--paper-2);border-radius:var(--radius);border-left:3px solid ${p.paceStatus==='ahead'?'var(--status-green)':(p.paceStatus==='behind'?'var(--status-red)':'var(--line-strong)')};">
             <div style="display:flex;justify-content:space-between;align-items:baseline;">
@@ -14124,10 +14475,6 @@
             </div>
             <div style="font-family:var(--font-mono);font-size:15px;margin-top:4px;">${p.format==='money'?formatMoney(p.value):(p.format==='pct'?p.value+'%':p.value)} <span style="color:var(--ink-soft);font-size:12px;">из ${p.format==='money'?formatMoney(p.target):(p.format==='pct'?p.target+'%':p.target)}${p.format!=='pct'?' ('+p.pctOfTarget+'%)':''}</span></div>
             <div class="stat-bar-track" style="margin-top:6px;"><div class="stat-bar-fill" style="width:${Math.min(100,p.format==='pct'?(p.target>0?Math.round(p.value/p.target*100):0):p.pctOfTarget)}%;background:${p.paceStatus==='behind'?'var(--status-red)':(p.paceStatus==='nodata'?'var(--line-strong)':'var(--status-green)')};"></div></div>
-            ${daysElapsed>0 && p.format!=='pct' ? (p.usedLastYear===false
-              ? `<div style="font-size:11.5px;color:var(--ink-soft);margin-top:6px;">Прогноз на конец месяца: ${p.format==='money'?formatMoney(p.projected):p.projected}. <span style="color:var(--accent);">📋 Нет данных за этот день прошлого года — нажмите «Занести данные» выше, чтобы увидеть темп.</span></div>`
-              : `<div style="font-size:11.5px;color:var(--ink-soft);margin-top:6px;">Нужно к этому дню: ${p.format==='money'?formatMoney(p.expectedByNow):p.expectedByNow} · Прогноз на конец месяца: ${p.format==='money'?formatMoney(p.projected):p.projected}</div>`
-            ) : ''}
           </div>
         `).join('')}
         ${productPlanProgress.length>0 ? `
@@ -14140,10 +14487,6 @@
             </div>
             <div style="font-family:var(--font-mono);font-size:15px;margin-top:4px;">${formatMoney(p.value)} <span style="color:var(--ink-soft);font-size:12px;">из ${formatMoney(p.target)} (${p.pctOfTarget}%)</span></div>
             <div class="stat-bar-track" style="margin-top:6px;"><div class="stat-bar-fill" style="width:${Math.min(100,p.pctOfTarget)}%;background:${p.paceStatus==='behind'?'var(--status-red)':(p.paceStatus==='nodata'?'var(--line-strong)':'var(--status-green)')};"></div></div>
-            ${daysElapsed>0 ? (p.usedLastYear===false
-              ? `<div style="font-size:11.5px;color:var(--ink-soft);margin-top:6px;">Прогноз на конец месяца: ${formatMoney(p.projected)}. <span style="color:var(--accent);">📋 Нет данных за этот день прошлого года — нажмите «Занести данные» выше, чтобы увидеть темп.</span></div>`
-              : `<div style="font-size:11.5px;color:var(--ink-soft);margin-top:6px;">Нужно к этому дню: ${formatMoney(p.expectedByNow)} · Прогноз на конец месяца: ${formatMoney(p.projected)}</div>`
-            ) : ''}
           </div>
         `).join('')}
         ` : ''}
@@ -14475,7 +14818,10 @@
 
     // по направлениям (вид мероприятия / название)
     const directionCounts = {};
-    evts.forEach(e=>{
+    const directionFilter = state.directionStatusFilter || 'all';
+    const directionTotalAll = evts.length;
+    const directionEvts = directionFilter==='all' ? evts : evts.filter(e=>e.status===directionFilter);
+    directionEvts.forEach(e=>{
       const t = (e.title && e.title.trim()) ? e.title.trim() : 'Без названия';
       directionCounts[t] = (directionCounts[t]||0) + 1;
     });
@@ -15337,19 +15683,20 @@
         <div class="stat-row">
           <div class="stat-label">Занято мест</div>
           <div class="stat-bar-track"><div class="stat-bar-fill" style="width:${Math.min(100,occupancyPct)}%;background:var(--status-green);"></div></div>
-          <div class="stat-count">${occupancyPct}%</div>
+          <div class="stat-count">${occupancyPct}% <span style="color:var(--ink-soft);font-weight:400;">(${occupancyInfo.seats} из ${occupancyInfo.cap})</span></div>
         </div>
+        <div style="font-size:11.5px;color:var(--ink-soft);font-family:var(--font-mono);margin-top:6px;">Считаем места в группах «По расписанию» и «Слот»: записанные гости / максимум мест в пространстве. Частники, маркетинг и выезды не входят.</div>
       </div>
 
 
       <div class="analytics-section">
         <h4>Заполняемость по пространствам</h4>
-        <div style="font-size:11.5px;color:var(--ink-soft);font-family:var(--font-mono);margin-bottom:8px;">Условная вместимость поровну поделена между пространствами студии (${Math.round(perSpaceCapacity)} мероприятий/мес каждому). «Выезд» без ограничения — сюда не входит.</div>
+        <div style="font-size:11.5px;color:var(--ink-soft);font-family:var(--font-mono);margin-bottom:8px;">Записанные гости / все места в группах расписания и слотах этого пространства. «Выезд» сюда не входит.</div>
         ${spaceOccupancyList.map(x=>`
           <div class="stat-row">
             <div class="stat-label">${spaceBadge(x.space,'sm')}${escapeHtml(x.space.name)}</div>
             <div class="stat-bar-track"><div class="stat-bar-fill" style="width:${Math.min(100,x.pct)}%;background:${x.pct>=90?'var(--status-red)':(x.pct>=60?'var(--status-green)':'var(--ink-soft)')};"></div></div>
-            <div class="stat-count">${x.pct}% <span style="color:var(--ink-soft);font-weight:400;">(${x.count})</span></div>
+            <div class="stat-count">${x.pct}% <span style="color:var(--ink-soft);font-weight:400;">(${x.seats} из ${x.cap} · ${x.groups} гр.)</span></div>
           </div>
         `).join('')}
       </div>
@@ -15385,7 +15732,11 @@
 
 
       <div class="analytics-section">
-        <h4>По направлениям</h4>
+        <h4>По направлениям <span style="font-family:var(--font-mono);font-size:11px;color:var(--ink-soft);font-weight:400;">— штук за месяц${directionFilter!=='all'?': всего '+directionEvts.length+' из '+directionTotalAll:': всего '+directionTotalAll}</span></h4>
+        <div class="dir-filter" style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:10px;">
+          ${[['all','Все'],['confirmed','По расписанию'],['slot','Слот'],['tentative','Частник'],['offsite','Выезд'],['marketing','Маркетинг']].map(([k,l])=>`<button type="button" class="btn ${directionFilter===k?'btn-primary':'btn-ghost'}" data-dirfilter="${k}" style="padding:4px 10px;font-size:12px;">${l}</button>`).join('')}
+        </div>
+        ${directionList.length===0?`<div style="color:var(--ink-soft);font-size:13px;">В этом месяце нет таких мероприятий.</div>`:''}
         ${directionList.map(([t,c])=>`
           <div class="stat-row">
             <div class="stat-label">${escapeHtml(t)}</div>
@@ -15687,10 +16038,6 @@
             </div>
             <div style="font-family:var(--font-mono);font-size:15px;margin-top:4px;">${p.format==='money'?formatMoney(p.value):(p.format==='pct'?p.value+'%':p.value)} <span style="color:var(--ink-soft);font-size:12px;">из ${p.format==='money'?formatMoney(p.target):(p.format==='pct'?p.target+'%':p.target)}${p.format!=='pct'?' ('+p.pctOfTarget+'%)':''}</span></div>
             <div class="stat-bar-track" style="margin-top:6px;"><div class="stat-bar-fill" style="width:${Math.min(100,p.format==='pct'?(p.target>0?Math.round(p.value/p.target*100):0):p.pctOfTarget)}%;background:${p.paceStatus==='behind'?'var(--status-red)':(p.paceStatus==='nodata'?'var(--line-strong)':'var(--status-green)')};"></div></div>
-            ${daysElapsed>0 && p.format!=='pct' ? (p.usedLastYear===false
-              ? `<div style="font-size:11.5px;color:var(--ink-soft);margin-top:6px;">Прогноз на конец месяца: ${p.format==='money'?formatMoney(p.projected):p.projected}. <span style="color:var(--accent);">📋 Нет данных за этот день прошлого года — нажмите «Занести данные» выше, чтобы увидеть темп.</span></div>`
-              : `<div style="font-size:11.5px;color:var(--ink-soft);margin-top:6px;">Нужно к этому дню: ${p.format==='money'?formatMoney(p.expectedByNow):p.expectedByNow} · Прогноз на конец месяца: ${p.format==='money'?formatMoney(p.projected):p.projected}</div>`
-            ) : ''}
           </div>
     `;
     const productRowHtml = p => `
@@ -15701,10 +16048,6 @@
             </div>
             <div style="font-family:var(--font-mono);font-size:15px;margin-top:4px;">${formatMoney(p.value)} <span style="color:var(--ink-soft);font-size:12px;">из ${formatMoney(p.target)} (${p.pctOfTarget}%)</span></div>
             <div class="stat-bar-track" style="margin-top:6px;"><div class="stat-bar-fill" style="width:${Math.min(100,p.pctOfTarget)}%;background:${p.paceStatus==='behind'?'var(--status-red)':(p.paceStatus==='nodata'?'var(--line-strong)':'var(--status-green)')};"></div></div>
-            ${daysElapsed>0 ? (p.usedLastYear===false
-              ? `<div style="font-size:11.5px;color:var(--ink-soft);margin-top:6px;">Прогноз на конец месяца: ${formatMoney(p.projected)}. <span style="color:var(--accent);">📋 Нет данных за этот день прошлого года — нажмите «Занести данные» выше, чтобы увидеть темп.</span></div>`
-              : `<div style="font-size:11.5px;color:var(--ink-soft);margin-top:6px;">Нужно к этому дню: ${formatMoney(p.expectedByNow)} · Прогноз на конец месяца: ${formatMoney(p.projected)}</div>`
-            ) : ''}
           </div>
     `;
 
@@ -15721,7 +16064,7 @@
         <h4 style="margin-top:0;">🎯 Выполнение плана</h4>
         <div style="margin-bottom:10px;"><button class="btn btn-ghost" id="btn-add-history-daily">📝 Занести данные за этот день в прошлом году</button></div>
         ${hasAnyPlan ? `
-          <div style="font-size:11.5px;color:var(--ink-soft);font-family:var(--font-mono);margin-bottom:10px;">День ${daysElapsed} из ${daysInMonth}. «Нужно к этому дню» — ориентир по тому, сколько от плана обычно набрано к этому числу в этом же месяце прошлого года (мероприятия бронируют заранее, и к концу месяца темп естественно замедляется, поэтому не делим план поровну по дням). Если за этот день прошлого года данных нет, темп не считаем — вместо этого просим занести данные. «Прогноз» — куда придём, если сохраним текущий темп.</div>
+          <div style="font-size:11.5px;color:var(--ink-soft);font-family:var(--font-mono);margin-bottom:10px;">День ${daysElapsed} из ${daysInMonth}</div>
           ${[...planProgress.filter(p=>p.target!==null), ...customPlanProgress].map(rowHtml).join('')}
           ${productPlanProgress.length>0 ? `<h4 style="margin-top:4px;">По продуктам (сезонность)</h4>${productPlanProgress.map(productRowHtml).join('')}` : ''}
         ` : `<div style="color:var(--ink-soft);font-size:13px;">План на этот месяц ещё не задан.</div>`}
@@ -15959,7 +16302,31 @@
     `;
   }
 
+  // сворачиваемые блоки аналитики: клик по заголовку прячет/показывает содержимое, состояние помнится между перерисовками
+  function applyCollapsibleSections(){
+    if(!state.collapsedSections) state.collapsedSections = {};
+    document.querySelectorAll('.analytics-section').forEach(sec=>{
+      const h = sec.querySelector(':scope > h4');
+      if(!h || h.classList.contains('collapsible-h4')) return;
+      const key = (state.analyticsFinTab || '') + '|' + h.textContent.trim();
+      h.classList.add('collapsible-h4');
+      h.title = 'Свернуть / развернуть';
+      const apply = (collapsed)=>{
+        sec.classList.toggle('is-collapsed', collapsed);
+        [...sec.children].forEach(ch=>{ if(ch !== h) ch.style.display = collapsed ? 'none' : ''; });
+      };
+      apply(!!state.collapsedSections[key]);
+      h.addEventListener('click', ev=>{
+        if(ev.target.closest('button,a,input,select,textarea')) return;
+        const now = !sec.classList.contains('is-collapsed');
+        state.collapsedSections[key] = now;
+        apply(now);
+      });
+    });
+  }
+
   function attachAnalyticsEvents(){
+    applyCollapsibleSections();
     document.querySelectorAll('.my-missing-report-row').forEach(row=>{
       row.onclick = ()=>{
         const e = state.events.find(x=>x.id===row.dataset.eid);
@@ -16035,6 +16402,9 @@
         state.expandedHost = (state.expandedHost === h) ? null : h;
         render();
       };
+    });
+    document.querySelectorAll('[data-dirfilter]').forEach(b=>{
+      b.onclick = ()=>{ state.directionStatusFilter = b.dataset.dirfilter; render(); };
     });
 
     document.querySelectorAll('[data-fintab]').forEach(btn=>{
@@ -16768,10 +17138,12 @@
             ${spaceBadge(sp,'sm')}${escapeHtml(sp.name)} · ${formatDateText(ev.date)} · ${ev.time}
           </div>
           <div style="font-size:14px;font-weight:500;">${escapeHtml(ev.title)}</div>
+          ${ev.notes ? `<div id="qh-notes" style="font-size:13px;background:var(--paper-2);border-radius:var(--radius);padding:8px 10px;white-space:pre-wrap;"><b>Заметки:</b> ${escapeHtml(ev.notes)}</div>` : ''}
+          ${(state.currentRole==='master' && guestNamesText(ev)) ? `<div id="qh-guests" style="font-size:13px;background:var(--paper-2);border-radius:var(--radius);padding:8px 10px;white-space:pre-wrap;"><b>Гости:</b> ${escapeHtml(guestNamesText(ev))}</div>` : ''}
           <div class="field">
             <label>Мастер</label>
             <input type="text" id="qh-host" value="${escapeHtml(ev.host||'')}" placeholder="Начните вводить имя…" list="qh-host-suggestions" autofocus>
-            <datalist id="qh-host-suggestions">${hostSelectOptions(ev.host).map(h=>`<option value="${escapeHtml(h)}">`).join('')}</datalist>
+            <datalist id="qh-host-suggestions">${allowedHostsForTitle(ev.title).map(h=>`<option value="${escapeHtml(h)}">`).join('')}</datalist>
           </div>
           <div style="font-size:11.5px;color:var(--ink-soft);">Это действие не требует кода доступа.</div>
           <div class="modal-actions">
@@ -16800,6 +17172,8 @@
             ${spaceBadge(sp,'sm')}${escapeHtml(sp.name)} · ${formatDateText(ev.date)} · ${ev.time}
           </div>
           <div style="font-size:14px;font-weight:500;">${escapeHtml(ev.title)}${ev.host?' · '+escapeHtml(ev.host):' · без мастера'}</div>
+          ${ev.notes ? `<div style="font-size:13px;background:var(--paper-2);border-radius:var(--radius);padding:8px 10px;white-space:pre-wrap;"><b>Заметки:</b> ${escapeHtml(ev.notes)}</div>` : ''}
+          ${(state.currentRole==='master' && guestNamesText(ev)) ? `<div style="font-size:13px;background:var(--paper-2);border-radius:var(--radius);padding:8px 10px;white-space:pre-wrap;"><b>Гости:</b> ${escapeHtml(guestNamesText(ev))}</div>` : ''}
 
           <div class="field">
             <label>1. Откуда гости узнали про СП</label>
@@ -16822,7 +17196,7 @@
             <input type="hidden" id="qr-rating" value="${r.rating||''}">
           </div>
           <div class="field">
-            <label>5. Расшифровка вашей оценки <span id="qr-comment-hint" style="font-weight:400;color:var(--ink-soft);">${(!r.rating||r.rating<5)?'— обязательно, если оценка ниже 5':'— необязательно'}</span></label>
+            <label>5. Расшифровка вашей оценки <span id="qr-comment-hint" style="font-weight:400;color:var(--ink-soft);">${(!r.rating||r.rating<5)?'— обязательно при оценке 4 и ниже':'— по желанию (при 5 баллах)'}</span></label>
             <textarea id="qr-rating-comment" placeholder="Что именно было некомфортно вам или гостям...">${escapeHtml(r.ratingComment||'')}</textarea>
           </div>
           ${reportPhotoFieldHtml('6. ', !!r.hasPhoto, false)}
@@ -16850,7 +17224,7 @@
         overlay.querySelectorAll('.rating-btn').forEach(b=>b.classList.remove('active'));
         btn.classList.add('active');
         ratingHidden.value = btn.dataset.rating;
-        if(commentHint) commentHint.textContent = (Number(btn.dataset.rating) < 5) ? '— обязательно, если оценка ниже 5' : '— необязательно';
+        if(commentHint) commentHint.textContent = (Number(btn.dataset.rating) < 5) ? '— обязательно при оценке 4 и ниже' : '— по желанию (при 5 баллах)';
       };
     });
 
@@ -16901,6 +17275,11 @@
     const save = async ()=>{
       const ev = state.modal.event;
       const hostVal = input.value.trim();
+      if(hostVal && ev.host !== hostVal && !isHostAllowedForTitle(hostVal, ev.title)){
+        const ent = officialEventEntry(ev.title);
+        showHostConflictPopup('<b>' + escapeHtml(hostVal) + '</b> не может вести «' + escapeHtml(ev.title) + '». ' + (ent ? 'Может вести: ' + escapeHtml(ent[1].join(', ')) + '.' : 'Доступны: ' + escapeHtml(officialHostsAll().join(', ')) + '.'));
+        return;
+      }
       if(hostVal){
         const newStart = timeToMinutes(ev.time);
         const newEnd = newStart + (Number(ev.duration)||0);
@@ -17040,6 +17419,115 @@
         <button type="button" class="mr-del" data-idx="${ri}" title="Удалить статью">✕</button>
       </div>
     `).join('');
+  }
+
+
+  // ===== «📚 Мероприятия и ведущие»: правка утверждённого справочника (руководитель, ассистент, менеджер) =====
+  function eventCatalogRowHtml(c, isNew){
+    const all = officialHostsAll();
+    const hosts = c.hosts || [];
+    const extras = hosts.filter(h=>!all.includes(h));
+    const names = [...all, ...extras];
+    return `
+      <div class="ec-row" data-new="${isNew?'1':'0'}" data-title-lc="${escapeHtml((c.title||'').toLowerCase())}" style="border-bottom:1px solid var(--line);padding-bottom:10px;margin-bottom:10px;">
+        <div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center;">
+          <input type="text" class="ec-title" value="${escapeHtml(c.title||'')}" ${isNew?'placeholder="Название нового мероприятия"':'readonly'} style="flex:2;min-width:200px;${isNew?'':'background:var(--paper-2);'}">
+          <input type="number" class="ec-duration" value="${c.duration||120}" min="15" step="15" style="width:76px;">
+          <span class="et-unit">мин</span>
+          <button type="button" class="ec-del" title="Убрать из списка" style="border:1px solid var(--line-strong);background:var(--white);border-radius:var(--radius);padding:4px 10px;color:var(--danger);cursor:pointer;">✕</button>
+        </div>
+        <div class="ec-hosts" style="display:flex;flex-wrap:wrap;gap:4px 12px;margin-top:8px;">
+          ${names.map(h=>`<label style="font-size:12.5px;display:inline-flex;gap:4px;align-items:center;cursor:pointer;"><input type="checkbox" class="ec-host" value="${escapeHtml(h)}" ${hosts.includes(h)?'checked':''}>${escapeHtml(h)}</label>`).join('')}
+        </div>
+        <input type="text" class="ec-extra" placeholder="Другой ведущий, если нет в списке (можно несколько через запятую)" style="margin-top:8px;font-size:12.5px;">
+      </div>`;
+  }
+  function renderEventCatalogModal(){
+    const durOf = t=>{ const x = (state.eventTypes||[]).find(e=>e.name.toLowerCase()===t.toLowerCase()); return x ? x.duration : 120; };
+    const rows = eventCatalogList().map(c=>eventCatalogRowHtml({...c, duration:durOf(c.title)}, false)).join('');
+    return `
+      <div class="modal" style="max-width:820px;">
+        <div class="modal-head">
+          <h3>Мероприятия и ведущие</h3>
+          <button class="modal-close">×</button>
+        </div>
+        <div class="modal-body">
+          <div style="font-size:12.5px;color:var(--ink-soft);margin-top:-6px;">Только эти названия можно выбрать в мероприятии, и вести их могут только отмеченные ведущие. Отметьте, кто может вести, и укажите продолжительность. Название существующего мероприятия менять нельзя; «✕» убирает его из выбора (старые мероприятия не пропадут).</div>
+          <input type="text" id="ec-search" placeholder="🔍 Поиск по названию…" style="margin-bottom:8px;">
+          <div id="ec-list">${rows}</div>
+          <div id="ec-no-results" style="display:none;color:var(--ink-soft);font-size:13px;padding:8px 0;">Ничего не найдено</div>
+          <button class="add-evt-btn" id="ec-add">+ добавить мероприятие</button>
+          <div id="ec-error" style="color:var(--status-red);font-size:12.5px;margin-top:8px;"></div>
+          <div class="modal-actions">
+            <span></span>
+            <div style="display:flex;gap:8px;">
+              <button class="btn btn-ghost" id="ec-cancel">Отмена</button>
+              <button class="btn btn-primary" id="ec-save">Сохранить</button>
+            </div>
+          </div>
+        </div>
+      </div>`;
+  }
+  function attachEventCatalogModalEvents(overlay){
+    const list = overlay.querySelector('#ec-list');
+    overlay.querySelector('#ec-cancel').onclick = ()=>{ state.modal = null; overlay.remove(); };
+    const search = overlay.querySelector('#ec-search');
+    search.addEventListener('input', ()=>{
+      const q = search.value.trim().toLowerCase(); let any = false;
+      list.querySelectorAll('.ec-row').forEach(r=>{
+        const t = (r.querySelector('.ec-title').value||'').toLowerCase();
+        const m = !q || t.includes(q) || r.dataset.new==='1';
+        r.style.display = m ? '' : 'none'; if(m) any = true;
+      });
+      overlay.querySelector('#ec-no-results').style.display = (q && !any) ? 'block' : 'none';
+    });
+    list.addEventListener('click', e=>{
+      const b = e.target.closest('.ec-del'); if(!b) return;
+      const row = b.closest('.ec-row');
+      const t = row.querySelector('.ec-title').value.trim();
+      if(row.dataset.new==='1' || window.confirm('Убрать «'+t+'» из списка? Старые мероприятия с этим названием останутся, но новые с ним создать будет нельзя.')) row.remove();
+    });
+    overlay.querySelector('#ec-add').onclick = ()=>{
+      list.insertAdjacentHTML('beforeend', eventCatalogRowHtml({title:'', hosts:[], duration:120}, true));
+      const last = list.querySelector('.ec-row:last-child .ec-title'); if(last) last.focus();
+    };
+    overlay.querySelector('#ec-save').onclick = async ()=>{
+      const err = overlay.querySelector('#ec-error'); err.textContent = '';
+      const out = []; const seen = new Set(); const newHosts = new Set();
+      let bad = null;
+      list.querySelectorAll('.ec-row').forEach(r=>{
+        if(bad) return;
+        const title = r.querySelector('.ec-title').value.trim();
+        const duration = parseInt(r.querySelector('.ec-duration').value) || 0;
+        const hosts = [...r.querySelectorAll('.ec-host:checked')].map(i=>i.value);
+        (r.querySelector('.ec-extra').value||'').split(',').map(x=>x.trim()).filter(Boolean).forEach(h=>{ if(!hosts.some(x=>x.toLowerCase()===h.toLowerCase())){ hosts.push(h); newHosts.add(h); } });
+        if(!title){ bad = 'Укажите название у новой строки или уберите её.'; return; }
+        const k = title.toLowerCase();
+        if(seen.has(k)){ bad = 'Название «'+title+'» повторяется.'; return; }
+        if(r.dataset.new==='1' && SERVICE_EVENT_TITLES.some(x=>x.toLowerCase()===k)){ bad = 'Название «'+title+'» уже есть среди служебных.'; return; }
+        if(duration < 15 || duration > 720){ bad = 'У «'+title+'» укажите продолжительность от 15 до 720 минут.'; return; }
+        if(!hosts.length){ bad = 'У «'+title+'» отметьте хотя бы одного ведущего.'; return; }
+        seen.add(k); out.push({title, hosts, duration});
+      });
+      if(bad){ err.textContent = bad; return; }
+      // длительность — в «Видах мероприятий» (сохраняем их статьи расхода), новые ведущие — в список мастеров
+      out.forEach(c=>{
+        const t = state.eventTypes.find(x=>x.name.toLowerCase()===c.title.toLowerCase());
+        if(t) t.duration = c.duration; else state.eventTypes.push({name:c.title, duration:c.duration, materialRules:[]});
+      });
+      const lc = new Set((state.hostsList||[]).map(h=>String(h).trim().toLowerCase()));
+      const addHosts = [...new Set(out.flatMap(c=>c.hosts))].filter(h=>!lc.has(h.toLowerCase()));
+      if(addHosts.length) state.hostsList = [...state.hostsList, ...addHosts];
+      state.eventCatalog = out.map(c=>({title:c.title, hosts:c.hosts}));
+      try{
+        await saveEventTypes();
+        if(addHosts.length) await saveHostsList();
+        await saveEventCatalog();
+      }catch(e){}
+      recordAction('Справочник мероприятий и ведущих обновлён');
+      state.modal = null; overlay.remove(); render();
+      showToast('Справочник сохранён');
+    };
   }
 
   function renderEventTypesModal(){
@@ -18216,6 +18704,9 @@
   }
 
   function attachAnalyticsPanelModalEvents(overlay){
+    overlay.querySelectorAll('[data-dirfilter]').forEach(b=>{
+      b.onclick = ()=>{ state.directionStatusFilter = b.dataset.dirfilter; render(); };
+    });
     overlay.querySelectorAll('.stat-row.clickable').forEach(row=>{
       row.onclick = ()=>{
         const h = row.dataset.host;
@@ -19726,9 +20217,10 @@
                 <div class="title">${openSlot?'🙋 ':''}${escapeHtml(e.title)}</div>
                 ${isAll ? `<div class="host" style="display:flex;align-items:center;gap:6px;">${spaceBadge(getSpace(e.spaceId),'sm')}${escapeHtml(getSpace(e.spaceId).name)} · ${escapeHtml(allHostNamesDisplay(e))}${e.product?' · '+escapeHtml(e.product):''}${showsDishesAndRental(e.status)&&e.dishes?' · 🍽 '+(e.dishes==='needed'?'нужна посуда':'без посуды'):''}${rentalSuffix(e)}${legalSuffix(e)}</div>` : `<div class="host">${escapeHtml(allHostNamesDisplay(e))}${e.product?' · '+escapeHtml(e.product):''}${showsDishesAndRental(e.status)&&e.dishes?' · 🍽 '+(e.dishes==='needed'?'нужна посуда':'без посуды'):''}${rentalSuffix(e)}${legalSuffix(e)}</div>`}
                 ${openSlot ? `<div class="notes" style="color:var(--status-cyan);">🙋 ${available.length ? 'Свободны: '+escapeHtml(available.join(', ')) : 'Пока никто не откликнулся'}</div>` : ''}
-                ${isPrivateEventStatus(e.status) && e.ageCategory ? `<div class="notes">🎂 ${escapeHtml(e.ageCategory)}</div>` : ''}
-                ${isPrivateEventStatus(e.status) && e.foodInfo ? `<div class="notes" title="${escapeHtml(e.foodInfo)}">🍕 ${escapeHtml(e.foodInfo)}</div>` : ''}
-                ${e.notes ? `<div class="notes" title="${escapeHtml(e.notes)}">💬 ${escapeHtml(e.notes)}</div>` : ''}
+                ${isPrivateEventStatus(e.status) && e.ageCategory ? `<div class="notes${state.currentRole==='master'?' notes-full':''}">🎂 ${escapeHtml(e.ageCategory)}</div>` : ''}
+                ${isPrivateEventStatus(e.status) && e.foodInfo ? `<div class="notes${state.currentRole==='master'?' notes-full':''}" title="${escapeHtml(e.foodInfo)}">🍕 ${escapeHtml(e.foodInfo)}</div>` : ''}
+                ${e.notes ? `<div class="notes${state.currentRole==='master'?' notes-full':''}" title="${escapeHtml(e.notes)}">💬 ${escapeHtml(e.notes)}</div>` : ''}
+                ${(state.currentRole==='master' && guestNamesText(e)) ? `<div class="notes notes-full guest-names">👥 ${escapeHtml(guestNamesText(e))}</div>` : ''}
                 ${remainder>0 ? `<div class="notes" style="color:var(--status-red);">💳 Остаток: ${formatMoney(remainder)}</div>` : ''}
               </div>
               <div style="display:flex;flex-direction:column;gap:6px;flex-shrink:0;">
@@ -20053,10 +20545,10 @@
             <label>Название</label>
             <select id="f-title">
               <option value="" ${(!ev.title || ev.title==='Слот')?'selected':''}>— выберите вид —</option>
-              ${Array.from(new Set([...((ev.title && ev.title!=='Слот')?[ev.title]:[]), ...state.eventTypes.map(t=>t.name)])).sort((a,b)=>a.localeCompare(b,'ru')).map(t=>`<option value="${escapeHtml(t)}" ${ev.title===t?'selected':''}>${escapeHtml(t)}</option>`).join('')}
-              ${roleCanQuickAddEventType(state.currentRole) ? '<option value="__add_new__">+ Добавить новый вид…</option>' : ''}
+              ${Array.from(new Set([...((ev.title && ev.title!=='Слот')?[ev.title]:[]), ...eventCatalogList().map(x=>x.title), ...SERVICE_EVENT_TITLES.filter(x=>x!=='Слот')])).sort((a,b)=>a.localeCompare(b,'ru')).map(t=>`<option value="${escapeHtml(t)}" ${ev.title===t?'selected':''}>${escapeHtml(t)}</option>`).join('')}
             </select>
-            <div style="font-size:11px;color:var(--ink-soft);margin-top:4px;">${roleCanQuickAddEventType(state.currentRole) ? 'Нет нужного вида в списке? Выберите «+ Добавить новый вид…» прямо здесь — он сразу появится в списке. Настроить для него статьи расхода материалов можно позже в «📋 Виды мероприятий» (доступно администраторам).' : 'Нет нужного вида в списке? Добавьте его в «📋 Виды мероприятий» в шапке — тогда он появится здесь.'}</div>
+            <div style="font-size:11px;color:var(--ink-soft);margin-top:4px;">Названия берутся только из утверждённой таблицы «Мероприятия и ведущие». ${roleCanEditEventCatalog(state.currentRole) ? 'Нужного нет? Добавьте его в «📚 Мероприятия и ведущие» в шапке.' : 'Нужного нет — напишите Карине или менеджеру, список обновим.'}</div>
+            ${(ev.title && ev.title!=='Слот' && !isAllowedEventTitle(ev.title)) ? `<div style="font-size:11.5px;color:var(--status-red);margin-top:4px;">Название «${escapeHtml(ev.title)}» устарело. Менять не обязательно, но для новых мероприятий оно недоступно.</div>` : ''}
           </div>
           <div class="field">
             <label>Количество человек</label>
@@ -20078,16 +20570,17 @@
           <div class="field">
             <label>Ведущий <span id="f-host-optional-hint" style="font-weight:400;color:var(--ink-soft);display:${(PRODUCTS_WITHOUT_HOST.includes(ev.product)||ev.status==='slot')?'inline':'none'};">— необязательно${ev.status==='slot'?' для статуса «Слот»':' для продукта «Аренда»'}</span></label>
             <input type="text" id="f-host" value="${escapeHtml(ev.host||'')}" placeholder="Начните вводить имя…" list="host-suggestions">
-            <datalist id="host-suggestions">${hostSelectOptions(ev.host).map(h=>`<option value="${escapeHtml(h)}">`).join('')}</datalist>
+            <datalist id="host-suggestions">${(()=>{ const al = (ev.title && isAllowedEventTitle(ev.title)) ? allowedHostsForTitle(ev.title) : officialHostsAll(); const l = [...al]; if(ev.host && !l.some(x=>x.toLowerCase()===ev.host.trim().toLowerCase())) l.push(ev.host.trim()); return l; })().map(h=>`<option value="${escapeHtml(h)}">`).join('')}</datalist>
+            <div id="f-host-allowed-hint" style="font-size:11.5px;color:var(--ink-soft);margin-top:4px;">${(ev.title && officialEventEntry(ev.title)) ? 'Может вести: ' + escapeHtml(allowedHostsForTitle(ev.title).join(', ')) : 'Выберите название — покажу, кто может вести.'}</div>
             ${ev.status==='slot' ? `<div style="font-size:11px;color:var(--ink-soft);margin-top:4px;">Статус «Слот» — расписание зафиксировано, но мастер ещё не назначен. Мастера видят этот слот и могут отметить себя свободными (см. выше). Когда определитесь, впишите мастера сюда, выберите продукт/направление и смените статус на нужный.</div>` : ''}
           </div>
           <div class="field">
             <label>Зарплата мастеру (₽) <span style="font-weight:400;color:var(--ink-soft);">— считается автоматически по тарифу, можно поправить вручную</span></label>
-            <input type="number" id="f-master-pay" data-auto="${ev.masterPayAuto===false?'false':'true'}" value="${(ev.masterPay!==undefined && ev.masterPay!==null) ? ev.masterPay : masterPayForGuests(ev.guests, ev.host)}" min="0" step="50">
+            <input type="number" id="f-master-pay" data-auto="${ev.masterPayAuto===false?'false':'true'}" value="${(ev.masterPay!==undefined && ev.masterPay!==null) ? ev.masterPay : masterPayForGuests(ev.guests, ev.host, ev.title)}" min="0" step="50">
           </div>
           <div class="field">
             <label>Дополнительные ведущие и их зарплата <span style="font-weight:400;color:var(--ink-soft);">— если мероприятие ведут несколько человек</span></label>
-            <div id="additional-hosts-list">${renderAdditionalHostRows(ev.additionalHosts||[], ev.guests)}</div>
+            <div id="additional-hosts-list">${renderAdditionalHostRows(ev.additionalHosts||[], ev.guests, ev.title)}</div>
             <button type="button" class="add-evt-btn" id="btn-add-host">+ добавить ведущего</button>
           </div>
           <div class="field">
@@ -20194,6 +20687,28 @@
             <label>Прогнозная выручка <span style="font-weight:400;color:var(--ink-soft);">— сколько денег должно быть оплачено за мероприятие, без учёта сертификатов</span></label>
             <input type="number" id="f-agreed-price" value="${financeHiddenInEventModal() ? '' : (ev.agreedPrice!==undefined && ev.agreedPrice!==null ? ev.agreedPrice : '')}" min="0" step="100" placeholder="Например: 10000" ${financeHiddenInEventModal()?'disabled':''}>
             <div id="awaiting-hint" style="font-size:12px;margin-top:6px;font-family:var(--font-mono);"></div>
+            ${(state.currentRole==='hostess' && ev.priceTiers && ev.priceTiers.length && ev.id) ? `
+            <div id="hs-guests-block" style="margin-top:12px;padding:10px 12px;border:1px solid var(--line-strong);border-radius:var(--radius);background:var(--paper-2);">
+              <div style="font-size:13px;font-weight:600;margin-bottom:6px;">👥 Сколько гостей по факту</div>
+              <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
+                <input type="number" id="hs-guests" min="1" step="1" value="${ev.guests!==undefined&&ev.guests!==null?ev.guests:''}" style="width:100px;">
+                <button type="button" class="btn btn-primary" id="hs-guests-save">Обновить гостей и остаток</button>
+              </div>
+              <div id="hs-guests-hint" style="font-size:12.5px;margin-top:8px;font-family:var(--font-mono);"></div>
+            </div>` : ''}
+            <details id="tiers-details" style="margin-top:10px;" ${(ev.priceTiers&&ev.priceTiers.length)?'open':''}>
+              <summary style="cursor:pointer;font-size:13px;font-weight:600;">📊 Вилка цены по числу гостей${(ev.priceTiers&&ev.priceTiers.length)?` (${ev.priceTiers.length})`:''}</summary>
+              <div style="margin-top:8px;">
+                <div style="font-size:11.5px;color:var(--ink-soft);margin-bottom:8px;">Сумма зависит от числа гостей: берётся ступень с наибольшим «от», не превышающим число гостей. Пока вилка задана, «Прогнозная выручка» считается сама, а остаток — по ней.</div>
+                <div id="tiers-rows">${(ev.priceTiers||[]).map(t=>renderPriceTierRow(t, state.currentRole!=='hostess')).join('')}</div>
+                ${state.currentRole!=='hostess' ? `<button type="button" class="add-evt-btn" id="btn-add-tier">+ ступень</button>
+                <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:8px;">
+                  <button type="button" class="btn btn-ghost" id="btn-tier-from-ref" style="padding:4px 10px;font-size:12px;">↩ Подставить из справочника продукта</button>
+                  <button type="button" class="btn btn-ghost" id="btn-tier-to-ref" style="padding:4px 10px;font-size:12px;">💾 Запомнить для этого продукта</button>
+                </div>` : ((ev.priceTiers&&ev.priceTiers.length)?'':'<div style="font-size:12px;color:var(--ink-soft);">Вилка не задана. Её настраивает менеджер.</div>')}
+                <div id="tiers-hint" style="font-size:12px;margin-top:8px;font-family:var(--font-mono);"></div>
+              </div>
+            </details>
           </div>
           <div class="field">
             <label>Себестоимость материалов <span style="font-weight:400;color:var(--ink-soft);">— по каждому материалу: сколько стоит и кто его предоставил</span></label>
@@ -20243,7 +20758,7 @@
             <input type="hidden" id="f-report-rating" value="${state.currentRole!=='master' ? '' : ((ev.masterReport&&typeof ev.masterReport==='object')?(ev.masterReport.rating||''):'')}">
           </div>
           <div class="field" style="${state.currentRole!=='master'?'display:none;':''}">
-            <label>5. Расшифровка оценки <span style="font-weight:400;color:var(--ink-soft);">— обязательно, если оценка ниже 5</span></label>
+            <label>5. Расшифровка оценки <span style="font-weight:400;color:var(--ink-soft);">— обязательно при оценке 4 и ниже; при 5 — по желанию</span></label>
             <textarea id="f-report-rating-comment" placeholder="Что именно было некомфортно...">${state.currentRole!=='master' ? '' : escapeHtml((ev.masterReport&&typeof ev.masterReport==='object')?(ev.masterReport.ratingComment||''):'')}</textarea>
           </div>
           ${reportPhotoFieldHtml('6. ', !!(ev.masterReport && typeof ev.masterReport==='object' && ev.masterReport.hasPhoto), state.currentRole!=='master')}
@@ -20265,15 +20780,55 @@
   // администратор (роль "hostess") открывает мероприятие только на просмотр — без права что-либо
   // редактировать: все поля дизейблятся нативно, а не через кнопку "Сохранить" (иначе некоторые
   // действия, например списание сертификата, сохранились бы в базу мгновенно, до всякого "Сохранить")
+  // «вилка цены»: администратору разрешено менять ТОЛЬКО число гостей — сумма и остаток пересчитываются по ступеням
+  function priceTierFor(tiers, g){
+    if(!tiers || !tiers.length || !(g>0)) return null;
+    const sorted = [...tiers].sort((a,b)=> a.from-b.from);
+    let t = sorted[0]; sorted.forEach(x=>{ if(x.from <= g) t = x; });
+    return t;
+  }
+  function wireHostessGuestsBlock(overlay){
+    const inp = overlay.querySelector('#hs-guests');
+    const btn = overlay.querySelector('#hs-guests-save');
+    const hint = overlay.querySelector('#hs-guests-hint');
+    const evId = state.modal && state.modal.event && state.modal.event.id;
+    if(!inp || !btn || !hint || !evId) return;
+    const stored = ()=> state.events.find(e=>e.id===evId);
+    function upd(){
+      const e = stored(); if(!e) return;
+      const g = parseInt(inp.value) || 0;
+      const t = priceTierFor(e.priceTiers, g);
+      if(!t){ hint.textContent = 'Укажите число гостей.'; hint.style.color = 'var(--ink-soft)'; return; }
+      const remain = t.price - eventReceivedTotal({...e, agreedPrice: t.price});
+      hint.style.color = remain > 0 ? 'var(--status-red)' : 'var(--status-green)';
+      hint.textContent = g + ' чел. → ' + formatMoney(t.price) + ' · ' + (remain > 0 ? 'взять с гостей ещё: ' + formatMoney(remain) : (remain < 0 ? 'переплата: ' + formatMoney(-remain) : 'оплачено полностью'));
+    }
+    inp.addEventListener('input', upd); upd();
+    btn.onclick = async ()=>{
+      const e = stored(); if(!e) return;
+      const g = parseInt(inp.value) || 0;
+      const t = priceTierFor(e.priceTiers, g);
+      if(!t){ inp.style.borderColor = 'var(--status-red)'; return; }
+      inp.style.borderColor = '';
+      btn.disabled = true;
+      e.guests = g; e.agreedPrice = t.price;
+      await saveEvents();
+      recordAction('Вилка цены: число гостей', (e.title||'') + ' ' + (e.date||'') + ' → ' + g + ' чел., ' + formatMoney(t.price));
+      btn.disabled = false;
+      state.modal = {...state.modal, event: {...e}};
+      render();
+    };
+  }
   function lockdownEventModalForViewing(overlay){
     overlay.querySelectorAll('input, select, textarea').forEach(el=>{
-      if(el.id === 'f-dishes-washer') return; // админам (старшему и обычному) можно менять, кто мыл посуду
+      if(el.id === 'f-dishes-washer' || el.id === 'hs-guests') return; // админам (старшему и обычному) можно менять, кто мыл посуду
       el.disabled = true;
     });
     overlay.querySelectorAll('button').forEach(btn=>{
-      if(btn.id === 'btn-cancel' || btn.classList.contains('modal-close')) return;
+      if(btn.id === 'btn-cancel' || btn.classList.contains('modal-close') || btn.id === 'hs-guests-save') return;
       btn.disabled = true;
     });
+    wireHostessGuestsBlock(overlay);
     // кастомные "пилюли"-переключатели (статус, посуда, плательщик и т.п.) — не настоящие кнопки,
     // поэтому blocked отдельно через pointer-events; доплату за посуду («За 300 ₽» / «Без оплаты»)
     // оставляем кликабельной — это единственное, что этой роли можно менять в карточке
@@ -20359,6 +20914,28 @@
         showToast(existing ? 'Такой вид уже есть в списке — выбрала его' : `Добавлен новый вид «${name}»`);
       });
     }
+    if(titleInput){
+      const refreshHostChoices = ()=>{
+        const dl = overlay.querySelector('#host-suggestions');
+        const hint = overlay.querySelector('#f-host-allowed-hint');
+        const t = titleInput.value;
+        const list = officialEventEntry(t) ? allowedHostsForTitle(t) : officialHostsAll();
+        if(dl) dl.innerHTML = list.map(h=>`<option value="${escapeHtml(h)}">`).join('');
+        if(hint) hint.textContent = officialEventEntry(t) ? 'Может вести: ' + list.join(', ') : 'Выберите название — покажу, кто может вести.';
+      };
+      titleInput.addEventListener('change', refreshHostChoices);
+      titleInput.addEventListener('input', refreshHostChoices);
+      // сменилось название (например, на арт-ланч) — пересчитываем зарплату мастера там, где она считается автоматически
+      const recalcPayOnTitle = ()=>{
+        const gi = overlay.querySelector('#f-guests'), mp = overlay.querySelector('#f-master-pay'), hi = overlay.querySelector('#f-host');
+        if(gi && mp && mp.dataset.auto === 'true') mp.value = masterPayForGuests(gi.value, hi ? hi.value : '', titleInput.value);
+        overlay.querySelectorAll('#additional-hosts-list [data-ah-idx]').forEach(row=>{
+          const inp = row.querySelector('.ah-pay'), nameInp = row.querySelector('.ah-name');
+          if(gi && inp && inp.dataset.auto === 'true') inp.value = masterPayForGuests(gi.value, nameInp?nameInp.value:'', titleInput.value);
+        });
+      };
+      titleInput.addEventListener('change', recalcPayOnTitle);
+    }
     if(titleInput && durationInput){
       titleInput.addEventListener('input', ()=>{
         const match = state.eventTypes.find(t=>t.name.toLowerCase() === titleInput.value.trim().toLowerCase());
@@ -20410,12 +20987,12 @@
     if(guestsInput && masterPayInput){
       guestsInput.addEventListener('input', ()=>{
         if(masterPayInput.dataset.auto === 'true'){
-          masterPayInput.value = masterPayForGuests(guestsInput.value, hostInputEl ? hostInputEl.value : '');
+          masterPayInput.value = masterPayForGuests(guestsInput.value, hostInputEl ? hostInputEl.value : '', (overlay.querySelector('#f-title')||{}).value);
         }
         overlay.querySelectorAll('#additional-hosts-list [data-ah-idx]').forEach(row=>{
           const inp = row.querySelector('.ah-pay');
           const nameInp = row.querySelector('.ah-name');
-          if(inp && inp.dataset.auto === 'true'){ inp.value = masterPayForGuests(guestsInput.value, nameInp?nameInp.value:''); }
+          if(inp && inp.dataset.auto === 'true'){ inp.value = masterPayForGuests(guestsInput.value, nameInp?nameInp.value:'', (overlay.querySelector('#f-title')||{}).value); }
         });
         overlay.querySelectorAll('#materials-items-list [data-mi-idx]').forEach(row=>{
           const costInput = row.querySelector('.mi-cost');
@@ -20441,7 +21018,7 @@
       if(hostInputEl){
         hostInputEl.addEventListener('input', ()=>{
           if(masterPayInput.dataset.auto === 'true'){
-            masterPayInput.value = masterPayForGuests(guestsInput.value, hostInputEl.value);
+            masterPayInput.value = masterPayForGuests(guestsInput.value, hostInputEl.value, (overlay.querySelector('#f-title')||{}).value);
           }
         });
       }
@@ -20530,7 +21107,7 @@
     }
     function refreshAdditionalHostsUI(){
       const container = overlay.querySelector('#additional-hosts-list');
-      container.innerHTML = renderAdditionalHostRows(additionalHostsDraft, guestsInput ? guestsInput.value : null);
+      container.innerHTML = renderAdditionalHostRows(additionalHostsDraft, guestsInput ? guestsInput.value : null, (overlay.querySelector('#f-title')||{}).value);
       attachAdditionalHostsRowEvents();
     }
     function attachAdditionalHostsRowEvents(){
@@ -20543,7 +21120,7 @@
         if(nameInp && payInp){
           nameInp.addEventListener('input', ()=>{
             if(payInp.dataset.auto === 'true'){
-              payInp.value = masterPayForGuests(guestsInput ? guestsInput.value : null, nameInp.value);
+              payInp.value = masterPayForGuests(guestsInput ? guestsInput.value : null, nameInp.value, (overlay.querySelector('#f-title')||{}).value);
             }
           });
         }
@@ -20805,6 +21382,83 @@
     updateAwaitingHint();
     const agreedPriceInput = overlay.querySelector('#f-agreed-price');
     if(agreedPriceInput) agreedPriceInput.addEventListener('input', updateAwaitingHint);
+
+    // --- вилка цены: пересчёт «Прогнозной выручки» по числу гостей ---
+    const tiersRowsEl = overlay.querySelector('#tiers-rows');
+    function readTiers(){
+      if(!tiersRowsEl) return [];
+      return [...tiersRowsEl.querySelectorAll('.tier-row')].map(r=>({
+        from: parseInt(r.querySelector('.tier-from').value),
+        price: parseInt(r.querySelector('.tier-price').value)
+      })).filter(t=> !isNaN(t.from) && t.from>0 && !isNaN(t.price) && t.price>=0).sort((a,b)=> a.from-b.from);
+    }
+    function applyTiers(){
+      if(!tiersRowsEl) return;
+      const tiers = readTiers();
+      const agreedEl = overlay.querySelector('#f-agreed-price');
+      const hintEl = overlay.querySelector('#tiers-hint');
+      if(!agreedEl || !hintEl) return;
+      if(!tiers.length){
+        agreedEl.readOnly = false; agreedEl.style.background = ''; agreedEl.title = ''; hintEl.textContent = '';
+        return;
+      }
+      agreedEl.readOnly = true; agreedEl.style.background = 'var(--paper-2)'; agreedEl.title = 'Считается по вилке цены ниже';
+      const g = parseInt(overlay.querySelector('#f-guests').value) || 0;
+      if(g <= 0){ hintEl.textContent = 'Укажите число гостей — сумма посчитается по вилке.'; hintEl.style.color = 'var(--ink-soft)'; return; }
+      let t = tiers[0]; tiers.forEach(x=>{ if(x.from <= g) t = x; });
+      agreedEl.value = t.price;
+      updateAwaitingHint();
+      const next = tiers.find(x=> x.from > g);
+      hintEl.style.color = 'var(--ink)';
+      hintEl.textContent = g + ' чел. → ступень «от ' + t.from + '»: ' + formatMoney(t.price) + (next ? ' · ещё ' + (next.from-g) + ' чел. до ' + formatMoney(next.price) : '');
+    }
+    if(tiersRowsEl){
+      tiersRowsEl.addEventListener('input', applyTiers);
+      tiersRowsEl.addEventListener('click', ev2=>{
+        const b = ev2.target.closest('.tier-del'); if(!b) return;
+        b.closest('.tier-row').remove(); applyTiers();
+      });
+      const addTierBtn = overlay.querySelector('#btn-add-tier');
+      if(addTierBtn) addTierBtn.onclick = ()=>{
+        tiersRowsEl.insertAdjacentHTML('beforeend', renderPriceTierRow({}, true));
+        const last = tiersRowsEl.querySelector('.tier-row:last-child .tier-from'); if(last) last.focus();
+      };
+      const gEl = overlay.querySelector('#f-guests');
+      if(gEl){ gEl.addEventListener('input', applyTiers); gEl.addEventListener('change', applyTiers); }
+      // справочник вилок по продуктам: запомнить текущую вилку / подставить сохранённую
+      const productSel = overlay.querySelector('#f-product');
+      function fillTiers(tiers){
+        tiersRowsEl.innerHTML = tiers.map(t=>renderPriceTierRow(t, true)).join('');
+        const det = overlay.querySelector('#tiers-details'); if(det) det.open = true;
+        applyTiers();
+      }
+      const fromRefBtn = overlay.querySelector('#btn-tier-from-ref');
+      if(fromRefBtn) fromRefBtn.onclick = ()=>{
+        const prod = productSel ? productSel.value : '';
+        const hintEl = overlay.querySelector('#tiers-hint');
+        const tpl = prod && state.priceTierTemplates[prod];
+        if(!tpl || !tpl.length){ if(hintEl){ hintEl.style.color='var(--status-red)'; hintEl.textContent = prod ? 'Для продукта «'+prod+'» вилка в справочнике не сохранена.' : 'Сначала выберите продукт.'; } return; }
+        fillTiers(tpl);
+      };
+      const toRefBtn = overlay.querySelector('#btn-tier-to-ref');
+      if(toRefBtn) toRefBtn.onclick = async ()=>{
+        const prod = productSel ? productSel.value : '';
+        const hintEl = overlay.querySelector('#tiers-hint');
+        if(!prod){ if(hintEl){ hintEl.style.color='var(--status-red)'; hintEl.textContent = 'Сначала выберите продукт.'; } return; }
+        const tiers = readTiers();
+        if(tiers.length){ state.priceTierTemplates[prod] = tiers; } else { delete state.priceTierTemplates[prod]; }
+        try{ await storageSetWithRetry('price-tier-templates', JSON.stringify(state.priceTierTemplates)); }catch(e){}
+        if(hintEl){ hintEl.style.color='var(--status-green)'; hintEl.textContent = tiers.length ? '✓ Вилка сохранена в справочнике для «'+prod+'».' : '✓ Вилка для «'+prod+'» удалена из справочника.'; }
+      };
+      // новое мероприятие: при выборе продукта с сохранённой вилкой и пустой вилке — подставляем её сами
+      if(productSel && !(state.modal.event && state.modal.event.priceTiers && state.modal.event.priceTiers.length)){
+        productSel.addEventListener('change', ()=>{
+          const tpl = state.priceTierTemplates[productSel.value];
+          if(tpl && tpl.length && readTiers().length===0 && state.currentRole!=='hostess') fillTiers(tpl);
+        });
+      }
+      applyTiers();
+    }
 
     const addPaymentBtn = overlay.querySelector('#btn-add-payment');
     const paymentAmountInput = overlay.querySelector('#payment-add-amount');
@@ -21660,7 +22314,7 @@
         const agreedPriceRawCheck = priceFieldLockedForMaster ? '' : overlay.querySelector('#f-agreed-price').value;
         const agreedPriceNegative = !priceFieldLockedForMaster && agreedPriceRawCheck !== '' && Number(agreedPriceRawCheck) < 0;
         if(agreedPriceNegative) markInvalid('f-agreed-price');
-        if(!notesVal) markInvalid('f-notes');
+        if(!notesVal && statusVal !== 'confirmed') markInvalid('f-notes'); // у «По расписанию» заметка необязательна
         if(guestNamesMissing || redoEventMissing){
           const guestListEl = overlay.querySelector('#guest-list-container');
           if(guestListEl){ guestListEl.style.boxShadow = 'inset 0 0 0 1.5px var(--danger)'; guestListEl.style.borderRadius = 'var(--radius)'; if(!firstInvalid) firstInvalid = guestListEl; }
@@ -21692,7 +22346,7 @@
           else if(dishesVal === 'needed' && !dishesPaymentVal){ dishesMissing = true; if(dishesFieldEl) dishesFieldEl.style.boxShadow = 'inset 0 0 0 1.5px var(--danger)'; if(!firstInvalid) firstInvalid = dishesFieldEl; }
         }
         const hostMissing = !hostVal && !PRODUCTS_WITHOUT_HOST.includes(productVal);
-        if(!title || hostMissing || !dateVal || !timeVal || !durationVal || durationVal<=0 || guestsRaw==='' || priceRaw==='' || Number(priceRaw)<0 || agreedPriceNegative || masterPayNegative || additionalHostsNegative || materialsNegative || !notesVal || guestNamesMissing || redoEventMissing || materialsMissing || dishesMissing){
+        if(!title || hostMissing || !dateVal || !timeVal || !durationVal || durationVal<=0 || guestsRaw==='' || priceRaw==='' || Number(priceRaw)<0 || agreedPriceNegative || masterPayNegative || additionalHostsNegative || materialsNegative || (!notesVal && statusVal !== 'confirmed') || guestNamesMissing || redoEventMissing || materialsMissing || dishesMissing){
           showGapWarningBanner(redoEventMissing ? 'У гостя отмечена «Переделка» — укажите, к какому мероприятию это относится.' : 'Заполните все поля перед сохранением (для статуса «Слот» это необязательно). Себестоимость: добавьте хотя бы один материал с названием и суммой (для мастер-класса без гостей её можно пропустить). Суммы (выручка, ЗП мастеру и со-ведущим, себестоимость) не могут быть отрицательными.');
           if(firstInvalid && firstInvalid.scrollIntoView) firstInvalid.scrollIntoView({block:'center', behavior:'smooth'});
           return;
@@ -21718,6 +22372,31 @@
         .filter(h=>h.name);
       // ведущих можно выбирать только из списка «Мастера» (чтобы не плодить дубли вроде «Оля»/«Ольга»).
       // Уже стоявшие на этом мероприятии имена не трогаем — иначе старые записи нельзя было бы пересохранить.
+      // утверждённый справочник: название — только из таблицы (или служебное), ведущие — только те, кто может вести это мероприятие.
+      // Если у уже существующего мероприятия название/ведущий не менялись — старые значения не трогаем.
+      {
+        const prevEv0 = state.modal.event || {};
+        const isExisting = !state.modal.isNew && prevEv0.id && state.events.some(x=>x.id===prevEv0.id);
+        const titleUnchanged = isExisting && (prevEv0.title||'') === title;
+        if(title && !isAllowedEventTitle(title) && !titleUnchanged){
+          const tEl = overlay.querySelector('#f-title'); if(tEl) tEl.style.borderColor = 'var(--danger)';
+          showGapWarningBanner('Название «' + title + '» нет в утверждённом списке. Выберите название из списка.');
+          return;
+        }
+        const prevNames0 = new Set([prevEv0.host, ...(prevEv0.additionalHosts||[]).map(h=>h.name)].filter(Boolean).map(n=>String(n).trim().toLowerCase()));
+        const badHosts = [hostVal, ...finalAdditionalHosts.map(h=>h.name)].filter(n=>{
+          const k = String(n||'').trim(); if(!k) return false;
+          if(isHostAllowedForTitle(k, title)) return false;
+          return !(titleUnchanged && prevNames0.has(k.toLowerCase())); // старые записи не ломаем
+        });
+        if(badHosts.length){
+          const hostEl = overlay.querySelector('#f-host');
+          if(hostEl && badHosts.includes(hostVal)){ hostEl.style.borderColor = 'var(--danger)'; if(hostEl.scrollIntoView) hostEl.scrollIntoView({block:'center', behavior:'smooth'}); }
+          const ent = officialEventEntry(title);
+          showGapWarningBanner('«' + badHosts.join('», «') + '» нельзя поставить на это мероприятие. ' + (ent ? 'Может вести: ' + ent[1].join(', ') + '.' : 'Доступны: ' + officialHostsAll().join(', ') + '.'));
+          return;
+        }
+      }
       {
         const listLC = new Map((state.hostsList||[]).map(h=>[String(h).trim().toLowerCase(), String(h).trim()]));
         const prevEv = state.modal.event || {};
@@ -21790,6 +22469,17 @@
         }
       }
 
+      // отчёт мастера в карточке: при оценке 4 и ниже расшифровка обязательна, при 5 — по желанию
+      {
+        const rrEl = overlay.querySelector('#f-report-rating'), rcEl = overlay.querySelector('#f-report-rating-comment');
+        const rr = rrEl ? (parseInt(rrEl.value) || 0) : 0;
+        if(rr > 0 && rr < 5 && rcEl && !rcEl.value.trim()){
+          rcEl.style.borderColor = 'var(--danger)';
+          if(rcEl.scrollIntoView) rcEl.scrollIntoView({block:'center', behavior:'smooth'});
+          showGapWarningBanner('Оценка ' + rr + ' — напишите расшифровку: что именно было некомфортно (обязательно при оценке 4 и ниже).');
+          return;
+        }
+      }
       const updated = {
         id: state.modal.event.id,
         spaceId: overlay.querySelector('#f-space').value,
@@ -21807,6 +22497,9 @@
         price: priceFieldLockedForMaster
           ? (state.modal.event.price!==undefined && state.modal.event.price!==null ? state.modal.event.price : null)
           : (overlay.querySelector('#f-price').value !== '' ? parseInt(overlay.querySelector('#f-price').value) : null),
+        priceTiers: priceFieldLockedForMaster
+          ? (state.modal.event.priceTiers || [])
+          : readTiers(),
         agreedPrice: priceFieldLockedForMaster
           ? (state.modal.event.agreedPrice!==undefined && state.modal.event.agreedPrice!==null ? state.modal.event.agreedPrice : null)
           : (overlay.querySelector('#f-agreed-price').value !== '' ? parseInt(overlay.querySelector('#f-agreed-price').value) : null),
