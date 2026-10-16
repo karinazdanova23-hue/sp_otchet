@@ -4608,8 +4608,9 @@
     // (см. REPORTS_REQUIRED_FROM), иначе этот баннер задним числом нагнал бы весь сентябрь
     const cutoff = new Date(); cutoff.setDate(cutoff.getDate()-14);
     const cutoffStr = fmtDate(cutoff) > REPORTS_REQUIRED_FROM ? fmtDate(cutoff) : REPORTS_REQUIRED_FROM;
-    const missingReports = state.events.filter(e=> e.host && e.host.trim() && e.date && e.date>=cutoffStr && e.date<=today && !hasMasterReport(e)).length;
-    if(missingReports > 0 && reportsRequiredNow() && !['manager','assistant'].includes(state.currentRole)) alerts.push({icon:'📝', text:`Не сдано отчётов за 2 недели: ${missingReports}`});
+    const missingReportsList = state.events.filter(e=> e.host && e.host.trim() && e.date && e.date>=cutoffStr && e.date<=today && !hasMasterReport(e) && (state.currentRole!=='master' || isMyEventForReport(e)));
+    const missingReports = missingReportsList.length;
+    if(missingReports > 0 && reportsRequiredNow() && !['manager','assistant'].includes(state.currentRole)) alerts.push({icon:'📝', text: state.currentRole==='master' ? `Не сдано ваших отчётов за 2 недели: ${missingReports}` : `Не сдано отчётов за 2 недели: ${missingReports}`, missingReports:true});
 
     // новые пожелания гостей к расписанию — видят старший администратор, руководитель и ассистент
     if(WISH_MANAGE_ROLES.includes(state.currentRole)){
@@ -4889,7 +4890,7 @@
       </div>
       ${alerts.length ? `
       <div class="daily-alerts-banner">
-        ${alerts.map(a=>`<span class="daily-alert-item${(a.view||a.legalDocs||a.wishes)?' clickable':''}" ${a.view?`data-alert-view="${a.view}" data-alert-certview="${a.certView||''}"`:''} ${a.legalDocs?'data-alert-legaldocs="1"':''} ${a.wishes?'data-alert-wishes="1"':''}>${a.icon} ${escapeHtml(a.text)}</span>`).join('')}
+        ${alerts.map(a=>`<span class="daily-alert-item${(a.view||a.legalDocs||a.wishes||a.missingReports)?' clickable':''}" ${a.view?`data-alert-view="${a.view}" data-alert-certview="${a.certView||''}"`:''} ${a.missingReports?'data-alert-missingreports="1"':''} ${a.legalDocs?'data-alert-legaldocs="1"':''} ${a.wishes?'data-alert-wishes="1"':''}>${a.icon} ${escapeHtml(a.text)}</span>`).join('')}
       </div>
       ` : ''}
     `;
@@ -12141,6 +12142,11 @@
           render();
           return;
         }
+        if(item.dataset.alertMissingreports){
+          state.modal = {type:'missing-reports'};
+          render();
+          return;
+        }
         if(item.dataset.alertLegaldocs){
           state.modal = {type:'legal-docs-missing'};
           render();
@@ -12390,6 +12396,8 @@
       overlay.innerHTML = renderSafeDepositModal();
     } else if(state.modal.type === 'safe-withdraw'){
       overlay.innerHTML = renderSafeWithdrawModal();
+    } else if(state.modal.type === 'missing-reports'){
+      overlay.innerHTML = renderMissingReportsModal();
     } else if(state.modal.type === 'legal-docs-missing'){
       overlay.innerHTML = renderLegalDocsMissingModal();
     }
@@ -12463,10 +12471,71 @@
     else if(state.modal.type === 'cash-adjust'){ attachCashAdjustModalEvents(overlay); }
     else if(state.modal.type === 'safe-deposit'){ attachSafeDepositModalEvents(overlay); }
     else if(state.modal.type === 'safe-withdraw'){ attachSafeWithdrawModalEvents(overlay); }
+    else if(state.modal.type === 'missing-reports'){ attachMissingReportsModalEvents(overlay); }
     else if(state.modal.type === 'legal-docs-missing'){ attachLegalDocsMissingModalEvents(overlay); }
   }
 
   // список мероприятий с юр.лицом, где не хватает договора/счёта/акта (открывается кликом по верхнему баннеру)
+  // «Несданные отчёты мастеров»: мастер видит только свои (с кнопкой «заполнить»), остальные — всех, по мастерам и мероприятиям
+  function missingMasterReportEvents(){
+    const today = todayStr();
+    return state.events.filter(e=> e.host && e.host.trim() && e.date && e.date<=today && isReportRequiredForEvent(e) && !hasMasterReport(e)
+      && (state.currentRole!=='master' || isMyEventForReport(e)))
+      .sort((a,b)=> (b.date+b.time).localeCompare(a.date+a.time));
+  }
+  function renderMissingReportsModal(){
+    const list = missingMasterReportEvents();
+    const isMaster = state.currentRole === 'master';
+    const cutoff = new Date(); cutoff.setDate(cutoff.getDate()-14);
+    const cutoffStr = fmtDate(cutoff);
+    const recent = list.filter(e=>e.date>=cutoffStr), older = list.filter(e=>e.date<cutoffStr);
+    const row = e=>`
+      <div class="stat-row mr-row" data-eid="${e.id}" style="align-items:center;">
+        <div class="stat-label" style="width:100%;flex:1;">
+          ${isMaster ? '' : `<b>${escapeHtml(e.host)}</b> — `}${escapeHtml(e.title||'без названия')} ${spaceBadge(getSpace(e.spaceId),'xs')} · ${formatDateText(e.date)} ${e.time||''}
+        </div>
+        ${isMaster ? `<button class="quick-report-btn mr-fill" data-eid="${e.id}" style="flex-shrink:0;">📝 заполнить</button>` : ''}
+      </div>`;
+    const group = (title, arr)=>{
+      if(!arr.length) return '';
+      if(isMaster) return `<div style="font-size:12px;font-weight:600;margin:10px 0 4px;">${title} (${arr.length})</div>${arr.map(row).join('')}`;
+      const byHost = {};
+      arr.forEach(e=>{ const h = e.host.trim(); (byHost[h] = byHost[h] || []).push(e); });
+      return `<div style="font-size:12px;font-weight:600;margin:10px 0 4px;">${title} (${arr.length})</div>` +
+        Object.entries(byHost).sort((a,b)=>b[1].length-a[1].length).map(([h,evs])=>`
+          <div style="margin:6px 0 2px;font-size:13px;"><b>${escapeHtml(h)}</b> <span class="cert-badge in_progress" style="margin-left:4px;">${evs.length}</span></div>
+          ${evs.map(e=>`<div class="stat-row mr-row" data-eid="${e.id}"><div class="stat-label" style="width:100%;flex:1;font-size:12.5px;">${escapeHtml(e.title||'без названия')} ${spaceBadge(getSpace(e.spaceId),'xs')} · ${formatDateText(e.date)} ${e.time||''}</div></div>`).join('')}
+        `).join('');
+    };
+    return `
+      <div class="modal" style="max-width:600px;">
+        <div class="modal-head">
+          <h3>📝 ${isMaster ? 'Ваши несданные отчёты' : 'Несданные отчёты мастеров'}</h3>
+          <button class="modal-close">×</button>
+        </div>
+        <div class="modal-body">
+          <div style="font-size:12.5px;color:var(--ink-soft);margin-top:-6px;">Мероприятия с мастером, которые уже прошли, а отчёта по ним нет (с 1 октября 2026).</div>
+          ${list.length === 0 ? `<div style="color:var(--status-green);font-size:13.5px;">✓ Все отчёты сданы.</div>` : group('За последние 2 недели', recent) + group('Раньше', older)}
+          <div class="modal-actions">
+            <span></span>
+            <button class="btn btn-ghost" id="btn-close-missing-reports">Закрыть</button>
+          </div>
+        </div>
+      </div>`;
+  }
+  function attachMissingReportsModalEvents(overlay){
+    const closeBtn = overlay.querySelector('#btn-close-missing-reports');
+    if(closeBtn) closeBtn.onclick = ()=>{ state.modal = null; overlay.remove(); };
+    overlay.querySelectorAll('.mr-fill').forEach(btn=>{
+      btn.onclick = ()=>{
+        const e = state.events.find(x=>x.id===btn.dataset.eid);
+        if(!e || !isMyEventForReport(e)) return;
+        state.modal = {type:'quick-report', event:{...e}, keepAll:true};
+        render();
+      };
+    });
+  }
+
   function renderLegalDocsMissingModal(){
     const list = eventsWithMissingLegalDocs();
     return `
