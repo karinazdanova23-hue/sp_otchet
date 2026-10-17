@@ -1104,7 +1104,7 @@
   const EXPENSE_CATEGORIES = ['Материалы','Инвентарь','Маркетинг','Зарплата','Аренда','Подарки','Операции','Декор','Логистика','Продукты','Типография','Косяки','Сейф'];
   const EXPENSE_SOURCES = ['Наличные','Точка','ВБ','Озон','Карина','Сейф'];
   const STAFF_ROLE_OPTIONS = ['Старший администратор','Ассистент','Менеджер','Другое'];
-  const EXPENSE_RESPONSIBLE = ['Карина','Ассистент','Менеджер'];
+  const EXPENSE_RESPONSIBLE = ['Карина','Ассистент','Менеджер','Старший администратор'];
   // "Сейф" — служебная категория/счёт для перемещений наличных между кассой и сейфом (раздел "Касса",
   // доступен администраторам): см. roleCanAccessCashbox и renderCashboxView. Каждое перемещение пишется
   // как обычная запись в "Книге" (safeTransfer:true помечает такие записи, чтобы отличать их от
@@ -6852,7 +6852,7 @@
             </div>
           </div>
           <div class="field">
-            <label>Комментарий — за что депозит</label>
+            <label>Комментарий — за что депозит <span style="font-weight:400;color:var(--ink-soft);">— необязательно</span></label>
             <textarea id="dp-comment" placeholder="Например: предоплата за день рождения 12.11, Лофт">${escapeHtml(dep.comment||'')}</textarea>
           </div>
           <div class="field">
@@ -6952,10 +6952,9 @@
       if(!name) bad.push('dp-name');
       if(!phone) bad.push('dp-phone');
       if(amountRaw==='' || isNaN(amountRaw) || Number(amountRaw) <= 0) bad.push('dp-amount');
-      if(!comment) bad.push('dp-comment');
       if(bad.length){
         bad.forEach(id=>{ const el = overlay.querySelector('#'+id); if(el) el.style.borderColor = 'var(--danger)'; });
-        showGapWarningBanner('Заполните дату, имя, телефон, сумму и комментарий — за что депозит.');
+        showGapWarningBanner('Заполните дату, имя, телефон и сумму.');
         const el = overlay.querySelector('#'+bad[0]); if(el && el.scrollIntoView) el.scrollIntoView({block:'center', behavior:'smooth'});
         return;
       }
@@ -8734,7 +8733,7 @@
           </div>
           <div id="or-split-preview" style="font-size:13px;font-family:var(--font-mono);color:var(--ink-soft);"></div>
           <div class="field">
-            <label>Комментарий</label>
+            <label>Комментарий <span style="font-weight:400;color:var(--ink-soft);">— необязательно</span></label>
             <textarea id="or-comment" placeholder="Что заказали, что нужно сделать...">${escapeHtml(order.comment||'')}</textarea>
           </div>
           <div class="modal-actions">
@@ -8914,7 +8913,6 @@
       if(masterShareRaw === '' || Number(masterShareRaw) < 0) markInvalid('or-master-share');
       if(costRaw !== '' && Number(costRaw) < 0) markInvalid('or-cost');
       if(receivedRaw !== '' && Number(receivedRaw) < 0) markInvalid('or-received');
-      if(!commentVal) markInvalid('or-comment');
       // каждый дополнительный мастер — либо оба поля заполнены (имя + ЗП), либо оба пустые (тогда строка просто не сохранится)
       let additionalMastersInvalid = false;
       overlay.querySelectorAll('#additional-order-masters-list [data-om-idx]').forEach(row=>{
@@ -8929,7 +8927,7 @@
           if(!firstInvalid) firstInvalid = hasName ? shareInp : nameInp;
         }
       });
-      if(!dateVal || !masterVal || revenueRaw==='' || Number(revenueRaw)<0 || masterShareRaw==='' || Number(masterShareRaw)<0 || (costRaw!=='' && Number(costRaw)<0) || (receivedRaw!=='' && Number(receivedRaw)<0) || !commentVal || additionalMastersInvalid){
+      if(!dateVal || !masterVal || revenueRaw==='' || Number(revenueRaw)<0 || masterShareRaw==='' || Number(masterShareRaw)<0 || (costRaw!=='' && Number(costRaw)<0) || (receivedRaw!=='' && Number(receivedRaw)<0) || additionalMastersInvalid){
         showGapWarningBanner(additionalMastersInvalid ? 'У каждого дополнительного мастера укажите и имя, и его ЗП (или уберите пустую строку).' : 'Заполните все поля перед сохранением заказа — включая сумму ЗП мастера (её нужно вписать вручную) и комментарий. Суммы не могут быть отрицательными.');
         if(firstInvalid && firstInvalid.scrollIntoView) firstInvalid.scrollIntoView({block:'center', behavior:'smooth'});
         return;
@@ -9792,7 +9790,7 @@
             <div class="field"><label>Дата</label><input type="date" id="ca-date" value="${selDate}"></div>
             <div class="field"><label>Сумма (₽)</label><input type="number" id="ca-amount" min="0" step="1" placeholder="0"></div>
           </div>
-          <div class="field"><label>Комментарий — что это</label><input type="text" id="ca-comment" placeholder="Например: не внесли выручку за 3.10 / размен"></div>
+          <div class="field"><label>Комментарий — что это <span style="font-weight:400;color:var(--ink-soft);">— необязательно</span></label><input type="text" id="ca-comment" placeholder="Например: не внесли выручку за 3.10 / размен"></div>
           <div class="field"><label>Кто вписал</label><input type="text" id="ca-by" value="${escapeHtml(state.loggedInHostessName||'')}" list="cashbox-names-list" placeholder="Имя">${cashNamesDatalist()}</div>
           <div class="modal-actions">
             <span></span>
@@ -9815,8 +9813,8 @@
       const amountRaw = overlay.querySelector('#ca-amount').value;
       const comment = overlay.querySelector('#ca-comment').value.trim();
       const by = overlay.querySelector('#ca-by').value.trim();
-      if(!date || amountRaw === '' || isNaN(amountRaw) || Number(amountRaw) <= 0 || !comment || !by){
-        showGapWarningBanner('Заполните дату, сумму, комментарий и кто вписал.');
+      if(!date || amountRaw === '' || isNaN(amountRaw) || Number(amountRaw) <= 0 || !by){
+        showGapWarningBanner('Заполните дату, сумму и кто вписал.');
         return;
       }
       const amount = Math.round(Number(amountRaw)*100)/100 * sign;
@@ -10553,7 +10551,7 @@
           ${items.map(e=>`
             <div class="expense-row" data-eid="${e.id}">
               <div class="cell">${e.date ? formatDateText(e.date) : '—'}${expenseShiftedToOtherMonth(e) ? `<div style="font-size:10.5px;color:var(--ink-soft);">за ${MONTHS[parseInt(expenseAccrualDate(e).slice(5,7),10)-1].toLowerCase()}</div>` : ''}</div>
-              <div class="cell">${escapeHtml(e.category||'')}${e.ownerOnly?' <span title="Из «Ручные расходы» — редактируется там, видно только владельцу" style="opacity:.55;">🔒</span>':''}${e.category==='Материалы'&&e.direction?'<br><span style="color:var(--ink-soft);font-size:11px;">'+escapeHtml(e.direction)+'</span>':''}${e.category==='Зарплата'&&e.master?'<br><span style="color:var(--ink-soft);font-size:11px;">'+escapeHtml(e.master)+'</span>':''}</div>
+              <div class="cell">${escapeHtml(e.category||'')}${(e.receiptIds&&e.receiptIds.length)?` <span title="Приложен чек">📎</span>`:''}${e.ownerOnly?' <span title="Из «Ручные расходы» — редактируется там, видно только владельцу" style="opacity:.55;">🔒</span>':''}${e.category==='Материалы'&&e.direction?'<br><span style="color:var(--ink-soft);font-size:11px;">'+escapeHtml(e.direction)+'</span>':''}${e.category==='Зарплата'&&e.master?'<br><span style="color:var(--ink-soft);font-size:11px;">'+escapeHtml(e.master)+'</span>':''}</div>
               <div class="cell">${escapeHtml(e.source||'')}</div>
               <div class="amount">${e.amount!==undefined&&e.amount!==null ? formatMoneyPrecise(e.amount) : ''}</div>
               <div class="cell">${escapeHtml(e.responsible||'')}</div>
@@ -10734,7 +10732,7 @@
             <input type="hidden" id="i-event" value="${income.eventId||''}">
           </div>
           <div class="field">
-            <label>Комментарий</label>
+            <label>Комментарий <span style="font-weight:400;color:var(--ink-soft);">— необязательно</span></label>
             <textarea id="i-comment" placeholder="Доп. детали...">${escapeHtml(income.comment||'')}</textarea>
           </div>
           <div class="modal-actions">
@@ -10850,14 +10848,13 @@
       };
       if(!dateVal) markInvalid('i-date');
       if(amountRaw === '' || Number(amountRaw) < 0) markInvalid('i-amount');
-      if(!commentVal) markInvalid('i-comment');
       const masterMissing = (productVal === 'Изделие' && !masterVal);
       if(masterMissing) markInvalid('i-master');
       const orderMasterMissing = (productVal === 'Заказ' && !orderMasterVal);
       if(orderMasterMissing) markInvalid('i-order-master');
       const orderShareMissing = (productVal === 'Заказ' && orderShareRaw === '');
       if(orderShareMissing) markInvalid('i-order-share');
-      if(!dateVal || amountRaw==='' || Number(amountRaw)<0 || !commentVal || masterMissing || orderMasterMissing || orderShareMissing){
+      if(!dateVal || amountRaw==='' || Number(amountRaw)<0 || masterMissing || orderMasterMissing || orderShareMissing){
         let msg = 'Заполните все поля перед сохранением дохода. Сумма не может быть отрицательной.';
         if(masterMissing) msg = 'Продукт «Изделие» — укажите мастера, который его изготовил.';
         else if(orderMasterMissing || orderShareMissing) msg = 'Продукт «Заказ» — укажите мастера и договорённую сумму ЗП мастера.';
@@ -10971,6 +10968,11 @@
               </select>
             </div>
           </div>
+          <div class="field" id="ex-receipt-field">
+            <label>Чек / фото <span id="ex-receipt-req" style="font-weight:400;color:var(--ink-soft);"></span></label>
+            <div id="ex-receipts" style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:8px;"></div>
+            <input type="file" id="ex-receipt-file" accept="image/*" multiple>
+          </div>
           <div class="field">
             <label>Привязать к мероприятию <span style="font-weight:400;color:var(--ink-soft);">— необязательно</span></label>
             <input type="text" id="ex-event-search" placeholder="Начните вводить дату, название или пространство…" list="ex-event-options" value="${escapeHtml(expense.eventId ? (eventSelectOptions().find(o=>o.id===expense.eventId)?.label || '') : '')}">
@@ -10979,7 +10981,7 @@
             <div style="font-size:11.5px;color:var(--ink-soft);margin-top:6px;">Кроме категории «Зарплата» — сумма автоматически добавится в себестоимость привязанного мероприятия.</div>
           </div>
           <div class="field">
-            <label>Комментарий</label>
+            <label>Комментарий <span style="font-weight:400;color:var(--ink-soft);">— необязательно</span></label>
             <textarea id="ex-comment" placeholder="Доп. детали...">${escapeHtml(expense.comment||'')}</textarea>
           </div>
           <div class="modal-actions">
@@ -11049,6 +11051,51 @@
       };
     }
 
+    // --- чеки (фото): храним отдельными ключами, в расходе — только список id ---
+    const exRec0 = state.modal.expense || {};
+    const receiptsList = (exRec0.receiptIds || []).map(id=>({ id, dataUrl: null, isNew: false }));
+    const removedReceiptIds = [];
+    const receiptsEl = overlay.querySelector('#ex-receipts');
+    const receiptFileEl = overlay.querySelector('#ex-receipt-file');
+    const receiptReqEl = overlay.querySelector('#ex-receipt-req');
+    const receiptWasRequired = ()=> state.modal.isNew || (exRec0.receiptIds && exRec0.receiptIds.length > 0);
+    const receiptRequired = ()=> overlay.querySelector('#ex-responsible').value !== 'Карина' && receiptWasRequired();
+    function renderReceipts(){
+      if(!receiptsEl) return;
+      receiptsEl.innerHTML = receiptsList.map((r,i)=>`
+        <div style="position:relative;">
+          ${r.dataUrl ? `<a href="${r.dataUrl}" target="_blank" rel="noopener"><img src="${r.dataUrl}" style="width:84px;height:84px;object-fit:cover;border-radius:var(--radius);border:1px solid var(--line-strong);"></a>` : `<div style="width:84px;height:84px;display:flex;align-items:center;justify-content:center;font-size:11px;color:var(--ink-soft);border:1px dashed var(--line-strong);border-radius:var(--radius);">загрузка…</div>`}
+          <button type="button" data-rm-receipt="${i}" title="Убрать" style="position:absolute;top:-6px;right:-6px;width:20px;height:20px;border-radius:50%;border:none;background:var(--danger);color:#fff;cursor:pointer;font-size:12px;line-height:20px;padding:0;">×</button>
+        </div>`).join('') || '<div style="font-size:12.5px;color:var(--ink-soft);">Фото не прикреплено</div>';
+      receiptsEl.querySelectorAll('[data-rm-receipt]').forEach(b=>{
+        b.onclick = ()=>{
+          const r = receiptsList.splice(parseInt(b.dataset.rmReceipt),1)[0];
+          if(r && !r.isNew) removedReceiptIds.push(r.id);
+          renderReceipts();
+        };
+      });
+    }
+    function updateReceiptReq(){
+      if(!receiptReqEl) return;
+      const req = receiptRequired();
+      receiptReqEl.textContent = req ? '— обязательно, если ответственный не Карина' : '— необязательно';
+      receiptReqEl.style.color = req ? 'var(--status-red)' : 'var(--ink-soft)';
+    }
+    renderReceipts(); updateReceiptReq();
+    receiptsList.forEach(r=>{ loadAttachedPhoto('expense-photo-'+r.id).then(d=>{ if(overlay.isConnected){ r.dataUrl = d || ''; renderReceipts(); } }); });
+    overlay.querySelector('#ex-responsible').addEventListener('change', ()=>{ updateReceiptReq(); receiptFileEl.style.outline = ''; });
+    if(receiptFileEl) receiptFileEl.addEventListener('change', async ()=>{
+      for(const f of [...receiptFileEl.files]){
+        if(receiptsList.length >= 6){ showGapWarningBanner('Можно приложить не больше 6 фото к одному расходу.'); break; }
+        try{
+          const d = await compressImageFile(f);
+          receiptsList.push({ id: uid(), dataUrl: d, isNew: true });
+        }catch(e){ showGapWarningBanner('Не удалось прочитать файл — приложите фото (jpg/png).'); }
+      }
+      receiptFileEl.value = ''; receiptFileEl.style.outline = '';
+      renderReceipts();
+    });
+
     const delBtn = overlay.querySelector('#btn-del-expense');
     if(delBtn) delBtn.onclick = ()=>{
       if(state.currentRole !== 'owner'){
@@ -11062,6 +11109,7 @@
       showConfirmDeletePopup(`Удалить этот расход?${hasLink ? ' Он также уберётся из себестоимости привязанного мероприятия.' : ' Действие необратимо.'}`, async ()=>{
         const expToDelete = state.modal.expense;
         state.expenses = state.expenses.filter(x=>x.id !== expToDelete.id);
+        for(const rid of (expToDelete.receiptIds||[])){ await deleteAttachedPhoto('expense-photo-'+rid); }
         if(expToDelete.eventId){
           const ev = state.events.find(e=>e.id===expToDelete.eventId);
           if(ev && Array.isArray(ev.materialsItems)){
@@ -11107,13 +11155,19 @@
       if(!dateVal) markInvalid('ex-date');
       if(amountRaw === '' || Number(amountRaw) < 0) markInvalid('ex-amount');
       if(!responsibleVal) markInvalid('ex-responsible');
-      if(!commentVal) markInvalid('ex-comment');
       let directionMissing = false;
       if(categoryVal === 'Материалы' && !directionVal){ directionMissing = true; markInvalid('ex-direction-search'); }
       let masterMissing = false;
       if(categoryVal === 'Зарплата' && !masterVal){ masterMissing = true; markInvalid('ex-master-search'); }
+      if(receiptRequired() && receiptsList.length === 0){
+        receiptFileEl.style.outline = '2px solid var(--danger)';
+        if(!firstInvalid) firstInvalid = receiptFileEl;
+        showGapWarningBanner('Приложите фото чека — когда ответственный не Карина, чек обязателен.');
+        if(firstInvalid.scrollIntoView) firstInvalid.scrollIntoView({block:'center', behavior:'smooth'});
+        return;
+      }
 
-      if(!dateVal || amountRaw==='' || Number(amountRaw)<0 || !responsibleVal || !commentVal || directionMissing || masterMissing){
+      if(!dateVal || amountRaw==='' || Number(amountRaw)<0 || !responsibleVal || directionMissing || masterMissing){
         showGapWarningBanner('Заполните все поля перед сохранением расхода. Сумма не может быть отрицательной.');
         if(firstInvalid && firstInvalid.scrollIntoView) firstInvalid.scrollIntoView({block:'center', behavior:'smooth'});
         return;
@@ -11154,6 +11208,13 @@
         if(ev.materialsItems.length !== before || (eventId === updated.eventId && updated.category !== 'Зарплата')) anyExpEventChanged = true;
       });
       if(anyExpEventChanged) await saveEvents();
+
+      // фото чеков: новые сохраняем, убранные удаляем; в расходе храним только список id
+      try{
+        for(const r of receiptsList){ if(r.isNew && r.dataUrl) await saveAttachedPhoto('expense-photo-'+r.id, r.dataUrl); }
+        for(const rid of removedReceiptIds){ await deleteAttachedPhoto('expense-photo-'+rid); }
+      }catch(e){ showGapWarningBanner('Не удалось сохранить фото чека. Попробуйте ещё раз (возможно, фото слишком большое).'); return; }
+      updated.receiptIds = receiptsList.map(r=>r.id);
 
       const idx = state.expenses.findIndex(x=>x.id===updated.id);
       if(idx >= 0) state.expenses[idx] = updated; else state.expenses.push(updated);
@@ -11492,7 +11553,7 @@
             <button type="button" class="btn btn-ghost" id="btn-remove-receipt" style="margin-top:6px;display:${cert.hasReceiptPhoto?'inline-block':'none'};">Удалить фото</button>
           </div>
           <div class="field">
-            <label>Комментарий</label>
+            <label>Комментарий <span style="font-weight:400;color:var(--ink-soft);">— необязательно</span></label>
             <textarea id="c-comment" placeholder="Кому, для чего, доп. детали...">${escapeHtml(cert.comment||'')}</textarea>
           </div>
           <div class="modal-actions">
@@ -11738,7 +11799,6 @@
       if(amountRaw === '' || Number(amountRaw) < 0) markInvalid('c-amount');
       if(!ownerNameVal) markInvalid('c-owner-name');
       if(!ownerContactVal) markInvalid('c-owner-contact');
-      if(!commentVal) markInvalid('c-comment');
       let specificMissing = false, redemptionsMissing = false, redemptionsIncomplete = false;
       if(certKindVal === 'specific' && !specificVal){ specificMissing = true; markInvalid('c-specific-mk'); }
 
@@ -11768,7 +11828,7 @@
         if(remainingEl && !firstInvalid) firstInvalid = remainingEl;
       }
 
-      if(numberRaw==='' || !channelVal || !certTypeVal || !dateVal || amountRaw==='' || Number(amountRaw)<0 || !ownerNameVal || !ownerContactVal || !commentVal || specificMissing || redemptionsMissing || redemptionsIncomplete || redemptionBeforeSale || overspent){
+      if(numberRaw==='' || !channelVal || !certTypeVal || !dateVal || amountRaw==='' || Number(amountRaw)<0 || !ownerNameVal || !ownerContactVal || specificMissing || redemptionsMissing || redemptionsIncomplete || redemptionBeforeSale || overspent){
         let msg = 'Заполните все поля перед сохранением сертификата. Сумма не может быть отрицательной.';
         if(redemptionBeforeSale) msg = 'Дата списания не может быть раньше даты продажи сертификата.';
         if(redemptionsMissing) msg = 'Статус «Использован»/«Частично использован» — добавьте хотя бы одно списание.';
