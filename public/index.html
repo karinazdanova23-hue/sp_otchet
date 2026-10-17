@@ -10045,7 +10045,7 @@
     const isOwnerBA = state.currentRole === 'owner';
     const incomesP = state.incomes.filter(i=>inPeriod(i.date));
     // «Аренда»/«Зарплата» — видно только руководителю, как и в списке расходов
-    const expensesP = state.expenses.filter(e=>inPeriod(e.date) && e.safeTransferType!=='collection' && (isOwnerBA || (!e.ownerOnly && e.category!=='Аренда' && e.category!=='Зарплата')));
+    const expensesP = state.expenses.filter(e=>inPeriod(expenseAccrualDate(e)) && e.safeTransferType!=='collection' && (isOwnerBA || (!e.ownerOnly && e.category!=='Аренда' && e.category!=='Зарплата')));
 
     const totalIncome = incomesP.reduce((s,i)=> s + ((i.amount!==undefined&&i.amount!==null&&!isNaN(i.amount))?Number(i.amount):0), 0);
     const totalExpense = expensesP.reduce((s,e)=> s + ((e.amount!==undefined&&e.amount!==null&&!isNaN(e.amount))?Number(e.amount):0), 0);
@@ -10496,13 +10496,30 @@
     `;
   }
 
+  // «в какой месяц относится расход»: зарплата, выданная 1–2 числа (за вторую половину прошлого месяца), считается расходом прошлого месяца.
+  // Реальная дата выдачи (и касса) не меняются — только отнесение к периоду в «Книге».
+  function expenseAccrualDate(e){
+    const d = e.date || '';
+    if(e.category !== 'Зарплата' || e.safeTransfer || e.netProfitRef || !d) return d; // записи из «Ручных расходов» (чистая прибыль) уже привязаны к своему месяцу (1 число)
+    const lastDay = (ym)=>{ const [y,m] = ym.split('-').map(Number); return ym + '-' + String(new Date(y, m, 0).getDate()).padStart(2,'0'); };
+    if(e.salaryPayYm && e.salaryPayHalf === 'H2') return lastDay(e.salaryPayYm);
+    if(e.salaryPayYm && e.salaryPayHalf === 'H1') return e.salaryPayYm + '-16';
+    const day = parseInt(d.slice(8,10),10) || 1;
+    if(day <= 2){
+      const y = parseInt(d.slice(0,4),10), m = parseInt(d.slice(5,7),10);
+      const py = m===1 ? y-1 : y, pm = m===1 ? 12 : m-1;
+      return lastDay(py+'-'+String(pm).padStart(2,'0'));
+    }
+    return d;
+  }
+  function expenseShiftedToOtherMonth(e){ const a = expenseAccrualDate(e); return !!(e.date && a && a.slice(0,7) !== e.date.slice(0,7)); }
   function renderExpensesView(period){
     const inPeriod = period ? period.inPeriod : (()=>true);
     const periodLabel = period ? period.periodLabel : '';
     const isOwner = state.currentRole === 'owner';
     const hideTotals = bookTotalsHidden(state.currentRole);
     // «Аренда»/«Зарплата» — видно только руководителю (та же чувствительная инфа, что и в «Ручных расходах»)
-    const expensesP = state.expenses.filter(e=>inPeriod(e.date) && (isOwner || (!e.ownerOnly && e.category!=='Аренда' && e.category!=='Зарплата')));
+    const expensesP = state.expenses.filter(e=>inPeriod(expenseAccrualDate(e)) && (isOwner || (!e.ownerOnly && e.category!=='Аренда' && e.category!=='Зарплата')));
     const items = [...expensesP].sort((a,b)=> (b.date||'').localeCompare(a.date||''));
     const total = items.filter(e=>e.safeTransferType!=='collection').reduce((s,e)=> s + ((e.amount!==undefined&&e.amount!==null&&!isNaN(e.amount))?Number(e.amount):0), 0);
 
@@ -10535,7 +10552,7 @@
         <div class="cert-list">
           ${items.map(e=>`
             <div class="expense-row" data-eid="${e.id}">
-              <div class="cell">${e.date ? formatDateText(e.date) : '—'}</div>
+              <div class="cell">${e.date ? formatDateText(e.date) : '—'}${expenseShiftedToOtherMonth(e) ? `<div style="font-size:10.5px;color:var(--ink-soft);">за ${MONTHS[parseInt(expenseAccrualDate(e).slice(5,7),10)-1].toLowerCase()}</div>` : ''}</div>
               <div class="cell">${escapeHtml(e.category||'')}${e.ownerOnly?' <span title="Из «Ручные расходы» — редактируется там, видно только владельцу" style="opacity:.55;">🔒</span>':''}${e.category==='Материалы'&&e.direction?'<br><span style="color:var(--ink-soft);font-size:11px;">'+escapeHtml(e.direction)+'</span>':''}${e.category==='Зарплата'&&e.master?'<br><span style="color:var(--ink-soft);font-size:11px;">'+escapeHtml(e.master)+'</span>':''}</div>
               <div class="cell">${escapeHtml(e.source||'')}</div>
               <div class="amount">${e.amount!==undefined&&e.amount!==null ? formatMoneyPrecise(e.amount) : ''}</div>
@@ -21478,6 +21495,29 @@
     };
   }
   function lockdownEventModalForViewing(overlay){
+    // администратору остаток оплаты и заметки — в самое начало карточки (как и старшему администратору)
+    (function(){
+      const bodyEl = overlay.querySelector('.modal-body');
+      const notesEl = overlay.querySelector('#f-notes');
+      const notesField = notesEl ? notesEl.closest('.field') : null;
+      const ev = (state.modal && state.modal.event) || {};
+      if(!bodyEl || !notesField) return;
+      let txt = '', color = 'var(--ink-soft)';
+      const agreed = parseInt(ev.agreedPrice) || 0, got = parseInt(ev.price) || 0;
+      if(ev.status !== 'cancelled' && agreed > 0){
+        const remain = agreed - got;
+        if(remain > 0){ txt = `Ждём ещё: ${formatMoney(remain)}`; color = 'var(--status-red)'; }
+        else if(remain < 0){ txt = `Переплата: ${formatMoney(-remain)}`; color = 'var(--status-blue)'; }
+        else { txt = 'Оплачено полностью'; color = 'var(--status-green)'; }
+      }
+      const front = document.createElement('div');
+      front.id = 'front-block';
+      front.style.cssText = 'margin-bottom:14px;padding:10px 12px;border:1px solid var(--line-strong);border-radius:var(--radius);background:var(--paper-2);';
+      front.innerHTML = `<div id="front-awaiting-wrap" style="display:${txt?'block':'none'};margin-bottom:10px;"><div style="font-size:12px;color:var(--ink-soft);">Остаток оплаты</div><div id="front-awaiting" style="font-size:16px;font-weight:600;font-family:var(--font-mono);color:${color};">${txt}</div></div>`;
+      front.appendChild(notesField);
+      notesField.style.marginBottom = '0';
+      bodyEl.insertBefore(front, bodyEl.firstChild);
+    })();
     overlay.querySelectorAll('input, select, textarea').forEach(el=>{
       if(el.id === 'f-dishes-washer' || el.id === 'hs-guests') return; // админам (старшему и обычному) можно менять, кто мыл посуду
       el.disabled = true;
@@ -22016,6 +22056,15 @@
     renderPaymentsLog();
 
     function updateAwaitingHint(){
+      updateAwaitingHintCore();
+      const h = overlay.querySelector('#awaiting-hint'), f = overlay.querySelector('#front-awaiting');
+      if(f && h){
+        f.textContent = h.textContent; f.style.color = h.style.color;
+        const w = overlay.querySelector('#front-awaiting-wrap');
+        if(w) w.style.display = h.textContent ? 'block' : 'none';
+      }
+    }
+    function updateAwaitingHintCore(){
       const hint = overlay.querySelector('#awaiting-hint');
       if(!hint) return;
       // отменённое мероприятие никогда не "ждёт ещё" денег — оно не состоится
@@ -22035,6 +22084,21 @@
         else { hint.textContent = 'Оплачено полностью'; hint.style.color = 'var(--status-green)'; }
       } else {
         hint.textContent = '';
+      }
+    }
+    // администраторам и старшему администратору остаток оплаты и заметки — в самое начало карточки
+    if(state.currentRole === 'hostess' || state.currentRole === 'admin'){
+      const bodyEl = overlay.querySelector('.modal-body');
+      const notesEl = overlay.querySelector('#f-notes');
+      const notesField = notesEl ? notesEl.closest('.field') : null;
+      if(bodyEl && notesField){
+        const front = document.createElement('div');
+        front.id = 'front-block';
+        front.style.cssText = 'margin-bottom:14px;padding:10px 12px;border:1px solid var(--line-strong);border-radius:var(--radius);background:var(--paper-2);';
+        front.innerHTML = `<div id="front-awaiting-wrap" style="display:none;margin-bottom:10px;"><div style="font-size:12px;color:var(--ink-soft);">Остаток оплаты</div><div id="front-awaiting" style="font-size:16px;font-weight:600;font-family:var(--font-mono);"></div></div>`;
+        front.appendChild(notesField);
+        notesField.style.marginBottom = '0';
+        bodyEl.insertBefore(front, bodyEl.firstChild);
       }
     }
     updateAwaitingHint();
