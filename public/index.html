@@ -933,6 +933,14 @@
   const PRODUCTS = ['День рождения','Свадьба','Свидание','Девичник','Корпоратив','Детский МК','Мастер-класс','Аренда','Другое'];
   // продукт "Аренда" — сдаём пространство без своего мастера, поэтому ведущего можно не выбирать
   const PRODUCTS_WITHOUT_HOST = ['Аренда'];
+  // «Мастер-класс» больше не выбирается как продукт: у мероприятия «По расписанию» продукта нет.
+  // Внутри данных у таких мероприятий остаётся служебное значение «Мастер-класс» (на нём держится учёт «Расписания»),
+  // а старые мероприятия с этим значением не трогаются. Для показа людям: «Расписание» / пустой тег.
+  const SCHEDULE_PRODUCT_KEY = 'Мастер-класс';
+  function prodLabel(p){ return p === SCHEDULE_PRODUCT_KEY ? 'Расписание' : p; }
+  function prodTag(p){ return p === SCHEDULE_PRODUCT_KEY ? '' : (p||''); }
+  // варианты для выбора продукта: «Мастер-класс» — только если он уже стоит у редактируемой записи
+  function productChoices(list, current){ return list.filter(p=> p !== SCHEDULE_PRODUCT_KEY || p === current); }
   // условная "вместимость" месяца в мероприятиях, для % заполняемости (см. "📊 Заполняемость" и "Отчёт дня")
   const MONTH_CAPACITY_EVENTS = 200;
 
@@ -1944,11 +1952,13 @@
     deposits: [],
     depositSearchQuery: '',
     cashShifts: [],
+    salaryChecks: [],
     cashAdjustments: [],
     eventTypes: null,
     incomes: null,
     expenses: null,
     cashboxDate: null,
+    cashboxPeriod: 'day',
     receiptPhotoCache: {},
     bookView: 'incomes',
     bookCursor: new Date(),
@@ -2589,6 +2599,10 @@
     }catch(e){ state.deposits = []; }
 
     try{
+      const sch = await window.storage.get('salary-checks', true);
+      state.salaryChecks = sch ? JSON.parse(sch.value) : [];
+    }catch(e){ state.salaryChecks = []; }
+    try{
       const csh = await window.storage.get('cash-shifts', true);
       state.cashShifts = csh ? JSON.parse(csh.value) : [];
     }catch(e){ state.cashShifts = []; }
@@ -2658,6 +2672,7 @@
     state._refundsBaseline = JSON.parse(JSON.stringify(state.refunds));
     state._depositsBaseline = JSON.parse(JSON.stringify(state.deposits));
     state._cashShiftsBaseline = JSON.parse(JSON.stringify(state.cashShifts));
+    state._salaryChecksBaseline = JSON.parse(JSON.stringify(state.salaryChecks));
     state._cashAdjustmentsBaseline = JSON.parse(JSON.stringify(state.cashAdjustments));
     state._incomesBaseline = JSON.parse(JSON.stringify(state.incomes));
     state._expensesBaseline = JSON.parse(JSON.stringify(state.expenses));
@@ -4114,6 +4129,94 @@
       state._expensesBaseline = JSON.parse(JSON.stringify(finalArr));
     });
   }
+  async function saveSalaryChecks(){
+    await saveCollectionMerged('salary-checks', state.salaryChecks, state._salaryChecksBaseline, (finalArr)=>{
+      state.salaryChecks = finalArr;
+      state._salaryChecksBaseline = JSON.parse(JSON.stringify(finalArr));
+    });
+  }
+  // «Я проверил зарплату — всё ок»: запись на (вид, имя, месяц, половина) с суммой на момент проверки.
+  // Если сумма потом изменилась — отметка считается устаревшей и человек проверяет заново.
+  // Корректировка ЗП относится к тому периоду (месяц и половина), когда её ВНЕСЛИ (createdAt), а не к дате, вписанной в запись.
+  // У старых записей createdAt нет — для них действует дата записи, как раньше.
+  function adjEffDate(a){
+    if(a && a.createdAt){ const d = new Date(a.createdAt); if(!isNaN(d)) return fmtDate(d); }
+    return (a && a.date) || '';
+  }
+  // сумма корректировок за половину месяца (по дате, когда внесены — см. adjEffDate; в details дата уже эффективная)
+  function adjSumForHalf(list, half){
+    return (list||[]).reduce((sum,a)=>{
+      const day = parseInt(String(a.date||'').slice(8,10),10) || 1;
+      return sum + (((day<=15)?'H1':'H2')===half ? (Number(a.amount)||0) : 0);
+    }, 0);
+  }
+  function salaryCheckFind(kind, name, ym, half){
+    const n = (name||'').trim().toLowerCase();
+    return (state.salaryChecks||[]).find(c=> c.kind===kind && (c.name||'').trim().toLowerCase()===n && c.ym===ym && c.half===half);
+  }
+  function salaryCheckStatus(kind, name, ym, half, amount){
+    const c = salaryCheckFind(kind, name, ym, half);
+    if(!c) return 'none';
+    return Math.round(Number(c.amount)||0) === Math.round(Number(amount)||0) ? 'ok' : 'changed';
+  }
+  function renderSalaryCheckControl(kind, name, ym, half, amount){
+    if(!(Math.round(Number(amount)||0) > 0)) return '';
+    const st = salaryCheckStatus(kind, name, ym, half, amount);
+    const key = [kind, name, ym, half].map(encodeURIComponent).join('|');
+    if(st === 'ok'){
+      const c = salaryCheckFind(kind, name, ym, half);
+      const d = c && c.ts ? new Date(c.ts) : null;
+      const when = d ? pad(d.getDate())+'.'+pad(d.getMonth()+1) : '';
+      return `<div style="margin-top:8px;padding:8px 10px;border-radius:var(--radius);background:rgba(60,140,80,0.10);font-size:12.5px;display:flex;gap:10px;align-items:center;flex-wrap:wrap;">
+        <span style="color:var(--status-green);font-weight:600;">✅ Вы проверили зарплату${when?' ('+when+')':''} — сумма ${formatMoney(amount)}</span>
+        <button type="button" class="btn btn-ghost" data-salcheck-undo="${key}" style="font-size:11.5px;padding:4px 8px;">отменить</button></div>`;
+    }
+    return `<div style="margin-top:8px;">
+      ${st==='changed' ? `<div style="font-size:12px;color:var(--status-red);margin-bottom:6px;">⚠️ Сумма изменилась после вашей проверки — проверьте ещё раз.</div>` : ''}
+      <button type="button" class="btn btn-primary" data-salcheck="${key}" data-amount="${Math.round(Number(amount)||0)}" style="font-size:12.5px;padding:7px 12px;">✅ Я проверил(а) зарплату — всё ок (${formatMoney(amount)})</button></div>`;
+  }
+  // ---- «Выдано»: быстрая выдача зарплаты одной кнопкой (расход «Зарплата», по умолчанию из кассы) ----
+  function salaryPayMarkers(name, ym, half){
+    const n = (name||'').trim().toLowerCase();
+    return (state.expenses||[]).filter(e=> e.category==='Зарплата' && e.salaryPayHalf===half && e.salaryPayYm===ym && (e.master||'').trim().toLowerCase()===n);
+  }
+  function salaryPayControlHtml(name, ym, half, accrued, paid){
+    accrued = Math.round(Number(accrued)||0); paid = Math.round(Number(paid)||0);
+    if(accrued <= 0 && paid <= 0) return '';
+    const left = accrued - paid;
+    const key = [name, ym, half].map(encodeURIComponent).join('|');
+    const hasMarker = salaryPayMarkers(name, ym, half).length > 0;
+    const undo = hasMarker ? ` <button type="button" class="btn btn-ghost" data-salunpay="${key}" style="font-size:11px;padding:3px 8px;">отменить</button>` : '';
+    if(left > 0){
+      return `<span style="display:inline-flex;gap:8px;align-items:center;flex-wrap:wrap;"><button type="button" class="btn btn-primary" data-salpay="${key}" data-left="${left}" style="font-size:12px;padding:5px 10px;">💵 Выдано — ${formatMoney(left)}</button>${paid>0?`<span style="font-size:11.5px;color:var(--ink-soft);">уже выдано ${formatMoney(paid)}</span>${undo}`:''}</span>`;
+    }
+    return `<span style="display:inline-flex;gap:8px;align-items:center;flex-wrap:wrap;font-size:12.5px;color:var(--status-green);font-weight:600;">✅ Выдано ${formatMoney(paid)}${undo}</span>`;
+  }
+  function showSalaryPayPopup(name, halfLabel, amount, onConfirm){
+    const old = document.getElementById('salary-pay-popup'); if(old) old.remove();
+    const cash = cashOnHandAsOf(todayStr());
+    const wrap = document.createElement('div');
+    wrap.id = 'salary-pay-popup';
+    wrap.style.cssText = 'position:fixed;inset:0;background:rgba(42,37,32,0.5);display:flex;align-items:center;justify-content:center;z-index:220;padding:20px;';
+    wrap.innerHTML = `
+      <div style="background:var(--white);border-radius:4px;max-width:400px;width:100%;padding:22px 22px 18px;box-shadow:0 20px 60px rgba(0,0,0,0.3);font-family:var(--font-body);">
+        <div style="font-family:var(--font-display);font-weight:600;font-size:16px;margin-bottom:10px;">Выдать зарплату</div>
+        <div style="font-size:13.5px;color:var(--ink);line-height:1.55;margin-bottom:12px;">${escapeHtml(name)} · ${escapeHtml(halfLabel)}<br><b>${formatMoney(amount)}</b></div>
+        <div class="field" style="margin-bottom:8px;"><label style="font-size:12px;">Откуда выдано</label>
+          <select id="sp-source" style="width:100%;padding:8px;"><option value="Наличные">Наличные (из кассы, сейчас ${formatMoney(cash)})</option><option value="Точка">Перевод (Точка)</option><option value="Карина">Личные деньги Карины</option></select></div>
+        <div id="sp-warn" style="font-size:12px;color:var(--status-red);margin-bottom:8px;${amount>cash?'':'display:none;'}">В кассе по записям меньше этой суммы — остаток кассы уйдёт в минус.</div>
+        <div style="display:flex;justify-content:flex-end;gap:8px;margin-top:10px;">
+          <button id="sp-no" style="border:1px solid var(--line-strong);background:var(--white);color:var(--ink);padding:9px 18px;border-radius:4px;font-size:13.5px;cursor:pointer;font-family:var(--font-body);">Отмена</button>
+          <button id="sp-yes" style="border:none;background:var(--accent);color:#fff;padding:9px 18px;border-radius:4px;font-size:13.5px;cursor:pointer;font-family:var(--font-body);">Выдано</button>
+        </div>
+      </div>`;
+    document.body.appendChild(wrap);
+    const sel = wrap.querySelector('#sp-source');
+    sel.onchange = ()=>{ wrap.querySelector('#sp-warn').style.display = (sel.value==='Наличные' && amount>cash) ? '' : 'none'; };
+    wrap.querySelector('#sp-yes').onclick = ()=>{ const src = sel.value; wrap.remove(); onConfirm(src); };
+    wrap.querySelector('#sp-no').onclick = ()=> wrap.remove();
+    wrap.addEventListener('click', (e)=>{ if(e.target===wrap) wrap.remove(); });
+  }
   async function saveCashShifts(){
     await saveCollectionMerged('cash-shifts', state.cashShifts, state._cashShiftsBaseline, (finalArr)=>{
       state.cashShifts = finalArr;
@@ -4538,7 +4641,7 @@
                 <div class="today-status-dot" style="background:${statusColor(e.status)};"></div>
                 <div class="today-time">${e.time}</div>
                 <div class="today-info">
-                  <div class="title">${escapeHtml(e.title)}${e.product?` <span class="today-tag">${escapeHtml(e.product)}</span>`:''}</div>
+                  <div class="title">${escapeHtml(e.title)}${prodTag(e.product)?` <span class="today-tag">${escapeHtml(prodTag(e.product))}</span>`:''}</div>
                   <div class="meta">
                     <span>${spaceBadge(sp,'sm')} ${escapeHtml(sp.name)}</span>
                     <span>· ${STATUS_LABEL[e.status]||e.status}</span>
@@ -5036,7 +5139,7 @@
             <div class="time">${e.time}</div>
             <div class="info">
               <div class="title">${escapeHtml(e.title)}</div>
-              <div class="space" style="display:flex;align-items:center;gap:6px;">${spaceBadge(sp,'sm')}${escapeHtml(sp.name)}${e.product?' · '+escapeHtml(e.product):''}</div>
+              <div class="space" style="display:flex;align-items:center;gap:6px;">${spaceBadge(sp,'sm')}${escapeHtml(sp.name)}${prodTag(e.product)?' · '+escapeHtml(prodTag(e.product)):''}</div>
               ${e.notes ? `<div class="host-row-notes" style="font-size:12px;color:var(--ink-soft);margin-top:3px;white-space:pre-wrap;">💬 ${escapeHtml(e.notes)}</div>` : ''}
               ${(state.currentRole==='master' && guestNamesText(e)) ? `<div class="host-row-notes guest-names" style="font-size:12px;color:var(--ink-soft);margin-top:3px;white-space:pre-wrap;">👥 ${escapeHtml(guestNamesText(e))}</div>` : ''}
             </div>
@@ -5735,6 +5838,11 @@
           id: updated.adjId || uid(), date: updated.date, masterName: itemsMasterVal, amount: updated.amount, eventId: '',
           comment: updated.comment ? `Маркетинг: изделия — ${updated.comment}` : 'Маркетинг: изделия', msRef: updated.id,
         };
+        {
+          const prevAdj = state.salaryAdjustments.find(x=>x.id===adjEntry.id);
+          if(prevAdj){ if(prevAdj.createdAt) adjEntry.createdAt = prevAdj.createdAt; }
+          else adjEntry.createdAt = new Date().toISOString();
+        }
         const aIdx = state.salaryAdjustments.findIndex(x=>x.id===adjEntry.id);
         if(aIdx>=0) state.salaryAdjustments[aIdx] = adjEntry; else state.salaryAdjustments.push(adjEntry);
         updated.adjId = adjEntry.id;
@@ -5894,7 +6002,7 @@
             <label>Продукт (если пост про конкретный продукт)</label>
             <select id="cp-product">
               <option value="">— любой —</option>
-              ${PRODUCTS.map(pr=>`<option value="${pr}" ${p.product===pr?'selected':''}>${pr}</option>`).join('')}
+              ${productChoices(PRODUCTS, p.product).map(pr=>`<option value="${pr}" ${p.product===pr?'selected':''}>${prodLabel(pr)}</option>`).join('')}
             </select>
           </div>
           <div class="field">
@@ -7927,8 +8035,8 @@
 
   function renderSalaryAdjustmentsView(){
     const { navHtml, period } = buildPeriodNav('salaryAdjCursor', 'salaryAdjMode', 'salaryadj-nav');
-    const adjAll = state.salaryAdjustments.filter(a=>period.inPeriod(a.date));
-    const items = [...adjAll].sort((a,b)=> (b.date||'').localeCompare(a.date||''));
+    const adjAll = state.salaryAdjustments.filter(a=>period.inPeriod(adjEffDate(a)));
+    const items = [...adjAll].sort((a,b)=> adjEffDate(b).localeCompare(adjEffDate(a)));
     const totalPlus = adjAll.filter(a=>a.amount>0).reduce((s,a)=>s+Number(a.amount), 0);
     const totalMinus = adjAll.filter(a=>a.amount<0).reduce((s,a)=>s+Number(a.amount), 0);
 
@@ -7968,7 +8076,7 @@
         <div class="cert-list">
           ${items.map(a=>`
             <div class="refund-row" data-adjid="${a.id}">
-              <div class="cell">${a.date ? formatDateText(a.date) : '—'}</div>
+              <div class="cell" title="${a.createdAt ? 'Внесена '+escapeHtml(formatDateText(adjEffDate(a)))+'; дата в записи: '+escapeHtml(a.date?formatDateText(a.date):'—') : ''}">${adjEffDate(a) ? formatDateText(adjEffDate(a)) : '—'}</div>
               <div class="cell">${escapeHtml(a.masterName||'')}</div>
               <div class="amount" style="color:${a.amount>=0?'var(--status-green)':'var(--status-red)'};">${a.amount>=0?'+':''}${formatMoney(a.amount)}</div>
               <div class="reason">${escapeHtml(a.comment||'')}${a.eventId?' <span style="color:var(--ink-soft);font-size:11px;">🔗 '+escapeHtml(linkedEventLabel(a.eventId))+'</span>':''}</div>
@@ -8015,7 +8123,7 @@
               <label>Продукт</label>
               <select id="l-product">
                 <option value="" ${!lead.product?'selected':''}>— выберите —</option>
-                ${LEAD_PRODUCTS.map(p=>`<option value="${escapeHtml(p)}" ${lead.product===p?'selected':''}>${escapeHtml(p)}</option>`).join('')}
+                ${productChoices(LEAD_PRODUCTS, lead.product).map(p=>`<option value="${escapeHtml(p)}" ${lead.product===p?'selected':''}>${escapeHtml(prodLabel(p))}</option>`).join('')}
               </select>
             </div>
           </div>
@@ -8829,7 +8937,7 @@
 
       selectedNames.forEach(name=>{
         state.salaryAdjustments.push({
-          id: uid(), date: dateVal, masterName: name, amount: -amount, eventId: '', comment: commentVal,
+          id: uid(), date: dateVal, masterName: name, amount: -amount, eventId: '', comment: commentVal, createdAt: new Date().toISOString(),
         });
       });
       await saveSalaryAdjustments();
@@ -8991,6 +9099,8 @@
         eventId: overlay.querySelector('#adj-event').value || '',
         comment: commentVal,
       };
+      if(previousAdj.createdAt) updated.createdAt = previousAdj.createdAt;
+      else if(!state.salaryAdjustments.some(x=>x.id===updated.id)) updated.createdAt = new Date().toISOString();
 
       // синхронизация с себестоимостью мероприятия: только положительные доплаты (студия должна),
       // отрицательные удержания к конкретному мероприятию не относятся
@@ -9135,26 +9245,74 @@
     return safeIn - safeOut + adj;
   }
   const CASHBOX_SAFE_THRESHOLD = 10000;
+  // границы периода просмотра кассы: день / неделя (пн–вс) / календарный месяц
+  function cashboxRange(dateStr, period){
+    if(period === 'week'){
+      const d = new Date(dateStr+'T00:00:00'); const wd = (d.getDay()+6)%7;
+      const from = new Date(d); from.setDate(d.getDate()-wd);
+      const to = new Date(from); to.setDate(from.getDate()+6);
+      return {from: fmtDate(from), to: fmtDate(to)};
+    }
+    if(period === 'month'){
+      const y = Number(dateStr.slice(0,4)), m = Number(dateStr.slice(5,7));
+      return {from: fmtDate(new Date(y, m-1, 1)), to: fmtDate(new Date(y, m, 0))};
+    }
+    return {from: dateStr, to: dateStr};
+  }
+  function cashboxShift(dateStr, period, dir){
+    if(period === 'week') return shiftDateStr(dateStr, 7*dir);
+    if(period === 'month'){
+      const y = Number(dateStr.slice(0,4)), m = Number(dateStr.slice(5,7)), dd = Number(dateStr.slice(8,10));
+      const last = new Date(y, m+dir, 0).getDate();
+      return fmtDate(new Date(y, m-1+dir, Math.min(dd, last)));
+    }
+    return shiftDateStr(dateStr, dir);
+  }
   function renderCashboxView(){
     if(!state.cashboxDate) state.cashboxDate = todayStr();
     const selDate = state.cashboxDate;
-    const dateLabel = formatDateText(selDate);
+    // период просмотра: день / неделя / месяц (у роли «Администратор» итоги за период скрыты — только день)
+    const periodsAllowed = !bookTotalsHidden(state.currentRole);
+    const cbPeriod = periodsAllowed ? (state.cashboxPeriod || 'day') : 'day';
+    const cbRange = cashboxRange(selDate, cbPeriod);
+    const inCbRange = (d)=> !!d && d >= cbRange.from && d <= cbRange.to;
+    const dateLabel = cbPeriod === 'day' ? formatDateText(selDate)
+      : cbPeriod === 'week' ? (formatDateText(cbRange.from) + ' – ' + formatDateText(cbRange.to))
+      : (MONTHS[Number(selDate.slice(5,7))-1] + ' ' + selDate.slice(0,4));
+    const periodWord = cbPeriod === 'day' ? 'за день' : cbPeriod === 'week' ? 'за неделю' : 'за месяц';
 
     // в сводке "за день" — только настоящие операционные доходы/расходы (продажи, закупки и т.п.),
     // без самих перемещений в сейф, чтобы не путать выручку с внутренним перекладыванием денег
-    const dayIncomes = state.incomes.filter(i=> i.account === 'Наличные' && i.date === selDate && !i.safeTransfer);
-    const dayExpenses = state.expenses.filter(e=> e.source === 'Наличные' && e.date === selDate && !e.safeTransfer);
+    const dayIncomes = state.incomes.filter(i=> i.account === 'Наличные' && inCbRange(i.date) && !i.safeTransfer);
+    const dayExpenses = state.expenses.filter(e=> e.source === 'Наличные' && inCbRange(e.date) && !e.safeTransfer);
     const dayIncomeTotal = dayIncomes.reduce((s,i)=> s + (Number(i.amount)||0), 0);
     const dayExpenseTotal = dayExpenses.reduce((s,e)=> s + (Number(e.amount)||0), 0);
     // а вот фактический остаток в кассе учитывает вообще все движения, включая перемещения в сейф
-    const cashBalance = cashOnHandAsOf(selDate);
+    const cashBalance = cashOnHandAsOf(cbRange.to);
     const overThreshold = cashBalance > CASHBOX_SAFE_THRESHOLD;
+    // итоги периода: оборот, уходы в сейф, инкассации и расхождения (для недели/месяца)
+    const periodCollections = state.expenses.filter(e=> e.safeTransferType==='collection' && inCbRange(e.date));
+    const periodCollectionsSum = periodCollections.reduce((s,e)=> s + (Number(e.amount)||0), 0);
+    const periodDeposits = state.expenses.filter(e=> e.safeTransferType==='deposit' && inCbRange(e.date)).reduce((s,e)=> s + (Number(e.amount)||0), 0);
+    const periodShifts = (state.cashShifts||[]).filter(x=> inCbRange(x.date) && typeof x.diffCash === 'number');
+    const periodShort = periodShifts.filter(x=>x.diffCash<0).reduce((s,x)=> s - x.diffCash, 0);
+    const periodOver = periodShifts.filter(x=>x.diffCash>0).reduce((s,x)=> s + x.diffCash, 0);
+    const periodBad = periodShifts.filter(x=>x.diffCash!==0).length;
 
     const safeBalance = safeBalanceNow();
-    const txLog = [...state.expenses].filter(e=> e.safeTransfer)
+    const txLog = [...state.expenses].filter(e=> e.safeTransfer && e.safeTransferType !== 'collection')
       .sort((a,b)=> (b.date||'').localeCompare(a.date||'') || (b.id||'').localeCompare(a.id||''));
+    // инкассации: деньги вывезены из кассы/сейфа и больше не числятся на балансе
+    const collections = [...state.expenses].filter(e=> e.safeTransferType === 'collection')
+      .sort((a,b)=> (b.date||'').localeCompare(a.date||'') || (b.id||'').localeCompare(a.id||''));
+    const collectionsTotal = collections.reduce((s,e)=> s + (Number(e.amount)||0), 0);
+    const canDeleteCollection = ['owner','admin'].includes(state.currentRole);
 
-    const navHtml = `
+    const periodTabsHtml = periodsAllowed ? `
+      <div style="display:flex;gap:6px;margin-bottom:10px;">
+        ${[['day','День'],['week','Неделя'],['month','Месяц']].map(([k,l])=>`<button class="btn ${cbPeriod===k?'btn-primary':'btn-ghost'}" data-cb-period="${k}" style="font-size:12px;padding:6px 12px;">${l}</button>`).join('')}
+      </div>` : '';
+    const navHtml = periodTabsHtml + `
       <div class="cal-nav" style="margin-bottom:14px;">
         <div class="month-label">${escapeHtml(dateLabel)}</div>
         <div class="cal-nav-btns">
@@ -9189,6 +9347,7 @@
           <button class="btn btn-primary" id="btn-cash-accept">📥 Принять кассу</button>
           <button class="btn btn-ghost" id="btn-cash-handover">📤 Передать смену</button>
           <button class="btn btn-ghost" id="btn-cash-check">🔍 Проверить кассу</button>
+          <button class="btn btn-ghost" id="btn-cash-collect">🏦 Инкассация</button>
           <button class="btn btn-ghost" id="btn-cash-adjust">✏️ Ручная запись / исправить остаток</button>
         </div>
       </div>
@@ -9265,10 +9424,18 @@
       ${navHtml}
       <div style="font-size:11.5px;color:var(--ink-soft);margin:-8px 0 14px;">Все движения наличных и сейфа записываются в общую «Книгу» — записи помечены категорией/счётом «Сейф» и видны старшему администратору и руководителю там же.</div>
       <div class="analytics-summary" style="margin-bottom:16px;">
-        <div class="summary-card"><div class="num" style="font-size:20px;color:var(--status-green);">${formatMoney(dayIncomeTotal)}</div><div class="label">Доходы наличными за день</div></div>
-        <div class="summary-card"><div class="num" style="font-size:20px;color:var(--status-red);">${formatMoney(dayExpenseTotal)}</div><div class="label">Расходы наличными за день</div></div>
-        <div class="summary-card" style="border-left:4px solid ${overThreshold?'var(--status-red)':'var(--status-green)'};"><div class="num" style="font-size:20px;">${overThreshold?'⚠️ ':''}${formatMoney(cashBalance)}</div><div class="label">Остаток наличных</div></div>
+        <div class="summary-card"><div class="num" style="font-size:20px;color:var(--status-green);">${formatMoney(dayIncomeTotal)}</div><div class="label">Доходы наличными ${periodWord}</div></div>
+        <div class="summary-card"><div class="num" style="font-size:20px;color:var(--status-red);">${formatMoney(dayExpenseTotal)}</div><div class="label">Расходы наличными ${periodWord}</div></div>
+        <div class="summary-card" style="border-left:4px solid ${overThreshold?'var(--status-red)':'var(--status-green)'};"><div class="num" style="font-size:20px;">${overThreshold?'⚠️ ':''}${formatMoney(cashBalance)}</div><div class="label">Остаток наличных${cbPeriod==='day'?'':' на конец периода'}</div></div>
       </div>
+      ${cbPeriod !== 'day' ? `
+      <div class="analytics-section" style="margin-bottom:16px;">
+        <h4>Итоги периода <span style="font-size:11px;color:var(--ink-soft);font-weight:400;">${escapeHtml(dateLabel)}</span></h4>
+        <div class="stat-row"><div class="stat-label" style="flex:1;">Оборот наличных (доходы − расходы)</div><div style="font-family:var(--font-mono);font-size:13px;">${dayIncomeTotal-dayExpenseTotal>=0?'+':'−'}${formatMoney(Math.abs(dayIncomeTotal-dayExpenseTotal))}</div></div>
+        <div class="stat-row"><div class="stat-label" style="flex:1;">Убрано в сейф</div><div style="font-family:var(--font-mono);font-size:13px;">${formatMoney(periodDeposits)}</div></div>
+        <div class="stat-row"><div class="stat-label" style="flex:1;">Инкассировано (${periodCollections.length})</div><div style="font-family:var(--font-mono);font-size:13px;">${formatMoney(periodCollectionsSum)}</div></div>
+        <div class="stat-row"><div class="stat-label" style="flex:1;">Пересчётов кассы: ${periodShifts.length}</div><div style="font-size:12.5px;${periodBad?'color:var(--status-red);font-weight:600;':'color:var(--status-green);'}">${periodShifts.length ? (periodBad ? 'с расхождением: '+periodBad+(periodShort?' · недостача −'+formatMoney(periodShort):'')+(periodOver?' · излишек +'+formatMoney(periodOver):'') : 'всё сходится') : 'нет данных'}</div></div>
+      </div>` : ''}
 
       ${overThreshold ? `
         <div class="daily-alerts-banner" style="margin-bottom:16px;">
@@ -9278,24 +9445,26 @@
 
       <div class="analytics-section">
         <h4>Доходы наличными — ${escapeHtml(dateLabel)}</h4>
-        ${dayIncomes.length ? dayIncomes.map(i=>`
+        ${dayIncomes.length ? dayIncomes.slice().sort((a,b)=>(b.date||'').localeCompare(a.date||'')).map(i=>`
           <div class="stat-row">
+            ${cbPeriod!=='day' ? `<div class="stat-label" style="width:90px;font-size:12px;">${escapeHtml(formatDateText(i.date))}</div>` : ''}
             <div class="stat-label" style="width:140px;">${escapeHtml(i.product || i.operation || 'доход')}</div>
             <div style="flex:1;font-size:12.5px;">${escapeHtml(i.comment||'')}</div>
             <div style="font-family:var(--font-mono);font-size:12.5px;color:var(--status-green);">+${formatMoney(i.amount)}</div>
           </div>
-        `).join('') : `<div style="color:var(--ink-soft);font-size:13px;">Наличных поступлений за этот день не было.</div>`}
+        `).join('') : `<div style="color:var(--ink-soft);font-size:13px;">Наличных поступлений за этот период не было.</div>`}
       </div>
 
       <div class="analytics-section">
         <h4>Расходы наличными — ${escapeHtml(dateLabel)}</h4>
-        ${dayExpenses.length ? dayExpenses.map(e=>`
+        ${dayExpenses.length ? dayExpenses.slice().sort((a,b)=>(b.date||'').localeCompare(a.date||'')).map(e=>`
           <div class="stat-row">
+            ${cbPeriod!=='day' ? `<div class="stat-label" style="width:90px;font-size:12px;">${escapeHtml(formatDateText(e.date))}</div>` : ''}
             <div class="stat-label" style="width:140px;">${escapeHtml(e.category||'расход')}</div>
-            <div style="flex:1;font-size:12.5px;">${escapeHtml(e.comment||'')}</div>
+            <div style="flex:1;font-size:12.5px;">${escapeHtml((e.category==='Зарплата' && !['owner','assistant'].includes(state.currentRole)) ? 'выплата сотруднику' : (e.comment||''))}</div>
             <div style="font-family:var(--font-mono);font-size:12.5px;color:var(--status-red);">−${formatMoney(e.amount)}</div>
           </div>
-        `).join('') : `<div style="color:var(--ink-soft);font-size:13px;">Наличных расходов за этот день не было.</div>`}
+        `).join('') : `<div style="color:var(--ink-soft);font-size:13px;">Наличных расходов за этот период не было.</div>`}
       </div>
 
       <div class="analytics-section">
@@ -9314,6 +9483,19 @@
           </div>
         `).join('') : `<div style="color:var(--ink-soft);font-size:13px;">Движений по сейфу ещё не было.</div>`}
       </div>
+      <div class="analytics-section">
+        <h4>🏦 Инкассации${collections.length ? ` <span style="font-size:11px;color:var(--ink-soft);font-weight:400;">всего вывезено: ${formatMoney(collectionsTotal)}</span>` : ''}</h4>
+        <div style="font-size:11.5px;color:var(--ink-soft);margin-bottom:10px;">Деньги, которые забрали из кассы или сейфа. С остатка списываются, в расходы студии и аналитику не попадают, в «Книге» остаются как запись.</div>
+        ${collections.length ? collections.map(t=>`
+          <div class="stat-row">
+            <div class="stat-label" style="width:100px;">${escapeHtml(formatDateText(t.date))}</div>
+            <div style="width:170px;font-weight:600;">${t.source==='Сейф' ? 'Из сейфа' : 'Из кассы'} · ${escapeHtml(t.responsible||'—')}</div>
+            <div style="flex:1;font-size:12.5px;">${escapeHtml(t.rawComment||'')}</div>
+            <div style="font-family:var(--font-mono);font-size:12.5px;color:var(--status-red);">−${formatMoney(t.amount)}</div>
+            ${canDeleteCollection ? `<button data-collection-del="${t.id}" title="Отменить инкассацию" style="border:none;background:none;cursor:pointer;color:var(--ink-soft);font-size:15px;">×</button>` : ''}
+          </div>
+        `).join('') : `<div style="color:var(--ink-soft);font-size:13px;">Инкассаций ещё не было.</div>`}
+      </div>
       ${shiftLogHtml}
     `;
   }
@@ -9321,12 +9503,27 @@
     const todayBtn = document.getElementById('cashbox-today');
     if(todayBtn) todayBtn.onclick = ()=>{ state.cashboxDate = todayStr(); render(); };
     const prevBtn = document.getElementById('cashbox-prev');
-    if(prevBtn) prevBtn.onclick = ()=>{ state.cashboxDate = shiftDateStr(state.cashboxDate || todayStr(), -1); render(); };
+    if(prevBtn) prevBtn.onclick = ()=>{ state.cashboxDate = cashboxShift(state.cashboxDate || todayStr(), bookTotalsHidden(state.currentRole) ? 'day' : state.cashboxPeriod, -1); render(); };
     const nextBtn = document.getElementById('cashbox-next');
-    if(nextBtn) nextBtn.onclick = ()=>{ state.cashboxDate = shiftDateStr(state.cashboxDate || todayStr(), 1); render(); };
+    if(nextBtn) nextBtn.onclick = ()=>{ state.cashboxDate = cashboxShift(state.cashboxDate || todayStr(), bookTotalsHidden(state.currentRole) ? 'day' : state.cashboxPeriod, 1); render(); };
+    document.querySelectorAll('[data-cb-period]').forEach(b=>{
+      b.onclick = ()=>{ state.cashboxPeriod = b.dataset.cbPeriod; render(); };
+    });
     [['btn-cash-accept','accept'],['btn-cash-handover','handover'],['btn-cash-check','check']].forEach(([id,kind])=>{
       const b = document.getElementById(id);
       if(b) b.onclick = ()=>{ state.modal = {type:'cash-shift', kind}; render(); };
+    });
+    const collectBtn = document.getElementById('btn-cash-collect');
+    if(collectBtn) collectBtn.onclick = ()=>{ state.modal = {type:'cash-collect'}; render(); };
+    document.querySelectorAll('[data-collection-del]').forEach(b=>{
+      b.onclick = ()=>{
+        showConfirmDeletePopup('Отменить эту инкассацию? Сумма вернётся на остаток кассы/сейфа.', async ()=>{
+          state.expenses = state.expenses.filter(x=>x.id !== b.dataset.collectionDel);
+          await saveExpenses();
+          recordAction("Инкассация отменена", '');
+          render();
+        });
+      };
     });
     const adjBtn = document.getElementById('btn-cash-adjust');
     if(adjBtn) adjBtn.onclick = ()=>{ state.modal = {type:'cash-adjust'}; render(); };
@@ -9582,6 +9779,84 @@
       state.modal = null; overlay.remove(); render();
     };
   }
+  function renderCashCollectModal(){
+    const date = state.cashboxDate || todayStr();
+    const cashNow = cashOnHandAsOf(date);
+    const safeNow = safeBalanceNow();
+    const defaultPerson = state.loggedInHostessName || '';
+    return `
+      <div class="modal" style="max-width:380px;">
+        <div class="modal-head">
+          <h3>🏦 Инкассация</h3>
+          <button class="modal-close">×</button>
+        </div>
+        <div class="modal-body">
+          <div style="font-size:12px;color:var(--ink-soft);margin-top:-6px;">Деньги забрали и вывезли. Они сразу уйдут с остатка и перестанут числиться в кассе/сейфе. В «Книге» появится запись, на выручку и расходы она не влияет.</div>
+          <div class="field">
+            <label>Откуда забрали</label>
+            <select id="cc-from">
+              <option value="Наличные">Из кассы (сейчас ${formatMoney(cashNow)})</option>
+              <option value="Сейф">Из сейфа (сейчас ${formatMoney(safeNow)})</option>
+            </select>
+          </div>
+          <div class="field">
+            <label>Сумма</label>
+            <input type="number" id="cc-amount" min="0" placeholder="0 ₽">
+          </div>
+          <div class="field">
+            <label>Дата</label>
+            <input type="date" id="cc-date" value="${date}">
+          </div>
+          <div class="field">
+            <label>Кто забрал</label>
+            <input type="text" id="cc-person" value="${escapeHtml(defaultPerson)}" list="cashbox-names-list" placeholder="Имя">
+            <datalist id="cashbox-names-list">${HOSTESS_LIST.map(n=>`<option value="${escapeHtml(n)}">`).join('')}</datalist>
+          </div>
+          <div class="field">
+            <label>Комментарий (необязательно)</label>
+            <input type="text" id="cc-comment" placeholder="Например: сдача в банк">
+          </div>
+          <div class="modal-actions">
+            <span></span>
+            <div style="display:flex;gap:8px;">
+              <button class="btn btn-ghost" id="cc-cancel">Отмена</button>
+              <button class="btn btn-primary" id="cc-save">Сохранить</button>
+            </div>
+          </div>
+        </div>
+      </div>
+    `;
+  }
+  function attachCashCollectModalEvents(overlay){
+    overlay.querySelector('#cc-cancel').onclick = ()=>{ state.modal = null; overlay.remove(); };
+    overlay.querySelector('#cc-save').onclick = async ()=>{
+      const from = overlay.querySelector('#cc-from').value;
+      const amountRaw = overlay.querySelector('#cc-amount').value;
+      const date = overlay.querySelector('#cc-date').value;
+      const person = overlay.querySelector('#cc-person').value.trim();
+      const comment = overlay.querySelector('#cc-comment').value.trim();
+      if(!amountRaw || Number(amountRaw) <= 0 || !person || !date){
+        showGapWarningBanner('Укажите сумму, дату и кто забрал деньги.');
+        return;
+      }
+      const amount = Math.round(Number(amountRaw)*100)/100;
+      const available = from === 'Сейф' ? safeBalanceNow() : cashOnHandAsOf(date);
+      if(amount > available){
+        showGapWarningBanner(`${from === 'Сейф' ? 'В сейфе' : 'В кассе'} по записям только ${formatMoney(available)}. Сначала поправьте остаток через «Ручная запись».`);
+        return;
+      }
+      const entry = {
+        id: uid(), date, category: 'Инкассация', direction: '', master: '', source: from,
+        amount, responsible: person, eventId: '',
+        comment: `Инкассация (${from === 'Сейф' ? 'из сейфа' : 'из кассы'})` + (comment ? ' · ' + comment : ''),
+        safeTransfer: true, safeTransferType: 'collection', rawComment: comment,
+      };
+      state.expenses.push(entry);
+      await saveExpenses();
+      recordAction("Инкассация", `${formatMoney(amount)} · ${from === 'Сейф' ? 'из сейфа' : 'из кассы'} · ${person}`);
+      state.modal = null; overlay.remove(); render();
+    };
+  }
   function renderSafeWithdrawModal(){
     const safeBalance = safeBalanceNow();
     const defaultPerson = state.loggedInHostessName || '';
@@ -9654,7 +9929,7 @@
     const isOwnerBA = state.currentRole === 'owner';
     const incomesP = state.incomes.filter(i=>inPeriod(i.date));
     // «Аренда»/«Зарплата» — видно только руководителю, как и в списке расходов
-    const expensesP = state.expenses.filter(e=>inPeriod(e.date) && (isOwnerBA || (!e.ownerOnly && e.category!=='Аренда' && e.category!=='Зарплата')));
+    const expensesP = state.expenses.filter(e=>inPeriod(e.date) && e.safeTransferType!=='collection' && (isOwnerBA || (!e.ownerOnly && e.category!=='Аренда' && e.category!=='Зарплата')));
 
     const totalIncome = incomesP.reduce((s,i)=> s + ((i.amount!==undefined&&i.amount!==null&&!isNaN(i.amount))?Number(i.amount):0), 0);
     const totalExpense = expensesP.reduce((s,e)=> s + ((e.amount!==undefined&&e.amount!==null&&!isNaN(e.amount))?Number(e.amount):0), 0);
@@ -10113,10 +10388,10 @@
     // «Аренда»/«Зарплата» — видно только руководителю (та же чувствительная инфа, что и в «Ручных расходах»)
     const expensesP = state.expenses.filter(e=>inPeriod(e.date) && (isOwner || (!e.ownerOnly && e.category!=='Аренда' && e.category!=='Зарплата')));
     const items = [...expensesP].sort((a,b)=> (b.date||'').localeCompare(a.date||''));
-    const total = items.reduce((s,e)=> s + ((e.amount!==undefined&&e.amount!==null&&!isNaN(e.amount))?Number(e.amount):0), 0);
+    const total = items.filter(e=>e.safeTransferType!=='collection').reduce((s,e)=> s + ((e.amount!==undefined&&e.amount!==null&&!isNaN(e.amount))?Number(e.amount):0), 0);
 
     const byCategory = {};
-    expensesP.forEach(e=>{
+    expensesP.filter(e=>e.safeTransferType!=='collection').forEach(e=>{
       const cat = e.category || 'Без категории';
       byCategory[cat] = (byCategory[cat]||0) + ((e.amount!==undefined&&e.amount!==null&&!isNaN(e.amount))?Number(e.amount):0);
     });
@@ -10719,6 +10994,10 @@
         eventId: overlay.querySelector('#ex-event').value || '',
         comment: commentVal,
       };
+      // отметка «Выдано» (половина месяца) не должна теряться при правке расхода — иначе выдача снова станет «невыданной»
+      if(categoryVal==='Зарплата' && previousExpense.salaryPayHalf && previousExpense.salaryPayYm){
+        updated.salaryPayHalf = previousExpense.salaryPayHalf; updated.salaryPayYm = previousExpense.salaryPayYm;
+      }
 
       // синхронизация с себестоимостью привязанного мероприятия — кроме категории "Зарплата",
       // которая уже учитывается через зарплату мастера и задвоилась бы
@@ -12394,6 +12673,8 @@
       overlay.innerHTML = renderCashAdjustModal();
     } else if(state.modal.type === 'safe-deposit'){
       overlay.innerHTML = renderSafeDepositModal();
+    } else if(state.modal.type === 'cash-collect'){
+      overlay.innerHTML = renderCashCollectModal();
     } else if(state.modal.type === 'safe-withdraw'){
       overlay.innerHTML = renderSafeWithdrawModal();
     } else if(state.modal.type === 'missing-reports'){
@@ -12470,6 +12751,7 @@
     else if(state.modal.type === 'cash-shift'){ attachCashShiftModalEvents(overlay); }
     else if(state.modal.type === 'cash-adjust'){ attachCashAdjustModalEvents(overlay); }
     else if(state.modal.type === 'safe-deposit'){ attachSafeDepositModalEvents(overlay); }
+    else if(state.modal.type === 'cash-collect'){ attachCashCollectModalEvents(overlay); }
     else if(state.modal.type === 'safe-withdraw'){ attachSafeWithdrawModalEvents(overlay); }
     else if(state.modal.type === 'missing-reports'){ attachMissingReportsModalEvents(overlay); }
     else if(state.modal.type === 'legal-docs-missing'){ attachLegalDocsMissingModalEvents(overlay); }
@@ -13419,7 +13701,7 @@
     // корректировки (доплаты/удержания) — на мастера или на админа (роль различаем по HOSTESS_LIST),
     // привязанная к мероприятию положительная доплата уже зеркалится в его себестоимость — не берём
     const isAdjMirroredToEvent = a=> !!a.eventId && Number(a.amount) > 0;
-    state.salaryAdjustments.filter(a=> a.date && a.date.startsWith(ym) && !isAdjMirroredToEvent(a)).forEach(a=>{
+    state.salaryAdjustments.filter(a=> adjEffDate(a) && adjEffDate(a).startsWith(ym) && !isAdjMirroredToEvent(a)).forEach(a=>{
       const name = (a.masterName||'').trim();
       const isHostess = HOSTESS_LIST.some(h=>h.toLowerCase()===name.toLowerCase());
       add(name, Number(a.amount)||0, isHostess ? 'hostess' : 'master');
@@ -14123,7 +14405,7 @@
         const expectedByNow = usedLastYear ? Math.round(target * lyRatio) : null;
         const paceStatus = daysElapsed===0 ? 'notstarted' : (!usedLastYear ? 'nodata' : (value >= expectedByNow ? 'ahead' : 'behind'));
         const projected = daysElapsed>0 ? Math.round(value / daysElapsed * daysInMonth) : null;
-        return { key:'product', label: product, value, format:'money', target, pctOfTarget, expectedByNow, paceStatus, projected, isProduct:true, usedLastYear };
+        return { key:'product', label: prodLabel(product), value, format:'money', target, pctOfTarget, expectedByNow, paceStatus, projected, isProduct:true, usedLastYear };
       });
     const hasAnyPlan = planProgress.some(p=>p.target !== null) || customPlanProgress.length > 0 || productPlanProgress.length > 0;
 
@@ -14175,7 +14457,7 @@
         const mMastersSalary = mEvts.reduce((s,e)=> s + eventTotalMasterPay(e), 0)
           + state.itemSales.filter(x=>x.date && x.date.startsWith(ym)).reduce((s,x)=> s + Math.round(((x.revenue!==undefined&&x.revenue!==null&&!isNaN(x.revenue))?Number(x.revenue):0) * ITEM_SALE_MASTER_PCT / 100), 0)
           + state.orders.filter(x=>x.date && x.date.startsWith(ym)).reduce((s,x)=> s + orderTotalMasterShare(x), 0)
-          + state.salaryAdjustments.filter(a=>a.date && a.date.startsWith(ym)).reduce((s,a)=> s + (Number(a.amount)||0), 0);
+          + state.salaryAdjustments.filter(a=>adjEffDate(a) && adjEffDate(a).startsWith(ym)).reduce((s,a)=> s + (Number(a.amount)||0), 0);
         let mHostessSalary = 0;
         {
           const daysInM = new Date(year, mIdx+1, 0).getDate();
@@ -14271,7 +14553,7 @@
       state.orders.filter(x=>x.date && x.date.startsWith(ym)).forEach(x=>{
         orderMasterEntries(x).forEach(e=> addStaffPay(e.name, mIdx, e.share));
       });
-      state.salaryAdjustments.filter(a=>a.date && a.date.startsWith(ym)).forEach(a=>{
+      state.salaryAdjustments.filter(a=>adjEffDate(a) && adjEffDate(a).startsWith(ym)).forEach(a=>{
         addStaffPay(a.masterName, mIdx, Number(a.amount)||0);
       });
       const daysInM = new Date(summaryYear, mIdx+1, 0).getDate();
@@ -14395,10 +14677,10 @@
     // "Чистой прибыли" (студия как будто заплатила мастеру полностью, хотя на самом деле удержала).
     const isAdjMirroredToEvent = a=> !!a.eventId && Number(a.amount) > 0;
     const npUnlinkedAdjustments = state.salaryAdjustments
-      .filter(a=> a.date && a.date.startsWith(monthYm) && !isAdjMirroredToEvent(a) && !HOSTESS_LIST.some(h=>h.toLowerCase()===(a.masterName||'').trim().toLowerCase()))
+      .filter(a=> adjEffDate(a) && adjEffDate(a).startsWith(monthYm) && !isAdjMirroredToEvent(a) && !HOSTESS_LIST.some(h=>h.toLowerCase()===(a.masterName||'').trim().toLowerCase()))
       .reduce((s,a)=> s + (Number(a.amount)||0), 0);
     const npHostessAdjustments = state.salaryAdjustments
-      .filter(a=> a.date && a.date.startsWith(monthYm) && !isAdjMirroredToEvent(a) && HOSTESS_LIST.some(h=>h.toLowerCase()===(a.masterName||'').trim().toLowerCase()))
+      .filter(a=> adjEffDate(a) && adjEffDate(a).startsWith(monthYm) && !isAdjMirroredToEvent(a) && HOSTESS_LIST.some(h=>h.toLowerCase()===(a.masterName||'').trim().toLowerCase()))
       .reduce((s,a)=> s + (Number(a.amount)||0), 0);
     const npMastersSalary = npMastersBasePay + npMastersItemShare + npMastersOrderShare + npUnlinkedAdjustments;
     // зп хостес — по графику смен (будни/выходные + переработка), как и в разделе "ЗП хостес", плюс
@@ -14644,7 +14926,7 @@
             <tbody>
               ${yearProductMatrix.filter(row=>row.total>0).map(row=>`
                 <tr style="border-bottom:1px solid var(--line);">
-                  <td style="padding:5px 7px;">${escapeHtml(row.name)}</td>
+                  <td style="padding:5px 7px;">${escapeHtml(prodLabel(row.name))}</td>
                   ${row.monthValues.map(v=>`<td style="text-align:right;padding:5px 7px;font-family:var(--font-mono);${v===0?'color:var(--ink-soft);':''}">${v>0?formatMoney(v):'—'}</td>`).join('')}
                   <td style="text-align:right;padding:5px 7px;font-family:var(--font-mono);font-weight:600;">${formatMoney(row.total)}</td>
                 </tr>
@@ -15073,8 +15355,8 @@
     // единый список ВСЕХ корректировок ЗП за месяц (и мастера, и админы вместе) — чтобы видеть все
     // доплаты/удержания в одном месте, без необходимости открывать каждого сотрудника по отдельности
     const allSalaryAdjustmentsThisMonth = state.salaryAdjustments
-      .filter(x=> x.date && x.date.startsWith(monthYmForItemSales))
-      .map(x=> ({ date: x.date, masterName: (x.masterName||'').trim(), comment: x.comment||'', amount: Number(x.amount)||0 }))
+      .filter(x=> adjEffDate(x) && adjEffDate(x).startsWith(monthYmForItemSales))
+      .map(x=> ({ date: adjEffDate(x), masterName: (x.masterName||'').trim(), comment: x.comment||'', amount: Number(x.amount)||0 }))
       .sort((a,b)=> a.date.localeCompare(b.date));
 
     const hostSalary = {};
@@ -15139,13 +15421,13 @@
     // (роль "hostess", HOSTESS_LIST), считаются отдельно в зарплате админов, чтобы не путать два разных начисления
     const adjustmentsByMaster = {};
     const masterAdjustmentDetails = {};
-    state.salaryAdjustments.filter(x=> x.date && x.date.startsWith(monthYmForItemSales)).forEach(x=>{
+    state.salaryAdjustments.filter(x=> adjEffDate(x) && adjEffDate(x).startsWith(monthYmForItemSales)).forEach(x=>{
       const name = (x.masterName||'').trim();
       if(!name) return;
       if(HOSTESS_LIST.some(h=>h.toLowerCase()===name.toLowerCase())) return;
       adjustmentsByMaster[name] = (adjustmentsByMaster[name]||0) + (Number(x.amount)||0);
       if(!masterAdjustmentDetails[name]) masterAdjustmentDetails[name] = [];
-      masterAdjustmentDetails[name].push({ date: x.date, comment: x.comment||'', amount: Number(x.amount)||0 });
+      masterAdjustmentDetails[name].push({ date: adjEffDate(x), comment: x.comment||'', amount: Number(x.amount)||0 });
     });
     const combinedMasterNames = Array.from(new Set([...Object.keys(hostSalary), ...Object.keys(hostMaterialsComp), ...Object.keys(itemSalesByMaster), ...Object.keys(ordersByMaster), ...Object.keys(adjustmentsByMaster)]));
     const combinedMasterTotals = combinedMasterNames.map(name=>{
@@ -15194,11 +15476,11 @@
         else { hostSalaryH2[e.name] = (hostSalaryH2[e.name]||0) + e.share; totalSalaryH2 += e.share; }
       });
     });
-    state.salaryAdjustments.filter(x=> x.date && x.date.startsWith(monthYmForItemSales)).forEach(x=>{
+    state.salaryAdjustments.filter(x=> adjEffDate(x) && adjEffDate(x).startsWith(monthYmForItemSales)).forEach(x=>{
       const name = (x.masterName||'').trim();
       if(!name) return;
       if(HOSTESS_LIST.some(h=>h.toLowerCase()===name.toLowerCase())) return;
-      const day = parseInt((x.date||'').split('-')[2], 10) || 1;
+      const day = parseInt((adjEffDate(x)||'').split('-')[2], 10) || 1;
       const amount = Number(x.amount) || 0;
       if(day <= 15){ hostSalaryH1[name] = (hostSalaryH1[name]||0) + amount; totalSalaryH1 += amount; }
       else { hostSalaryH2[name] = (hostSalaryH2[name]||0) + amount; totalSalaryH2 += amount; }
@@ -15248,11 +15530,11 @@
     // в зарплату админов (и в нужную половину месяца по дате самой корректировки), а не мастеров
     const hostessAdjustmentsByName = {};
     const hostessAdjustmentDetails = {};
-    state.salaryAdjustments.filter(x=> x.date && x.date.startsWith(monthYmForItemSales)).forEach(x=>{
+    state.salaryAdjustments.filter(x=> adjEffDate(x) && adjEffDate(x).startsWith(monthYmForItemSales)).forEach(x=>{
       const name = (x.masterName||'').trim();
       if(!name) return;
       if(!HOSTESS_LIST.some(h=>h.toLowerCase()===name.toLowerCase())) return;
-      const day = parseInt((x.date||'').split('-')[2], 10) || 1;
+      const day = parseInt((adjEffDate(x)||'').split('-')[2], 10) || 1;
       const amount = Number(x.amount) || 0;
       hostessSalary[name] = (hostessSalary[name]||0) + amount;
       totalHostessSalary += amount;
@@ -15260,7 +15542,7 @@
       else { hostessSalaryH2[name] = (hostessSalaryH2[name]||0) + amount; totalHostessSalaryH2 += amount; }
       hostessAdjustmentsByName[name] = (hostessAdjustmentsByName[name]||0) + amount;
       if(!hostessAdjustmentDetails[name]) hostessAdjustmentDetails[name] = [];
-      hostessAdjustmentDetails[name].push({ date: x.date, comment: x.comment||'', amount });
+      hostessAdjustmentDetails[name].push({ date: adjEffDate(x), comment: x.comment||'', amount });
     });
     // премия админам, назначенная владельцем вручную за этот месяц (видна самому админу) — учитывается во
     // 2-й половине месяца (выплачивается по итогам месяца целиком, а не привязана к конкретному дню)
@@ -15333,6 +15615,13 @@
       if(e.category!=='Зарплата' || !e.master || !e.date) return;
       const name = e.master.trim();
       const amount = (e.amount!==undefined&&e.amount!==null&&!isNaN(e.amount)) ? Number(e.amount) : 0;
+      if(e.salaryPayHalf && e.salaryPayYm){
+        if(e.salaryPayYm === reconYm){
+          if(e.salaryPayHalf === 'H1') hostPaidH1[name] = (hostPaidH1[name]||0) + amount;
+          else hostPaidH2[name] = (hostPaidH2[name]||0) + amount;
+        }
+        return;
+      }
       const eym = e.date.slice(0,7);
       const day = parseInt(e.date.slice(8,10),10) || 1;
       if(eym===reconYm && day>=16){ hostPaidH1[name] = (hostPaidH1[name]||0) + amount; }
@@ -15563,7 +15852,7 @@
     } else if(activeFinTab === 'salary'){
       // «К выдаче мастерам»: сколько нужно привезти на выплату 16-го (за 1–15) и 2-го (за 16–конец), с учётом уже выплаченного
       const canSeePayout = ['owner','assistant'].includes(state.currentRole) && !state.loggedInMasterName && !state.loggedInHostessName;
-      const payoutHalfHtml = (label, dueDate, accruedMap, paidMap, total)=>{
+      const payoutHalfHtml = (label, dueDate, accruedMap, paidMap, total, halfKey)=>{
         const names = Array.from(new Set([...Object.keys(accruedMap), ...Object.keys(paidMap)]));
         const rows = names.map(n=>({ name:n, accrued: accruedMap[n]||0, paid: paidMap[n]||0 })).map(r=>({...r, left: r.accrued - r.paid}))
           .filter(r=>r.accrued!==0 || r.paid!==0).sort((a,b)=>b.left-a.left);
@@ -15577,7 +15866,7 @@
             </div>
             ${rows.length===0 ? '<div style="color:var(--ink-soft);font-size:12.5px;">Начислений нет.</div>' : `
             <details style="margin-top:4px;"><summary style="cursor:pointer;font-size:12px;color:var(--ink-soft);">по мастерам (${rows.length})</summary>
-              ${rows.map(r=>`<div class="stat-row" style="margin-top:4px;"><div class="stat-label" style="width:170px;">${escapeHtml(r.name)}</div><div style="flex:1;font-size:12.5px;font-family:var(--font-mono);">${formatMoney(Math.max(0,r.left))}${r.paid>0?` <span style="color:var(--ink-soft);font-size:11px;">· начислено ${formatMoney(r.accrued)}, выплачено ${formatMoney(r.paid)}</span>`:''}</div></div>`).join('')}
+              ${rows.map(r=>`<div class="stat-row" style="margin-top:4px;"><div class="stat-label" style="width:170px;">${escapeHtml(r.name)}</div><div style="flex:1;font-size:12.5px;font-family:var(--font-mono);">${formatMoney(Math.max(0,r.left))}${r.paid>0?` <span style="color:var(--ink-soft);font-size:11px;">· начислено ${formatMoney(r.accrued)}, выплачено ${formatMoney(r.paid)}</span>`:''}</div><div>${salaryPayControlHtml(r.name, reconYm, halfKey, r.accrued, r.paid)}</div></div>`).join('')}
             </details>`}
           </div>`;
       };
@@ -15585,8 +15874,8 @@
         <div class="analytics-section" style="border:1px solid var(--line-strong);border-radius:var(--radius);padding:12px 14px;margin-bottom:14px;">
           <h4 style="margin-top:0;">💵 К выдаче мастерам</h4>
           <div style="font-size:11.5px;color:var(--ink-soft);margin-bottom:8px;">Суммы по начислениям за месяц выше (МК, изделия, заказы, корректировки) минус уже выплаченное по расходам «Зарплата». Возмещение себестоимости материалов сюда не входит${combinedMaterialsCompTotal>0?' (отдельно: '+formatMoney(combinedMaterialsCompTotal)+')':''}. Способ выдачи (наличные/перевод) приложение не различает — это общая сумма.</div>
-          ${payoutHalfHtml('За 1–15 число', dueDateH1, hostSalaryH1, hostPaidH1, totalSalaryH1)}
-          ${payoutHalfHtml('За 16 – конец месяца', dueDateH2, hostSalaryH2, hostPaidH2, totalSalaryH2)}
+          ${payoutHalfHtml('За 1–15 число', dueDateH1, hostSalaryH1, hostPaidH1, totalSalaryH1, 'H1')}
+          ${payoutHalfHtml('За 16 – конец месяца', dueDateH2, hostSalaryH2, hostPaidH2, totalSalaryH2, 'H2')}
         </div>` : '';
       finContent = payoutBlock + `
         <div class="analytics-section">
@@ -15635,13 +15924,17 @@
                           <div style="font-family:var(--font-mono);font-size:12.5px;${d.kind==='materials'?'color:var(--accent);':''}">${formatMoney(d.total)}</div>
                         </div>
                       `).join('')}
-                      ${half==='H2' ? `
+                      ${(() => {
+                        const hAdj = adjSumForHalf(masterAdjustmentDetails[x.name], half);
+                        if(half==='H1' && hAdj===0) return '';
+                        return `
                         <div style="margin-top:8px;padding-top:8px;border-top:1px solid var(--line-strong);">
-                          <div class="stat-row"><div class="stat-label">Сумма за 2-ю половину (МК + заказы + изделия)</div><div style="flex:1;text-align:right;font-family:var(--font-mono);font-size:12.5px;">${formatMoney(h2EventTotal)}</div></div>
-                          <div class="stat-row"><div class="stat-label">Корректировки</div><div style="flex:1;text-align:right;font-family:var(--font-mono);font-size:12.5px;color:${x.fromAdjustments>=0?'var(--status-green)':'var(--status-red)'};">${x.fromAdjustments>=0?'+':''}${formatMoney(x.fromAdjustments)}</div></div>
-                          <div class="stat-row" style="font-weight:600;"><div class="stat-label">Итог к выдаче (2-я половина)</div><div style="flex:1;text-align:right;font-family:var(--font-mono);font-size:13px;">${formatMoney(h2EventTotal + x.fromAdjustments)}</div></div>
-                        </div>
-                      ` : ''}
+                          <div class="stat-row"><div class="stat-label">Сумма за ${half==='H1'?'1-ю':'2-ю'} половину (МК + заказы + изделия)</div><div style="flex:1;text-align:right;font-family:var(--font-mono);font-size:12.5px;">${formatMoney(halfTotal)}</div></div>
+                          <div class="stat-row"><div class="stat-label">Корректировки</div><div style="flex:1;text-align:right;font-family:var(--font-mono);font-size:12.5px;color:${hAdj>=0?'var(--status-green)':'var(--status-red)'};">${hAdj>=0?'+':''}${formatMoney(hAdj)}</div></div>
+                          <div class="stat-row" style="font-weight:600;"><div class="stat-label">Итог к выдаче (${half==='H1'?'1-я':'2-я'} половина)</div><div style="flex:1;text-align:right;font-family:var(--font-mono);font-size:13px;">${formatMoney(halfTotal + hAdj)}</div></div>
+                        </div>`;
+                      })()}
+                      ${canSeePayout ? `<div style="margin-top:8px;">${salaryPayControlHtml(x.name, reconYm, half, (half==='H1'?hostSalaryH1:hostSalaryH2)[x.name]||0, (half==='H1'?hostPaidH1:hostPaidH2)[x.name]||0)}</div>` : ''}
                     </div>
                   `;}).join('')}
                   ${renderMasterMaterialsCompBlock(details)}
@@ -15819,7 +16112,7 @@
         <div style="font-size:11.5px;color:var(--ink-soft);font-family:var(--font-mono);margin-bottom:8px;">В скобках — среднее количество гостей на мероприятие этого продукта.</div>
         ${productList.map(([p,c])=>`
           <div class="stat-row">
-            <div class="stat-label">${escapeHtml(p)}</div>
+            <div class="stat-label">${escapeHtml(prodLabel(p))}</div>
             <div class="stat-bar-track"><div class="stat-bar-fill" style="width:${Math.round(c/maxProduct*100)}%;background:var(--ink);"></div></div>
             <div class="stat-count">${c} <span style="color:var(--ink-soft);font-weight:400;">(~${c>0?Math.round(productGuests[p]/c*10)/10:0} чел.)</span></div>
           </div>
@@ -15951,6 +16244,43 @@
       </div>`;
     state.analyticsPanels = { plan: analyticsPanel_plan, occupancy: analyticsPanel_occupancy, days: analyticsPanel_days, ceramics: analyticsPanel_ceramics, guests: analyticsPanel_guests, legal: analyticsPanel_legal, reports: analyticsPanel_reports, redo: analyticsPanel_redo, netprofit: analyticsPanel_netprofit, cashflow: analyticsPanel_cashflow, yearsummary: analyticsPanel_yearsummary, auditlog: analyticsPanel_auditlog, marketing: analyticsPanel_marketing, integrity: renderEventsIntegrityPanel() };
 
+    // «Проверка зарплаты»: кто из мастеров/админов нажал «Я проверил(а) — всё ок». Видно руководителю, ассистенту и старшему администратору
+    const canSeeSalaryChecks = ['owner','assistant','admin'].includes(state.currentRole) && !state.loggedInMasterName && !state.loggedInHostessName;
+    const salaryChecksBlock = canSeeSalaryChecks ? (()=>{
+      const ymC = monthYmForItemSales;
+      const showAmt = state.currentRole !== 'admin';
+      const canPayFromChecks = ['owner','assistant'].includes(state.currentRole);
+      const halfHtml = (half, label, due, mMap, hMap)=>{
+        const rows = [];
+        Object.entries(mMap||{}).forEach(([n,a])=>{ if(Math.round(a)>0) rows.push({kind:'master', name:n, amount:a}); });
+        Object.entries(hMap||{}).forEach(([n,a])=>{ if(Math.round(a)>0) rows.push({kind:'hostess', name:n, amount:a}); });
+        rows.forEach(r=>{ r.st = salaryCheckStatus(r.kind, r.name, ymC, half, r.amount); });
+        if(!rows.length) return '';
+        const order = {none:0, changed:1, ok:2};
+        rows.sort((a,b)=> order[a.st]-order[b.st] || a.name.localeCompare(b.name,'ru'));
+        const okN = rows.filter(r=>r.st==='ok').length;
+        return `
+          <div style="margin-bottom:12px;">
+            <div style="font-size:13px;font-weight:600;margin-bottom:4px;">${label} — выдача ${due.slice(8,10)}.${due.slice(5,7)} <span style="font-weight:400;font-size:11.5px;color:${okN===rows.length?'var(--status-green)':'var(--ink-soft)'};">· проверили ${okN} из ${rows.length}</span></div>
+            <details><summary style="cursor:pointer;font-size:12px;color:var(--ink-soft);">список (${rows.length})</summary>
+            ${rows.map(r=>`<div class="stat-row" style="margin-top:4px;">
+              <div class="stat-label" style="width:170px;">${escapeHtml(r.name)}${r.kind==='hostess'?' <span style="font-size:10.5px;color:var(--ink-soft);">админ</span>':''}</div>
+              ${showAmt ? `<div style="width:100px;font-family:var(--font-mono);font-size:12.5px;">${formatMoney(r.amount)}</div>` : ''}
+              <div style="flex:1;font-size:12.5px;${r.st==='ok'?'color:var(--status-green);font-weight:600;':(r.st==='changed'?'color:var(--status-red);':'color:var(--ink-soft);')}">${r.st==='ok'?'✅ проверено, можно выдавать':(r.st==='changed'?'⚠️ сумма изменилась после проверки':'⏳ не проверено')}</div>
+              ${canPayFromChecks ? `<div>${salaryPayControlHtml(r.name, ymC, half, r.amount, (half==='H1'?hostPaidH1:hostPaidH2)[r.name]||0)}</div>` : ''}
+            </div>`).join('')}
+            </details>
+          </div>`;
+      };
+      const h1 = halfHtml('H1', 'За 1–15 число', dueDateH1, hostSalaryH1, hostessSalaryH1);
+      const h2 = halfHtml('H2', 'За 16 – конец месяца', dueDateH2, hostSalaryH2, hostessSalaryH2);
+      if(!h1 && !h2) return '';
+      return `<div class="analytics-section" style="border:1px solid var(--line-strong);border-radius:var(--radius);padding:12px 14px;margin-bottom:14px;">
+        <h4 style="margin-top:0;">✅ Проверка зарплаты сотрудниками</h4>
+        <div style="font-size:11.5px;color:var(--ink-soft);margin-bottom:8px;">Мастера и администраторы нажимают «Я проверил(а) зарплату — всё ок» в своей «Моя зарплата». Если сумма потом изменилась, отметка сбрасывается.</div>
+        ${h1}${h2}
+      </div>`;
+    })() : '';
     const fullHtml = `
       <div class="cal-nav">
         <div class="month-label">${monthLabel}</div>
@@ -16026,11 +16356,12 @@
         </div>
       </div>
 
+      ${salaryChecksBlock}
       ${!isAdminFinRestricted ? finTabsHtml : ''}
       ${!isAdminFinRestricted ? finContent : ''}
     `;
     if(state.loggedInMasterName){
-      return renderPersonalMasterSalaryView(monthLabel, combinedMasterTotals, masterEventDetails, masterAdjustmentDetails, combinedGrandTotal);
+      return renderPersonalMasterSalaryView(monthLabel, combinedMasterTotals, masterEventDetails, masterAdjustmentDetails, combinedGrandTotal, hostSalaryH1, hostSalaryH2);
     }
     if(state.loggedInHostessName){
       return renderPersonalHostessSalaryView(monthLabel, hostessSalary, hostessSalaryH1, hostessSalaryH2, totalHostessSalary, hostessAdjustmentDetails, hostessManualBonusesForMerge);
@@ -16121,7 +16452,7 @@
         const expectedByNow = usedLastYear ? Math.round(target * lyRatio) : null;
         const paceStatus = daysElapsed===0 ? 'notstarted' : (!usedLastYear ? 'nodata' : (value >= expectedByNow ? 'ahead' : 'behind'));
         const projected = daysElapsed>0 ? Math.round(value / daysElapsed * daysInMonth) : null;
-        return { key:'product', label: product, value, format:'money', target, pctOfTarget, expectedByNow, paceStatus, projected, isProduct:true, usedLastYear };
+        return { key:'product', label: prodLabel(product), value, format:'money', target, pctOfTarget, expectedByNow, paceStatus, projected, isProduct:true, usedLastYear };
       });
     const hasAnyPlan = planProgress.some(p=>p.target !== null) || customPlanProgress.length > 0 || productPlanProgress.length > 0;
     const PP_STATUS_LABEL = { ahead:'✅ в темпе', behind:'⚠ отстаём', notstarted:'—', nodata:'📋 нет данных за прошлый год' };
@@ -16254,6 +16585,7 @@
                   <div style="font-family:var(--font-mono);font-size:12.5px;">${formatMoney(s.pay)}</div>
                 </div>
               `).join('')}
+              ${resolvedName ? renderSalaryCheckControl('hostess', resolvedName, y+'-'+pad(m+1), half, (half==='H1' ? hostessSalaryH1 : hostessSalaryH2)[resolvedName]||0) : ''}
             </div>
           `;}).join('')}
           ${myAdjustments.length > 0 ? `
@@ -16299,7 +16631,7 @@
           </div>`).join('')}
       </div>`;
   }
-  function renderPersonalMasterSalaryView(monthLabel, combinedMasterTotals, masterEventDetails, masterAdjustmentDetails, combinedGrandTotal){
+  function renderPersonalMasterSalaryView(monthLabel, combinedMasterTotals, masterEventDetails, masterAdjustmentDetails, combinedGrandTotal, hostSalaryH1Map, hostSalaryH2Map){
     const myName = state.loggedInMasterName;
     const norm = s => (s||'').trim().toLowerCase();
     // сначала точное совпадение, потом — без учёта регистра и пробелов (имя в календаре могли напечатать чуть иначе)
@@ -16371,13 +16703,22 @@
                   <div style="font-family:var(--font-mono);font-size:12.5px;${d.kind==='materials'?'color:var(--accent);':''}">${formatMoney(d.total)}</div>
                 </div>
               `).join('')}
-              ${half==='H2' ? `
+              ${(() => {
+                const hAdj = adjSumForHalf(myAdjustments, half);
+                if(half==='H1' && hAdj===0) return '';
+                return `
                 <div style="margin-top:8px;padding-top:8px;border-top:1px solid var(--line-strong);">
-                  <div class="stat-row"><div class="stat-label">Сумма за 2-ю половину (МК + заказы + изделия)</div><div style="flex:1;text-align:right;font-family:var(--font-mono);font-size:12.5px;">${formatMoney(h2EventTotal)}</div></div>
-                  <div class="stat-row"><div class="stat-label">Корректировки</div><div style="flex:1;text-align:right;font-family:var(--font-mono);font-size:12.5px;color:${(mine?mine.fromAdjustments:0)>=0?'var(--status-green)':'var(--status-red)'};">${(mine&&mine.fromAdjustments>=0)?'+':''}${formatMoney(mine?mine.fromAdjustments:0)}</div></div>
-                  <div class="stat-row" style="font-weight:600;"><div class="stat-label">Итог к выдаче (2-я половина)</div><div style="flex:1;text-align:right;font-family:var(--font-mono);font-size:13px;">${formatMoney(h2EventTotal + (mine?mine.fromAdjustments:0))}</div></div>
-                </div>
-              ` : ''}
+                  <div class="stat-row"><div class="stat-label">Сумма за ${half==='H1'?'1-ю':'2-ю'} половину (МК + заказы + изделия)</div><div style="flex:1;text-align:right;font-family:var(--font-mono);font-size:12.5px;">${formatMoney(halfTotal)}</div></div>
+                  <div class="stat-row"><div class="stat-label">Корректировки</div><div style="flex:1;text-align:right;font-family:var(--font-mono);font-size:12.5px;color:${hAdj>=0?'var(--status-green)':'var(--status-red)'};">${hAdj>=0?'+':''}${formatMoney(hAdj)}</div></div>
+                  <div class="stat-row" style="font-weight:600;"><div class="stat-label">Итог к выдаче (${half==='H1'?'1-я':'2-я'} половина)</div><div style="flex:1;text-align:right;font-family:var(--font-mono);font-size:13px;">${formatMoney(halfTotal + hAdj)}</div></div>
+                </div>`;
+              })()}
+              ${(()=>{
+                const mp = state.analyticsCursor; const ymC = mp.getFullYear()+'-'+pad(mp.getMonth()+1);
+                const mapH = half==='H1' ? hostSalaryH1Map : hostSalaryH2Map;
+                const amt = (mapH && resolvedName && mapH[resolvedName] !== undefined) ? mapH[resolvedName] : (half==='H1' ? h1EventTotal : h2EventTotal + (mine?mine.fromAdjustments:0));
+                return resolvedName ? renderSalaryCheckControl('master', resolvedName, ymC, half, amt) : '';
+              })()}
             </div>
           `;}).join('')}
           ${renderMasterMaterialsCompBlock(details)}
@@ -16404,14 +16745,17 @@
     document.querySelectorAll('.analytics-section').forEach(sec=>{
       const h = sec.querySelector(':scope > h4');
       if(!h || h.classList.contains('collapsible-h4')) return;
-      const key = (state.analyticsFinTab || '') + '|' + h.textContent.trim();
+      // ключ без сумм/чисел после «:» и «(» — иначе при каждом изменении цифр раздел «забывал» своё состояние
+      const key = (state.analyticsFinTab || '') + '|' + h.textContent.trim().replace(/[:(].*$/, '').replace(/[\d\s.,₽%+−-]+$/, '').trim();
       h.classList.add('collapsible-h4');
       h.title = 'Свернуть / развернуть';
       const apply = (collapsed)=>{
         sec.classList.toggle('is-collapsed', collapsed);
         [...sec.children].forEach(ch=>{ if(ch !== h) ch.style.display = collapsed ? 'none' : ''; });
       };
-      apply(!!state.collapsedSections[key]);
+      // по умолчанию все разделы свёрнуты (кроме личной «Моя зарплата» у мастера/админа); раскрытое вручную запоминается
+      const saved = state.collapsedSections[key];
+      apply(saved === undefined ? !(state.loggedInMasterName || state.loggedInHostessName) : !!saved);
       h.addEventListener('click', ev=>{
         if(ev.target.closest('button,a,input,select,textarea')) return;
         const now = !sec.classList.contains('is-collapsed');
@@ -16423,6 +16767,56 @@
 
   function attachAnalyticsEvents(){
     applyCollapsibleSections();
+    document.querySelectorAll('[data-salpay]').forEach(b=>{
+      b.onclick = (ev)=>{
+        ev.stopPropagation();
+        const [name, ym, half] = b.dataset.salpay.split('|').map(decodeURIComponent);
+        const amount = Number(b.dataset.left)||0;
+        const halfLabel = (half==='H1' ? 'за 1–15 число' : 'за 16 – конец месяца') + ' · ' + MONTHS[Number(ym.slice(5,7))-1] + ' ' + ym.slice(0,4);
+        showSalaryPayPopup(name, halfLabel, amount, async (source)=>{
+          const resp = state.currentRole==='owner' ? 'Карина' : (state.currentRole==='assistant' ? 'Ассистент' : 'Менеджер');
+          state.expenses.push({
+            id: uid(), date: todayStr(), category: 'Зарплата', direction: '', master: name, source,
+            amount, responsible: resp, eventId: '', comment: `Выдача ЗП: ${name} · ${halfLabel}`,
+            salaryPayYm: ym, salaryPayHalf: half,
+          });
+          await saveExpenses();
+          recordAction('Зарплата выдана', `${name} · ${halfLabel} · ${formatMoney(amount)} · ${source}`);
+          render();
+        });
+      };
+    });
+    document.querySelectorAll('[data-salunpay]').forEach(b=>{
+      b.onclick = (ev)=>{
+        ev.stopPropagation();
+        const [name, ym, half] = b.dataset.salunpay.split('|').map(decodeURIComponent);
+        showConfirmDeletePopup(`Отменить отметку «Выдано» для ${escapeHtml(name)}? Расход вернётся в кассу.`, async ()=>{
+          const ids = new Set(salaryPayMarkers(name, ym, half).map(e=>e.id));
+          state.expenses = state.expenses.filter(e=> !ids.has(e.id));
+          await saveExpenses();
+          render();
+        });
+      };
+    });
+    document.querySelectorAll('[data-salcheck]').forEach(b=>{
+      b.onclick = async ()=>{
+        const [kind, name, ym, half] = b.dataset.salcheck.split('|').map(decodeURIComponent);
+        const amount = Number(b.dataset.amount)||0;
+        state.salaryChecks = (state.salaryChecks||[]).filter(c=> !(c.kind===kind && (c.name||'').trim().toLowerCase()===name.trim().toLowerCase() && c.ym===ym && c.half===half));
+        state.salaryChecks.push({ id: uid(), kind, name, ym, half, amount, ts: new Date().toISOString() });
+        await saveSalaryChecks();
+        recordAction('Зарплата проверена сотрудником', `${name} · ${ym} · ${half==='H1'?'1–15':'16–конец'} · ${formatMoney(amount)}`);
+        render();
+      };
+    });
+    document.querySelectorAll('[data-salcheck-undo]').forEach(b=>{
+      b.onclick = async ()=>{
+        const [kind, name, ym, half] = b.dataset.salcheckUndo.split('|').map(decodeURIComponent);
+        state.salaryChecks = (state.salaryChecks||[]).filter(c=> !(c.kind===kind && (c.name||'').trim().toLowerCase()===name.trim().toLowerCase() && c.ym===ym && c.half===half));
+        await saveSalaryChecks();
+        render();
+      };
+    });
     document.querySelectorAll('.my-missing-report-row').forEach(row=>{
       row.onclick = ()=>{
         const e = state.events.find(x=>x.id===row.dataset.eid);
@@ -16911,7 +17305,7 @@
             const who = e.guestName && e.guestName !== '-' ? e.guestName : (e.companyName || '');
             return `<label style="display:flex; gap:8px; align-items:flex-start; font-size:12.5px; padding:6px 0; border-bottom:1px solid var(--line);">
               <input type="checkbox" class="missing-ev-check" data-idx="${i}" checked style="margin-top:2px;">
-              <span><b>${escapeHtml(dateLabel)} ${escapeHtml(e.time||'')}</b> — ${escapeHtml(e.title||'без названия')}${e.product?` (${escapeHtml(e.product)})`:''}, ведёт: ${escapeHtml(e.host||'—')}${who?`, гость: ${escapeHtml(who)}`:''}</span>
+              <span><b>${escapeHtml(dateLabel)} ${escapeHtml(e.time||'')}</b> — ${escapeHtml(e.title||'без названия')}${prodTag(e.product)?` (${escapeHtml(prodTag(e.product))})`:''}, ведёт: ${escapeHtml(e.host||'—')}${who?`, гость: ${escapeHtml(who)}`:''}</span>
             </label>`;
           }).join('');
           missingBtn.style.display = 'inline-block';
@@ -19240,10 +19634,10 @@
     // к мероприятию положительная доплата уже зеркалится в его себестоимость, удержание — нет.
     const isAdjMirroredToEvent = a=> !!a.eventId && Number(a.amount) > 0;
     const npUnlinkedAdjustments = state.salaryAdjustments
-      .filter(a=> a.date && a.date.startsWith(ym) && !isAdjMirroredToEvent(a) && !HOSTESS_LIST.some(h=>h.toLowerCase()===(a.masterName||'').trim().toLowerCase()))
+      .filter(a=> adjEffDate(a) && adjEffDate(a).startsWith(ym) && !isAdjMirroredToEvent(a) && !HOSTESS_LIST.some(h=>h.toLowerCase()===(a.masterName||'').trim().toLowerCase()))
       .reduce((s,a)=> s + (Number(a.amount)||0), 0);
     const npHostessAdjustments = state.salaryAdjustments
-      .filter(a=> a.date && a.date.startsWith(ym) && !isAdjMirroredToEvent(a) && HOSTESS_LIST.some(h=>h.toLowerCase()===(a.masterName||'').trim().toLowerCase()))
+      .filter(a=> adjEffDate(a) && adjEffDate(a).startsWith(ym) && !isAdjMirroredToEvent(a) && HOSTESS_LIST.some(h=>h.toLowerCase()===(a.masterName||'').trim().toLowerCase()))
       .reduce((s,a)=> s + (Number(a.amount)||0), 0);
     const npMastersSalary = npMastersBasePay + npMastersItemShare + npMastersOrderShare + npUnlinkedAdjustments;
 
@@ -19841,7 +20235,7 @@
               const stats = productPlanningStats(p, ym);
               return `
               <div class="row2" style="grid-template-columns: 1.3fr 130px; margin-bottom:2px;align-items:center;">
-                <label style="font-size:13px;margin:0;">${escapeHtml(p)}${prevYearAmount>0?` <span style="font-weight:400;color:var(--ink-soft);font-size:11px;">— год назад: ${formatMoney(prevYearAmount)}</span>`:''}</label>
+                <label style="font-size:13px;margin:0;">${escapeHtml(prodLabel(p))}${prevYearAmount>0?` <span style="font-weight:400;color:var(--ink-soft);font-size:11px;">— год назад: ${formatMoney(prevYearAmount)}</span>`:''}</label>
                 <input type="number" class="plan-product-input" data-product="${escapeHtml(p)}" data-avg-check="${stats.avgCheck||''}" data-conv-pct="${stats.conversionPct||''}" value="${val}" min="0" step="1000" placeholder="0">
               </div>
               <div class="plan-product-derived" style="font-size:11px;color:var(--ink-soft);margin:0 0 7px 0;min-height:14px;"></div>
@@ -20520,13 +20914,21 @@
               <input type="number" id="f-duration" value="${ev.duration||60}" min="0" step="15">
             </div>
           </div>
-          <div class="field">
+          ${(()=>{
+            const evStatus = ev.status || 'confirmed';
+            // у нового мероприятия «По расписанию» продукта нет — служебное значение подставляется само
+            const curProd = (isNew && evStatus==='confirmed' && !ev.product) ? SCHEDULE_PRODUCT_KEY : ((isNew && evStatus!=='confirmed' && ev.product===SCHEDULE_PRODUCT_KEY) ? '' : (ev.product||''));
+            return `
+          <div class="field" id="f-product-field" data-orig-product="${escapeHtml(isNew ? '' : (ev.product||''))}" data-orig-status="${isNew ? '' : evStatus}" style="display:${evStatus==='confirmed'?'none':''};">
             <label>Продукт</label>
             <select id="f-product">
-              <option value="" ${!ev.product?'selected':''}>Не указан</option>
-              ${PRODUCTS.map(p=>`<option value="${escapeHtml(p)}" ${ev.product===p?'selected':''}>${escapeHtml(p)}</option>`).join('')}
+              <option value="" ${!curProd?'selected':''}>Не указан</option>
+              ${PRODUCTS.map(p=> p===SCHEDULE_PRODUCT_KEY
+                ? `<option value="${escapeHtml(p)}" ${curProd===p?'selected':''} ${(!isNew && ev.product===SCHEDULE_PRODUCT_KEY && evStatus!=='confirmed')?'':'hidden'}>${escapeHtml(p)}</option>`
+                : `<option value="${escapeHtml(p)}" ${curProd===p?'selected':''}>${escapeHtml(p)}</option>`).join('')}
             </select>
-          </div>
+          </div>`;
+          })()}
           <div class="field">
             <label>Статус</label>
             <div class="status-select-wrap">
@@ -22070,6 +22472,22 @@
         o.classList.toggle('active', o.dataset.status === statusValue);
       });
       overlay.querySelector('#f-status').value = statusValue;
+      {
+        // «По расписанию» → поле продукта скрыто и подставляется служебное значение; остальные статусы → поле видно
+        const pf = overlay.querySelector('#f-product-field'), ps = overlay.querySelector('#f-product');
+        if(pf && ps){
+          const origProd = pf.dataset.origProduct || '', origStatus = pf.dataset.origStatus || '';
+          if(statusValue === 'confirmed'){
+            pf.style.display = 'none';
+            // старое мероприятие, которое и было «По расписанию», сохраняет свой прежний продукт
+            ps.value = (origStatus === 'confirmed') ? origProd : SCHEDULE_PRODUCT_KEY;
+          } else {
+            pf.style.display = '';
+            if(ps.value === SCHEDULE_PRODUCT_KEY && origProd !== SCHEDULE_PRODUCT_KEY) ps.value = '';
+          }
+          ps.dispatchEvent(new Event('change'));
+        }
+      }
       const dishesField = overlay.querySelector('#dishes-field');
       if(dishesField) dishesField.style.display = showsDishesAndRental(statusValue) ? 'block' : 'none';
       const rentalField = overlay.querySelector('#rental-field');
@@ -22410,7 +22828,6 @@
         const agreedPriceRawCheck = priceFieldLockedForMaster ? '' : overlay.querySelector('#f-agreed-price').value;
         const agreedPriceNegative = !priceFieldLockedForMaster && agreedPriceRawCheck !== '' && Number(agreedPriceRawCheck) < 0;
         if(agreedPriceNegative) markInvalid('f-agreed-price');
-        if(!notesVal && statusVal !== 'confirmed') markInvalid('f-notes'); // у «По расписанию» заметка необязательна
         if(guestNamesMissing || redoEventMissing){
           const guestListEl = overlay.querySelector('#guest-list-container');
           if(guestListEl){ guestListEl.style.boxShadow = 'inset 0 0 0 1.5px var(--danger)'; guestListEl.style.borderRadius = 'var(--radius)'; if(!firstInvalid) firstInvalid = guestListEl; }
@@ -22442,7 +22859,7 @@
           else if(dishesVal === 'needed' && !dishesPaymentVal){ dishesMissing = true; if(dishesFieldEl) dishesFieldEl.style.boxShadow = 'inset 0 0 0 1.5px var(--danger)'; if(!firstInvalid) firstInvalid = dishesFieldEl; }
         }
         const hostMissing = !hostVal && !PRODUCTS_WITHOUT_HOST.includes(productVal);
-        if(!title || hostMissing || !dateVal || !timeVal || !durationVal || durationVal<=0 || guestsRaw==='' || priceRaw==='' || Number(priceRaw)<0 || agreedPriceNegative || masterPayNegative || additionalHostsNegative || materialsNegative || (!notesVal && statusVal !== 'confirmed') || guestNamesMissing || redoEventMissing || materialsMissing || dishesMissing){
+        if(!title || hostMissing || !dateVal || !timeVal || !durationVal || durationVal<=0 || guestsRaw==='' || priceRaw==='' || Number(priceRaw)<0 || agreedPriceNegative || masterPayNegative || additionalHostsNegative || materialsNegative || guestNamesMissing || redoEventMissing || materialsMissing || dishesMissing){
           showGapWarningBanner(redoEventMissing ? 'У гостя отмечена «Переделка» — укажите, к какому мероприятию это относится.' : 'Заполните все поля перед сохранением (для статуса «Слот» это необязательно). Себестоимость: добавьте хотя бы один материал с названием и суммой (для мастер-класса без гостей её можно пропустить). Суммы (выручка, ЗП мастеру и со-ведущим, себестоимость) не могут быть отрицательными.');
           if(firstInvalid && firstInvalid.scrollIntoView) firstInvalid.scrollIntoView({block:'center', behavior:'smooth'});
           return;
