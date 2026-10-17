@@ -2151,6 +2151,27 @@
     const total = (c.amount!==undefined&&c.amount!==null&&!isNaN(c.amount))?Number(c.amount):0;
     return total - certSpentTotal(c);
   }
+  // продажа изделия, оплаченная (частично или целиком) сертификатом: revenue — полная цена изделия (от неё считается доля мастера),
+  // certAmount — часть, закрытая сертификатом. В выручку как новые деньги идёт только остаток, т.к. деньги за сертификат уже учтены при его продаже
+  function itemMoneyRev(x){
+    const full = (x.revenue!==undefined&&x.revenue!==null&&!isNaN(x.revenue))?Number(x.revenue):0;
+    const c = (x.certAmount!==undefined&&x.certAmount!==null&&!isNaN(x.certAmount))?Number(x.certAmount):0;
+    return Math.max(0, full - c);
+  }
+  function recalcCertStatusFromRedemptions(c){
+    if(c.status === 'refunded') return;
+    c.status = certRemaining(c) <= 0 ? 'used' : ((c.redemptions||[]).length > 0 ? 'partial' : 'in_progress');
+    if(!(c.redemptions||[]).length) c.useDate = '';
+  }
+  // снимаем списание по сертификату, сделанное под продажу изделия (при удалении/изменении продажи) — сумма возвращается на баланс
+  async function releaseItemSaleCert(sale){
+    if(!sale || !sale.certId) return;
+    const cert = state.certificates.find(c=>c.id===sale.certId);
+    if(!cert) return;
+    cert.redemptions = (cert.redemptions||[]).filter(r=> r.id !== sale.certRedemptionId);
+    recalcCertStatusFromRedemptions(cert);
+    await saveCertificates();
+  }
   // возврат сертификата целиком (деньги за него отдали гостю обратно) — сам сертификат помечается
   // возвращённым и больше недоступен для списания (см. certRemaining)
   function markCertRefunded(cert, refundId){
@@ -4419,7 +4440,14 @@
     `).join('');
   }
   function renderRedemptionRows(list){
-    return list.map((r,i)=>`
+    return list.map((r,i)=> r.itemSaleId ? `
+      <div class="mi-row" style="grid-template-columns: 1.4fr 90px 90px 32px;align-items:center;">
+        <div style="font-size:13px;">🛍 Покупка изделия</div>
+        <div style="font-size:12.5px;font-family:var(--font-mono);">${r.date ? formatDateText(r.date) : ''}</div>
+        <div style="font-size:12.5px;font-family:var(--font-mono);">${formatMoney(r.amount||0)}</div>
+        <span></span>
+      </div>
+    ` : `
       <div class="mi-row" data-rd-idx="${i}" style="grid-template-columns: 1.4fr 90px 90px 32px;">
         <input type="text" class="rd-event" value="${escapeHtml(r.eventId ? (eventSelectOptions().find(o=>o.id===r.eventId)?.label || '') : '')}" placeholder="Мероприятие" list="rd-event-options">
         <input type="date" class="rd-date" value="${r.date||''}">
@@ -7537,7 +7565,7 @@
               <div class="cell">${x.date ? formatDateText(x.date) : '—'}</div>
               <div class="cell">${escapeHtml(x.masterName||'')}</div>
               <div class="amount">${x.revenue!==undefined&&x.revenue!==null ? formatMoney(x.revenue) : ''}</div>
-              <div class="cell" style="color:var(--ink-soft);font-size:12px;">${x.revenue?`мастер: ${formatMoney(Math.round(x.revenue*ITEM_SALE_MASTER_PCT/100))}`:''}${x.source?` · ${escapeHtml(x.source)}`:''}</div>
+              <div class="cell" style="color:var(--ink-soft);font-size:12px;">${x.revenue?`мастер: ${formatMoney(Math.round(x.revenue*ITEM_SALE_MASTER_PCT/100))}`:''}${x.source?` · ${escapeHtml(x.source)}`:''}${x.certAmount?` · 🎟 сертификатом ${formatMoney(x.certAmount)}`:''}</div>
               <div class="reason">${escapeHtml(x.comment||'')}</div>
             </div>
           `).join('')}
@@ -8444,6 +8472,16 @@
               ${SALE_PAYMENT_ACCOUNTS.map(a=>`<option value="${escapeHtml(a)}" ${(itemSale.source||SALE_PAYMENT_ACCOUNTS[0])===a?'selected':''}>${escapeHtml(a)}</option>`).join('')}
             </select>
           </div>
+          <div class="field">
+            <label>Оплата сертификатом <span style="font-weight:400;color:var(--ink-soft);">— если изделие куплено за счёт сертификата</span></label>
+            <input type="text" id="is-cert-search" list="is-cert-options" placeholder="Номер или имя владельца…" value="${escapeHtml((()=>{ const c = itemSale.certId ? state.certificates.find(x=>x.id===itemSale.certId) : null; return c ? certPickerLabel(c) : ''; })())}">
+            <datalist id="is-cert-options">${state.certificates.filter(c=> c.status!=='refunded' && (certRemaining(c) > 0 || c.id===itemSale.certId)).sort((a,b)=>(b.saleDate||'').localeCompare(a.saleDate||'')).map(c=>`<option value="${escapeHtml(certPickerLabel(c))}">`).join('')}</datalist>
+            <div style="display:flex;gap:8px;margin-top:6px;">
+              <input type="number" id="is-cert-amount" min="0" step="50" placeholder="Сколько списать с сертификата, ₽" value="${itemSale.certAmount?itemSale.certAmount:''}">
+              <button type="button" class="btn btn-ghost" id="is-cert-clear">Убрать</button>
+            </div>
+            <div id="is-cert-hint" style="font-size:12px;color:var(--ink-soft);margin-top:4px;"></div>
+          </div>
           <div id="is-split-preview" style="font-size:13px;font-family:var(--font-mono);color:var(--ink-soft);"></div>
           <div class="field">
             <label>Комментарий <span style="font-weight:400;color:var(--ink-soft);">— необязательно</span></label>
@@ -8467,13 +8505,59 @@
 
     const revenueInput = overlay.querySelector('#is-revenue');
     const previewEl = overlay.querySelector('#is-split-preview');
+    const certSearchEl = overlay.querySelector('#is-cert-search');
+    const certAmountEl = overlay.querySelector('#is-cert-amount');
+    const certHintEl = overlay.querySelector('#is-cert-hint');
+    const ownSale = state.modal.itemSale || {};
+    const resolveItemCert = ()=>{
+      const v = certSearchEl.value.trim();
+      if(!v) return {cert:null};
+      const byLabel = state.certificates.find(c=> certPickerLabel(c) === v);
+      if(byLabel) return {cert:byLabel};
+      const m = v.match(/^№?(\S+)/);
+      const matches = state.certificates.filter(c=> String(c.number) === (m?m[1]:v));
+      if(matches.length > 1) return {error:`Есть несколько сертификатов №${m?m[1]:v} — выберите нужный из списка.`};
+      if(!matches.length) return {error:'Сертификат не найден — выберите его из списка.'};
+      return {cert:matches[0]};
+    };
+    // сколько можно списать: остаток + то, что эта же продажа уже списала с этого сертификата
+    const certAvail = (cert)=> certRemaining(cert) + ((ownSale.certId===cert.id && ownSale.certAmount) ? Number(ownSale.certAmount) : 0);
     const updatePreview = ()=>{
       const rev = parseInt(revenueInput.value) || 0;
       const masterShare = Math.round(rev * ITEM_SALE_MASTER_PCT / 100);
       const studioShare = rev - masterShare;
-      previewEl.textContent = rev > 0 ? `Мастеру (${ITEM_SALE_MASTER_PCT}%): ${formatMoney(masterShare)} · Студии (${ITEM_SALE_STUDIO_PCT}%): ${formatMoney(studioShare)}` : '';
+      const r = resolveItemCert();
+      const ca = (r.cert ? (parseInt(certAmountEl.value)||0) : 0);
+      let txt = rev > 0 ? `Мастеру (${ITEM_SALE_MASTER_PCT}%): ${formatMoney(masterShare)} · Студии (${ITEM_SALE_STUDIO_PCT}%): ${formatMoney(studioShare)}` : '';
+      if(r.cert && ca > 0 && rev > 0) txt += `\nСертификатом: ${formatMoney(Math.min(ca,rev))} · Деньгами: ${formatMoney(Math.max(0,rev-ca))}`;
+      previewEl.style.whiteSpace = 'pre-line';
+      previewEl.textContent = txt;
+      if(r.error){ certHintEl.style.color='var(--status-red)'; certHintEl.textContent = r.error; }
+      else if(r.cert){
+        const av = certAvail(r.cert);
+        certHintEl.style.color = (ca > av || ca > rev) ? 'var(--status-red)' : 'var(--ink-soft)';
+        certHintEl.textContent = `Доступно на сертификате: ${formatMoney(av)}` + (ca > av ? ' — списываете больше остатка' : (rev>0 && ca>rev ? ' — больше цены изделия' : ''));
+      } else { certHintEl.style.color='var(--ink-soft)'; certHintEl.textContent = ''; }
     };
-    revenueInput.addEventListener('input', updatePreview);
+    revenueInput.addEventListener('input', ()=>{
+      const r = resolveItemCert();
+      if(r.cert && certAmountEl.dataset.auto==='1'){
+        const rev = parseInt(revenueInput.value)||0;
+        certAmountEl.value = Math.min(certAvail(r.cert), rev) || '';
+      }
+      updatePreview();
+    });
+    certSearchEl.addEventListener('input', ()=>{
+      const r = resolveItemCert();
+      if(r.cert && (certAmountEl.value==='' || certAmountEl.dataset.auto==='1')){
+        const rev = parseInt(revenueInput.value)||0;
+        certAmountEl.value = Math.min(certAvail(r.cert), rev) || '';
+        certAmountEl.dataset.auto = '1';
+      }
+      updatePreview();
+    });
+    certAmountEl.addEventListener('input', ()=>{ certAmountEl.dataset.auto = '0'; updatePreview(); });
+    overlay.querySelector('#is-cert-clear').onclick = ()=>{ certSearchEl.value=''; certAmountEl.value=''; certAmountEl.dataset.auto='0'; updatePreview(); };
     updatePreview();
 
     const delBtn = overlay.querySelector('#btn-del-itemsale');
@@ -8489,6 +8573,7 @@
       showConfirmDeletePopup(`Удалить эту продажу изделия?${cascadesToIncome ? ' Связанный доход в «Книге» тоже удалится.' : ' Действие необратимо.'}`, async ()=>{
         const saleToDelete = state.modal.itemSale;
         state.itemSales = state.itemSales.filter(x=>x.id !== saleToDelete.id);
+        await releaseItemSaleCert(saleToDelete);
         if(saleToDelete.incomeId){
           state.incomes = state.incomes.filter(x=>x.id !== saleToDelete.incomeId);
           await saveIncomes();
@@ -8543,17 +8628,48 @@
         incomeId: state.modal.itemSale.incomeId || '',
       };
 
+      // оплата сертификатом (полностью или частично)
+      const oldSale = state.modal.itemSale;
+      const certR = resolveItemCert();
+      if(certR.error){ showGapWarningBanner(certR.error); return; }
+      let certAmt = 0;
+      if(certR.cert){
+        certAmt = parseInt(certAmountEl.value) || 0;
+        if(certAmt <= 0){ showGapWarningBanner('Укажите, сколько списать с сертификата, или уберите сертификат.'); certAmountEl.style.borderColor='var(--danger)'; return; }
+        if(certAmt > updated.revenue){ showGapWarningBanner('С сертификата нельзя списать больше цены изделия.'); certAmountEl.style.borderColor='var(--danger)'; return; }
+        if(certAmt > certAvail(certR.cert)){ showGapWarningBanner(`На сертификате №${certR.cert.number} доступно только ${formatMoney(certAvail(certR.cert))}.`); certAmountEl.style.borderColor='var(--danger)'; return; }
+      }
+      await releaseItemSaleCert(oldSale);
+      if(certR.cert){
+        const cert = state.certificates.find(c=>c.id===certR.cert.id);
+        if(!Array.isArray(cert.redemptions)) cert.redemptions = [];
+        const red = { id: uid(), itemSaleId: updated.id, date: dateVal, amount: certAmt };
+        cert.redemptions.push(red);
+        if(!cert.useDate) cert.useDate = dateVal;
+        recalcCertStatusFromRedemptions(cert);
+        await saveCertificates();
+        updated.certId = cert.id; updated.certRedemptionId = red.id; updated.certAmount = certAmt;
+      }
+      const moneyPart = updated.revenue - certAmt;
+
       // связка с "Книга → Доходы", чтобы продажа изделия сразу попадала в общую книгу с источником оплаты,
       // а не жила отдельно только в разделе "Изделия" (как раньше)
       const incomeEntry = {
         id: updated.incomeId || uid(), date: updated.date, operation: INCOME_OPERATIONS[0], product: 'Изделие',
-        account: sourceVal, eventId: '', amount: updated.revenue, masterName: masterVal, masterShare: null,
-        itemSaleId: updated.id, orderId: '', comment: updated.comment || `Продажа изделия — ${masterVal}`,
+        account: sourceVal, eventId: '', amount: moneyPart, masterName: masterVal, masterShare: null,
+        itemSaleId: updated.id, orderId: '', comment: (updated.comment || `Продажа изделия — ${masterVal}`) + (certAmt>0 ? ` (сертификат №${certR.cert.number}: ${certAmt} ₽)` : ''),
       };
-      updated.incomeId = incomeEntry.id;
-      const incIdx = state.incomes.findIndex(x=>x.id===incomeEntry.id);
-      if(incIdx >= 0) state.incomes[incIdx] = incomeEntry; else state.incomes.push(incomeEntry);
-      await saveIncomes();
+      if(moneyPart > 0){
+        updated.incomeId = incomeEntry.id;
+        const incIdx = state.incomes.findIndex(x=>x.id===incomeEntry.id);
+        if(incIdx >= 0) state.incomes[incIdx] = incomeEntry; else state.incomes.push(incomeEntry);
+        await saveIncomes();
+      } else if(updated.incomeId){
+        // изделие полностью оплачено сертификатом — живых денег нет, дохода в «Книге» не создаём
+        state.incomes = state.incomes.filter(x=>x.id !== updated.incomeId);
+        updated.incomeId = '';
+        await saveIncomes();
+      }
 
       const idx = state.itemSales.findIndex(x=>x.id===updated.id);
       if(idx >= 0) state.itemSales[idx] = updated; else state.itemSales.push(updated);
@@ -10655,6 +10771,7 @@
       showConfirmDeletePopup(`Удалить этот доход?${cascades ? ' Связанная запись в «Изделиях»/«Заказе»/«Сертификатах» также удалится.' : ' Действие необратимо.'}`, async ()=>{
       state.incomes = state.incomes.filter(x=>x.id !== state.modal.income.id);
       if(state.modal.income.itemSaleId){
+        await releaseItemSaleCert(state.itemSales.find(x=>x.id === state.modal.income.itemSaleId));
         state.itemSales = state.itemSales.filter(x=>x.id !== state.modal.income.itemSaleId);
         await saveItemSales();
       }
@@ -10750,12 +10867,16 @@
 
       // синхронизация с "Для менеджеров → Изделия"
       if(productVal === 'Изделие'){
-        const saleEntry = { id: updated.itemSaleId || uid(), date: updated.date, masterName: masterVal, revenue: updated.amount, source: accountVal, comment: updated.comment, incomeId: updated.id };
+        const prevSale = updated.itemSaleId ? state.itemSales.find(x=>x.id===updated.itemSaleId) : null;
+        const prevCertAmt = (prevSale && prevSale.certAmount) ? Number(prevSale.certAmount) : 0;
+        const saleEntry = { id: updated.itemSaleId || uid(), date: updated.date, masterName: masterVal, revenue: updated.amount + prevCertAmt, source: accountVal, comment: updated.comment, incomeId: updated.id };
+        if(prevCertAmt > 0){ saleEntry.certId = prevSale.certId; saleEntry.certRedemptionId = prevSale.certRedemptionId; saleEntry.certAmount = prevCertAmt; }
         updated.itemSaleId = saleEntry.id;
         const saleIdx = state.itemSales.findIndex(x=>x.id===saleEntry.id);
         if(saleIdx >= 0) state.itemSales[saleIdx] = saleEntry; else state.itemSales.push(saleEntry);
         await saveItemSales();
       } else if(updated.itemSaleId){
+        await releaseItemSaleCert(state.itemSales.find(x=>x.id === updated.itemSaleId));
         state.itemSales = state.itemSales.filter(x=>x.id !== updated.itemSaleId);
         await saveItemSales();
         updated.itemSaleId = '';
@@ -13964,7 +14085,7 @@
       .reduce((s,c)=>s+((c.amount!==undefined&&c.amount!==null&&!isNaN(c.amount))?Number(c.amount):0),0);
     // "Изделия" — продажа готовых изделий со стеллажа (раздел "Сертификаты / Изделия → Изделия"), как в npItemSalesRevenue.
     const itemSalesRevenueForecast = state.itemSales.filter(x=>x.date && x.date.startsWith(ym))
-      .reduce((s,x)=>s+((x.revenue!==undefined&&x.revenue!==null&&!isNaN(x.revenue))?Number(x.revenue):0),0);
+      .reduce((s,x)=>s+itemMoneyRev(x),0);
     // "Прочее" — доходы, вписанные прямо в "Книгу → Доходы" вручную, не привязанные ни к одному из потоков выше
     // (как npOtherIncomeRevenue) — без этой строки сумма потоков не сходилась бы с «Выручка (прогноз)».
     const certIncomeIdsSetDR = new Set(state.certificates.filter(c=>c.incomeId).map(c=>c.incomeId));
@@ -14344,7 +14465,7 @@
       .reduce((s,c)=> s + ((c.amount!==undefined&&c.amount!==null&&!isNaN(c.amount))?Number(c.amount):0), 0);
     const itemSalesRevenueForTotal = state.itemSales
       .filter(x=> x.date && x.date.startsWith(planYm))
-      .reduce((s,x)=> s + ((x.revenue!==undefined&&x.revenue!==null&&!isNaN(x.revenue))?Number(x.revenue):0), 0);
+      .reduce((s,x)=> s + itemMoneyRev(x), 0);
     const ordersRevenueForTotal = state.orders
       .filter(x=> x.date && x.date.startsWith(planYm))
       .reduce((s,x)=> s + ((x.revenue!==undefined&&x.revenue!==null&&!isNaN(x.revenue))?Number(x.revenue):0), 0);
@@ -14444,7 +14565,7 @@
         const mGuests = mEvts.reduce((s,e)=> s + ((e.guests!==undefined&&e.guests!==null&&!isNaN(e.guests))?Number(e.guests):0), 0);
         const mEventsRevenue = mEvts.reduce((s,e)=> s + eventRevenueForecast(e), 0);
         const mProfit = mEvts.reduce((s,e)=> s + eventProfitForecast(e), 0);
-        const mItemSalesRevenue = state.itemSales.filter(x=>x.date && x.date.startsWith(ym)).reduce((s,x)=> s + ((x.revenue!==undefined&&x.revenue!==null&&!isNaN(x.revenue))?Number(x.revenue):0), 0);
+        const mItemSalesRevenue = state.itemSales.filter(x=>x.date && x.date.startsWith(ym)).reduce((s,x)=> s + itemMoneyRev(x), 0);
         const mCertSalesRevenue = state.certificates.filter(c=>c.purpose==='sale' && c.status!=='refunded' && c.saleDate && c.saleDate.startsWith(ym)).reduce((s,c)=> s + ((c.amount!==undefined&&c.amount!==null&&!isNaN(c.amount))?Number(c.amount):0), 0);
         const mOrdersRevenue = state.orders.filter(x=>x.date && x.date.startsWith(ym)).reduce((s,x)=> s + ((x.revenue!==undefined&&x.revenue!==null&&!isNaN(x.revenue))?Number(x.revenue):0), 0);
         const mFullRevenue = mEventsRevenue + mItemSalesRevenue + mCertSalesRevenue + mOrdersRevenue;
@@ -14608,7 +14729,7 @@
     const npEventsRevenue = totalRevenue; // мероприятия, прогнозная (см. eventRevenueForecast)
     const npItemSalesRevenue = state.itemSales
       .filter(x=> x.date && x.date.startsWith(monthYm))
-      .reduce((s,x)=> s + ((x.revenue!==undefined&&x.revenue!==null&&!isNaN(x.revenue))?Number(x.revenue):0), 0);
+      .reduce((s,x)=> s + itemMoneyRev(x), 0);
     const npCertSalesRevenue = certMonthSales; // сертификаты, уже посчитаны выше
     const npOrdersRevenue = state.orders
       .filter(x=> x.date && x.date.startsWith(monthYm))
@@ -16281,6 +16402,43 @@
         ${h1}${h2}
       </div>`;
     })() : '';
+    // «Ждём»: остаток выручки с частных мероприятий («Частник», «Выезд») — сколько ещё должны доплатить, по месяцам
+    const awaitingByMonth = {};
+    state.events.forEach(e=>{
+      if(!e.date || (e.status!=='tentative' && e.status!=='offsite')) return;
+      const rem = eventRemainderTotal(e);
+      if(!(rem > 0)) return;
+      const ymA = e.date.slice(0,7);
+      const m = awaitingByMonth[ymA] || (awaitingByMonth[ymA] = {sum:0, items:[]});
+      m.sum += rem; m.items.push({ e, rem });
+    });
+    const awaitingMonthKeys = Object.keys(awaitingByMonth).sort();
+    const awaitingTotal = awaitingMonthKeys.reduce((s,k)=> s + awaitingByMonth[k].sum, 0);
+    const awaitingNowYm = todayStr().slice(0,7);
+    const awaitingSectionHtml = (state.currentRole !== 'marketer') ? `
+      <div class="analytics-section">
+        <h4>⏳ Ждём по частным мероприятиям: ${formatMoney(awaitingTotal)}</h4>
+        <div style="font-size:11.5px;color:var(--ink-soft);font-family:var(--font-mono);margin-bottom:8px;">Остаток выручки с мероприятий «Частник» и «Выезд»: полная сумма минус уже полученное (включая оплату сертификатами). Отменённые не считаются. Разбивка по месяцам мероприятий, нажмите на месяц — увидите список.</div>
+        ${awaitingMonthKeys.length === 0 ? `<div style="color:var(--ink-soft);font-size:13px;">Все частные мероприятия оплачены полностью.</div>` : awaitingMonthKeys.map(k=>{
+          const m = awaitingByMonth[k];
+          const past = k < awaitingNowYm;
+          const label = MONTHS[Number(k.slice(5,7))-1] + ' ' + k.slice(0,4);
+          return `
+          <details style="margin-bottom:6px;">
+            <summary style="cursor:pointer;display:flex;gap:10px;align-items:baseline;flex-wrap:wrap;">
+              <span style="width:150px;text-transform:capitalize;font-weight:${k===awaitingNowYm?'700':'500'};">${escapeHtml(label)}${k===awaitingNowYm?' <span style="font-weight:400;font-size:11px;color:var(--ink-soft);">· сейчас</span>':''}</span>
+              <span style="font-family:var(--font-mono);font-size:13.5px;font-weight:600;color:${past?'var(--status-red)':'var(--ink)'};">${formatMoney(m.sum)}</span>
+              <span style="font-size:11.5px;color:var(--ink-soft);">${m.items.length} меропр.${past?' · месяц прошёл, доплаты нет':''}</span>
+            </summary>
+            ${m.items.sort((a,b)=> (a.e.date+(a.e.time||'')).localeCompare(b.e.date+(b.e.time||''))).map(x=>`
+              <div class="stat-row" style="margin-top:4px;">
+                <div class="stat-label" style="width:150px;">${escapeHtml(formatDateText(x.e.date))}${x.e.time?' '+escapeHtml(x.e.time):''}</div>
+                <div style="flex:1;font-size:12.5px;">${escapeHtml(x.e.title||'без названия')}${prodTag(x.e.product)?' · '+escapeHtml(prodTag(x.e.product)):''}${x.e.status==='offsite'?' · выезд':''}</div>
+                <div style="font-family:var(--font-mono);font-size:12.5px;">${formatMoney(x.rem)}</div>
+              </div>`).join('')}
+          </details>`;
+        }).join('')}
+      </div>` : '';
     const fullHtml = `
       <div class="cal-nav">
         <div class="month-label">${monthLabel}</div>
@@ -16331,6 +16489,8 @@
         <div class="stat-row"><div class="stat-label" style="color:${refundsUnlinkedAmount>0?'var(--status-red)':'var(--ink-soft)'};">Возвраты за месяц</div><div style="flex:1;font-family:var(--font-mono);font-size:13px;color:${refundsUnlinkedAmount>0?'var(--status-red)':'var(--ink-soft)'};">−${formatMoney(refundsTotalAmount)} <span style="font-size:11px;">${refundsLinkedAmount>0?'(из них '+formatMoney(refundsLinkedAmount)+' уже учтено в выручке мероприятий)':''}${refundsCertLinkedAmount>0?' (из них '+formatMoney(refundsCertLinkedAmount)+' уже учтено в выручке сертификатов)':''}${refundsUnlinkedAmount>0?' ⚠ '+formatMoney(refundsUnlinkedAmount)+' — без привязки к мероприятию или сертификату, нигде больше не вычтено':''}</span></div></div>
       </div>
       ` : ''}
+
+      ${!isAdminFinRestricted ? awaitingSectionHtml : ''}
 
       <div class="analytics-section">
       <div class="analytics-section" style="padding:14px 16px;">
@@ -16397,7 +16557,7 @@
       .reduce((s,c)=> s + ((c.amount!==undefined&&c.amount!==null&&!isNaN(c.amount))?Number(c.amount):0), 0);
     const itemSalesRevenueForTotal = state.itemSales
       .filter(x=> x.date && x.date.startsWith(planYm))
-      .reduce((s,x)=> s + ((x.revenue!==undefined&&x.revenue!==null&&!isNaN(x.revenue))?Number(x.revenue):0), 0);
+      .reduce((s,x)=> s + itemMoneyRev(x), 0);
     const ordersRevenueForTotal = state.orders
       .filter(x=> x.date && x.date.startsWith(planYm))
       .reduce((s,x)=> s + ((x.revenue!==undefined&&x.revenue!==null&&!isNaN(x.revenue))?Number(x.revenue):0), 0);
@@ -19599,7 +19759,7 @@
     const npEventsRevenue = evts.reduce((s,e)=> s + eventRevenueForecast(e), 0);
     const npItemSalesRevenue = state.itemSales
       .filter(x=> x.date && x.date.startsWith(ym))
-      .reduce((s,x)=> s + ((x.revenue!==undefined&&x.revenue!==null&&!isNaN(x.revenue))?Number(x.revenue):0), 0);
+      .reduce((s,x)=> s + itemMoneyRev(x), 0);
     const npCertSalesRevenue = state.certificates
       .filter(c=> c.saleDate && c.saleDate.startsWith(ym) && c.purpose !== 'marketing' && c.status !== 'refunded')
       .reduce((s,c)=> s + ((c.amount!==undefined&&c.amount!==null&&!isNaN(c.amount))?Number(c.amount):0), 0);
@@ -20058,7 +20218,7 @@
         case 'revenue': {
           const evRev = state.events.filter(e=> inRange(e.date)).reduce((s,e)=> s+eventRevenueForecast(e), 0);
           const certRev = state.certificates.filter(c=> inRange(c.saleDate) && c.purpose!=='marketing' && c.status!=='refunded').reduce((s,c)=> s+((c.amount!==undefined&&c.amount!==null&&!isNaN(c.amount))?Number(c.amount):0), 0);
-          const itemRev = state.itemSales.filter(x=> inRange(x.date)).reduce((s,x)=> s+((x.revenue!==undefined&&x.revenue!==null&&!isNaN(x.revenue))?Number(x.revenue):0), 0);
+          const itemRev = state.itemSales.filter(x=> inRange(x.date)).reduce((s,x)=> s+itemMoneyRev(x), 0);
           const orderRev = state.orders.filter(x=> inRange(x.date)).reduce((s,x)=> s+((x.revenue!==undefined&&x.revenue!==null&&!isNaN(x.revenue))?Number(x.revenue):0), 0);
           const manualRev = manualRows.reduce((s,h)=> s+((h.revenue!==undefined&&h.revenue!==null&&!isNaN(h.revenue))?Number(h.revenue):0), 0);
           return evRev + certRev + itemRev + orderRev + manualRev;
