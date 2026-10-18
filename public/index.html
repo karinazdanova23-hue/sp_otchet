@@ -385,6 +385,9 @@
   .host-row.past{ opacity: 0.5; }
 
   /* ---------- certificates ---------- */
+  .list-search{ display:flex; align-items:center; gap:12px; margin:0 0 12px; flex-wrap:wrap; }
+  .list-search input{ flex:1; min-width:200px; max-width:440px; }
+  .list-search .ls-info{ font-size:12px; color:var(--ink-soft); font-family:var(--font-mono); }
   .cert-toolbar{ display:flex; justify-content:space-between; align-items:center; margin-bottom:18px; flex-wrap:wrap; gap:10px; }
   .cert-list{ display:flex; flex-direction:column; border-top: 1px solid var(--line); }
   .cert-row{
@@ -4640,7 +4643,57 @@
     else if(state.view === 'cashbox'){ attachCashboxEvents(); }
     else if(state.view === 'reportsfeed'){ attachReportsFeedEvents(); }
 
+    try{ installListSearch(); }catch(e){ console.error('list search failed', e); }
     if(state.modal){ renderModal(); }
+  }
+
+  // ---- общий поиск над списками записей (Книга: доходы/расходы, изделия, заказы, возвраты, заявки и т.д.) ----
+  // фильтрует уже нарисованные строки на месте; запрос запоминается, пока открыта страница, и применяется после каждой перерисовки
+  function installListSearch(){
+    if(!state.listSearch) state.listSearch = {};
+    if(state.view === 'book' && state.bookView === 'book-analytics') return;
+    const norm = (t)=> String(t||'').toLowerCase().replace(/ё/g,'е');
+    document.querySelectorAll('.cert-list').forEach((list, idx)=>{
+      if(list.closest('.overlay') || list.dataset.lsDone) return;
+      const parent = list.parentElement;
+      if(parent && parent.querySelector('#deposit-search, #outreach-search, #cert-search')) return; // у этих списков свой поиск
+      const rows = [...list.children].filter(c=>c.nodeType===1);
+      if(rows.length < 3) return;
+      list.dataset.lsDone = '1';
+      const key = state.view + '|' + (state.bookView||'') + '|' + (state.certView||'') + '|' + idx;
+      const box = document.createElement('div');
+      box.className = 'list-search no-print';
+      box.innerHTML = '<input type="search" placeholder="🔍 Поиск по списку: имя, комментарий, сумма, дата…"><span class="ls-info"></span>';
+      list.parentNode.insertBefore(box, list);
+      const input = box.querySelector('input'), info = box.querySelector('.ls-info');
+      const empty = document.createElement('div');
+      empty.className = 'host-empty'; empty.style.display = 'none'; empty.textContent = 'Ничего не найдено';
+      list.parentNode.insertBefore(empty, list.nextSibling);
+      const rowText = rows.map(r=> { const t = norm(r.textContent); return { t, d: t.replace(/[\s\u00a0]/g,'') }; });
+      const showSum = state.view === 'book' && !bookTotalsHidden(state.currentRole) && rows.every(r=>r.querySelector('.amount'));
+      const amountOf = (r)=> {
+        const a = r.querySelector('.amount'); if(!a) return 0;
+        const v = parseFloat(a.textContent.replace(/[\s\u00a0₽]/g,'').replace(',','.').replace(/[^0-9.\-]/g,''));
+        return isNaN(v) ? 0 : v;
+      };
+      const isCollection = (r)=>{ const id = r.dataset.eid; if(!id) return false; const e = state.expenses.find(x=>x.id===id); return !!(e && e.safeTransferType==='collection'); };
+      const apply = ()=>{
+        const q = norm(input.value).trim();
+        state.listSearch[key] = input.value;
+        const tokens = q ? q.split(/\s+/) : [];
+        let found = 0, sum = 0;
+        rows.forEach((r,i)=>{
+          const ok = tokens.every(tok=> rowText[i].t.includes(tok) || rowText[i].d.includes(tok.replace(/[\s\u00a0]/g,'')));
+          r.style.display = ok ? '' : 'none';
+          if(ok){ found++; if(showSum && !isCollection(r)) sum += amountOf(r); }
+        });
+        empty.style.display = (tokens.length && found===0) ? '' : 'none';
+        info.textContent = tokens.length ? `Найдено: ${found} из ${rows.length}` + (showSum && found ? ` · на сумму ${formatMoney(Math.round(sum*100)/100)}` : '') : '';
+      };
+      input.value = state.listSearch[key] || '';
+      input.addEventListener('input', apply);
+      apply();
+    });
   }
 
   function renderTodayView(){
@@ -6689,7 +6742,10 @@
     const query = (state.certSearchQuery||'').trim();
     let certs = [...state.certificates].sort((a,b)=> (Number(b.number)||0) - (Number(a.number)||0));
     if(query){
-      certs = certs.filter(c=> String(c.number).includes(query));
+      {
+        const qn = query.toLowerCase().replace(/ё/g,'е');
+        certs = certs.filter(c=> String(c.number).includes(query) || [c.ownerName, c.ownerContact, c.comment, c.channel, String(c.amount||'')].some(v=> String(v||'').toLowerCase().replace(/ё/g,'е').includes(qn)));
+      }
     }
 
     const printedCount = state.certificates.filter(c=>c.certType==='Печатный').length;
@@ -6713,7 +6769,7 @@
     if(query){
       // при поиске — плоский список, без группировки, чтобы результат было видно сразу
       listHtml = certs.length === 0
-        ? `<div class="host-empty">Ничего не найдено по номеру «${escapeHtml(query)}»</div>`
+        ? `<div class="host-empty">Ничего не найдено по запросу «${escapeHtml(query)}»</div>`
         : `<div class="cert-list">${certs.map(renderCertRow).join('')}</div>`;
     } else if(certs.length === 0){
       listHtml = `<div class="host-empty">Сертификатов пока нет</div>`;
@@ -6770,7 +6826,7 @@
         </div>
       </div>
       <div class="field" style="max-width:260px;margin-bottom:14px;">
-        <input type="text" id="cert-search" value="${escapeHtml(query)}" placeholder="Поиск по номеру…" inputmode="numeric">
+        <input type="text" id="cert-search" value="${escapeHtml(query)}" placeholder="🔍 Поиск: номер, имя, контакт, сумма…">
       </div>
       ${(!query && certs.length>0) ? `<div style="display:flex;gap:8px;margin-bottom:8px;">
         <button class="btn btn-ghost" id="cert-expand-all" style="padding:4px 10px;font-size:12px;">Развернуть всё</button>
@@ -8394,6 +8450,14 @@
       if(!sourceVal) markInvalid('l-source');
       if(!productVal) markInvalid('l-product');
       if(revenueRaw === '') markInvalid('l-revenue');
+      // проданная заявка не может быть с нулевой выручкой — такая продажа искажает конверсию и средний чек
+      const soldZeroRevenue = soldVal && revenueRaw !== '' && !(Number(revenueRaw) > 0);
+      if(soldZeroRevenue){
+        markInvalid('l-revenue');
+        showGapWarningBanner('Заявка отмечена как «Продано» — укажите выручку больше нуля.');
+        if(firstInvalid && firstInvalid.scrollIntoView) firstInvalid.scrollIntoView({block:'center', behavior:'smooth'});
+        return;
+      }
       const saleDateMissing = soldVal && !saleDateVal;
       if(saleDateMissing) markInvalid('l-sale-date');
       // заявка со статусом "Продано" обязательно должна быть привязана либо к мероприятию, либо к заказу —
@@ -8598,7 +8662,8 @@
         if(el) el.style.borderColor = '';
       });
       const dateVal = overlay.querySelector('#is-date').value;
-      const masterVal = overlay.querySelector('#is-master').value.trim();
+      const canonMaster = (v)=>{ const h = (state.hostsList||[]).find(x=>x.toLowerCase()===v.toLowerCase()); return h || v; }; // имя как в списке ведущих, иначе «василена» и «Василена» считались бы разными людьми
+      const masterVal = canonMaster(overlay.querySelector('#is-master').value.trim());
       const revenueRaw = overlay.querySelector('#is-revenue').value;
       const sourceVal = overlay.querySelector('#is-source').value;
       const commentVal = overlay.querySelector('#is-comment').value.trim();
@@ -10529,7 +10594,35 @@
     const catList = Object.entries(byCategory).filter(([k,v])=>v>0).sort((a,b)=>b[1]-a[1]);
     const maxCat = Math.max(1, ...catList.map(x=>x[1]));
 
+    // разбивка зарплаты по сотрудникам за период (видно только руководителю — как и сами записи «Зарплата»)
+    const salaryWho = (e)=> (e.master||'').trim() || ((e.netProfitRef && (e.comment||'').includes(': ')) ? e.comment.split(': ').slice(1).join(': ').trim() : '') || 'Без имени';
+    const bySalaryPerson = {};
+    if(isOwner && !hideTotals){
+      expensesP.filter(e=> e.category==='Зарплата' && e.safeTransferType!=='collection' && !e.safeTransfer).forEach(e=>{
+        const who = salaryWho(e);
+        const amt = (e.amount!==undefined&&e.amount!==null&&!isNaN(e.amount))?Number(e.amount):0;
+        if(!bySalaryPerson[who]) bySalaryPerson[who] = { sum:0, n:0 };
+        bySalaryPerson[who].sum += amt; bySalaryPerson[who].n++;
+      });
+    }
+    const salaryPersonList = Object.entries(bySalaryPerson).filter(([k,v])=>v.sum>0).sort((a,b)=>b[1].sum-a[1].sum);
+    const salaryPersonTotal = salaryPersonList.reduce((s,[k,v])=>s+v.sum,0);
+    const maxSalaryPerson = Math.max(1, ...salaryPersonList.map(x=>x[1].sum));
+
     return `
+      ${salaryPersonList.length ? `
+      <div class="analytics-section" style="margin-bottom:20px;">
+        <h4>Зарплата по сотрудникам — кому сколько выдано · ${formatMoney(salaryPersonTotal)}</h4>
+        ${salaryPersonList.map(([who,v])=>`
+          <div class="stat-row">
+            <div class="stat-label">${escapeHtml(who)}</div>
+            <div class="stat-bar-track"><div class="stat-bar-fill" style="width:${Math.round(v.sum/maxSalaryPerson*100)}%;background:var(--accent);"></div></div>
+            <div class="stat-count" style="width:auto;font-size:12px;">${formatMoney(v.sum)} · ${v.n} ${v.n===1?'выдача':(v.n<5?'выдачи':'выдач')}</div>
+          </div>
+        `).join('')}
+        <div style="font-size:11.5px;color:var(--ink-soft);margin-top:6px;">За выбранный период (месяц или год). Выдача 1–2 числа за вторую половину прошлого месяца считается прошлым месяцем. Поиск по имени ниже покажет все выдачи этого человека.</div>
+      </div>
+      ` : ''}
       ${(catList.length && !hideTotals) ? `
       <div class="analytics-section" style="margin-bottom:20px;">
         <h4>Расходы по категориям</h4>
@@ -10551,7 +10644,7 @@
           ${items.map(e=>`
             <div class="expense-row" data-eid="${e.id}">
               <div class="cell">${e.date ? formatDateText(e.date) : '—'}${expenseShiftedToOtherMonth(e) ? `<div style="font-size:10.5px;color:var(--ink-soft);">за ${MONTHS[parseInt(expenseAccrualDate(e).slice(5,7),10)-1].toLowerCase()}</div>` : ''}</div>
-              <div class="cell">${escapeHtml(e.category||'')}${(e.receiptIds&&e.receiptIds.length)?` <span title="Приложен чек">📎</span>`:''}${e.ownerOnly?' <span title="Из «Ручные расходы» — редактируется там, видно только владельцу" style="opacity:.55;">🔒</span>':''}${e.category==='Материалы'&&e.direction?'<br><span style="color:var(--ink-soft);font-size:11px;">'+escapeHtml(e.direction)+'</span>':''}${e.category==='Зарплата'&&e.master?'<br><span style="color:var(--ink-soft);font-size:11px;">'+escapeHtml(e.master)+'</span>':''}</div>
+              <div class="cell">${escapeHtml(e.category||'')}${(isOwner && e.category==='Зарплата') ? ` · ${escapeHtml(salaryWho(e))}` : ''}${(e.receiptIds&&e.receiptIds.length)?` <span title="Приложен чек">📎</span>`:''}${e.ownerOnly?' <span title="Из «Ручные расходы» — редактируется там, видно только владельцу" style="opacity:.55;">🔒</span>':''}${e.category==='Материалы'&&e.direction?'<br><span style="color:var(--ink-soft);font-size:11px;">'+escapeHtml(e.direction)+'</span>':''}${e.category==='Зарплата'&&e.master?'<br><span style="color:var(--ink-soft);font-size:11px;">'+escapeHtml(e.master)+'</span>':''}</div>
               <div class="cell">${escapeHtml(e.source||'')}</div>
               <div class="amount">${e.amount!==undefined&&e.amount!==null ? formatMoneyPrecise(e.amount) : ''}</div>
               <div class="cell">${escapeHtml(e.responsible||'')}</div>
@@ -10684,7 +10777,7 @@
             </div>
             <div class="field">
               <label>Сумма (₽)</label>
-              <input type="number" id="i-amount" value="${income.amount!==undefined&&income.amount!==null?income.amount:''}" min="0" step="0.01" placeholder="Например: 5000 или 5000.50">
+              <input type="text" inputmode="decimal" autocomplete="off" id="i-amount" value="${income.amount!==undefined&&income.amount!==null?income.amount:''}" placeholder="Например: 5000 или 300+450+1200">
             </div>
           </div>
           <div class="row2">
@@ -10772,6 +10865,7 @@
       });
     }
 
+    attachMoneyCalc(overlay.querySelector('#i-amount'));
     const delBtn = overlay.querySelector('#btn-del-income');
     if(delBtn) delBtn.onclick = ()=>{
       if(state.currentRole !== 'owner'){
@@ -10831,13 +10925,14 @@
         if(el) el.style.borderColor = '';
       });
       const dateVal = overlay.querySelector('#i-date').value;
-      const amountRaw = overlay.querySelector('#i-amount').value;
+      const amountRaw = moneyFieldValue(overlay.querySelector('#i-amount'));
       const operationVal = overlay.querySelector('#i-operation').value;
       const productVal = overlay.querySelector('#i-product').value;
       const accountVal = overlay.querySelector('#i-account').value;
       const yuklientVal = overlay.querySelector('#i-yuklient') ? overlay.querySelector('#i-yuklient').checked : false;
       const commentVal = overlay.querySelector('#i-comment').value.trim();
-      const masterVal = overlay.querySelector('#i-master').value.trim();
+      const canonMaster = (v)=>{ const h = (state.hostsList||[]).find(x=>x.toLowerCase()===v.toLowerCase()); return h || v; }; // имя как в списке ведущих, иначе «василена» и «Василена» считались бы разными людьми
+      const masterVal = canonMaster(overlay.querySelector('#i-master').value.trim());
       const orderMasterVal = overlay.querySelector('#i-order-master').value.trim();
       const orderShareRaw = overlay.querySelector('#i-order-share').value;
 
@@ -10934,7 +11029,7 @@
             </div>
             <div class="field">
               <label>Сумма (₽)</label>
-              <input type="number" id="ex-amount" value="${expense.amount!==undefined&&expense.amount!==null?expense.amount:''}" min="0" step="0.01" placeholder="Например: 5000 или 5000.50">
+              <input type="text" inputmode="decimal" autocomplete="off" id="ex-amount" value="${expense.amount!==undefined&&expense.amount!==null?expense.amount:''}" placeholder="Например: 5000 или 300+450+1200">
             </div>
           </div>
           <div class="field">
@@ -11096,6 +11191,7 @@
       renderReceipts();
     });
 
+    attachMoneyCalc(overlay.querySelector('#ex-amount'));
     const delBtn = overlay.querySelector('#btn-del-expense');
     if(delBtn) delBtn.onclick = ()=>{
       if(state.currentRole !== 'owner'){
@@ -11139,7 +11235,7 @@
         if(el) el.style.borderColor = '';
       });
       const dateVal = overlay.querySelector('#ex-date').value;
-      const amountRaw = overlay.querySelector('#ex-amount').value;
+      const amountRaw = moneyFieldValue(overlay.querySelector('#ex-amount'));
       const categoryVal = overlay.querySelector('#ex-category').value;
       const directionVal = overlay.querySelector('#ex-direction-search').value.trim();
       const masterVal = overlay.querySelector('#ex-master-search').value.trim();
@@ -13646,6 +13742,75 @@
   }
   // оставлена для обратной совместимости вызовов в коде — теперь то же самое, что formatMoney
   function formatMoneyPrecise(n){ return formatMoney(n); }
+
+  // ---- мини-калькулятор в полях суммы: можно писать «300+450+1200», «2500-300», «150*4», скобки — без eval ----
+  function evalMoneyExpr(str){
+    const src = String(str==null?'':str).replace(/[\s\u00a0]/g,'').replace(/,/g,'.').replace(/[×xхХX]/g,'*').replace(/[÷:]/g,'/').replace(/[−–—]/g,'-');
+    if(!src) return null;
+    if(!/^[0-9.+\-*\/()]+$/.test(src)) return null;
+    let i = 0;
+    const peek = ()=> src[i];
+    function num(){
+      let j = i;
+      while(i < src.length && /[0-9.]/.test(src[i])) i++;
+      if(j === i) throw new Error('num');
+      const v = parseFloat(src.slice(j, i));
+      if(isNaN(v)) throw new Error('num');
+      return v;
+    }
+    function factor(){
+      if(peek() === '-'){ i++; return -factor(); }
+      if(peek() === '+'){ i++; return factor(); }
+      if(peek() === '('){ i++; const v = expr(); if(peek() !== ')') throw new Error('paren'); i++; return v; }
+      return num();
+    }
+    function term(){
+      let v = factor();
+      while(peek() === '*' || peek() === '/'){
+        const op = src[i++]; const r = factor();
+        if(op === '*') v *= r; else { if(r === 0) throw new Error('div0'); v /= r; }
+      }
+      return v;
+    }
+    function expr(){
+      let v = term();
+      while(peek() === '+' || peek() === '-'){ const op = src[i++]; const r = term(); v = op === '+' ? v + r : v - r; }
+      return v;
+    }
+    try{
+      const v = expr();
+      if(i !== src.length || !isFinite(v)) return null;
+      return Math.round(v * 100) / 100;
+    }catch(e){ return null; }
+  }
+  function moneyExprHasOperator(str){ return /[0-9)][\s\u00a0]*[+\-*\/×÷xх:(][\s\u00a0]*[0-9(.\-]/.test(String(str||'')); }
+  // значение поля суммы как число-строка ('' если не получилось посчитать)
+  function moneyFieldValue(el){ const v = evalMoneyExpr(el.value); return v === null ? '' : String(v); }
+  function attachMoneyCalc(input){
+    if(!input) return;
+    const hint = document.createElement('div');
+    hint.style.cssText = 'font-size:12px;font-family:var(--font-mono);margin-top:4px;color:var(--ink-soft);min-height:16px;';
+    input.insertAdjacentElement('afterend', hint);
+    const upd = ()=>{
+      const raw = input.value;
+      if(moneyExprHasOperator(raw)){
+        const v = evalMoneyExpr(raw);
+        if(v === null){ hint.style.color = 'var(--status-red)'; hint.textContent = 'Не получается посчитать — проверьте выражение'; }
+        else { hint.style.color = 'var(--status-green)'; hint.textContent = '= ' + formatMoney(v) + '  (нажмите Enter или уйдите из поля — подставится итог)'; }
+      } else { hint.style.color = 'var(--ink-soft)'; hint.textContent = raw ? '' : 'Можно считать прямо здесь: 300+450+1200'; }
+    };
+    const commit = ()=>{
+      if(moneyExprHasOperator(input.value)){
+        const v = evalMoneyExpr(input.value);
+        if(v !== null){ input.dataset.expr = input.value; input.value = String(v); }
+      }
+      upd();
+    };
+    input.addEventListener('input', upd);
+    input.addEventListener('blur', commit);
+    input.addEventListener('keydown', e=>{ if(e.key === 'Enter'){ e.preventDefault(); commit(); } });
+    upd();
+  }
 
   // ---------- закупки: списание за период и прогноз потребности ----------
   function materialUsageStats(days){
@@ -17002,8 +17167,22 @@
     });
   }
 
+  // после «Выдано» / отмены выдачи страница перерисовывается — запоминаем, какие списки были раскрыты и где пролистано,
+  // чтобы список сотрудников не схлопывался и можно было сразу нажимать «Выдано» у следующего
+  function snapshotOpenDetails(){
+    state._reopen = { idx: [...document.querySelectorAll('details')].map((d,i)=> d.open ? i : -1).filter(i=>i>=0), y: window.scrollY };
+  }
+  function restoreOpenDetails(){
+    const r = state._reopen; if(!r) return;
+    state._reopen = null;
+    const ds = [...document.querySelectorAll('details')];
+    r.idx.forEach(i=>{ if(ds[i]) ds[i].open = true; });
+    window.scrollTo(0, r.y);
+    setTimeout(()=>window.scrollTo(0, r.y), 0);
+  }
   function attachAnalyticsEvents(){
     applyCollapsibleSections();
+    restoreOpenDetails();
     document.querySelectorAll('[data-salpay]').forEach(b=>{
       b.onclick = (ev)=>{
         ev.stopPropagation();
@@ -17019,6 +17198,7 @@
           });
           await saveExpenses();
           recordAction('Зарплата выдана', `${name} · ${halfLabel} · ${formatMoney(amount)} · ${source}`);
+          snapshotOpenDetails();
           render();
         });
       };
@@ -17031,6 +17211,7 @@
           const ids = new Set(salaryPayMarkers(name, ym, half).map(e=>e.id));
           state.expenses = state.expenses.filter(e=> !ids.has(e.id));
           await saveExpenses();
+          snapshotOpenDetails();
           render();
         });
       };
