@@ -3874,6 +3874,18 @@
   }
   // ЗП менеджеров за месяц: оклад + % от выручки "Частник" + % от выручки "По расписанию" + % от суммы проданных сертификатов.
   // Единая цифра на всех менеджеров (не привязана к конкретному человеку — см. обсуждение при добавлении).
+  // ЗП менеджеров в чистой прибыли: по каждому менеджеру из MANAGER_LIST — по умолчанию авто-расчёт (оклад + проценты),
+  // но владелец может вписать свою сумму на месяц (netProfitManual[ym].managers = {имя: сумма})
+  function computeManagersPayForMonth(ym){
+    const auto = computeManagerSalaryForMonth(ym).total;
+    const ov = ((state.netProfitManual && state.netProfitManual[ym]) || {}).managers || {};
+    const rows = MANAGER_LIST.map(name=>{
+      const v = ov[name];
+      const edited = v!==undefined && v!==null && v!=='' && !isNaN(Number(v));
+      return { name, amount: edited ? Number(v) : auto, edited, auto };
+    });
+    return { auto, rows, total: rows.reduce((s,r)=>s+r.amount,0) };
+  }
   function computeManagerSalaryForMonth(ym){
     const revenueByStatus = { confirmed: 0, tentative: 0 };
     // "Выездные" считаем вместе с "Частником" (та же ставка) — выездное мероприятие такая же
@@ -8080,7 +8092,7 @@
       <div style="font-size:11.5px;color:var(--ink-soft);font-family:var(--font-mono);margin-bottom:16px;">Общая ЗП менеджеров за месяц — оклад + проценты от выручки студии. Не привязана к конкретному сотруднику.</div>
 
       <div class="analytics-summary" style="margin-bottom:20px;">
-        <div class="summary-card"><div class="num" style="font-size:22px;">${formatMoney(calc.total)}</div><div class="label">ИТОГО ЗА МЕСЯЦ</div></div>
+        <div class="summary-card"><div class="num" style="font-size:22px;">${formatMoney(calc.total)}</div><div class="label">ИТОГО ЗА МЕСЯЦ — НА ОДНОГО МЕНЕДЖЕРА</div></div>
       </div>
 
       <div class="analytics-section">
@@ -15107,7 +15119,7 @@
     npHostessSalary += npHostessBonusTotal;
     const npManual = (state.netProfitManual && state.netProfitManual[monthYm]) || {};
     // ЗП менеджеров считается автоматически по той же формуле, что и в «Для менеджеров → ЗП менеджеров»
-    const npManagerSalary = computeManagerSalaryForMonth(monthYm).total;
+    const npManagerSalary = computeManagersPayForMonth(monthYm).total;
     const npRent = (npManual.rent!==undefined && npManual.rent!==null) ? Number(npManual.rent) : 0;
     const npStaffList = npManual.staff || [];
     const npStaffTotal = npStaffList.reduce((s,x)=> s + (Number(x.amount)||0), 0);
@@ -15132,7 +15144,7 @@
       {label:'Прочие расходы (Книга)', amount: npOtherLedgerCost, breakdown: npExpenseBreakdown.otherLedger},
       {label:'ЗП мастеров (выдано + будущие записи)', amount: npMastersSalary, breakdown: computeMastersCashSalary(monthYm).rows},
       {label:'ЗП админов', amount: npHostessSalary, breakdown: npStaffBreakdown.hostess},
-      {label:'ЗП менеджеров (авто)', amount: npManagerSalary, note: MANAGER_LIST.length ? `общей суммой на ${MANAGER_LIST.length} чел. (${MANAGER_LIST.join(', ')}), не делится по сотруднику` : ''},
+      {label:'ЗП менеджеров', amount: npManagerSalary, breakdown: computeManagersPayForMonth(monthYm).rows.map(r=>({name: r.name + (r.edited ? ' (изменено вручную)' : ' (авто)'), amount: r.amount}))},
       {label:'Аренда', amount: npRent},
       ...npStaffList.map(s=>({label: s.name||'Сотрудник', amount: Number(s.amount)||0})),
       ...npCustomList.map(c=>({label: c.name||'Статья расхода', amount: Number(c.amount)||0})),
@@ -15508,9 +15520,9 @@
           <div style="display:flex;flex-wrap:wrap;gap:8px;">
             ${!isAdminFinRestricted ? `<button class="btn btn-ghost analytics-panel-btn" data-panel="plan" style="${hasAnyPlan?'':'border-color:var(--accent);color:var(--accent);'}">🎯 Выполнение плана</button>` : ''}
             <button class="btn btn-ghost" id="btn-edit-plan">✏ Задать план</button>
-            <button class="btn btn-ghost owner-panel-btn" data-panel="netprofit" style="border-color:#6B4A1E;color:#6B4A1E;">🔒 Чистая прибыль</button>
-            <button class="btn btn-ghost owner-panel-btn" data-panel="netprofit-calc" style="border-color:#6B4A1E;color:#6B4A1E;">🧮 Калькулятор плана</button>
-            <button class="btn btn-ghost owner-panel-btn" data-panel="cashflow" style="border-color:#6B4A1E;color:#6B4A1E;">💵 Кэшфлоу</button>
+            ${state.currentRole==='owner' ? `<button class="btn btn-ghost owner-panel-btn" data-panel="netprofit" style="border-color:#6B4A1E;color:#6B4A1E;">🔒 Чистая прибыль</button>` : ''}
+            ${state.currentRole==='owner' ? `<button class="btn btn-ghost owner-panel-btn" data-panel="netprofit-calc" style="border-color:#6B4A1E;color:#6B4A1E;">🧮 Калькулятор плана</button>` : ''}
+            ${state.currentRole==='owner' ? `<button class="btn btn-ghost owner-panel-btn" data-panel="cashflow" style="border-color:#6B4A1E;color:#6B4A1E;">💵 Кэшфлоу</button>` : ''}
             <button class="btn btn-ghost analytics-panel-btn" data-panel="yearsummary">📆 Сводка по годам</button>
             <button class="btn btn-ghost analytics-panel-btn" data-panel="auditlog">📜 Журнал действий</button>
             <button class="btn btn-ghost analytics-panel-btn" data-panel="integrity" style="${(state.eventsIntegrityAlerts&&state.eventsIntegrityAlerts.length>0)?'border-color:var(--status-red);color:var(--status-red);':''}">🛡 Сохранность расписания</button>
@@ -16058,11 +16070,11 @@
       {id:'salary', label:'Зарплата'},
     ];
     // Зарплаты: руководитель видит всё; старший админ — только мастеров и админов; остальные роли — никаких
-    const FIN_TABS = state.currentRole==='admin' ? FIN_TABS_ALL.filter(t=>t.id==='salary') : (state.currentRole==='owner' ? FIN_TABS_ALL : FIN_TABS_ALL.filter(t=>t.id!=='salary'));
+    const FIN_TABS = state.currentRole==='admin' ? FIN_TABS_ALL.filter(t=>t.id==='salary') : (state.currentRole==='owner' ? FIN_TABS_ALL : FIN_TABS_ALL.filter(t=>t.id!=='salary' && t.id!=='profit'));
     let activeFinTab = (state.loggedInMasterName || state.loggedInHostessName) ? 'salary' : (state.analyticsFinTab || 'revenue');
     if(!state.loggedInMasterName && !state.loggedInHostessName){
       if(state.currentRole==='admin') activeFinTab = 'salary';
-      else if(state.currentRole!=='owner' && activeFinTab==='salary') activeFinTab = 'revenue';
+      else if(state.currentRole!=='owner' && (activeFinTab==='salary' || activeFinTab==='profit')) activeFinTab = 'revenue';
     }
     const finTabsHtml = `
       <div class="view-switch" style="margin-bottom:16px;">
@@ -16455,7 +16467,7 @@
           <h4 style="margin-top:0;">Сравнение: ${monthLabel} vs ${prevLabel}</h4>
           <div class="stat-row"><div class="stat-label">Мероприятий</div><div style="flex:1;font-size:13px;">${prevSum.total} → ${total}</div>${deltaHtml(total, prevSum.total, false)}</div>
           <div class="stat-row"><div class="stat-label">Выручка</div><div style="flex:1;font-size:13px;">${formatMoney(prevSum.totalRevenue)} → ${formatMoney(totalRevenue)}</div>${deltaHtml(totalRevenue, prevSum.totalRevenue, true)}</div>
-          <div class="stat-row"><div class="stat-label">Прибыль</div><div style="flex:1;font-size:13px;">${formatMoney(prevSum.totalProfit)} → ${formatMoney(totalProfit)}</div>${deltaHtml(totalProfit, prevSum.totalProfit, true)}</div>
+          ${state.currentRole==='owner' ? `<div class="stat-row"><div class="stat-label">Прибыль</div><div style="flex:1;font-size:13px;">${formatMoney(prevSum.totalProfit)} → ${formatMoney(totalProfit)}</div>${deltaHtml(totalProfit, prevSum.totalProfit, true)}</div>` : ''}
           <div class="stat-row"><div class="stat-label">Гостей</div><div style="flex:1;font-size:13px;">${prevSum.totalGuests} → ${totalGuests}</div>${deltaHtml(totalGuests, prevSum.totalGuests, false)}</div>
           <div class="stat-row"><div class="stat-label">Заполняемость</div><div style="flex:1;font-size:13px;">${prevSum.occupancyPct}% → ${occupancyPct}%</div>${deltaHtml(occupancyPct, prevSum.occupancyPct, false)} п.п.</div>
           ${productMovers.length ? `
@@ -16751,7 +16763,7 @@
         <div class="summary-card"><div class="num">${totalGuests}</div><div class="label">Гостей всего</div></div>
         ${!isAdminFinRestricted ? `
         <div class="summary-card"><div class="num" style="font-size:22px;">${formatMoney(totalRevenueAllSources)}</div><div class="label">Выручка за месяц <span style="font-weight:400;">(прогноз)</span></div></div>
-        <div class="summary-card" style="border-left:4px solid ${totalProfit>=0?'var(--status-green)':'var(--status-red)'};"><div class="num" style="font-size:22px;color:${totalProfit>=0?'var(--status-green)':'var(--status-red)'};">${formatMoney(totalProfit)}</div><div class="label">Прибыль за месяц <span style="font-weight:400;">(прогноз)</span></div></div>
+        ${state.currentRole==='owner' ? `<div class="summary-card" style="border-left:4px solid ${totalProfit>=0?'var(--status-green)':'var(--status-red)'};"><div class="num" style="font-size:22px;color:${totalProfit>=0?'var(--status-green)':'var(--status-red)'};">${formatMoney(totalProfit)}</div><div class="label">Прибыль за месяц <span style="font-weight:400;">(прогноз)</span></div></div>` : ''}
         ` : ''}
       </div>
 
@@ -16789,9 +16801,9 @@
             <button class="btn btn-ghost analytics-panel-btn" data-panel="integrity" style="${(state.eventsIntegrityAlerts&&state.eventsIntegrityAlerts.length>0)?'border-color:var(--status-red);color:var(--status-red);':''}">🛡 Сохранность расписания</button>
             <button class="btn btn-ghost analytics-panel-btn" data-panel="marketing">📣 Маркетинг</button>
             ${canSeeDailyReport ? `<button class="btn btn-ghost" id="btn-daily-report">📋 Отчёт дня</button>` : ''}
-          <button class="btn btn-ghost owner-panel-btn" data-panel="netprofit" style="border-color:#6B4A1E;color:#6B4A1E;">🔒 Чистая прибыль</button>
-            <button class="btn btn-ghost owner-panel-btn" data-panel="netprofit-calc" style="border-color:#6B4A1E;color:#6B4A1E;">🧮 Калькулятор плана</button>
-            <button class="btn btn-ghost owner-panel-btn" data-panel="cashflow" style="border-color:#6B4A1E;color:#6B4A1E;">💵 Кэшфлоу</button>
+          ${state.currentRole==='owner' ? `<button class="btn btn-ghost owner-panel-btn" data-panel="netprofit" style="border-color:#6B4A1E;color:#6B4A1E;">🔒 Чистая прибыль</button>` : ''}
+            ${state.currentRole==='owner' ? `<button class="btn btn-ghost owner-panel-btn" data-panel="netprofit-calc" style="border-color:#6B4A1E;color:#6B4A1E;">🧮 Калькулятор плана</button>` : ''}
+            ${state.currentRole==='owner' ? `<button class="btn btn-ghost owner-panel-btn" data-panel="cashflow" style="border-color:#6B4A1E;color:#6B4A1E;">💵 Кэшфлоу</button>` : ''}
         </div>
       </div>
 
@@ -19880,6 +19892,7 @@
     const label = MONTHS[cursor.getMonth()] + ' ' + cursor.getFullYear();
     const manual = (state.netProfitManual && state.netProfitManual[ym]) || {};
     const autoManagerSalary = computeManagerSalaryForMonth(ym).total;
+    const mgrOv = manual.managers || {};
     return `
       <div class="modal" style="max-width:460px;">
         <div class="modal-head">
@@ -19888,7 +19901,11 @@
         </div>
         <div class="modal-body">
           <div style="font-size:12px;color:var(--ink-soft);margin-top:-6px;">Вписываются вручную каждый месяц. Редактируется только владельцем — и при сохранении каждая сумма автоматически попадает отдельной записью в Книга → Расходы (с выбранным источником денег), но видно её там тоже только владельцу. Менять эти записи нужно здесь, а не в самой Книге.</div>
-          <div style="font-size:12px;color:var(--ink-soft);background:var(--cream);border-radius:var(--radius);padding:10px 12px;">ЗП менеджеров теперь считается автоматически (оклад + проценты от выручки) и сюда не вписывается — за ${escapeHtml(label)}: <strong>${formatMoney(autoManagerSalary)}</strong>. Посмотреть расчёт — вкладка «Для менеджеров → ЗП менеджеров».</div>
+          <div class="field" style="border-top:1px solid var(--line);padding-top:16px;">
+            <label style="font-family:var(--font-display);font-size:15px;font-weight:600;">ЗП менеджеров</label>
+            <div style="font-size:11.5px;color:var(--ink-soft);margin-top:-4px;margin-bottom:8px;">По умолчанию каждому считается автоматически (оклад + проценты): ${formatMoney(autoManagerSalary)}. Чтобы изменить — впишите свою сумму; пусто = авто.</div>
+            ${MANAGER_LIST.map((n,i)=>`<div class="row2" style="grid-template-columns:1fr 130px;margin-bottom:8px;align-items:center;"><span>${escapeHtml(n)}</span><input type="number" class="np-mgr-amount" data-mgr="${escapeHtml(n)}" value="${mgrOv[n]!==undefined&&mgrOv[n]!==null?mgrOv[n]:''}" placeholder="${autoManagerSalary}"></div>`).join('')}
+          </div>
           <div class="field">
             <label>Аренда (₽)</label>
             <div class="row2" style="grid-template-columns:1fr 130px;">
@@ -19990,8 +20007,11 @@
         staff: cleanedStaff,
         customExpenses: cleanedCustom,
       };
+      const mgrVals = {};
+      overlay.querySelectorAll('.np-mgr-amount').forEach(inp=>{ if(inp.value!=='' && !isNaN(parseFloat(inp.value))) mgrVals[inp.dataset.mgr] = parseFloat(inp.value); });
+      if(Object.keys(mgrVals).length) newManual.managers = mgrVals;
       if(!state.netProfitManual) state.netProfitManual = {};
-      const hasAny = newManual.rent!==null || cleanedStaff.length>0 || cleanedCustom.length>0;
+      const hasAny = newManual.rent!==null || cleanedStaff.length>0 || cleanedCustom.length>0 || Object.keys(mgrVals).length>0;
       if(hasAny) state.netProfitManual[ym] = newManual; else delete state.netProfitManual[ym];
       syncNetProfitLinkedExpenses(ym, hasAny ? newManual : {});
       await saveNetProfitManual();
@@ -20121,7 +20141,7 @@
     }
     npHostessSalary += npHostessAdjustments;
     npHostessSalary += Object.values((state.hostessBonuses && state.hostessBonuses[ym]) || {}).reduce((s,b)=> s + (Number((b&&b.amount)||0)), 0);
-    const npManagerSalary = computeManagerSalaryForMonth(ym).total;
+    const npManagerSalary = computeManagersPayForMonth(ym).total;
 
     // расходы из «Книги → Расходы»: «Маркетинг» — отдельной строкой (как и раньше), «Аренда»/«Зарплата» —
     // не берём совсем, для них уже есть свои места (ручное поле «Аренда» и автосчёт ЗП выше) — те же суммы
