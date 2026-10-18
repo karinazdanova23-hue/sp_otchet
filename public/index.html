@@ -6646,11 +6646,13 @@
     if(isAdminNoRefundsConversion && ['refunds','conversion'].includes(state.certView)){
       state.certView = 'certificates';
     }
+    if(state.certView==='salary-adj' && !['owner','admin'].includes(state.currentRole)) state.certView='certificates';
+    if(state.certView==='manager-salary' && state.currentRole!=='owner') state.certView='certificates';
     const subTabsHtml = `
       <div class="cert-subtabs">
         <button data-certview="certificates" class="${state.certView==='certificates'?'active':''}">Сертификаты</button>
-        ${!isHostessLimited ? `<button data-certview="salary-adj" class="${state.certView==='salary-adj'?'active':''}">Корректировки ЗП</button>` : ''}
-        ${!isHostessLimited ? `<button data-certview="manager-salary" class="${state.certView==='manager-salary'?'active':''}">ЗП менеджеров</button>` : ''}
+        ${(!isHostessLimited && ['owner','admin'].includes(state.currentRole)) ? `<button data-certview="salary-adj" class="${state.certView==='salary-adj'?'active':''}">Корректировки ЗП</button>` : ''}
+        ${(!isHostessLimited && state.currentRole==='owner') ? `<button data-certview="manager-salary" class="${state.certView==='manager-salary'?'active':''}">ЗП менеджеров</button>` : ''}
         ${!hideRefundsConversion ? `<button data-certview="refunds" class="${state.certView==='refunds'?'active':''}">Возвраты</button>` : ''}
         ${!hideRefundsConversion ? `<button data-certview="conversion" class="${state.certView==='conversion'?'active':''}">Конверсия</button>` : ''}
         <button data-certview="item-sales" class="${state.certView==='item-sales'?'active':''}">Изделия</button>
@@ -9640,7 +9642,7 @@
           <div class="stat-row">
             ${cbPeriod!=='day' ? `<div class="stat-label" style="width:90px;font-size:12px;">${escapeHtml(formatDateText(e.date))}</div>` : ''}
             <div class="stat-label" style="width:140px;">${escapeHtml(e.category||'расход')}</div>
-            <div style="flex:1;font-size:12.5px;">${escapeHtml((e.category==='Зарплата' && !['owner','assistant'].includes(state.currentRole)) ? 'выплата сотруднику' : (e.comment||''))}</div>
+            <div style="flex:1;font-size:12.5px;">${escapeHtml((e.category==='Зарплата' && state.currentRole!=='owner') ? 'выплата сотруднику' : (e.comment||''))}</div>
             <div style="font-family:var(--font-mono);font-size:12.5px;color:var(--status-red);">−${formatMoney(e.amount)}</div>
           </div>
         `).join('') : `<div style="color:var(--ink-soft);font-size:13px;">Наличных расходов за этот период не было.</div>`}
@@ -14103,6 +14105,41 @@
   // отдельную запись — так и попросила Карина: "не детально каждое мероприятие или каждая краска, а более
   // крупно". Та же логика, что и сами итоговые суммы (npMaterialsCost/npMarketingCost/npOtherLedgerCost
   // в renderAnalytics), чтобы сумма позиций списка всегда точно совпадала с числом в заголовке строки.
+  // «ЗП мастеров» в чистой прибыли = реально ВЫДАННАЯ мастерам зарплата (расходы «Зарплата» из Книги, отнесённые
+  // к этому месяцу) + будущие мероприятия месяца, где уже есть записи гостей (их ЗП ещё не выдана, но заведомо будет)
+  // «Материалы» в чистой прибыли = реальные траты из Книги (расходы категории «Материалы» с датой в этом месяце),
+  // а не расчётная себестоимость мероприятий. Разбивка — по направлению, если оно указано в расходе.
+  function computeMaterialsLedger(ym){
+    const map = {};
+    (state.expenses||[]).forEach(e=>{
+      if(e.category!=='Материалы' || e.safeTransfer || e.netProfitRef) return;
+      if(!(e.date && e.date.startsWith(ym))) return;
+      const a = Number(e.amount)||0; if(!a) return;
+      const k = (e.direction||'').trim() || 'Без направления';
+      map[k] = (map[k]||0) + a;
+    });
+    const rows = Object.entries(map).map(([name,amount])=>({name,amount})).sort((a,b)=>b.amount-a.amount);
+    return { total: rows.reduce((s,r)=>s+r.amount,0), rows };
+  }
+  function computeMastersCashSalary(ym){
+    const byName = {};
+    const add = (name, amount)=>{ const n=(name||'').trim(); if(!n||!amount) return; byName[n]=(byName[n]||0)+amount; };
+    const canon = v=>{ const h=(state.hostsList||[]).find(x=>x.toLowerCase()===(v||'').trim().toLowerCase()); return h||(v||'').trim(); };
+    const isHost = n=> HOSTESS_LIST.some(h=>h.toLowerCase()===(n||'').trim().toLowerCase());
+    (state.expenses||[]).forEach(e=>{
+      if(e.category!=='Зарплата' || e.netProfitRef || e.safeTransfer) return;
+      const who = (e.master||'').trim();
+      if(!who || isHost(who)) return;
+      const inMonth = e.salaryPayYm ? e.salaryPayYm===ym : (e.date && e.date.startsWith(ym));
+      if(!inMonth) return;
+      add(canon(who), Number(e.amount)||0);
+    });
+    const today = todayStr();
+    state.events.filter(e=> e.date && e.date.startsWith(ym) && e.date>today && e.status!=='marketing' && e.status!=='cancelled' && scheduleGuestsCount(e)>0)
+      .forEach(e=> eventHostsWithPay(e).forEach(h=> add(canon(h.name), h.pay)));
+    const rows = Object.entries(byName).filter(([,a])=>a).map(([name,amount])=>({name,amount})).sort((a,b)=>b.amount-a.amount);
+    return { total: rows.reduce((s,r)=>s+r.amount,0), rows };
+  }
   function computeExpenseLineBreakdownsForMonth(ym){
     const evtsM = state.events.filter(e=> e.date && e.date.startsWith(ym));
     const bucket = (map, key, amount)=>{ if(!amount) return; const k = key || 'Без направления'; map[k] = (map[k]||0) + amount; };
@@ -14113,12 +14150,7 @@
     // за вычетом доли блогеров/гостей, которая уходит в "Маркетинг" (см. eventMarketingGuestsMaterialsCost).
     // Заказы на изготовление — отдельной строкой, у них нет своего направления.
     const materialsMap = {};
-    evtsM.filter(e=> e.status!=='marketing').forEach(e=>{
-      const amount = eventMaterialsCostExclMarketingSpend(e) - eventMarketingGuestsMaterialsCost(e);
-      bucket(materialsMap, eventDirection(e), amount);
-    });
-    const ordersMaterialsTotal = state.orders.filter(x=> x.date && x.date.startsWith(ym)).reduce((s,x)=> s + orderMaterialsCost(x), 0);
-    bucket(materialsMap, 'Заказы (изготовление на заказ)', ordersMaterialsTotal);
+    computeMaterialsLedger(ym).rows.forEach(r=> bucket(materialsMap, r.name, r.amount));
 
     // "Маркетинг": раскладываем по направлению из раздела "Маркетинг → Статистика" (офлайн маркетинг,
     // блогеры, листовки и т.п. — см. MARKETING_DIRECTIONS) — каждая такая трата зеркалится в "Книгу"
@@ -14134,10 +14166,9 @@
       const spend = spendByExpenseId[e.id];
       bucket(marketingMap, spend && spend.direction ? spend.direction : 'Прочее (добавлено вручную в Книге)', amount);
     });
-    const marketingEventsTotal = evtsM.filter(e=> e.status==='marketing').reduce((s,e)=> s + eventTotalMasterPay(e) + eventMaterialsCostExclMarketingSpend(e), 0);
-    bucket(marketingMap, 'Съёмки/промо-мероприятия', marketingEventsTotal);
+    const marketingEventsTotal = evtsM.filter(e=> e.status==='marketing').reduce((s,e)=> s + eventTotalMasterPay(e), 0);
+    bucket(marketingMap, 'Съёмки/промо-мероприятия (ЗП мастеров)', marketingEventsTotal);
     const guestsCostTotal = evtsM.filter(e=> e.status!=='marketing').reduce((s,e)=> s + eventMarketingGuestsMaterialsCost(e), 0);
-    bucket(marketingMap, 'Гости по маркетинг-сертификату', guestsCostTotal);
 
     // "Прочие расходы (Книга)" — та же выборка, что и в npOtherLedgerCost, укрупнённо по категории
     // расхода (Инвентарь, Декор, Логистика и т.п.), а не по каждой отдельной записи. "Материалы" (поставки
@@ -15004,12 +15035,12 @@
     // маркетинг (их визит сам по себе промо-акция), а не на обычных платящих гостей; считаем долю от
     // материалов мероприятия пропорционально числу таких гостей и переносим из "Материалы" в "Маркетинг"
     const npMarketingGuestsMaterialsCost = evts.filter(e=> e.status!=='marketing').reduce((s,e)=> s + eventMarketingGuestsMaterialsCost(e), 0);
-    const npMaterialsCost = evts.filter(e=> e.status!=='marketing').reduce((s,e)=> s + eventMaterialsCostExclMarketingSpend(e), 0) - npMarketingGuestsMaterialsCost + npOrdersCost;
+    const npMaterialsCost = computeMaterialsLedger(monthYm).total;
     const npMarketingMaterialsCost = evts.filter(e=> e.status==='marketing').reduce((s,e)=> s + eventMaterialsCostExclMarketingSpend(e), 0);
     const npMarketingMasterPay = evts.filter(e=> e.status==='marketing').reduce((s,e)=> s + eventTotalMasterPay(e), 0);
     const npMarketingCost = state.expenses
       .filter(e=> e.date && e.date.startsWith(monthYm) && !e.eventId && e.category === 'Маркетинг')
-      .reduce((s,e)=> s + ((e.amount!==undefined&&e.amount!==null&&!isNaN(e.amount))?Number(e.amount):0), 0) + npMarketingMasterPay + npMarketingMaterialsCost + npMarketingGuestsMaterialsCost;
+      .reduce((s,e)=> s + ((e.amount!==undefined&&e.amount!==null&&!isNaN(e.amount))?Number(e.amount):0), 0) + npMarketingMasterPay;
     // остальные категории из "Книги → Расходы" (Инвентарь, Декор, Логистика и т.п., включая свои) —
     // "Аренда"/"Зарплата" туда не входят: для них уже есть ручное поле "Аренда" и автосчёт ЗП ниже, те же
     // суммы задвоились бы. Расходы, привязанные к конкретному мероприятию, тоже не берём — они уже в "Материалы" выше.
@@ -15045,7 +15076,7 @@
     const npHostessAdjustments = state.salaryAdjustments
       .filter(a=> adjEffDate(a) && adjEffDate(a).startsWith(monthYm) && !isAdjMirroredToEvent(a) && HOSTESS_LIST.some(h=>h.toLowerCase()===(a.masterName||'').trim().toLowerCase()))
       .reduce((s,a)=> s + (Number(a.amount)||0), 0);
-    const npMastersSalary = npMastersBasePay + npMastersItemShare + npMastersOrderShare + npUnlinkedAdjustments;
+    const npMastersSalary = computeMastersCashSalary(monthYm).total;
     // зп хостес — по графику смен (будни/выходные + переработка), как и в разделе "ЗП хостес", плюс
     // корректировки на имя админа и премия, вписанная владельцем вручную (state.hostessBonuses) — то же,
     // что фактически увидит админ в своей «Моя зарплата», иначе эти расходы нигде не попадали бы в прибыль
@@ -15096,10 +15127,10 @@
       {label:'Прочие доходы (Книга)', amount: npOtherIncomeRevenue},
     ];
     const npExpenseRows = [
-      {label:'Материалы', amount: npMaterialsCost, breakdown: npExpenseBreakdown.materials},
+      {label:'Материалы (по Книге)', amount: npMaterialsCost, breakdown: npExpenseBreakdown.materials},
       {label:'Маркетинг', amount: npMarketingCost, breakdown: npExpenseBreakdown.marketing},
       {label:'Прочие расходы (Книга)', amount: npOtherLedgerCost, breakdown: npExpenseBreakdown.otherLedger},
-      {label:'ЗП мастеров', amount: npMastersSalary, breakdown: npStaffBreakdown.masters},
+      {label:'ЗП мастеров (выдано + будущие записи)', amount: npMastersSalary, breakdown: computeMastersCashSalary(monthYm).rows},
       {label:'ЗП админов', amount: npHostessSalary, breakdown: npStaffBreakdown.hostess},
       {label:'ЗП менеджеров (авто)', amount: npManagerSalary, note: MANAGER_LIST.length ? `общей суммой на ${MANAGER_LIST.length} чел. (${MANAGER_LIST.join(', ')}), не делится по сотруднику` : ''},
       {label:'Аренда', amount: npRent},
@@ -16019,14 +16050,20 @@
       return `<div class="host-expand">${rows}</div>`;
     }
 
-    const FIN_TABS = [
+    const FIN_TABS_ALL = [
       {id:'revenue', label:'Выручка'},
       {id:'profit', label:'Прибыль'},
       {id:'avg', label:'Средний чек'},
       {id:'materials', label:'Себестоимость'},
       {id:'salary', label:'Зарплата'},
     ];
-    const activeFinTab = (state.loggedInMasterName || state.loggedInHostessName) ? 'salary' : (state.analyticsFinTab || 'revenue');
+    // Зарплаты: руководитель видит всё; старший админ — только мастеров и админов; остальные роли — никаких
+    const FIN_TABS = state.currentRole==='admin' ? FIN_TABS_ALL.filter(t=>t.id==='salary') : (state.currentRole==='owner' ? FIN_TABS_ALL : FIN_TABS_ALL.filter(t=>t.id!=='salary'));
+    let activeFinTab = (state.loggedInMasterName || state.loggedInHostessName) ? 'salary' : (state.analyticsFinTab || 'revenue');
+    if(!state.loggedInMasterName && !state.loggedInHostessName){
+      if(state.currentRole==='admin') activeFinTab = 'salary';
+      else if(state.currentRole!=='owner' && activeFinTab==='salary') activeFinTab = 'revenue';
+    }
     const finTabsHtml = `
       <div class="view-switch" style="margin-bottom:16px;">
         ${FIN_TABS.map(t=>`<button data-fintab="${t.id}" class="${activeFinTab===t.id?'active':''}">${t.label}</button>`).join('')}
@@ -16214,7 +16251,7 @@
       `;
     } else if(activeFinTab === 'salary'){
       // «К выдаче мастерам»: сколько нужно привезти на выплату 16-го (за 1–15) и 2-го (за 16–конец), с учётом уже выплаченного
-      const canSeePayout = ['owner','assistant'].includes(state.currentRole) && !state.loggedInMasterName && !state.loggedInHostessName;
+      const canSeePayout = state.currentRole==='owner' && !state.loggedInMasterName && !state.loggedInHostessName;
       const payoutHalfHtml = (label, dueDate, accruedMap, paidMap, total, halfKey)=>{
         const names = Array.from(new Set([...Object.keys(accruedMap), ...Object.keys(paidMap)]));
         const rows = names.map(n=>({ name:n, accrued: accruedMap[n]||0, paid: paidMap[n]||0 })).map(r=>({...r, left: r.accrued - r.paid}))
@@ -16334,7 +16371,7 @@
             </div>
           `).join('') : `<div style="color:var(--ink-soft);font-size:13px;">В этом месяце корректировок не было.</div>`}
         </div>
-        <div class="analytics-section">
+        ${state.currentRole==='admin' ? '' : `        <div class="analytics-section">
           <h4 style="color:${salaryReconciliation.length>0?'var(--status-red)':'inherit'};">Начислено vs Выплачено ${salaryReconciliation.length ? `(${salaryReconciliation.length} расхождений)` : ''}</h4>
           <div style="font-size:11.5px;color:var(--ink-soft);font-family:var(--font-mono);margin-bottom:8px;">ЗП выдаётся двумя частями: за 1–15 число — 16-го, за 16 – конец месяца — 2-го числа следующего месяца. Выплаченным считается расход категории «Зарплата» с указанным мастером и датой в соответствующем окне выдачи. Расхождение показывается только после даты выдачи — до неё платить ещё рано.</div>
           ${salaryReconciliation.length > COLLAPSE_LIST_LIMIT ? `
@@ -16347,7 +16384,7 @@
               <div class="stat-count" style="width:auto;font-size:12px;color:${x.diff>0?'var(--status-red)':'var(--status-blue)'};">${x.diff>0?'−':'+'}${formatMoney(Math.abs(x.diff))}</div>
             </div>
           `).join('') : `<div style="color:var(--status-green);font-size:13px;">✓ У всех мастеров начисленное совпадает с выплаченным (по срокам, которые уже наступили).</div>`}
-        </div>
+        </div>`}
         <div class="analytics-section">
           <h4>Зарплата админов за месяц: ${formatMoney(totalHostessSalary)}</h4>
           <div style="font-size:11.5px;color:var(--ink-soft);font-family:var(--font-mono);margin-bottom:8px;">По ставкам за смену: будни — ${formatMoney(HOSTESS_WEEKDAY_RATE)}, выходные — ${formatMoney(HOSTESS_WEEKEND_RATE)}, плюс переработка (раньше/позже стандартного времени) — ${formatMoney(HOSTESS_EXTRA_HOUR_RATE)}/час. Считается по «Графику хостес» в карточках дней.</div>
@@ -16608,11 +16645,11 @@
     state.analyticsPanels = { plan: analyticsPanel_plan, occupancy: analyticsPanel_occupancy, days: analyticsPanel_days, ceramics: analyticsPanel_ceramics, guests: analyticsPanel_guests, legal: analyticsPanel_legal, reports: analyticsPanel_reports, redo: analyticsPanel_redo, netprofit: analyticsPanel_netprofit, cashflow: analyticsPanel_cashflow, yearsummary: analyticsPanel_yearsummary, auditlog: analyticsPanel_auditlog, marketing: analyticsPanel_marketing, integrity: renderEventsIntegrityPanel() };
 
     // «Проверка зарплаты»: кто из мастеров/админов нажал «Я проверил(а) — всё ок». Видно руководителю, ассистенту и старшему администратору
-    const canSeeSalaryChecks = ['owner','assistant','admin'].includes(state.currentRole) && !state.loggedInMasterName && !state.loggedInHostessName;
+    const canSeeSalaryChecks = ['owner','admin'].includes(state.currentRole) && !state.loggedInMasterName && !state.loggedInHostessName;
     const salaryChecksBlock = canSeeSalaryChecks ? (()=>{
       const ymC = monthYmForItemSales;
       const showAmt = state.currentRole !== 'admin';
-      const canPayFromChecks = ['owner','assistant'].includes(state.currentRole);
+      const canPayFromChecks = state.currentRole==='owner';
       const halfHtml = (half, label, due, mMap, hMap)=>{
         const rows = [];
         Object.entries(mMap||{}).forEach(([n,a])=>{ if(Math.round(a)>0) rows.push({kind:'master', name:n, amount:a}); });
@@ -16759,8 +16796,8 @@
       </div>
 
       ${salaryChecksBlock}
-      ${!isAdminFinRestricted ? finTabsHtml : ''}
-      ${!isAdminFinRestricted ? finContent : ''}
+      ${state.currentRole==='admin' ? finContent : (!isAdminFinRestricted ? finTabsHtml : '')}
+      ${state.currentRole==='admin' ? '' : (!isAdminFinRestricted ? finContent : '')}
     `;
     if(state.loggedInMasterName){
       return renderPersonalMasterSalaryView(monthLabel, combinedMasterTotals, masterEventDetails, masterAdjustmentDetails, combinedGrandTotal, hostSalaryH1, hostSalaryH2);
@@ -19667,14 +19704,14 @@
     const expHtml = expenseRows.filter(r=>r.amount>0).map(r=>{
       const hasBreakdown = Array.isArray(r.breakdown) && r.breakdown.length>0;
       const rowLine = `
-      <div class="stat-row"><div class="stat-label">${hasBreakdown ? '' : escapeHtml(r.label)}</div><div style="flex:1;font-family:var(--font-mono);font-size:13px;text-align:right;color:var(--status-red);">${hasBreakdown ? '' : formatMoney(r.amount)+npSharePct(r.amount, npTotalRevenue)}</div></div>
+      <div class="stat-row"><div class="stat-label">${hasBreakdown ? '' : escapeHtml(r.label)}</div><div style="flex:1;font-family:var(--font-mono);font-size:13px;text-align:right;color:var(--status-red);">${hasBreakdown ? '' : formatMoney(r.amount)}</div></div>
       ${r.note ? `<div style="font-size:11px;color:var(--ink-soft);margin:-4px 0 4px 10px;">${escapeHtml(r.note)}</div>` : ''}`;
       if(!hasBreakdown) return rowLine;
       return `
       <details class="np-staff-breakdown" style="margin-bottom:2px;">
         <summary style="cursor:pointer;display:flex;align-items:center;list-style:none;">
           <div class="stat-label" style="flex:none;">${escapeHtml(r.label)}</div>
-          <div style="flex:1;font-family:var(--font-mono);font-size:13px;text-align:right;color:var(--status-red);">${formatMoney(r.amount)}${npSharePct(r.amount, npTotalRevenue)}</div>
+          <div style="flex:1;font-family:var(--font-mono);font-size:13px;text-align:right;color:var(--status-red);">${formatMoney(r.amount)}</div>
         </summary>
         <div style="margin:2px 0 6px 10px;padding-left:8px;border-left:2px solid var(--line);">
           ${r.breakdown.map(b=>`
@@ -19690,7 +19727,7 @@
     return `
       <div style="font-family:var(--font-display);font-weight:600;font-size:14px;margin-top:6px;">Выручка: ${formatMoney(npTotalRevenue)} <span style="color:var(--ink-soft);font-size:12px;font-weight:400;">(100%)</span></div>
       ${revHtml}
-      <div style="font-family:var(--font-display);font-weight:600;font-size:14px;margin-top:16px;">Расходы: ${formatMoney(npTotalExpenses)}${npSharePct(npTotalExpenses, npTotalRevenue)}</div>
+      <div style="font-family:var(--font-display);font-weight:600;font-size:14px;margin-top:16px;">Расходы: ${formatMoney(npTotalExpenses)}</div>
       ${expHtml}
       <div style="font-family:var(--font-display);font-weight:600;font-size:15px;margin-top:16px;padding-top:12px;border-top:1px solid var(--line);">Чистая прибыль: <span style="color:${netProfit>=0?'var(--status-green)':'var(--status-red)'};">${formatMoney(netProfit)}${npSharePct(netProfit, npTotalRevenue)}</span></div>
     `;
@@ -20038,7 +20075,7 @@
     // мероприятия со статусом "Маркетинг" — материалы и ЗП по ним не обычные расходы студии, а часть
     // расхода на маркетинг, см. тот же приём (и объяснение) в основном расчёте "Чистой прибыли" выше по файлу.
     const npMarketingGuestsMaterialsCost = evts.filter(e=> e.status!=='marketing').reduce((s,e)=> s + eventMarketingGuestsMaterialsCost(e), 0);
-    const npMaterialsCost = evts.filter(e=> e.status!=='marketing').reduce((s,e)=> s + eventMaterialsCostExclMarketingSpend(e), 0) - npMarketingGuestsMaterialsCost + npOrdersCost;
+    const npMaterialsCost = computeMaterialsLedger(ym).total;
     const npMarketingMaterialsCost = evts.filter(e=> e.status==='marketing').reduce((s,e)=> s + eventMaterialsCostExclMarketingSpend(e), 0);
     const npMarketingMasterPay = evts.filter(e=> e.status==='marketing').reduce((s,e)=> s + eventTotalMasterPay(e), 0);
     const npMastersBasePay = evts.filter(e=> e.status!=='marketing').reduce((s,e)=> s + eventTotalMasterPay(e), 0);
@@ -20057,7 +20094,7 @@
     const npHostessAdjustments = state.salaryAdjustments
       .filter(a=> adjEffDate(a) && adjEffDate(a).startsWith(ym) && !isAdjMirroredToEvent(a) && HOSTESS_LIST.some(h=>h.toLowerCase()===(a.masterName||'').trim().toLowerCase()))
       .reduce((s,a)=> s + (Number(a.amount)||0), 0);
-    const npMastersSalary = npMastersBasePay + npMastersItemShare + npMastersOrderShare + npUnlinkedAdjustments;
+    const npMastersSalary = computeMastersCashSalary(ym).total;
 
     let npHostessSalary = 0;
     {
@@ -20093,7 +20130,7 @@
     // они уже учтены в себестоимости этого мероприятия (materialsItems) выше.
     const npMarketingCost = state.expenses
       .filter(e=> e.date && e.date.startsWith(ym) && !e.eventId && e.category === 'Маркетинг')
-      .reduce((s,e)=> s + ((e.amount!==undefined&&e.amount!==null&&!isNaN(e.amount))?Number(e.amount):0), 0) + npMarketingMasterPay + npMarketingMaterialsCost + npMarketingGuestsMaterialsCost;
+      .reduce((s,e)=> s + ((e.amount!==undefined&&e.amount!==null&&!isNaN(e.amount))?Number(e.amount):0), 0) + npMarketingMasterPay;
     // "Материалы" (поставки/приёмка сырья) тоже не берём — та же себестоимость уже учтена в npMaterialsCost
     // выше (через materialsItems каждого мероприятия); иначе расход на материалы задвоится.
     // "Сейф" — служебная категория для перемещений наличных между кассой и сейфом (раздел "Касса"),
