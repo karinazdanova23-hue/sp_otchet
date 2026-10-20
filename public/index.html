@@ -6527,6 +6527,7 @@
           }).join('')}
         </div>` : ''}
 
+        ${['admin','owner'].includes(state.currentRole) ? `<div style="margin:6px 0 2px;"><button type="button" class="btn btn-ghost rf-move" data-eid="${e.id}" style="font-size:12px;padding:5px 10px;" title="Если мастер написал отчёт не по тому мастер-классу">📅 Перенести отчёт на другой МК</button></div>` : ''}
         <div class="rf-form">
           <textarea class="rf-input" data-eid="${e.id}" maxlength="${FEED_COMMENT_MAX}" placeholder="${me ? 'Написать комментарий как «'+escapeHtml(me.name)+'»…' : 'Сначала укажите, как вас подписывать (выше)'}" ${me?'':'disabled'}>${escapeHtml(draft)}</textarea>
           <button type="button" class="btn btn-primary rf-send" data-eid="${e.id}" ${me?'':'disabled'}>Отправить</button>
@@ -6572,6 +6573,8 @@
       if(!photoBox.isConnected) return;
       photoBox.innerHTML = d ? `<a href="${d}" target="_blank" rel="noopener"><img src="${d}" style="max-width:100%;max-height:260px;border-radius:var(--radius);border:1px solid var(--line-strong);display:block;"></a>` : '';
     });
+    const moveBtn = card.querySelector('.rf-move');
+    if(moveBtn) moveBtn.onclick = ()=>{ state.modal = {type:'report-move', eventId: eid}; render(); };
     const input = card.querySelector('.rf-input');
     if(input) input.addEventListener('input', ()=>{ state.feedDrafts[eid] = input.value; });
     card.querySelectorAll('.rf-react-btn').forEach(btn=>{
@@ -12991,6 +12994,8 @@
       overlay.innerHTML = renderOrderModal(state.modal.order, state.modal.isNew);
     } else if(state.modal.type === 'salary-adj'){
       overlay.innerHTML = renderSalaryAdjModal(state.modal.adj, state.modal.isNew);
+    } else if(state.modal.type === 'report-move'){
+      overlay.innerHTML = renderReportMoveModal();
     } else if(state.modal.type === 'bulk-salary-adj'){
       overlay.innerHTML = renderBulkSalaryAdjModal();
     } else if(state.modal.type === 'expense'){
@@ -13094,6 +13099,7 @@
     else if(state.modal.type === 'cash-collect'){ attachCashCollectModalEvents(overlay); }
     else if(state.modal.type === 'safe-withdraw'){ attachSafeWithdrawModalEvents(overlay); }
     else if(state.modal.type === 'missing-reports'){ attachMissingReportsModalEvents(overlay); }
+    else if(state.modal.type === 'report-move'){ attachReportMoveModalEvents(overlay); }
     else if(state.modal.type === 'legal-docs-missing'){ attachLegalDocsMissingModalEvents(overlay); }
   }
 
@@ -13144,6 +13150,64 @@
           </div>
         </div>
       </div>`;
+  }
+  // Перенос отчёта мастера на другой мастер-класс (старший администратор / руководитель): мастер мог случайно
+  // написать отчёт не по тому МК. Переезжают сам отчёт, фото, комментарии и реакции; на исходном МК отчёт снова «не сдан».
+  function renderReportMoveModal(){
+    const e = state.events.find(x=>x.id===state.modal.eventId);
+    if(!e) return '<div class="modal"><div class="modal-body">Мероприятие не найдено.</div></div>';
+    return `
+      <div class="modal" style="max-width:480px;">
+        <div class="modal-head"><h3>Перенести отчёт на другой МК</h3><button class="modal-close">×</button></div>
+        <div class="modal-body">
+          <div style="font-size:12.5px;color:var(--ink-soft);">Сейчас отчёт записан на: <b>${escapeHtml(e.title||'Без названия')}</b> · ${escapeHtml(formatDateText(e.date))}${e.time?' · '+escapeHtml(e.time):''} · ${escapeHtml(allHostNamesDisplay(e))}</div>
+          <div class="field"><label>Дата правильного мастер-класса</label><input type="date" id="rm-date" value="${escapeHtml(e.date||todayStr())}"></div>
+          <div id="rm-list"></div>
+          <div class="modal-actions"><span></span><div style="display:flex;gap:8px;"><button class="btn btn-ghost" id="rm-cancel">Отмена</button><button class="btn btn-primary" id="rm-save" disabled>Перенести</button></div></div>
+        </div>
+      </div>`;
+  }
+  function attachReportMoveModalEvents(overlay){
+    const src = state.events.find(x=>x.id===state.modal.eventId);
+    const close = ()=>{ state.modal = null; overlay.remove(); };
+    const cb = overlay.querySelector('.modal-close'); if(cb) cb.onclick = close;
+    overlay.querySelector('#rm-cancel').onclick = close;
+    const saveBtn = overlay.querySelector('#rm-save');
+    const listEl = overlay.querySelector('#rm-list');
+    const fill = ()=>{
+      const d = overlay.querySelector('#rm-date').value;
+      const cands = state.events.filter(x=> x.id!==src.id && x.date===d && x.status!=='cancelled' && x.status!=='slot').sort((a,b)=>(a.time||'').localeCompare(b.time||''));
+      listEl.innerHTML = cands.length ? cands.map(x=>{
+        const has = !!(x.masterReport && typeof x.masterReport==='object' && Object.keys(x.masterReport).length);
+        return `<label style="display:flex;gap:8px;align-items:flex-start;padding:8px 0;border-bottom:1px solid var(--line);${has?'opacity:.5;':''}"><input type="radio" name="rm-target" value="${x.id}" ${has?'disabled':''}><span><b>${escapeHtml(x.title||'Без названия')}</b> · ${escapeHtml(x.time||'')} · ${escapeHtml(allHostNamesDisplay(x))}${has?'<br><span style="font-size:11.5px;color:var(--status-red);">на нём уже есть отчёт</span>':''}</span></label>`;
+      }).join('') : '<div style="color:var(--ink-soft);font-size:13px;">На эту дату мероприятий нет.</div>';
+      saveBtn.disabled = true;
+      listEl.querySelectorAll('input[name="rm-target"]').forEach(r=> r.onchange = ()=>{ saveBtn.disabled = false; });
+    };
+    overlay.querySelector('#rm-date').onchange = fill;
+    fill();
+    saveBtn.onclick = async ()=>{
+      const sel = listEl.querySelector('input[name="rm-target"]:checked');
+      if(!sel) return;
+      const tgtId = sel.value;
+      const si = state.events.findIndex(x=>x.id===src.id), ti = state.events.findIndex(x=>x.id===tgtId);
+      if(si<0 || ti<0) return;
+      const report = state.events[si].masterReport;
+      saveBtn.disabled = true;
+      // фото отчёта (лежит отдельным ключом по id мероприятия)
+      if(report && report.hasPhoto){
+        try{ const d = await loadAttachedPhoto(reportPhotoKey(src.id)); if(d){ await saveAttachedPhoto(reportPhotoKey(tgtId), d); await deleteAttachedPhoto(reportPhotoKey(src.id)); } }catch(e){}
+      }
+      state.events[ti] = {...state.events[ti], masterReport: report};
+      state.events[si] = {...state.events[si], masterReport: null};
+      (state.reportComments||[]).forEach(c=>{ if(c.eventId===src.id) c.eventId = tgtId; });
+      (state.reportReactions||[]).forEach(r=>{ if(r.eventId===src.id){ r.eventId = tgtId; r.id = `${tgtId}|${r.type}|${r.author}`; } });
+      await saveEvents();
+      await saveFeedCollection('report-comments', 'reportComments', '_reportCommentsBaseline');
+      await saveFeedCollection('report-reactions', 'reportReactions', '_reportReactionsBaseline');
+      recordAction('Отчёт мастера перенесён на другой МК');
+      state.modal = null; overlay.remove(); render();
+    };
   }
   function attachMissingReportsModalEvents(overlay){
     const closeBtn = overlay.querySelector('#btn-close-missing-reports');
@@ -23361,7 +23425,9 @@
       // у занятия «по расписанию» (мастер-класс), на которое пока никто не записан, себестоимость можно не указывать —
       // материалы добавят, когда появятся гости
       const scheduleWithoutGuests = productVal === 'Мастер-класс' && (parseInt(guestsRaw)||0) === 0 && guestListForSave.length === 0;
-      const materialsMissing = cleanedMaterialsItems.length === 0 && !scheduleWithoutGuests;
+      // у маркетинговых мероприятий выручка и материалы необязательны
+      const marketingOptional = statusVal === 'marketing';
+      const materialsMissing = cleanedMaterialsItems.length === 0 && !scheduleWithoutGuests && !marketingOptional;
       const rentalBeforeVal = showsDishesAndRental(statusVal) ? (parseInt(rentalBeforeRaw) || 0) : 0;
       const rentalAfterVal = showsDishesAndRental(statusVal) ? (parseInt(rentalAfterRaw) || 0) : 0;
 
@@ -23378,7 +23444,7 @@
         if(!timeVal) markInvalid('f-time');
         if(!durationVal || durationVal<=0) markInvalid('f-duration');
         if(guestsRaw === '') markInvalid('f-guests');
-        if(!priceFieldLockedForMaster && (priceRaw === '' || Number(priceRaw) < 0)) markInvalid('f-price');
+        if(!priceFieldLockedForMaster && ((priceRaw === '' && !marketingOptional) || Number(priceRaw) < 0)) markInvalid('f-price');
         const agreedPriceRawCheck = priceFieldLockedForMaster ? '' : overlay.querySelector('#f-agreed-price').value;
         const agreedPriceNegative = !priceFieldLockedForMaster && agreedPriceRawCheck !== '' && Number(agreedPriceRawCheck) < 0;
         if(agreedPriceNegative) markInvalid('f-agreed-price');
@@ -23413,7 +23479,7 @@
           else if(dishesVal === 'needed' && !dishesPaymentVal){ dishesMissing = true; if(dishesFieldEl) dishesFieldEl.style.boxShadow = 'inset 0 0 0 1.5px var(--danger)'; if(!firstInvalid) firstInvalid = dishesFieldEl; }
         }
         const hostMissing = !hostVal && !PRODUCTS_WITHOUT_HOST.includes(productVal);
-        if(!title || hostMissing || !dateVal || !timeVal || !durationVal || durationVal<=0 || guestsRaw==='' || priceRaw==='' || Number(priceRaw)<0 || agreedPriceNegative || masterPayNegative || additionalHostsNegative || materialsNegative || guestNamesMissing || redoEventMissing || materialsMissing || dishesMissing){
+        if(!title || hostMissing || !dateVal || !timeVal || !durationVal || durationVal<=0 || guestsRaw==='' || (priceRaw==='' && !marketingOptional) || Number(priceRaw)<0 || agreedPriceNegative || masterPayNegative || additionalHostsNegative || materialsNegative || guestNamesMissing || redoEventMissing || materialsMissing || dishesMissing){
           showGapWarningBanner(redoEventMissing ? 'У гостя отмечена «Переделка» — укажите, к какому мероприятию это относится.' : 'Заполните все поля перед сохранением (для статуса «Слот» это необязательно). Себестоимость: добавьте хотя бы один материал с названием и суммой (для мастер-класса без гостей её можно пропустить). Суммы (выручка, ЗП мастеру и со-ведущим, себестоимость) не могут быть отрицательными.');
           if(firstInvalid && firstInvalid.scrollIntoView) firstInvalid.scrollIntoView({block:'center', behavior:'smooth'});
           return;
