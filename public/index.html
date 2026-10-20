@@ -16497,11 +16497,14 @@
           <h4>Зарплата админов за месяц: ${formatMoney(totalHostessSalary)}</h4>
           <div style="font-size:11.5px;color:var(--ink-soft);font-family:var(--font-mono);margin-bottom:8px;">По ставкам за смену: будни — ${formatMoney(HOSTESS_WEEKDAY_RATE)}, выходные — ${formatMoney(HOSTESS_WEEKEND_RATE)}, плюс переработка (раньше/позже стандартного времени) — ${formatMoney(HOSTESS_EXTRA_HOUR_RATE)}/час. Считается по «Графику хостес» в карточках дней.</div>
           ${hostessSalaryList.length ? hostessSalaryList.map(([h,pay])=>`
-            <div class="stat-row">
-              <div class="stat-label">${escapeHtml(h)}</div>
-              <div class="stat-bar-track"><div class="stat-bar-fill" style="width:${Math.round(pay/maxHostessSalary*100)}%;background:var(--accent);"></div></div>
-              <div class="stat-count" style="width:auto;font-size:12px;">${formatMoney(pay)}${totalHostessSalary>0?' · '+Math.round(pay/totalHostessSalary*100)+'%':''}</div>
-            </div>
+            <details class="np-staff-breakdown">
+              <summary style="cursor:pointer;list-style:none;" class="stat-row">
+                <div class="stat-label">▸ ${escapeHtml(h)}</div>
+                <div class="stat-bar-track"><div class="stat-bar-fill" style="width:${Math.round(pay/maxHostessSalary*100)}%;background:var(--accent);"></div></div>
+                <div class="stat-count" style="width:auto;font-size:12px;">${formatMoney(pay)}${totalHostessSalary>0?' · '+Math.round(pay/totalHostessSalary*100)+'%':''}</div>
+              </summary>
+              ${renderHostessPayDetailsHtml(h, monthYm, hostessAdjustmentDetails, hostessManualBonusesForMerge)}
+            </details>
           `).join('') : `<div style="color:var(--ink-soft);font-size:13px;">В этом месяце ни на одну смену не назначен админ.</div>`}
         </div>
         <div class="analytics-section">
@@ -17061,6 +17064,48 @@
     };
   }
 
+  // Разбивка зарплаты админа по дням для руководителя/старшего админа: смены (будни/выходные, часы сверх смены),
+  // бонусы за посуду, корректировки и премия — те же расчёты, что в личной «Моя зарплата» админа
+  function renderHostessPayDetailsHtml(name, ym, adjDetails, bonusesMap){
+    const norm = s=>(s||'').trim().toLowerCase();
+    const [y,mo] = ym.split('-').map(Number);
+    const daysInMonth = new Date(y, mo, 0).getDate();
+    const rows = [];
+    for(let d=1; d<=daysInMonth; d++){
+      const dateObj = new Date(y, mo-1, d);
+      const dow = dateObj.getDay();
+      const weekend = dow===0 || dow===6;
+      const rate = weekend ? HOSTESS_WEEKEND_RATE : HOSTESS_WEEKDAY_RATE;
+      const dateStr = fmtDate(dateObj);
+      const dayShifts = state.hostessShifts[dateStr];
+      if(!dayShifts) continue;
+      SHIFT_DEFS.forEach(sd=>{
+        const raw = dayShifts[sd.key];
+        const entry = normalizeShiftEntry(raw, sd);
+        if(entry && entry.name && norm(entry.name)===norm(name)){
+          const extra = shiftExtraHours(raw, sd);
+          rows.push({date:dateStr, half:d<=15?'H1':'H2', text:`смена ${entry.start}–${entry.end} · ${weekend?'выходной':'будни'} ${formatMoney(rate)}${extra>0?` + ${extra} ч сверх × ${formatMoney(HOSTESS_EXTRA_HOUR_RATE)}`:''}`, pay: rate + extra*HOSTESS_EXTRA_HOUR_RATE});
+        }
+      });
+      Object.entries(hostessDishesBonusesForDate(dateStr, dayShifts)).forEach(([n,b])=>{
+        if(norm(n)===norm(name)) rows.push({date:dateStr, half:d<=15?'H1':'H2', text:'🍽 бонус за посуду', pay:b});
+      });
+    }
+    rows.sort((a,b)=>a.date.localeCompare(b.date));
+    const key = Object.keys(adjDetails||{}).find(n=>norm(n)===norm(name));
+    const adjs = key ? (adjDetails[key]||[]).slice().sort((a,b)=>a.date.localeCompare(b.date)) : [];
+    const bKey = Object.keys(bonusesMap||{}).find(n=>norm(n)===norm(name));
+    const bonus = bKey ? Number((bonusesMap[bKey]&&bonusesMap[bKey].amount)||0) : 0;
+    const line = (l,t,v,color)=>`<div class="stat-row" style="padding:3px 0;"><div class="stat-label" style="width:150px;font-size:12.5px;color:var(--ink-soft);">${l}</div><div style="flex:1;font-size:12.5px;">${t}</div><div style="font-family:var(--font-mono);font-size:12.5px;${color?'color:'+color+';':''}">${v}</div></div>`;
+    const halves = ['H1','H2'].map(h=>{
+      const part = rows.filter(r=>r.half===h);
+      if(!part.length) return '';
+      return `<div style="font-size:11.5px;font-weight:600;margin:8px 0 2px;">${h==='H1'?'1–15 число':'16 – конец месяца'} · ${formatMoney(part.reduce((s,r)=>s+r.pay,0))}</div>`+part.map(r=>line(escapeHtml(formatDateText(r.date)), r.text, formatMoney(r.pay))).join('');
+    }).join('');
+    const adjHtml = adjs.length ? `<div style="font-size:11.5px;font-weight:600;margin:8px 0 2px;">Корректировки</div>`+adjs.map(a=>line(escapeHtml(formatDateText(a.date)), escapeHtml(a.comment||'без комментария'), (a.amount>=0?'+':'')+formatMoney(a.amount), a.amount>=0?'var(--status-green)':'var(--status-red)')).join('') : '';
+    const bonusHtml = bonus ? `<div style="font-size:11.5px;font-weight:600;margin:8px 0 2px;">Премия</div>`+line('', 'вписана вручную', '+'+formatMoney(bonus)) : '';
+    return (halves||adjHtml||bonusHtml) ? `<div style="margin:2px 0 8px 10px;padding-left:8px;border-left:2px solid var(--line);">${halves}${adjHtml}${bonusHtml}</div>` : `<div style="margin:2px 0 8px 10px;font-size:12.5px;color:var(--ink-soft);">Нет данных по сменам.</div>`;
+  }
   function renderPersonalHostessSalaryView(monthLabel, hostessSalary, hostessSalaryH1, hostessSalaryH2, totalHostessSalary, hostessAdjustmentDetails, hostessBonusesForMonth){
     const myName = state.loggedInHostessName;
     const norm = s => (s||'').trim().toLowerCase();
