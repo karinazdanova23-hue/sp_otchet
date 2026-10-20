@@ -6645,13 +6645,15 @@
     // (источники и продукт по заявкам); остальное (сертификаты, ЗП, возвраты, изделия, заказы, выдача) —
     // финансовое и закрыто по просьбе владелицы
     if(state.currentRole === 'marketer'){
-      state.certView = 'conversion';
+      // маркетолог: «Сертификаты» (создавать, вписывать, смотреть) и «Конверсия»; остальное финансовое — закрыто
+      if(!['certificates','conversion'].includes(state.certView)) state.certView = 'certificates';
       const marketerSubTabsHtml = `
         <div class="cert-subtabs">
-          <button data-certview="conversion" class="active">Конверсия</button>
+          <button data-certview="certificates" class="${state.certView==='certificates'?'active':''}">Сертификаты</button>
+          <button data-certview="conversion" class="${state.certView==='conversion'?'active':''}">Конверсия</button>
         </div>
       `;
-      return marketerSubTabsHtml + renderConversionView();
+      return marketerSubTabsHtml + (state.certView==='conversion' ? renderConversionView() : renderCertificatesListView());
     }
     // администратор (роль "hostess") видит здесь только "Сертификаты" и "Изделия" — то, что он сам продаёт;
     // остальные вкладки (корректировки ЗП, возвраты, конверсия, заказы, выдача) остаются только у менеджеров и выше
