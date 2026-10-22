@@ -4352,6 +4352,36 @@
   }
   // слот, который старший администратор поставил в расписание (пространство/время/продукт заданы), но мастер
   // ещё не назначен — мастера видят его в обычном дне и могут отметить себя свободными (см. availableMasters)
+  // частное мероприятие («Частник») можно завести без ведущего — такие собираются в отдельный список
+  function hostOptionalFor(status, product){
+    return status === 'tentative' || status === 'slot' || PRODUCTS_WITHOUT_HOST.includes(product);
+  }
+  function isPrivateWithoutHost(e){
+    return e.status === 'tentative' && !(e.host||'').trim() && !(e.additionalHosts && e.additionalHosts.length);
+  }
+  function canSeeNoHostList(){
+    return ['owner','admin','assistant','manager'].includes(state.currentRole);
+  }
+  function renderNoHostPanel(){
+    if(!canSeeNoHostList()) return '';
+    const today = todayStr();
+    const list = state.events.filter(e=> isPrivateWithoutHost(e) && e.date && e.date >= today)
+      .sort((a,b)=> (a.date+(a.time||'')).localeCompare(b.date+(b.time||'')));
+    if(!list.length) return '';
+    const rows = list.map(e=>{
+      const sp = getSpace(e.spaceId);
+      return `<div class="nohost-row" data-eid="${escapeHtml(e.id)}" style="display:flex;gap:10px;align-items:center;padding:8px 10px;border-top:1px solid var(--line);cursor:pointer;font-size:13px;">
+        <b style="min-width:92px;">${escapeHtml(formatDateText(e.date))}</b>
+        <span style="min-width:44px;font-family:var(--font-mono);">${escapeHtml(e.time||'')}</span>
+        <span style="flex:1;">${escapeHtml(e.title||'без названия')}${e.guestName?' · '+escapeHtml(e.guestName):''}</span>
+        <span style="color:var(--ink-soft);">${escapeHtml(sp && sp.name || '')}</span>
+      </div>`;
+    }).join('');
+    return `<details class="nohost-panel" ${state.noHostPanelOpen?'open':''} style="margin-bottom:12px;border:1px solid var(--status-red);border-radius:var(--radius);background:var(--white);">
+      <summary style="padding:10px 12px;cursor:pointer;font-weight:600;font-size:13.5px;">⚠ Мероприятия без ведущего: ${list.length}</summary>
+      ${rows}
+    </details>`;
+  }
   function isOpenMasterSlot(e){
     return e.status === 'slot' && !!e.spaceId && !(e.host||'').trim();
   }
@@ -5194,6 +5224,7 @@
       </div>
       ${filters}
       ${legend}
+      ${renderNoHostPanel()}
       ${renderWishesBar()}
       ${renderScheduleRecsPanel()}
       <div class="cal-grid-wrap">
@@ -8289,6 +8320,10 @@
             <div style="font-size:11.5px;color:var(--ink-soft);margin-top:6px;">Если нужного заказа ещё нет в списке — сначала заведите его в «Для менеджеров → Заказ», потом привяжите здесь.</div>
           </div>
           <div class="field">
+            <label>Комментарий</label>
+            <textarea id="l-comment" rows="3" placeholder="Что хочет гость, о чём договорились, на чём остановились">${escapeHtml(lead.comment||'')}</textarea>
+          </div>
+          <div class="field">
             <label>Фото</label>
             <div id="lead-photo-preview" style="margin-bottom:8px;">${lead.hasPhoto ? '<div style="font-size:12.5px;color:var(--ink-soft);">Загрузка фото…</div>' : '<div style="font-size:12.5px;color:var(--ink-soft);">Фото не прикреплено</div>'}</div>
             <input type="file" id="l-photo-file" accept="image/*">
@@ -8449,7 +8484,7 @@
     };
 
     overlay.querySelector('#btn-save-lead').onclick = async ()=>{
-      ['l-date','l-contact','l-month','l-source','l-product','l-revenue','l-sale-date'].forEach(id=>{
+      ['l-date','l-contact','l-month','l-source','l-product','l-revenue','l-sale-date','l-comment'].forEach(id=>{
         const el = overlay.querySelector('#'+id);
         if(el) el.style.borderColor = '';
       });
@@ -8465,6 +8500,7 @@
       const saleKindVal = overlay.querySelector('#l-sale-kind') ? (overlay.querySelector('#l-sale-kind').value || 'event') : 'event';
       const leadEventVal = overlay.querySelector('#l-event').value || '';
       const leadOrderVal = overlay.querySelector('#l-order') ? (overlay.querySelector('#l-order').value || '') : '';
+      const commentVal = overlay.querySelector('#l-comment').value.trim();
 
       let firstInvalid = null;
       const markInvalid = (id)=>{
@@ -8477,6 +8513,7 @@
       if(!sourceVal) markInvalid('l-source');
       if(!productVal) markInvalid('l-product');
       if(revenueRaw === '') markInvalid('l-revenue');
+      if(!commentVal) markInvalid('l-comment');
       // проданная заявка не может быть с нулевой выручкой — такая продажа искажает конверсию и средний чек
       const soldZeroRevenue = soldVal && revenueRaw !== '' && !(Number(revenueRaw) > 0);
       if(soldZeroRevenue){
@@ -8493,8 +8530,8 @@
       if(leadEventMissing) markInvalid('l-event-search');
       const leadOrderMissing = soldVal && saleKindVal==='order' && !leadOrderVal;
       if(leadOrderMissing) markInvalid('l-order-search');
-      if(!dateVal || !contactVal || !monthVal || !sourceVal || !productVal || revenueRaw==='' || saleDateMissing || leadEventMissing || leadOrderMissing){
-        showGapWarningBanner(leadEventMissing ? 'Заявка отмечена как «Продано» — выберите мероприятие, которое из неё создано.' : leadOrderMissing ? 'Заявка отмечена как «Продано» — выберите заказ, который из неё создан.' : saleDateMissing ? 'Заявка отмечена как «Продано» — укажите дату продажи.' : 'Заполните все поля перед сохранением заявки — включая номер/ник гостя.');
+      if(!dateVal || !contactVal || !monthVal || !sourceVal || !productVal || revenueRaw==='' || !commentVal || saleDateMissing || leadEventMissing || leadOrderMissing){
+        showGapWarningBanner(leadEventMissing ? 'Заявка отмечена как «Продано» — выберите мероприятие, которое из неё создано.' : leadOrderMissing ? 'Заявка отмечена как «Продано» — выберите заказ, который из неё создан.' : saleDateMissing ? 'Заявка отмечена как «Продано» — укажите дату продажи.' : 'Заполните все поля перед сохранением заявки — включая номер/ник гостя и комментарий.');
         if(firstInvalid && firstInvalid.scrollIntoView) firstInvalid.scrollIntoView({block:'center', behavior:'smooth'});
         return;
       }
@@ -8513,6 +8550,7 @@
         saleKind: soldVal ? saleKindVal : '',
         eventId: (soldVal && saleKindVal==='event') ? leadEventVal : '',
         orderId: (soldVal && saleKindVal==='order') ? leadOrderVal : '',
+        comment: commentVal,
         hasPhoto: state.modal.lead.hasPhoto || false,
       };
 
@@ -11595,6 +11633,12 @@
             <label>Номер</label>
             <input type="text" id="c-number" value="${escapeHtml(String(cert.number!==undefined&&cert.number!==null?cert.number:''))}" placeholder="Например: 102 или СП-2026-015">
           </div>
+          ${isNew ? `<div class="field" id="cert-qty-field">
+            <label>Количество одинаковых сертификатов</label>
+            <input type="number" id="c-qty" value="1" min="1" max="200" step="1" style="max-width:120px;">
+            <label id="c-seq-wrap" style="display:none;align-items:center;gap:8px;font-weight:400;margin-top:8px;cursor:pointer;"><input type="checkbox" id="c-seq" style="width:16px;height:16px;">Нумеровать по порядку (101, 102, 103…). Без галочки — у всех сертификатов один и тот же номер</label>
+            <div id="c-qty-hint" style="font-size:12px;color:var(--ink-soft);margin-top:6px;"></div>
+          </div>` : ''}
           <div class="row2">
             <div class="field">
               <label>Канал продажи</label>
@@ -11895,6 +11939,30 @@
       });
     };
 
+    // несколько одинаковых сертификатов за раз (только при создании): номинал, дата, владелец и т.д. общие
+    const certQtyEl = overlay.querySelector('#c-qty');
+    const certNumberForSeq = (base, k, seq)=>{
+      const m = String(base).trim().match(/^(.*?)(\d+)$/);
+      if(!seq || !m) return String(base).trim();
+      return m[1] + String(parseInt(m[2],10)+k).padStart(m[2].length,'0');
+    };
+    const refreshCertQtyHint = ()=>{
+      if(!certQtyEl) return;
+      const n = parseInt(certQtyEl.value)||1;
+      const numEl = overlay.querySelector('#c-number'), seqEl = overlay.querySelector('#c-seq');
+      const seqWrap = overlay.querySelector('#c-seq-wrap'), hint = overlay.querySelector('#c-qty-hint');
+      if(seqWrap) seqWrap.style.display = n>1 ? 'flex' : 'none';
+      if(!hint) return;
+      if(n<=1){ hint.textContent=''; return; }
+      const base = numEl.value.trim();
+      const hasDigits = /\d+$/.test(base);
+      hint.textContent = !base ? `Будет создано ${n} шт.` : (seqEl.checked && hasDigits)
+        ? `Будет создано ${n} шт.: №${certNumberForSeq(base,0,true)} … №${certNumberForSeq(base,n-1,true)}`
+        : `Будет создано ${n} шт. с одинаковым номером №${base}`;
+    };
+    if(certQtyEl){
+      ['input','change'].forEach(ev=>{ certQtyEl.addEventListener(ev, refreshCertQtyHint); overlay.querySelector('#c-number').addEventListener(ev, refreshCertQtyHint); overlay.querySelector('#c-seq').addEventListener(ev, refreshCertQtyHint); });
+    }
     const saveCertBtn = overlay.querySelector('#btn-save-cert');
     saveCertBtn.onclick = async ()=>{
       // защита от дублей: если кликнуть "Сохранить" повторно, пока первый клик ещё обрабатывается
@@ -11931,6 +11999,16 @@
       const ownerNameVal = overlay.querySelector('#c-owner-name').value.trim();
       const ownerContactVal = overlay.querySelector('#c-owner-contact').value.trim();
       const commentVal = overlay.querySelector('#c-comment').value.trim();
+      const qtyCount = certQtyEl ? (parseInt(certQtyEl.value)||1) : 1;
+      if(certQtyEl && (qtyCount < 1 || qtyCount > 200)){
+        certQtyEl.style.borderColor = 'var(--danger)';
+        showGapWarningBanner('Количество сертификатов — от 1 до 200.');
+        return;
+      }
+      if(qtyCount > 1 && statusVal !== 'in_progress'){
+        showGapWarningBanner('Несколько сертификатов за раз создаются только со статусом «В процессе». Списания добавьте потом в каждом отдельно.');
+        return;
+      }
 
       let firstInvalid = null;
       const markInvalid = (id)=>{
@@ -12039,6 +12117,26 @@
         updated.incomeId = '';
       }
 
+      // 1б) остальные одинаковые сертификаты пачки (только при создании)
+      if(qtyCount > 1){
+        const seqOn = overlay.querySelector('#c-seq') ? overlay.querySelector('#c-seq').checked : false;
+        for(let k=1;k<qtyCount;k++){
+          const c = {...updated, id: uid(), number: certNumberForSeq(numberRaw, k, seqOn), incomeId: '', redemptions: [], useDate: '', eventId: '', hasReceiptPhoto: false};
+          if(pendingReceiptPhoto && pendingReceiptPhoto !== 'REMOVE'){ await saveReceiptPhoto(c.id, pendingReceiptPhoto); c.hasReceiptPhoto = true; }
+          if(c.purpose === 'sale'){
+            const inc = {
+              id: uid(), date: c.saleDate, operation: 'Оплата', product: 'Сертификат',
+              account: c.account || 'Точка', eventId: '', amount: c.amount, masterName: '', itemSaleId: '', orderId: '',
+              comment: `Сертификат №${c.number} — ${c.ownerName}`,
+            };
+            c.incomeId = inc.id;
+            state.incomes.push(inc);
+          }
+          state.certificates.push(c);
+        }
+        await saveIncomes();
+      }
+
       // 2) синхронизация списаний с журналом платежей конкретных мероприятий
       const oldById = {}; previousRedemptions.forEach(r=>{ if(r.id) oldById[r.id] = r; });
       const newById = {}; updated.redemptions.forEach(r=>{ if(r.id) newById[r.id] = r; });
@@ -12088,7 +12186,7 @@
       const idx = state.certificates.findIndex(x=>x.id===updated.id);
       if(idx >= 0) state.certificates[idx] = updated; else state.certificates.push(updated);
       await saveCertificates();
-      recordAction("Сертификат сохранён");
+      recordAction(qtyCount>1 ? ("Сертификаты сохранены: "+qtyCount+" шт.") : "Сертификат сохранён");
       state.modal = null; overlay.remove(); render();
       } finally {
         if(saveCertBtn.isConnected) saveCertBtn.disabled = false;
@@ -12872,6 +12970,14 @@
     if(prev) prev.onclick = ()=>{ state.cursor = new Date(state.cursor.getFullYear(), state.cursor.getMonth()-1, 1); render(); };
     if(next) next.onclick = ()=>{ state.cursor = new Date(state.cursor.getFullYear(), state.cursor.getMonth()+1, 1); render(); };
     if(todayBtn) todayBtn.onclick = ()=>{ state.cursor = new Date(new Date().getFullYear(), new Date().getMonth(), 1); render(); };
+    const noHostPanelEl = document.querySelector('details.nohost-panel');
+    if(noHostPanelEl) noHostPanelEl.addEventListener('toggle', ()=>{ state.noHostPanelOpen = noHostPanelEl.open; });
+    document.querySelectorAll('.nohost-row').forEach(r=>{
+      r.onclick = ()=>{
+        const e = state.events.find(x=>x.id===r.dataset.eid);
+        if(e) requireUnlock(()=>{ state.modal = {type:'event', event:{...e}, isNew:false, keepAll:true}; render(); });
+      };
+    });
     const wishesOpenBtn = document.getElementById('wishes-open');
     if(wishesOpenBtn) wishesOpenBtn.onclick = ()=>{ state.modal = {type:'wishes', tab:'new'}; render(); };
     // панель рекомендаций по умолчанию свёрнута (занимает одну строку с числом того, что нужно поставить);
@@ -21682,7 +21788,7 @@
           </div>
           ` : ''}
           <div class="field">
-            <label>Ведущий <span id="f-host-optional-hint" style="font-weight:400;color:var(--ink-soft);display:${(PRODUCTS_WITHOUT_HOST.includes(ev.product)||ev.status==='slot')?'inline':'none'};">— необязательно${ev.status==='slot'?' для статуса «Слот»':' для продукта «Аренда»'}</span></label>
+            <label>Ведущий <span id="f-host-optional-hint" style="font-weight:400;color:var(--ink-soft);display:${hostOptionalFor(ev.status, ev.product)?'inline':'none'};">— необязательно${ev.status==='slot'?' для статуса «Слот»':ev.status==='tentative'?' для частника (попадёт в список «без ведущего»)':' для продукта «Аренда»'}</span></label>
             <input type="text" id="f-host" value="${escapeHtml(ev.host||'')}" placeholder="Начните вводить имя…" list="host-suggestions">
             <datalist id="host-suggestions">${(()=>{ const al = (ev.title && isAllowedEventTitle(ev.title)) ? allowedHostsForTitle(ev.title) : officialHostsAll(); const l = [...al]; if(ev.host && !l.some(x=>x.toLowerCase()===ev.host.trim().toLowerCase())) l.push(ev.host.trim()); return l; })().map(h=>`<option value="${escapeHtml(h)}">`).join('')}</datalist>
             <div id="f-host-allowed-hint" style="font-size:11.5px;color:var(--ink-soft);margin-top:4px;">${(ev.title && officialEventEntry(ev.title)) ? 'Может вести: ' + escapeHtml(allowedHostsForTitle(ev.title).join(', ')) : 'Выберите название — покажу, кто может вести.'}</div>
@@ -23185,7 +23291,7 @@
           setEventStatus('tentative');
         }
         const hostOptionalHint = overlay.querySelector('#f-host-optional-hint');
-        if(hostOptionalHint) hostOptionalHint.style.display = PRODUCTS_WITHOUT_HOST.includes(productSelectForAuto.value) ? 'inline' : 'none';
+        if(hostOptionalHint) { const stNow = overlay.querySelector('#f-status').value || 'confirmed'; hostOptionalHint.style.display = hostOptionalFor(stNow, productSelectForAuto.value) ? 'inline' : 'none'; hostOptionalHint.textContent = stNow==='tentative' ? '— необязательно для частника (попадёт в список «без ведущего»)' : stNow==='slot' ? '— необязательно для статуса «Слот»' : '— необязательно для продукта «Аренда»'; }
       });
     }
 
@@ -23484,7 +23590,7 @@
           if(el){ el.style.borderColor = 'var(--danger)'; if(!firstInvalid) firstInvalid = el; }
         };
         if(!title) markInvalid('f-title');
-        if(!hostVal && !PRODUCTS_WITHOUT_HOST.includes(productVal)) markInvalid('f-host');
+        if(!hostVal && !hostOptionalFor(statusVal, productVal)) markInvalid('f-host');
         if(!dateVal) markInvalid('f-date');
         if(!timeVal) markInvalid('f-time');
         if(!durationVal || durationVal<=0) markInvalid('f-duration');
@@ -23523,7 +23629,7 @@
           if(!dishesVal){ dishesMissing = true; if(dishesFieldEl) dishesFieldEl.style.boxShadow = 'inset 0 0 0 1.5px var(--danger)'; if(!firstInvalid) firstInvalid = dishesFieldEl; }
           else if(dishesVal === 'needed' && !dishesPaymentVal){ dishesMissing = true; if(dishesFieldEl) dishesFieldEl.style.boxShadow = 'inset 0 0 0 1.5px var(--danger)'; if(!firstInvalid) firstInvalid = dishesFieldEl; }
         }
-        const hostMissing = !hostVal && !PRODUCTS_WITHOUT_HOST.includes(productVal);
+        const hostMissing = !hostVal && !hostOptionalFor(statusVal, productVal);
         if(!title || hostMissing || !dateVal || !timeVal || !durationVal || durationVal<=0 || guestsRaw==='' || (priceRaw==='' && !marketingOptional) || Number(priceRaw)<0 || agreedPriceNegative || masterPayNegative || additionalHostsNegative || materialsNegative || guestNamesMissing || redoEventMissing || materialsMissing || dishesMissing){
           showGapWarningBanner(redoEventMissing ? 'У гостя отмечена «Переделка» — укажите, к какому мероприятию это относится.' : 'Заполните все поля перед сохранением (для статуса «Слот» это необязательно). Себестоимость: добавьте хотя бы один материал с названием и суммой (для мастер-класса без гостей её можно пропустить). Суммы (выручка, ЗП мастеру и со-ведущим, себестоимость) не могут быть отрицательными.');
           if(firstInvalid && firstInvalid.scrollIntoView) firstInvalid.scrollIntoView({block:'center', behavior:'smooth'});
