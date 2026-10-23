@@ -3322,6 +3322,7 @@
         const res = await window.storage.set(key, value, true);
         if(res){
           if(key !== 'sync-token') bumpSyncToken(); // не ждём — не критично для основного сохранения
+          if(typeof noteSaveOk === 'function') noteSaveOk(key);
           return true;
         }
         lastErr = new Error('empty result');
@@ -3331,7 +3332,9 @@
       if(i < attempts-1) await sleep(500 * (i+1));
     }
     console.error('storage save failed after retries:', key, lastErr);
-    showSaveError();
+    // разделы с автоповтором помечаются в saveCollectionMerged/saveMapMerged/saveSetMerged (постоянная полоса);
+    // для остальных ключей — прежняя короткая плашка
+    if(typeof SAVE_RETRY_BY_KEY !== 'undefined' && SAVE_RETRY_BY_KEY[key]) noteSaveFailed(key); else showSaveError();
     return false;
   }
 
@@ -3379,6 +3382,94 @@
     catch(e){ return null; }
   }
 
+  function showPersistentSaveFailBanner(text){
+    const old = document.getElementById('persistent-save-fail'); if(old) old.remove();
+    const b = document.createElement('div');
+    b.id = 'persistent-save-fail';
+    b.style.cssText = 'position:fixed;top:0;left:0;right:0;background:var(--danger);color:#fff;padding:14px 18px;font-size:14px;font-weight:600;font-family:var(--font-body);z-index:400;display:flex;gap:14px;align-items:center;justify-content:center;text-align:center;';
+    b.innerHTML = '⚠ ' + escapeHtml(text) + '<button style="background:#fff;color:var(--danger);border:none;border-radius:4px;padding:5px 14px;font-weight:600;cursor:pointer;font-size:12.5px;flex-shrink:0;">Понятно</button>';
+    b.querySelector('button').onclick = ()=> b.remove();
+    document.body.appendChild(b);
+  }
+  // ===== Надёжное сохранение: учёт несохранённых разделов, автоповтор, предупреждение при закрытии =====
+  const SAVE_RETRY_BY_KEY = {
+    'schedule-wishes': ()=>saveScheduleWishes(),
+    'incomes': ()=>saveIncomes(),
+    'expenses': ()=>saveExpenses(),
+    'audit-log': ()=>saveAuditLog(),
+    'events': ()=>saveEvents(),
+    'event-types': ()=>saveEventTypes(),
+    'event-catalog': ()=>saveEventCatalog(),
+    'custom-expense-categories': ()=>saveCustomExpenseCategories(),
+    'custom-marketing-directions': ()=>saveCustomMarketingDirections(),
+    'hosts-list': ()=>saveHostsList(),
+    'master-pay-rates': ()=>saveMasterPayRates(),
+    'master-pay-overrides': ()=>saveMasterPayOverrides(),
+    'materials-catalog': ()=>saveMaterialsCatalog(),
+    'item-sales': ()=>saveItemSales(),
+    'orders': ()=>saveOrders(),
+    'salary-adjustments': ()=>saveSalaryAdjustments(),
+    'monthly-plans': ()=>saveMonthlyPlans(),
+    'daily-report-snapshots': ()=>saveDailyReportSnapshots(),
+    'net-profit-manual': ()=>saveNetProfitManual(),
+    'hostess-bonuses': ()=>saveHostessBonuses(),
+    'year-summary-manual': ()=>saveYearSummaryManual(),
+    'closed-months': ()=>saveClosedMonths(),
+    'marketing-spend': ()=>saveMarketingSpend(),
+    'history-daily': ()=>saveHistoryDaily(),
+    'suppliers': ()=>saveSuppliers(),
+    'stock-receipts': ()=>saveStockReceipts(),
+    'days-off': ()=>saveDaysOff(),
+    'marketing-plans': ()=>saveMarketingPlans(),
+    'content-posts': ()=>saveContentPosts(),
+    'certificates': ()=>saveCertificates(),
+    'refunds': ()=>saveRefunds(),
+    'birthday-outreach': ()=>saveBirthdayOutreach(),
+    'salary-checks': ()=>saveSalaryChecks(),
+    'cash-shifts': ()=>saveCashShifts(),
+    'cash-adjustments': ()=>saveCashAdjustments(),
+    'deposits': ()=>saveDeposits(),
+    'leads': ()=>saveLeads(),
+    'hostess-shifts': ()=>saveHostessShifts(),
+    'manager-shifts': ()=>saveManagerShifts()
+  };
+  const failedSaveKeys = new Set();
+  let saveRetryInFlight = false;
+  function noteSaveFailed(key){
+    failedSaveKeys.add(key);
+    renderUnsavedBanner();
+  }
+  function noteSaveOk(key){
+    if(failedSaveKeys.delete(key)) renderUnsavedBanner();
+  }
+  function renderUnsavedBanner(){
+    let b = document.getElementById('unsaved-banner');
+    if(failedSaveKeys.size === 0){ if(b) b.remove(); return; }
+    if(!b){
+      b = document.createElement('div');
+      b.id = 'unsaved-banner';
+      b.style.cssText = 'position:fixed;left:0;right:0;bottom:0;background:var(--danger);color:#fff;padding:12px 16px;font-size:13.5px;font-weight:600;font-family:var(--font-body);z-index:350;display:flex;gap:12px;align-items:center;justify-content:center;text-align:center;flex-wrap:wrap;';
+      document.body.appendChild(b);
+    }
+    b.innerHTML = '⚠ Часть изменений ещё НЕ сохранена на сервере (разделов: ' + failedSaveKeys.size + '). Не закрывайте страницу — приложение повторяет попытки само. <button id="unsaved-retry" style="background:#fff;color:var(--danger);border:none;border-radius:4px;padding:5px 14px;font-weight:600;cursor:pointer;font-size:12.5px;">Повторить сейчас</button>';
+    b.querySelector('#unsaved-retry').onclick = ()=>{ retryFailedSaves(true); };
+  }
+  async function retryFailedSaves(manual){
+    if(saveRetryInFlight || failedSaveKeys.size === 0) return;
+    saveRetryInFlight = true;
+    try{
+      for(const key of Array.from(failedSaveKeys)){
+        const fn = SAVE_RETRY_BY_KEY[key];
+        if(!fn){ failedSaveKeys.delete(key); continue; }
+        try{ await fn(); }catch(e){ console.error('retry failed', key, e); }
+      }
+    } finally { saveRetryInFlight = false; renderUnsavedBanner(); }
+  }
+  setInterval(()=>{ retryFailedSaves(false); }, 12000);
+  window.addEventListener('online', ()=>{ retryFailedSaves(false); });
+  window.addEventListener('beforeunload', (e)=>{
+    if(failedSaveKeys.size > 0){ e.preventDefault(); e.returnValue = ''; return ''; }
+  });
   function showSaveError(){
     let banner = document.getElementById('save-error-banner');
     if(banner){ return; } // уже показан
@@ -3445,8 +3536,8 @@
     }
     if(!fetched){
       console.error('merge-save aborted: server unreachable for', storageKey);
-      showSaveError();
-      return;
+      if(SAVE_RETRY_BY_KEY[storageKey]) noteSaveFailed(storageKey); else showSaveError();
+      return false;
     }
     try{
       serverArray = res ? JSON.parse(res.value) : [];
@@ -3456,16 +3547,19 @@
     }
     if(serverUnreadable){
       // содержимое на сервере повреждено — сверять не с чем, сохраняем локальный список целиком
-      await storageSetWithRetry(storageKey, JSON.stringify(currentArray));
-      applyMerged(currentArray);
-      return;
+      const okRaw = await storageSetWithRetry(storageKey, JSON.stringify(currentArray));
+      if(okRaw) applyMerged(currentArray);
+      return !!okRaw;
     }
     const deleteSet = new Set(deletes);
     const map = new Map(serverArray.filter(Boolean).filter(x=>!deleteSet.has(kf(x))).map(x=>[kf(x), x]));
     upserts.forEach(x=>{ map.set(kf(x), x); });
     const finalArr = Array.from(map.values());
-    await storageSetWithRetry(storageKey, JSON.stringify(finalArr));
-    applyMerged(finalArr);
+    const okSet = await storageSetWithRetry(storageKey, JSON.stringify(finalArr));
+    // если сервер запись не принял — НЕ обновляем «исходное состояние»: иначе при повторной попытке
+    // приложение решит, что менять нечего, и новая запись так и не уйдёт на сервер
+    if(okSet) applyMerged(finalArr);
+    return !!okSet;
   }
   async function saveMapMerged(storageKey, currentMap, baselineMap, applyMerged){
     const cur = currentMap || {};
@@ -3477,15 +3571,17 @@
       const res = await window.storage.get(storageKey, true);
       serverMap = res ? JSON.parse(res.value) : {};
     }catch(e){
-      await storageSetWithRetry(storageKey, JSON.stringify(cur));
-      applyMerged(cur);
-      return;
+      // сервер не ответил — НЕ записываем свою (возможно устаревшую) копию целиком, а повторим позже
+      console.error('merge-save (map) aborted: server unreachable for', storageKey);
+      if(SAVE_RETRY_BY_KEY[storageKey]) noteSaveFailed(storageKey); else showSaveError();
+      return false;
     }
     const finalMap = { ...serverMap };
     deleteKeys.forEach(k=>{ delete finalMap[k]; });
     upsertKeys.forEach(k=>{ finalMap[k] = cur[k]; });
-    await storageSetWithRetry(storageKey, JSON.stringify(finalMap));
-    applyMerged(finalMap);
+    const okMap = await storageSetWithRetry(storageKey, JSON.stringify(finalMap));
+    if(okMap) applyMerged(finalMap);
+    return !!okMap;
   }
   async function saveSetMerged(storageKey, currentArray, baselineArray, applyMerged){
     const cur = currentArray || [];
@@ -3499,16 +3595,17 @@
       const res = await window.storage.get(storageKey, true);
       serverArray = res ? JSON.parse(res.value) : [];
     }catch(e){
-      await storageSetWithRetry(storageKey, JSON.stringify(cur));
-      applyMerged(cur);
-      return;
+      console.error('merge-save (set) aborted: server unreachable for', storageKey);
+      if(SAVE_RETRY_BY_KEY[storageKey]) noteSaveFailed(storageKey); else showSaveError();
+      return false;
     }
     const removedSet = new Set(removed);
     const finalSet = new Set(serverArray.filter(x=>!removedSet.has(x)));
     added.forEach(x=> finalSet.add(x));
     const finalArr = Array.from(finalSet);
-    await storageSetWithRetry(storageKey, JSON.stringify(finalArr));
-    applyMerged(finalArr);
+    const okSetM = await storageSetWithRetry(storageKey, JSON.stringify(finalArr));
+    if(okSetM) applyMerged(finalArr);
+    return !!okSetM;
   }
   // Сырое сохранение без слияния — используется ТОЛЬКО для намеренной ПОЛНОЙ замены данных
   // (кнопка "Восстановить из файла" → "Заменить текущие данные"), где слияние было бы неправильным:
@@ -3520,7 +3617,7 @@
     return storageSetWithRetry('events', JSON.stringify(state.events));
   }
   async function saveEvents(){
-    await saveCollectionMerged('events', state.events, state._eventsBaseline, (finalArr)=>{
+    return await saveCollectionMerged('events', state.events, state._eventsBaseline, (finalArr)=>{
       state.events = finalArr;
       state._eventsBaseline = JSON.parse(JSON.stringify(finalArr));
     });
@@ -23867,7 +23964,13 @@
         sendPushNotification('Закончился материал', justRanOutNames.join(', '), ['admin','owner']);
       }
 
-      await saveEvents();
+      const eventsSavedOk = await saveEvents();
+      if(eventsSavedOk === false){
+        // сервер не принял — окно НЕ закрываем, чтобы менеджер не решил, что всё сохранилось
+        showPersistentSaveFailBanner('Мероприятие НЕ сохранено: нет связи с сервером. Не закрывайте окно — проверьте интернет и нажмите «Сохранить» ещё раз.');
+        return;
+      }
+      { const pb = document.getElementById('persistent-save-fail'); if(pb) pb.remove(); }
 
       // привязка заявки к новому мероприятию (см. блок валидации выше) — создаём новую заявку или
       // дописываем eventId в выбранную существующую, сразу помечая её проданной этим мероприятием
