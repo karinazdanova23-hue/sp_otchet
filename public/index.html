@@ -1603,6 +1603,140 @@
       </div>
     </details>`;
   }
+  // ===== загруженность недели и рекомендации «что ещё поставить» =====
+  function loadSettings(){
+    const s = state.loadSettings || {};
+    const n = (v, d)=> (v !== undefined && v !== null && v !== '' && isFinite(Number(v))) ? Number(v) : d;
+    return { addAt: n(s.addAt, 60), lowAt: n(s.lowAt, 35), lead: Math.max(0, Math.min(14, n(s.lead, 3))) };
+  }
+  // окно оценки — 2 недели вперёд, начиная с «сегодня + запас на набор группы» (по умолчанию 3 дня)
+  function loadDefaultStart(){ return loadAddDays(todayStr(), loadSettings().lead); }
+  async function saveLoadSettings(){
+    await saveMapMerged('load-settings', state.loadSettings || {}, state._loadSettingsBaseline || {}, (m)=>{ state.loadSettings = m; state._loadSettingsBaseline = JSON.parse(JSON.stringify(m)); });
+  }
+  function loadAddDays(dateStr, n){ const d = parseDate(dateStr); d.setDate(d.getDate() + n); return fmtDate(d); }
+  function loadMonday(dateStr){ const d = parseDate(dateStr); d.setDate(d.getDate() - ((d.getDay() + 6) % 7)); return fmtDate(d); }
+  function loadDirKey(e){
+    const k = ((e.direction && e.direction.trim()) || e.title || '').trim().toLowerCase();
+    return legacyTitleToOfficial(k) || k;
+  }
+  function loadFill(list){
+    let t = 0, b = 0;
+    list.forEach(e=>{ const c = SPACE_CAPACITY[e.spaceId]; t += c; b += Math.min(Number(e.guests)||0, c); });
+    return { t, b, pct: t ? Math.round(b / t * 100) : null };
+  }
+  function loadFindSlots(key, ws, today, evsAll, evsDir){
+    const histFrom = loadAddDays(today, -56);
+    const past = evsDir.filter(e=> e.date >= histFrom && e.date < today && loadDirKey(e) === key);
+    if(!past.length) return [];
+    const pat = {}; const spaceCnt = {}; const durCnt = {}; const guestsArr = [];
+    past.forEach(e=>{
+      const wd = (parseDate(e.date).getDay() + 6) % 7; const k = wd + '|' + (e.time||'');
+      const f = loadFill([e]).pct || 0;
+      (pat[k] = pat[k] || { wd, time: e.time||'', n: 0, sum: 0 }); pat[k].n++; pat[k].sum += f;
+      spaceCnt[e.spaceId] = (spaceCnt[e.spaceId]||0) + 1; durCnt[e.duration||120] = (durCnt[e.duration||120]||0) + 1; guestsArr.push(Number(e.guests)||0);
+    });
+    const pats = Object.values(pat).filter(p=>p.time).sort((a,b)=> (b.sum/b.n - a.sum/a.n) || (b.n - a.n)).slice(0, 5);
+    const spaceIds = Object.keys(spaceCnt).sort((a,b)=>spaceCnt[b]-spaceCnt[a]);
+    const dur = +Object.keys(durCnt).sort((a,b)=>durCnt[b]-durCnt[a])[0] || 120;
+    const out = [];
+    for(let i = 0; i < 14 && out.length < 3; i++){
+      const d = loadAddDays(ws, i); if(d < today) continue;
+      if(evsDir.some(e=> e.date === d && loadDirKey(e) === key)) continue; // одно направление дважды за день не предлагаем
+      const wd = (parseDate(d).getDay() + 6) % 7;
+      for(const p of pats){
+        if(p.wd !== wd) continue;
+        const st = timeToMinutes(p.time), en = st + dur;
+        const free = spaceIds.find(sid=> !evsAll.some(e=> e.spaceId === sid && e.date === d && e.status !== 'cancelled' && (timeToMinutes(e.time) < en) && (timeToMinutes(e.time) + (Number(e.duration)||120) > st)));
+        if(free){ out.push({ date: d, time: p.time, spaceId: free, pct: Math.round(p.sum / p.n), n: p.n }); break; }
+      }
+    }
+    return out;
+  }
+  function computeLoad(ws){
+    const S = loadSettings(); const today = todayStr(); const we = loadAddDays(ws, 13);
+    const evsAll = (state.events||[]).filter(e=> e.date && e.status !== 'cancelled');
+    const evsDir = (state.events||[]).filter(e=> e.date && e.status === 'confirmed' && !PRIVATE_PRODUCTS_FOR_RECS.includes(e.product||'') && SPACE_CAPACITY[e.spaceId]);
+    const weekPast = we < today;
+    const near = ws <= loadAddDays(today, 2);
+    const histEnd = ws < today ? ws : today; const histStart = loadAddDays(histEnd, -28);
+    const W = {}, H = {}, names = {};
+    evsDir.forEach(e=>{
+      const k = loadDirKey(e); if(!k) return;
+      const nm = (e.direction && e.direction.trim()) || e.title || k; names[k] = names[k] || nm;
+      if(e.date >= ws && e.date <= we) (W[k] = W[k] || []).push(e);
+      else if(e.date >= histStart && e.date < histEnd) (H[k] = H[k] || []).push(e);
+    });
+    const keys = Array.from(new Set([...Object.keys(W), ...Object.keys(H).filter(k=>H[k].length >= 2)]));
+    const rows = keys.map(k=>{
+      const w = W[k]||[], h = H[k]||[];
+      const cur = loadFill(w), hist = loadFill(h);
+      // ориентир загрузки: ближайшие (≤2 дней) и прошедшие мероприятия берём как есть, дальние — не ниже типичной загрузки направления за 4 недели
+      let ref = null, src = 'факт';
+      if(w.length){
+        let tot = 0, exp = 0, used = false;
+        w.forEach(e=>{
+          const c = SPACE_CAPACITY[e.spaceId]; const g = Math.min(Number(e.guests)||0, c); tot += c;
+          if(!weekPast && e.date > loadAddDays(today, 2) && h.length >= 2 && hist.pct != null){ const f = Math.round(hist.pct / 100 * c); if(f > g){ exp += f; used = true; return; } }
+          exp += g;
+        });
+        ref = tot ? Math.round(exp / tot * 100) : null; if(used) src = 'прогноз: дальние даты не ниже обычной загрузки';
+      } else if(hist.pct != null && !weekPast){ ref = hist.pct; src = 'обычная загрузка за 4 недели'; }
+      let verdict = 'ok';
+      const enough = w.length >= 2 || h.length >= 2;
+      if(!weekPast && ref != null && enough){
+        if(ref >= S.addAt) verdict = 'add';
+        else if(ref < S.lowAt && w.length >= 2) verdict = 'low';
+      }
+      const projected = (verdict === 'add' && w.length >= 1) ? Math.round(ref * w.length / (w.length + 1)) : null;
+      const slots = verdict === 'add' ? loadFindSlots(k, ws, today, evsAll, evsDir) : [];
+      return { key: k, name: names[k]||k, wN: w.length, cur, hN: h.length, hist, ref, src, verdict, projected, slots, perWeek: Math.round(h.length / 2 * 10) / 10 };
+    });
+    const order = { add: 0, low: 2, ok: 1 };
+    rows.sort((a,b)=> (order[a.verdict] - order[b.verdict]) || ((b.ref||0) - (a.ref||0)));
+    const all = Object.values(W).reduce((a,l)=>a.concat(l), []);
+    return { ws, we, weekPast, rows, total: loadFill(all), count: all.length, S };
+  }
+  function renderLoadAdvicePanel(){
+    if(!(state.currentRole === 'admin' || state.currentRole === 'owner' || state.currentRole === 'assistant')) return '';
+    const canEdit = state.currentRole === 'admin' || state.currentRole === 'owner';
+    if(!state.loadWeekStart) state.loadWeekStart = loadDefaultStart();
+    const L = computeLoad(state.loadWeekStart);
+    const addN = L.rows.filter(r=>r.verdict === 'add').length;
+    const spName = (id)=> { const sp = (state.spaces||[]).find(s=>s.id === id); return sp ? sp.name : ''; };
+    const fmtS = (d)=> { const x = parseDate(d); return pad(x.getDate()) + '.' + pad(x.getMonth()+1); };
+    const wdN = ['пн','вт','ср','чт','пт','сб','вс'];
+    const chip = (r)=> r.verdict === 'add' ? '<span style="color:var(--status-green);font-weight:600;">➕ можно добавить ещё</span>'
+      : r.verdict === 'low' ? '<span style="color:var(--status-red);font-weight:600;">⚠ слабая загрузка</span>'
+      : '<span style="color:var(--ink-soft);">держим как есть</span>';
+    const pct = (x)=> x == null ? '—' : x + '%';
+    return `<details class="load-panel" ${state.loadPanelOpen ? 'open' : ''} style="border:1px solid var(--line-strong);border-radius:var(--radius);padding:10px 14px;margin-bottom:14px;background:var(--white);">
+      <summary style="cursor:pointer;font-weight:600;font-size:13.5px;">📈 Загруженность ближайших 2 недель и что добавить ${addN ? `<span style="color:var(--status-green);font-weight:600;">(можно добавить: ${addN})</span>` : ''}</summary>
+      <div style="margin-top:10px;font-size:13px;">
+        <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:8px;">
+          <button class="btn btn-ghost" id="load-prev" style="padding:4px 10px;">←</button>
+          <b>${fmtS(L.ws)} – ${fmtS(L.we)}</b> <span style="color:var(--ink-soft);">(2 недели)</span>
+          <button class="btn btn-ghost" id="load-next" style="padding:4px 10px;">→</button>
+          <button class="btn btn-ghost" id="load-today" style="padding:4px 10px;font-size:12px;">ближайшие 2 недели</button>
+          <span style="color:var(--ink-soft);">Групповых мероприятий: <b>${L.count}</b>${L.total.t ? ` · занято <b>${L.total.b}</b> из <b>${L.total.t}</b> мест (<b>${L.total.pct}%</b>)` : ''}</span>
+        </div>
+        ${L.rows.length ? `<div style="overflow:auto;"><table class="ref-table" style="min-width:560px;"><tr>${['Направление','В периоде','Загрузка','Обычно за 2 нед.','Вывод'].map(h=>`<td style="font-weight:600;">${h}</td>`).join('')}</tr>
+          ${L.rows.map(r=>`<tr>
+            <td><b>${escapeHtml(r.name)}</b></td>
+            <td>${r.wN}</td>
+            <td>${r.wN ? `${r.cur.b}/${r.cur.t} · <b>${pct(r.cur.pct)}</b>` : '—'}</td>
+            <td>${r.hN ? `≈${r.perWeek} · <b>${pct(r.hist.pct)}</b>` : '—'}</td>
+            <td>${chip(r)}${r.verdict === 'add' ? `<div style="font-size:12px;margin-top:3px;">${r.wN ? `Если поставить ещё одно: средняя загрузка станет ≈${r.projected}%.` : 'В этом периоде нет, а спрос по истории высокий.'} <span style="color:var(--ink-soft);">(ориентир: ${r.ref}% — ${escapeHtml(r.src)})</span></div>
+              ${r.slots.length ? `<div style="font-size:12px;margin-top:3px;">Свободные слоты: ${r.slots.map(s=>`<b>${wdN[(parseDate(s.date).getDay()+6)%7]} ${fmtS(s.date)} ${escapeHtml(s.time)}</b>, ${escapeHtml(spName(s.spaceId))} <span style="color:var(--ink-soft);">(раньше в это время ≈${s.pct}%, было ${s.n}×)</span>`).join('; ')}</div>` : '<div style="font-size:12px;margin-top:3px;color:var(--ink-soft);">Подходящего свободного слота по истории не нашла — выберите время сами.</div>'}` : ''}
+              ${r.verdict === 'low' ? '<div style="font-size:12px;margin-top:3px;">Мест много, гостей мало — новые не добавляйте; можно объединить группы или усилить продвижение.</div>' : ''}</td>
+          </tr>`).join('')}</table></div>` : '<div style="color:var(--ink-soft);">На этой неделе групповых мероприятий нет и по истории рекомендовать нечего.</div>'}
+        <div style="margin-top:10px;display:flex;gap:12px;flex-wrap:wrap;align-items:center;font-size:12px;color:var(--ink-soft);">
+          ${canEdit ? `<span>Рекомендовать добавить при загрузке от <input type="number" id="load-add-at" min="1" max="100" value="${L.S.addAt}" style="width:56px;">% · слабая ниже <input type="number" id="load-low-at" min="1" max="100" value="${L.S.lowAt}" style="width:56px;">% · запас на набор группы <input type="number" id="load-lead" min="0" max="14" value="${L.S.lead}" style="width:48px;"> дн.</span>` : `<span>Порог «добавить»: от ${L.S.addAt}%, «слабая загрузка»: ниже ${L.S.lowAt}%, запас на набор группы: ${L.S.lead} дн.</span>`}
+        </div>
+        <div style="font-size:11.5px;color:var(--ink-soft);margin-top:6px;">Оценивается период в 2 недели вперёд, начиная через несколько дней от сегодня: на самые ближайшие даты группу уже не успеть набрать. Считаются групповые мероприятия со статусом «Подтверждено» в залах (без выездов) — по числу записанных гостей к вместимости зала; для дат подальше загрузка берётся не ниже обычной за последние 4 недели. Слоты предлагаются по времени, в которое направление раньше заполнялось лучше всего, и только если зал в это время свободен. Это подсказка, а не правило.</div>
+      </div>
+    </details>`;
+  }
   function recsRowHtml(r, types){
     return `<div class="recs-row" style="display:grid;grid-template-columns:1.6fr 56px 56px 90px 28px;gap:6px;align-items:center;margin-bottom:6px;">
       <select class="recs-title"><option value="">— направление —</option>${types.map(t=>`<option value="${escapeHtml(t)}" ${r.title===t?'selected':''}>${escapeHtml(t)}</option>`).join('')}</select>
@@ -2594,6 +2728,10 @@
       state.refSettings = rs ? JSON.parse(rs.value) : {};
     }catch(e){ state.refSettings = {}; }
     try{
+      const lsr = await window.storage.get('load-settings', true);
+      state.loadSettings = lsr ? JSON.parse(lsr.value) : {};
+    }catch(e){ state.loadSettings = {}; }
+    try{
       const rl = await window.storage.get('reference-log', true);
       state.refLog = rl ? JSON.parse(rl.value) : [];
     }catch(e){ state.refLog = []; }
@@ -2716,6 +2854,7 @@
     state._monthlyPlansBaseline = JSON.parse(JSON.stringify(state.monthlyPlans));
     state._refOverridesBaseline = JSON.parse(JSON.stringify(state.refOverrides||{}));
     state._refSettingsBaseline = JSON.parse(JSON.stringify(state.refSettings||{}));
+    state._loadSettingsBaseline = JSON.parse(JSON.stringify(state.loadSettings||{}));
     state._refLogBaseline = JSON.parse(JSON.stringify(state.refLog||[]));
     state._dailyReportSnapshotsBaseline = JSON.parse(JSON.stringify(state.dailyReportSnapshots));
     state._netProfitManualBaseline = JSON.parse(JSON.stringify(state.netProfitManual));
@@ -3439,6 +3578,7 @@
     'schedule-wishes': ()=>saveScheduleWishes(),
     'reference-overrides': ()=>saveRefOverrides(),
     'reference-settings': ()=>saveRefSettings(),
+    'load-settings': ()=>saveLoadSettings(),
     'reference-log': ()=>saveRefLog(),
     'incomes': ()=>saveIncomes(),
     'expenses': ()=>saveExpenses(),
@@ -5384,6 +5524,7 @@
       ${renderNoHostPanel()}
       ${renderWishesBar()}
       ${renderScheduleRecsPanel()}
+      ${renderLoadAdvicePanel()}
       <div class="cal-grid-wrap">
         <div class="cal-grid">
           ${DOW.map(d=>`<div class="cal-dow">${d}</div>`).join('')}
@@ -14039,6 +14180,22 @@
     // если её раскрыли — остаётся раскрытой, пока человек сам не свернёт или не перезагрузит приложение
     const recsPanelEl = document.querySelector('details.recs-panel');
     if(recsPanelEl) recsPanelEl.addEventListener('toggle', ()=>{ state.recsPanelOpen = recsPanelEl.open; });
+    const loadPanelEl = document.querySelector('details.load-panel');
+    if(loadPanelEl) loadPanelEl.addEventListener('toggle', ()=>{ state.loadPanelOpen = loadPanelEl.open; });
+    { const shiftW = (n)=>{ state.loadWeekStart = loadAddDays(state.loadWeekStart || loadMonday(todayStr()), n); state.loadPanelOpen = true; render(); };
+      const lp = document.getElementById('load-prev'); if(lp) lp.onclick = ()=> shiftW(-7);
+      const ln = document.getElementById('load-next'); if(ln) ln.onclick = ()=> shiftW(7);
+      const lt = document.getElementById('load-today'); if(lt) lt.onclick = ()=>{ state.loadWeekStart = loadDefaultStart(); state.loadPanelOpen = true; render(); };
+      const saveTh = async ()=>{
+        const a = parseFloat(document.getElementById('load-add-at').value), l = parseFloat(document.getElementById('load-low-at').value), ld = parseInt(document.getElementById('load-lead').value);
+        if(!isFinite(a) || !isFinite(l) || a < 1 || a > 100 || l < 1 || l > 100){ showGapWarningBanner('Пороги — числа от 1 до 100.'); return; }
+        if(!isFinite(ld) || ld < 0 || ld > 14){ showGapWarningBanner('Запас на набор группы — от 0 до 14 дней.'); return; }
+        state.loadSettings = { addAt: a, lowAt: l, lead: ld }; state.loadPanelOpen = true; state.loadWeekStart = loadDefaultStart();
+        await saveLoadSettings(); render();
+      };
+      const la = document.getElementById('load-add-at'); if(la) la.onchange = saveTh;
+      const ll = document.getElementById('load-low-at'); if(ll) ll.onchange = saveTh;
+      const ld2 = document.getElementById('load-lead'); if(ld2) ld2.onchange = saveTh; }
     const recsEditBtn = document.getElementById('recs-edit');
     if(recsEditBtn) recsEditBtn.onclick = (ev)=>{ ev.preventDefault(); ev.stopPropagation(); state.modal = {type:'schedule-recs'}; render(); };
 
