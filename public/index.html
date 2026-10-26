@@ -1118,14 +1118,17 @@
   // ЗП мастера по заказам не считается по фиксированному %, а договаривается индивидуально —
   // сумма вводится вручную по каждому заказу (в отличие от "Изделия", где действует общий процент)
 
-  const LEAD_STATUSES = [['new','В работе'],['kp','КП отправлено'],['thinking','Думает'],['sold','Продано'],['lost','Отказ']];
+  const LEAD_STATUSES = [['new','Новая заявка'],['brief','Бриф / готовим КП'],['kp','КП отправлено'],['thinking','Думает'],['sold','Продано'],['lost','Отказ']];
   const LEAD_LOST_REASONS = ['Дорого','Не подошла дата','Выбрали другую студию','Передумали / отложили','Пропал, не отвечает','Не подошёл формат / программа','Нет свободного зала','Другое'];
   function leadStatus(l){ if(!l) return 'new'; if(l.sold) return 'sold'; return (l.status && l.status !== 'sold') ? l.status : 'new'; }
+  // вид заявки: B2C — частные гости (ведём здесь), B2B — компании (работа идёт в Едином журнале, здесь — продажа и конверсия)
+  function leadKind(l){ return l && l.kind === 'b2b' ? 'b2b' : 'b2c'; }
   function leadStatusLabel(s){ const f = LEAD_STATUSES.find(x=>x[0]===s); return f ? f[1] : s; }
   function leadBadgeHtml(l){
     const st = leadStatus(l); let h;
     if(st === 'sold') h = '✅';
     else if(st === 'lost') h = '<span style="color:var(--danger);">❌ отказ</span>' + (l.lostReason ? '<br><span style="font-size:10px;color:var(--ink-soft);">' + escapeHtml(l.lostReason) + '</span>' : '');
+    else if(st === 'brief') h = '<span style="font-size:11px;">📋 готовим КП</span>';
     else if(st === 'kp') h = '<span style="font-size:11px;">📨 КП</span>';
     else if(st === 'thinking') h = '<span style="font-size:11px;">🤔 думает</span>';
     else h = '—';
@@ -2081,6 +2084,7 @@
     activeSpaceId: 'all',
     calFilterDirection: '',
     calFilterHost: '',
+    calFilterKind: '',
     cursor: new Date(new Date().getFullYear(), new Date().getMonth(), 1),
     modal: null, // {type: 'day', date} | {type:'event', event, isNew} | {type:'code'} | {type:'code-settings'}
     activeHost: null,
@@ -2124,6 +2128,9 @@
     salaryAdjMode: 'month',
     leads: null,
     kpOffers: null,
+    leadTasks: null,
+    journalSync: null,
+    convTab: 'board',
     hostessShifts: null,
     managerShifts: null,
     syncToken: null,
@@ -2827,6 +2834,18 @@
     }catch(e){ state.kpOffers = []; }
 
     try{
+      const ltr = await window.storage.get('lead-tasks', true);
+      state.leadTasks = ltr ? JSON.parse(ltr.value) : [];
+      if(!Array.isArray(state.leadTasks)) state.leadTasks = [];
+    }catch(e){ state.leadTasks = []; }
+
+    try{
+      const jsr = await window.storage.get('journal-sync', true);
+      state.journalSync = jsr ? JSON.parse(jsr.value) : {};
+      if(!state.journalSync || typeof state.journalSync !== 'object' || Array.isArray(state.journalSync)) state.journalSync = {};
+    }catch(e){ state.journalSync = {}; }
+
+    try{
       const hs = await window.storage.get('hostess-shifts', true);
       state.hostessShifts = hs ? JSON.parse(hs.value) : {};
     }catch(e){ state.hostessShifts = {}; }
@@ -2882,6 +2901,8 @@
     state._expensesBaseline = JSON.parse(JSON.stringify(state.expenses));
     state._leadsBaseline = JSON.parse(JSON.stringify(state.leads));
     state._kpOffersBaseline = JSON.parse(JSON.stringify(state.kpOffers || []));
+    state._leadTasksBaseline = JSON.parse(JSON.stringify(state.leadTasks || []));
+    state._journalSyncBaseline = JSON.parse(JSON.stringify(state.journalSync || {}));
     state._hostessShiftsBaseline = JSON.parse(JSON.stringify(state.hostessShifts));
     state._managerShiftsBaseline = JSON.parse(JSON.stringify(state.managerShifts));
 
@@ -3417,6 +3438,7 @@
       cashAdjustments: state.cashAdjustments,
       leads: state.leads,
       kpOffers: state.kpOffers || [],
+      leadTasks: state.leadTasks || [],
       incomes: state.incomes,
       expenses: state.expenses,
       eventTypes: state.eventTypes,
@@ -3617,6 +3639,8 @@
     'deposits': ()=>saveDeposits(),
     'leads': ()=>saveLeads(),
     'kp-offers': ()=>saveKpOffers(),
+    'lead-tasks': ()=>saveLeadTasks(),
+    'journal-sync': ()=>saveJournalSync(),
     'hostess-shifts': ()=>saveHostessShifts(),
     'manager-shifts': ()=>saveManagerShifts()
   };
@@ -4568,6 +4592,7 @@
       state.leads = finalArr;
       state._leadsBaseline = JSON.parse(JSON.stringify(finalArr));
     });
+    try{ journalSyncSoon(); }catch(e){}
   }
   async function saveKpOffers(){
     if(!Array.isArray(state.kpOffers)) state.kpOffers = [];
@@ -4742,7 +4767,10 @@
     state.events.forEach(e=>{ const d = eventDirection(e); if(d) set.add(d); });
     return Array.from(set).sort((a,b)=>a.localeCompare(b,'ru'));
   }
+  const CAL_PRIVATE_KIND = ['День рождения','Свадьба','Свидание','Девичник','Корпоратив'];
   function calendarFilterMatch(e){
+    if(state.calFilterKind === 'legal' && e.payerType !== 'legal') return false;
+    if(state.calFilterKind === 'private' && !CAL_PRIVATE_KIND.includes(e.product||'')) return false;
     if(state.calFilterDirection && eventDirection(e) !== state.calFilterDirection) return false;
     if(state.calFilterHost){
       const names = eventHostsWithPay(e).map(h=>h.name);
@@ -5483,9 +5511,15 @@
     }
 
     const scopedEvts = state.events.filter(e=> (isAll || e.spaceId===state.activeSpaceId) && calendarFilterMatch(e));
-    const filterActive = !!(state.calFilterDirection || state.calFilterHost);
+    const filterActive = !!(state.calFilterDirection || state.calFilterHost || state.calFilterKind);
+    const kindYm = state.cursor.getFullYear() + '-' + pad(state.cursor.getMonth()+1);
+    const kindBase = state.events.filter(e=> e.date && e.date.startsWith(kindYm) && e.status !== 'cancelled' && (isAll || e.spaceId===state.activeSpaceId));
+    const kindLegalN = kindBase.filter(e=>e.payerType==='legal').length;
+    const kindPrivN = kindBase.filter(e=>CAL_PRIVATE_KIND.includes(e.product||'')).length;
+    const kindBtn = (k, label, n)=> `<button class="btn ${state.calFilterKind===k?'btn-primary':'btn-ghost'}" data-calkind="${k}" style="font-size:12.5px;padding:6px 12px;">${label} <span style="opacity:.75;">(${n})</span></button>`;
     const filters = `
       <div class="cal-filters" style="display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin-bottom:12px;">
+        ${kindBtn('legal','🏢 Юрлица',kindLegalN)}${kindBtn('private','🎉 ДР, свидания, корпоративы',kindPrivN)}
         <select id="cal-filter-direction" style="padding:7px 10px;border:1px solid var(--line-strong);border-radius:var(--radius);font-size:12.5px;background:var(--white);">
           <option value="">Все направления</option>
           ${allDirectionsInUse().map(d=>`<option value="${escapeHtml(d)}" ${state.calFilterDirection===d?'selected':''}>${escapeHtml(d)}</option>`).join('')}
@@ -6111,20 +6145,22 @@
       Object.assign(offer, { updatedAt: now, brief: snap, client: (B.client||'').trim(), contact, type: B.type||'', date: B.date||'', n: parseInt(B.n), total: T.total, unknown: !!T.unknown, catId: pos[0].cat.id, items: summary });
       const PROD = { birthday:'День рождения', date:'Свидание', girls:'Девичник', corp:'Корпоратив', kids:'Детский МК', other:'Другое' };
       let lead = offer.leadId ? state.leads.find(l=>l.id===offer.leadId) : null;
+      let _prevSt = lead ? leadStatus(lead) : null;
       if(!lead){
         const mi = B.date ? parseDate(B.date).getMonth() : -1;
         const monthName = mi >= 0 ? MONTHS[mi].charAt(0).toUpperCase() + MONTHS[mi].slice(1) : LEAD_MONTH_OPTIONS[0];
         const comment = 'КП на ' + formatMoney(T.total) + ': ' + summary.map(x=>x.name).join(', ') + (B.client && B.client.trim() ? ' · ' + B.client.trim() : '') + (B.wishes && B.wishes.trim() ? ' · ' + B.wishes.trim() : '');
         lead = { id: uid(), requestDate: todayStr(), contact, eventMonth: monthName, source: B.source, product: PROD[B.type] || LEAD_PRODUCTS[0],
           location: pos.every(x=>/выезд/i.test(x.v.space||'')) ? 'offsite' : 'in_studio', revenue: Math.round(T.total), sold: false, saleDate: '', saleKind: '', eventId: '', orderId: '',
-          comment, hasPhoto: false, status: markSent ? 'kp' : 'new', lostReason: '', kpId: offer.id };
+          comment, hasPhoto: false, status: markSent ? 'kp' : 'brief', lostReason: '', kpId: offer.id, owner: leadOwnerNow(), statusAt: now, kind: B.type === 'corp' ? 'b2b' : 'b2c' };
         state.leads.push(lead); offer.leadId = lead.id;
       } else {
         if(!lead.sold) lead.revenue = Math.round(T.total);
         if(!lead.kpId) lead.kpId = offer.id;
-        if(markSent && leadStatus(lead) === 'new') lead.status = 'kp';
+        if(markSent && ['new','brief'].includes(leadStatus(lead))){ lead.status = 'kp'; lead.statusAt = now; }
       }
       await saveLeads(); await saveKpOffers();
+      await leadStageTasks(lead, _prevSt);
       briefSave();
       return true;
     }
@@ -8259,6 +8295,7 @@
   }
 
   function attachCertificatesEvents(){
+    attachLeadBoardEvents();
     document.querySelectorAll('[data-certview]').forEach(btn=>{
       btn.onclick = ()=>{ state.certView = btn.dataset.certview; state.certSummaryExpandedYears = new Set(); render(); };
     });
@@ -8446,7 +8483,7 @@
       requireUnlock(()=>{
         state.modal = {type:'lead', isNew:true, lead:{
           id: uid(), requestDate: todayStr(), contact: '', eventMonth: LEAD_MONTH_OPTIONS[0], source: LEAD_SOURCES[0],
-          product: LEAD_PRODUCTS[0], location: 'in_studio', revenue: null, sold: false, saleDate: '', eventId: '', hasPhoto: false,
+          product: LEAD_PRODUCTS[0], location: 'in_studio', revenue: null, sold: false, saleDate: '', eventId: '', hasPhoto: false, owner: leadOwnerNow(),
         }};
         render();
       });
@@ -8548,7 +8585,435 @@
     });
   }
 
+  // ===== воронка заявок (канбан) и задачи по заявкам =====
+  const LEAD_STAGES = ['new','brief','kp','thinking','sold','lost'];
+  const LEAD_STAGE_COLORS = { new:'#2F8F9D', brief:'#B8863A', kp:'#7E57A8', thinking:'#5A6FA8', sold:'#3F8F6B', lost:'#B0443B' };
+  const LEAD_NEXT = { new:['brief','Бриф / КП →'], brief:['kp','КП отправлено'], kp:['sold','Сделка ✓'], thinking:['sold','Сделка ✓'] };
+  async function saveLeadTasks(){
+    if(!Array.isArray(state.leadTasks)) state.leadTasks = [];
+    await saveCollectionMerged('lead-tasks', state.leadTasks, state._leadTasksBaseline || [], (a)=>{ state.leadTasks = a; state._leadTasksBaseline = JSON.parse(JSON.stringify(a)); });
+    try{ journalSyncSoon(); }catch(e){}
+  }
+  function leadWho(){ return state.loggedInManagerName || state.loggedInHostessName || (ROLE_LABELS[state.currentRole] || state.currentRole); }
+  // владелец новой заявки: сам менеджер, если он вошёл; иначе менеджер, стоящий в календаре на сегодня
+  function leadOwnerNow(){ return state.loggedInManagerName || managerForDate(todayStr()) || leadWho(); }
+  // ближайший день, когда в календаре стоит менеджер (до 14 дней вперёд); если график не заполнен — дата как есть
+  function leadWorkDay(dateStr){
+    if(!dateStr) return dateStr;
+    for(let i = 0; i <= 14; i++){ const d = loadAddDays(dateStr, i); if(managerForDate(d)) return d; }
+    return dateStr;
+  }
+  function leadAssigneeFor(dateStr, lead){ return managerForDate(dateStr) || (lead && lead.owner) || leadWho(); }
+
+  // ===== связка с «Единым журналом»: заявки и задачи уходят в B2B журнала автоматически =====
+  // секретный ключ журнала лежит в отдельной записи и подгружается только на устройствах Руководителя, Ассистента и менеджеров
+  const JS_KEY_ROLES = ['owner','assistant','manager'];
+  function jsRoleOk(){ return JS_KEY_ROLES.includes(state.currentRole); }
+  function jsSettings(){ const s = state.journalSync || {}; return { url: String(s.url||'').trim().replace(/\/+$/,''), token: jsRoleOk() ? String(state.journalKey||'').trim() : '', enabled: !!s.enabled }; }
+  async function jsLoadKey(){
+    if(!jsRoleOk() || state.journalKey) return;
+    try{
+      const r = await window.storage.get('journal-sync-key', true);
+      if(r && r.value){ const o = JSON.parse(r.value); state.journalKey = String((o && o.token) || '').trim(); }
+    }catch(e){}
+    // перенос: раньше ключ лежал в общих настройках — Руководитель/Ассистент переносят его в отдельную запись и стирают из общих
+    const old = String((state.journalSync && state.journalSync.token) || '').trim();
+    if(old){
+      if(!state.journalKey) state.journalKey = old;
+      if(['owner','assistant'].includes(state.currentRole)){
+        try{ await window.storage.set('journal-sync-key', JSON.stringify({ token: state.journalKey }), true); state.journalSync.token = ''; await saveJournalSync(); }catch(e){}
+      }
+    }
+  }
+  async function jsSaveKey(token){
+    state.journalKey = String(token || '').trim();
+    await window.storage.set('journal-sync-key', JSON.stringify({ token: state.journalKey }), true);
+  }
+  async function saveJournalSync(){
+    await saveMapMerged('journal-sync', state.journalSync || {}, state._journalSyncBaseline || {}, (m)=>{ state.journalSync = m; state._journalSyncBaseline = JSON.parse(JSON.stringify(m)); });
+  }
+  const JS_STATE = { status: '', msg: '', at: '', timer: null, busy: false, lastPoll: 0 };
+  function jsHashes(){ try{ return JSON.parse(localStorage.getItem('sp-journal-sync-hash') || '{}'); }catch(e){ return {}; } }
+  function jsSaveHashes(h){ try{ localStorage.setItem('sp-journal-sync-hash', JSON.stringify(h)); }catch(e){} }
+  function jsBuildPayload(force){
+    const since = loadAddDays(todayStr(), -30); const hashes = jsHashes(); const out = []; const outTasks = []; const nh = {};
+    const trackLeads = [], trackTasks = [];
+    state.leads.forEach(l=>{
+      const st = leadStatus(l); const closed = (st === 'sold' || st === 'lost');
+      if(closed && ((l.statusAt ? l.statusAt.slice(0,10) : (l.saleDate || l.requestDate || '')) < since)) return;
+      if(!l.contact && !l.comment) return;
+      const kp = l.kpId ? (state.kpOffers||[]).find(o=>o.id===l.kpId) : null;
+      const base = { contact: l.contact || '', client: (kp && kp.client) || '', product: l.product || '' };
+      if(leadKind(l) === 'b2b'){
+        // B2B: заявка целиком уходит в B2B журнала, задачи по ней ставятся и ведутся там
+        if(!closed) trackLeads.push(l.id);
+        const p = Object.assign({ id: l.id, source: l.source || '', createdAt: l.requestDate || '', stage: st, revenue: Number(l.revenue) || 0, comment: l.comment || '', lostReason: l.lostReason || '', saleDate: l.saleDate || '', manager: l.owner || '', tasks: [] }, base);
+        const h = JSON.stringify(p); nh['L' + l.id] = h;
+        if(force || hashes['L' + l.id] !== h) out.push(p);
+      } else {
+        // B2C: заявка остаётся в расписании, а задачи «кому и что сделать» видны менеджерам в «Задачах» журнала
+        (state.leadTasks||[]).filter(t=>t.leadId === l.id).slice(0,60).forEach(t=>{
+          if(t.done && !hashes['T' + t.id]) return; // выполненные, которых в журнале не было, не отправляем
+          if(!t.done) trackTasks.push(t.id);
+          const p = Object.assign({ id: t.id, leadId: l.id, title: t.title, due: t.due || '', assignee: t.assignee || '', done: !!t.done, stage: leadStatusLabel(st), amount: Number(l.revenue) || 0, comment: l.comment || '' }, base);
+          const h = JSON.stringify(p); nh['T' + t.id] = h;
+          if(force || hashes['T' + t.id] !== h) outTasks.push(p);
+        });
+      }
+    });
+    const duty = jsDuty(); const dh = JSON.stringify(duty); nh['D'] = dh;
+    return { leads: out.slice(0,300), tasks: outTasks.slice(0,400), track: { leads: trackLeads.slice(0,500), tasks: trackTasks.slice(0,800) }, duty, dutyChanged: !!(force || hashes['D'] !== dh), hashes: nh };
+  }
+  // график дежурных менеджеров: источник — календарь расписания; журнал получает его отсюда и сам больше ничего не планирует
+  function jsDuty(){
+    const from = loadAddDays(todayStr(), -7), to = loadAddDays(todayStr(), 90); const out = {};
+    Object.keys(state.managerShifts || {}).forEach(d=>{ const n = managerForDate(d); if(n && d >= from && d <= to) out[d] = n; });
+    return out;
+  }
+  async function jsCall(body){
+    const S = jsSettings();
+    const r = await fetch(S.url + '/api/integrations/schedule/sync', { method:'POST', headers:{ 'content-type':'application/json', 'x-sync-token': S.token }, body: JSON.stringify(body), signal: AbortSignal.timeout(20000) });
+    let j = {}; try{ j = await r.json(); }catch(e){}
+    if(!r.ok) throw new Error(j.error || ('HTTP ' + r.status));
+    return j;
+  }
+  async function journalSyncNow(force){
+    if(!jsRoleOk()) return;
+    await jsLoadKey();
+    const S = jsSettings(); if(!S.enabled || !S.url || !S.token) return;
+    if(JS_STATE.busy){ journalSyncSoon(3000); return; }
+    const { leads, tasks, track, duty, dutyChanged, hashes } = jsBuildPayload(force);
+    const pollDue = !JS_STATE.lastPoll || (Date.now() - JS_STATE.lastPoll) > 240000;
+    const hasTrack = track.leads.length || track.tasks.length;
+    const hasDuty = Object.keys(duty).length > 0;
+    if(!leads.length && !tasks.length && !(hasDuty && dutyChanged) && !(hasTrack && (pollDue || force))){ if(JS_STATE.status !== 'ok' && JS_STATE.status !== 'err'){ JS_STATE.status = 'ok'; JS_STATE.msg = 'Всё отправлено'; } return; }
+    JS_STATE.busy = true; JS_STATE.status = 'sending';
+    try{
+      const j = await jsCall({ format:'sp-sync', version:1, leads, tasks, track, duty });
+      const cur = jsHashes(); cur['D'] = hashes['D']; leads.forEach(p=>{ cur['L' + p.id] = hashes['L' + p.id]; }); tasks.forEach(p=>{ cur['T' + p.id] = hashes['T' + p.id]; }); jsSaveHashes(cur);
+      JS_STATE.lastPoll = Date.now();
+      JS_STATE.status = 'ok'; JS_STATE.at = new Date().toISOString();
+      JS_STATE.msg = (leads.length || tasks.length) ? ('Отправлено: заявок ' + leads.length + ', задач ' + tasks.length) : 'Журнал на связи';
+      if(j.unmatched && j.unmatched.length) JS_STATE.msg += ' · в журнале нет сотрудника «' + j.unmatched.join('», «') + '» — задачи отданы менеджеру по графику';
+      await jsApplyResponse(j);
+    }catch(e){
+      JS_STATE.status = 'err'; JS_STATE.msg = (e && e.name === 'TimeoutError') ? 'журнал не ответил за 20 секунд' : String((e && e.message) || e);
+      journalSyncSoon(120000); // повтор позже; ничего не потеряется — отправка идёт по различиям
+    }finally{
+      JS_STATE.busy = false;
+      ['js-status','js-pstatus'].forEach(id=>{ const el = document.getElementById(id); if(el) el.innerHTML = jsStatusHtml(); });
+    }
+  }
+  // ответ журнала: этап B2B-заявок и выполненные там задачи → показываем/отмечаем в расписании
+  async function jsApplyResponse(j){
+    let chL = false, chT = false;
+    const st = (j && j.stages) || {};
+    Object.keys(st).forEach(id=>{ const l = state.leads.find(x=>x.id === id); if(l && (l.jStage || '') !== st[id].label){ l.jStage = st[id].label; chL = true; } });
+    const ts = (j && j.taskStates) || {}; const now = new Date().toISOString();
+    Object.keys(ts).forEach(id=>{ const t = (state.leadTasks||[]).find(x=>x.id === id); if(t && ts[id] === 'done' && !t.done){ t.done = true; t.doneAt = now; chT = true; } });
+    const lostIds = Object.keys(ts).filter(id=>ts[id] === 'lost');
+    if(lostIds.length){ const h = jsHashes(); lostIds.forEach(id=>{ delete h['T' + id]; }); jsSaveHashes(h); journalSyncSoon(1500); } // задача затёрлась в журнале при одновременной записи — отправим заново
+    if(chL) await saveLeads();
+    if(chT) await saveLeadTasks();
+    if(chL || chT) render();
+  }
+  function journalSyncSoon(ms){
+    const S = jsSettings(); if(!jsRoleOk() || !S.enabled || !S.url) return;
+    if(JS_STATE.timer) clearTimeout(JS_STATE.timer);
+    JS_STATE.timer = setTimeout(()=>{ JS_STATE.timer = null; journalSyncNow(false); }, ms || 2500);
+  }
+  function jsStatusHtml(){
+    const S = jsSettings();
+    if(!S.enabled) return '<span style="color:var(--ink-soft);">🔗 Журнал: не подключён</span>';
+    if(!jsRoleOk()) return '<span style="color:var(--ink-soft);">🔗 Журнал подключён: заявки передают менеджеры</span>';
+    const c = JS_STATE.status === 'err' ? 'var(--danger)' : (JS_STATE.status === 'ok' ? '#3F8F6B' : 'var(--ink-soft)');
+    const t = JS_STATE.status === 'err' ? 'ошибка: ' + escapeHtml(JS_STATE.msg) : (JS_STATE.status === 'sending' ? 'отправляю…' : (JS_STATE.status === 'ok' ? escapeHtml(JS_STATE.msg) : 'ожидает отправки'));
+    return `<span style="color:${c};">🔗 Журнал: ${t}</span>`;
+  }
+  function openJournalSyncPopup(){
+    const S = jsSettings(); const can = ['owner','assistant'].includes(state.currentRole);
+    const old = document.getElementById('js-popup'); if(old) old.remove();
+    const wrap = document.createElement('div'); wrap.id = 'js-popup';
+    wrap.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.35);z-index:2000;display:flex;align-items:center;justify-content:center;padding:16px;';
+    wrap.innerHTML = `<div style="background:var(--white);border-radius:var(--radius);padding:18px;max-width:460px;width:100%;max-height:90vh;overflow:auto;">
+      <h3 style="margin:0 0 6px;">🔗 Связка с Единым журналом</h3>
+      <div style="font-size:12.5px;color:var(--ink-soft);margin-bottom:10px;">Заявки и их задачи автоматически попадают во вкладку B2B журнала, а менеджеры получают задачи в «Задачах». Отправка идёт в одну сторону: из расписания в журнал. Ничего в журнале не удаляется.</div>
+      ${can ? `<div class="field"><label>Адрес журнала</label><input type="text" id="js-url" placeholder="https://….twc1.net" value="${escapeHtml(S.url)}"></div>
+      <div class="field"><label>Секретный ключ (SCHEDULE_SYNC_TOKEN на сервере журнала)</label><input type="password" id="js-token" value="${escapeHtml(S.token)}" autocomplete="off" placeholder="хранится отдельно и виден только на устройствах руководителя, ассистента и менеджеров"></div>
+      <label style="display:flex;gap:6px;align-items:center;font-size:13px;margin:6px 0;"><input type="checkbox" id="js-on" ${S.enabled?'checked':''}> Отправлять автоматически</label>` : '<div style="font-size:13px;">Настройки меняют Руководитель и Ассистент.</div>'}
+      <div id="js-pstatus" style="font-size:12.5px;margin:8px 0;">${jsStatusHtml()}</div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;justify-content:flex-end;margin-top:8px;">
+        <button class="btn btn-ghost" id="js-close">Закрыть</button>
+        ${can ? '<button class="btn btn-ghost" id="js-test">Проверить связь</button><button class="btn btn-ghost" id="js-force">Отправить всё заново</button><button class="btn btn-primary" id="js-save">Сохранить</button>' : ''}
+      </div></div>`;
+    document.body.appendChild(wrap);
+    wrap.querySelector('#js-close').onclick = ()=> wrap.remove();
+    if(!can) return;
+    jsLoadKey().then(()=>{ const i = wrap.querySelector('#js-token'); if(i && !i.value) i.value = state.journalKey || ''; });
+    const read = ()=>({ url: wrap.querySelector('#js-url').value.trim().replace(/\/+$/,''), token: wrap.querySelector('#js-token').value.trim(), enabled: wrap.querySelector('#js-on').checked });
+    const setMsg = (t, ok)=>{ const e = wrap.querySelector('#js-pstatus'); e.innerHTML = `<span style="color:${ok?'#3F8F6B':'var(--danger)'};">${escapeHtml(t)}</span>`; };
+    wrap.querySelector('#js-save').onclick = async ()=>{
+      const v = read();
+      if(v.enabled && (!/^(https:\/\/|http:\/\/localhost)/i.test(v.url) || !v.token)){ setMsg('Укажите адрес (https://…) и ключ.', false); return; }
+      state.journalSync = Object.assign({}, state.journalSync || {}, { url: v.url, enabled: v.enabled, token: '' }); await saveJournalSync();
+      try{ await jsSaveKey(v.token); }catch(e){ setMsg('Не удалось сохранить ключ — попробуйте ещё раз.', false); return; }
+      wrap.remove(); render(); if(v.enabled) journalSyncSoon(500);
+    };
+    wrap.querySelector('#js-test').onclick = async ()=>{
+      const v = read(); if(!/^(https:\/\/|http:\/\/localhost)/i.test(v.url) || !v.token){ setMsg('Укажите адрес (https://…) и ключ.', false); return; }
+      setMsg('Проверяю…', true);
+      try{
+        const r = await fetch(v.url + '/api/integrations/schedule/sync', { method:'POST', headers:{ 'content-type':'application/json', 'x-sync-token': v.token }, body: JSON.stringify({ ping:1 }), signal: AbortSignal.timeout(15000) });
+        const j = await r.json().catch(()=>({}));
+        if(r.ok && j.pong) setMsg('✅ Связь есть, ключ подошёл.', true); else setMsg('❌ ' + (j.error || 'HTTP ' + r.status), false);
+      }catch(e){ setMsg('❌ Не удалось связаться с журналом: ' + ((e && e.message) || e) + '. Проверьте адрес; если адрес верный — браузер может блокировать запрос, тогда пользуйтесь выгрузкой файла.', false); }
+    };
+    wrap.querySelector('#js-force').onclick = async ()=>{
+      const v = read(); state.journalSync = Object.assign({}, state.journalSync || {}, { url: v.url, enabled: v.enabled, token: '' }); await saveJournalSync();
+      try{ await jsSaveKey(v.token); }catch(e){}
+      if(!v.enabled){ setMsg('Включите «Отправлять автоматически» и сохраните.', false); return; }
+      setMsg('Отправляю все заявки…', true); await journalSyncNow(true);
+      const e = wrap.querySelector('#js-pstatus'); if(e) e.innerHTML = jsStatusHtml();
+    };
+  }
+  function leadOpenTasks(leadId){ return (state.leadTasks||[]).filter(t=>t.leadId === leadId && !t.done).sort((a,b)=>(a.due||'9999').localeCompare(b.due||'9999')); }
+  // при смене этапа: закрываем автозадачи прошлого этапа и ставим новую; при «Сделка/Отказ» закрываем все
+  async function leadStageTasks(lead, prevSt){
+    if(leadKind(lead) === 'b2b') return; // B2B-задачи ведутся в Едином журнале
+    const st = leadStatus(lead);
+    if(prevSt !== null && prevSt !== undefined && st === prevSt) return;
+    if(!Array.isArray(state.leadTasks)) state.leadTasks = [];
+    const now = new Date().toISOString();
+    const open = state.leadTasks.filter(t=>t.leadId === lead.id && !t.done);
+    if(st === 'sold' || st === 'lost'){ open.forEach(t=>{ t.done = true; t.doneAt = now; }); }
+    else {
+      open.filter(t=>t.auto).forEach(t=>{ t.done = true; t.doneAt = now; });
+      const T = { new:['Связаться с клиентом, уточнить детали',0], brief:['Подготовить и отправить КП',1], kp:['Связаться по КП, узнать решение',2], thinking:['Напомнить клиенту, узнать решение',3] }[st];
+      const due = leadWorkDay(loadAddDays(todayStr(), T[1]));
+      if(T) state.leadTasks.push({ id: uid(), leadId: lead.id, title: T[0], due, done: false, doneAt: '', assignee: leadAssigneeFor(due, lead), createdBy: leadWho(), createdAt: now, auto: true });
+    }
+    await saveLeadTasks();
+  }
+  function openLeadTaskPopup(leadId){
+    const lead = state.leads.find(l=>l.id === leadId); if(!lead) return;
+    const old = document.getElementById('lead-task-popup'); if(old) old.remove();
+    const wrap = document.createElement('div'); wrap.id = 'lead-task-popup';
+    wrap.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.35);z-index:2000;display:flex;align-items:center;justify-content:center;padding:16px;';
+    wrap.innerHTML = `<div style="background:var(--white);border-radius:var(--radius);padding:18px;max-width:380px;width:100%;">
+      <h3 style="margin:0 0 4px;">Новая задача</h3>
+      <div style="font-size:12.5px;color:var(--ink-soft);margin-bottom:10px;">${escapeHtml(lead.contact||'заявка')} · ${escapeHtml(lead.product||'')}</div>
+      <div class="field"><label>Что сделать</label><input type="text" id="lt-title" placeholder="Например: перезвонить, уточнить дату"></div>
+      <div class="row2"><div class="field"><label>Срок</label><input type="date" id="lt-due" value="${leadWorkDay(loadAddDays(todayStr(),1))}"></div>
+      <div class="field"><label>Ответственный</label><input type="text" id="lt-who" value="${escapeHtml(leadAssigneeFor(leadWorkDay(loadAddDays(todayStr(),1)), lead))}"></div></div>
+      <div id="lt-hint" style="font-size:11.5px;color:var(--ink-soft);margin-top:-4px;"></div>
+      <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:8px;"><button class="btn btn-ghost" id="lt-cancel">Отмена</button><button class="btn btn-primary" id="lt-save">Добавить</button></div></div>`;
+    document.body.appendChild(wrap);
+    const dueEl = wrap.querySelector('#lt-due'), whoEl = wrap.querySelector('#lt-who'), hint = wrap.querySelector('#lt-hint');
+    const syncWho = ()=>{ const m = managerForDate(dueEl.value); if(m){ whoEl.value = m; hint.textContent = 'В этот день по графику: ' + m; } else { hint.textContent = dueEl.value ? 'На эту дату менеджер в графике не назначен.' : ''; } };
+    dueEl.onchange = syncWho; syncWho();
+    wrap.querySelector('#lt-cancel').onclick = ()=> wrap.remove();
+    wrap.querySelector('#lt-save').onclick = async ()=>{
+      const title = wrap.querySelector('#lt-title').value.trim();
+      if(!title){ wrap.querySelector('#lt-title').style.borderColor = 'var(--danger)'; return; }
+      if(!Array.isArray(state.leadTasks)) state.leadTasks = [];
+      state.leadTasks.push({ id: uid(), leadId, title, due: wrap.querySelector('#lt-due').value || '', done: false, doneAt: '', assignee: wrap.querySelector('#lt-who').value.trim() || leadWho(), createdBy: leadWho(), createdAt: new Date().toISOString(), auto: false });
+      wrap.remove(); await saveLeadTasks(); render();
+    };
+    setTimeout(()=>{ const t = wrap.querySelector('#lt-title'); if(t) t.focus(); }, 30);
+  }
+  function leadDueHtml(due){
+    if(!due) return '';
+    const t = todayStr(); const col = due < t ? 'var(--danger)' : (due === t ? '#B8863A' : 'var(--ink-soft)');
+    return `<span style="color:${col};white-space:nowrap;">⏰ ${formatDateText(due)}${due < t ? ' · просрочено' : (due === t ? ' · сегодня' : '')}</span>`;
+  }
+  function renderLeadBoard(){
+    const today = todayStr(); const since = loadAddDays(today, -30);
+    const q = refNorm(state.leadBoardQ || '').trim(); const ownerF = state.leadBoardOwner || '';
+    const owners = Array.from(new Set(state.leads.map(l=>l.owner).filter(Boolean))).sort((a,b)=>a.localeCompare(b,'ru'));
+    const match = (l)=>{
+      if(ownerF && (l.owner||'') !== ownerF) return false;
+      if(state.leadBoardKind && leadKind(l) !== state.leadBoardKind) return false;
+      if(q){ const hay = refNorm([l.contact,l.comment,l.product,l.source,l.owner].join(' ')); if(!q.split(/\s+/).every(t=>hay.includes(t))) return false; }
+      return true;
+    };
+    const stageDate = (l)=> (l.statusAt ? l.statusAt.slice(0,10) : (l.saleDate || l.requestDate || ''));
+    const cols = LEAD_STAGES.map(st=>{
+      let list = state.leads.filter(l=> leadStatus(l) === st && match(l));
+      if(st === 'sold' || st === 'lost') list = list.filter(l=> stageDate(l) >= since);
+      list.sort((a,b)=> (st==='sold'||st==='lost') ? stageDate(b).localeCompare(stageDate(a)) : (b.requestDate||'').localeCompare(a.requestDate||''));
+      return { st, list, sum: list.reduce((s,l)=> s + (Number(l.revenue)||0), 0) };
+    });
+    const openTasksAll = (state.leadTasks||[]).filter(t=>!t.done && state.leads.some(l=>l.id===t.leadId));
+    const card = (l, st)=>{
+      const tasks = leadOpenTasks(l.id);
+      const isB2b = leadKind(l) === 'b2b';
+      const nxt = isB2b ? (st === 'sold' || st === 'lost' ? null : ['sold','Сделка ✓']) : LEAD_NEXT[st];
+      const days = l.requestDate ? Math.max(0, Math.round((parseDate(today) - parseDate(l.requestDate))/864e5)) : 0;
+      return `<div class="lb-card" draggable="${st==='sold'?'false':'true'}" data-lid="${escapeHtml(l.id)}">
+        <div class="lb-meta"><span style="font-weight:700;color:${isB2b?'#7E57A8':'#2F8F9D'};">${isB2b?'B2B':'B2C'}</span> · ${escapeHtml(l.owner||'не назначен')} · ${escapeHtml(l.product||'')}${l.location==='offsite'?' · выезд':''}</div>
+        <div class="lb-title"><b>${escapeHtml(l.contact||'без контакта')}</b></div>
+        <div class="lb-meta">${escapeHtml(l.eventMonth && l.eventMonth !== LEAD_MONTH_OPTIONS[0] ? l.eventMonth + ' · ' : '')}${escapeHtml(l.source||'')} · ${days} дн. в работе</div>
+        ${l.comment ? `<div class="lb-comment">${escapeHtml(l.comment)}</div>` : ''}
+        <div class="lb-sum">${l.revenue ? escapeHtml(formatMoney(l.revenue)) : '<span style="color:var(--ink-soft);">сумма не указана</span>'}${l.kpId ? ' <span title="Есть КП">📝 КП</span>' : ''}${st==='lost' && l.lostReason ? ' <span style="color:var(--danger);">· '+escapeHtml(l.lostReason)+'</span>' : ''}</div>
+        ${isB2b && st !== 'sold' && st !== 'lost' ? '<div class="lb-meta" style="color:#7E57A8;">🔗 В журнале: <b>' + escapeHtml(l.jStage || 'Новая заявка') + '</b> · работа и задачи там</div>' : ''}
+        ${tasks.slice(0,3).map(t=>`<label class="lb-task"><input type="checkbox" data-tid="${escapeHtml(t.id)}"> <span>${escapeHtml(t.title)}<br>${leadDueHtml(t.due)}</span></label>`).join('')}
+        ${isB2b && st !== 'sold' && st !== 'lost' && /Сделка|Отказ/.test(l.jStage || '') ? '<div class="lb-meta" style="color:var(--danger);font-weight:600;">⚠ В журнале заявка закрыта («' + escapeHtml(l.jStage) + '») — отметьте результат здесь, иначе он не попадёт в конверсию</div>' : ''}
+        ${!isB2b && tasks.length && jsSettings().enabled ? '<div class="lb-meta" style="color:#2F8F9D;">📲 задачи видны менеджеру в журнале</div>' : ''}
+        ${tasks.length > 3 ? `<div class="lb-meta">…ещё задач: ${tasks.length-3}</div>` : ''}
+        ${(st !== 'sold' && st !== 'lost' && !tasks.length && !isB2b) ? '<div class="lb-meta" style="color:var(--danger);">⚠ нет задачи — клиент может потеряться</div>' : ''}
+        <div class="lb-actions">
+          ${(st !== 'sold' && !isB2b) ? `<button class="btn btn-ghost" data-addtask="${escapeHtml(l.id)}">+ задача</button>` : ''}
+          ${nxt ? `<button class="btn btn-primary" data-next="${escapeHtml(l.id)}:${nxt[0]}">${nxt[1]}</button>` : ''}
+          ${(st !== 'lost' && st !== 'sold') ? `<button class="btn btn-ghost" data-lost="${escapeHtml(l.id)}" title="Отказ">✕</button>` : ''}
+        </div>
+      </div>`;
+    };
+    return `<style>
+      .lb-wrap{ display:flex; gap:10px; overflow-x:auto; padding-bottom:10px; align-items:flex-start; }
+      .lb-col{ flex:0 0 250px; background:var(--paper); border:1px solid var(--line); border-radius:var(--radius); min-height:140px; border-top:4px solid var(--ink); }
+      .lb-col.over{ outline:2px dashed var(--accent); }
+      .lb-head{ padding:8px 10px; display:flex; justify-content:space-between; align-items:baseline; font-weight:700; font-size:12.5px; text-transform:uppercase; }
+      .lb-sub{ padding:0 10px 6px; font-size:12px; color:var(--ink-soft); font-family:var(--font-mono); }
+      .lb-card{ background:var(--white); border:1px solid var(--line); border-radius:6px; margin:6px; padding:8px 10px; cursor:pointer; font-size:13px; }
+      .lb-card.dragging{ opacity:.45; }
+      .lb-meta{ font-size:11.5px; color:var(--ink-soft); margin:2px 0; }
+      .lb-comment{ font-size:12.5px; margin:4px 0; display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; overflow:hidden; }
+      .lb-sum{ font-family:var(--font-mono); font-size:12.5px; margin:4px 0; }
+      .lb-task{ display:flex; gap:6px; align-items:flex-start; font-size:12px; margin:4px 0; padding:4px 6px; background:var(--paper); border-radius:4px; cursor:default; }
+      .lb-actions{ display:flex; gap:6px; flex-wrap:wrap; margin-top:6px; }
+      .lb-actions .btn{ padding:4px 9px; font-size:12px; }
+      .lb-empty{ padding:14px 10px; font-size:12.5px; color:var(--ink-soft); }
+    </style>
+    <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:10px;">
+      <button class="btn btn-primary" id="btn-add-lead">+ Заявка</button>
+      <input type="search" id="lb-q" value="${escapeHtml(state.leadBoardQ||'')}" placeholder="🔎 Поиск: контакт, комментарий…" style="flex:1;min-width:180px;max-width:320px;">
+      <span style="display:flex;gap:4px;">${[['','Все'],['b2c','B2C'],['b2b','B2B']].map(k=>`<button class="btn ${(state.leadBoardKind||'')===k[0]?'btn-primary':'btn-ghost'}" data-bkind="${k[0]}" style="padding:4px 10px;">${k[1]}</button>`).join('')}</span>
+      <select id="lb-owner"><option value="">Все менеджеры</option>${owners.map(o=>`<option value="${escapeHtml(o)}" ${ownerF===o?'selected':''}>${escapeHtml(o)}</option>`).join('')}</select>
+      <button class="btn btn-ghost" id="btn-js-open" title="Связка с Единым журналом">🔗 Журнал</button><span id="js-status" style="font-size:12px;">${jsStatusHtml()}</span>
+      ${managerForDate(today) ? `<span style="font-size:12.5px;">👤 Сегодня на смене: <b>${escapeHtml(managerForDate(today))}</b></span>` : ''}
+      <span style="font-size:12.5px;color:var(--ink-soft);">В работе: <b>${cols.filter(c=>!['sold','lost'].includes(c.st)).reduce((s,c)=>s+c.list.length,0)}</b> · открытых задач: <b>${openTasksAll.length}</b>${openTasksAll.filter(t=>t.due && t.due < today).length ? ` · <span style="color:var(--danger);">просрочено ${openTasksAll.filter(t=>t.due && t.due < today).length}</span>` : ''}</span>
+    </div>
+    <div class="lb-wrap">${cols.map(c=>`<div class="lb-col" data-stage="${c.st}" style="border-top-color:${LEAD_STAGE_COLORS[c.st]};">
+      <div class="lb-head"><span>${escapeHtml(leadStatusLabel(c.st))}</span><span>${c.list.length}</span></div>
+      <div class="lb-sub">${c.st==='lost' ? 'потеряно ' : ''}${escapeHtml(formatMoney(c.sum))}${(c.st==='sold'||c.st==='lost') ? ' · 30 дн.' : ''}</div>
+      ${c.list.length ? c.list.map(l=>card(l, c.st)).join('') : `<div class="lb-empty">${c.st==='sold' ? 'Продажи появятся здесь — карточку нельзя просто перетащить, нужны мероприятие/заказ и выручка.' : 'Перетащите заявку сюда'}</div>`}
+    </div>`).join('')}</div>
+    <div style="font-size:11.5px;color:var(--ink-soft);margin-top:4px;">Карточки можно перетаскивать между этапами. «Сделка» и «Отказ» откроют заявку: для сделки нужны мероприятие/заказ и выручка, для отказа — причина. Сделки и отказы показаны за последние 30 дней; всё остальное — вкладка «Статистика и список».</div>`;
+  }
+  function renderLeadTasksView(){
+    const today = todayStr();
+    const showDone = !!state.leadTasksDone; const who = state.leadTasksWho || '';
+    let list = (state.leadTasks||[]).filter(t=> state.leads.some(l=>l.id === t.leadId));
+    const names = Array.from(new Set(list.map(t=>t.assignee).concat(managerForDate(today)).filter(Boolean))).sort((a,b)=>a.localeCompare(b,'ru'));
+    if(who) list = list.filter(t=> (t.assignee||'') === who);
+    const open = list.filter(t=>!t.done), done = list.filter(t=>t.done).sort((a,b)=>(b.doneAt||'').localeCompare(a.doneAt||'')).slice(0,30);
+    const groups = [['Просрочено', open.filter(t=>t.due && t.due < today)], ['Сегодня', open.filter(t=>t.due === today)], ['Дальше', open.filter(t=>t.due && t.due > today)], ['Без срока', open.filter(t=>!t.due)]];
+    const row = (t)=>{
+      const l = state.leads.find(x=>x.id === t.leadId);
+      return `<div class="stat-row" style="align-items:flex-start;gap:8px;">
+        <input type="checkbox" data-tdone="${escapeHtml(t.id)}" ${t.done?'checked':''} style="margin-top:3px;">
+        <div style="flex:1;min-width:0;"><div style="${t.done?'text-decoration:line-through;color:var(--ink-soft);':''}">${escapeHtml(t.title)}</div>
+          <div style="font-size:12px;color:var(--ink-soft);"><a href="#" data-openlead="${escapeHtml(t.leadId)}">${escapeHtml(l.contact||'заявка')} · ${escapeHtml(l.product||'')}</a> · ${escapeHtml(t.assignee||'—')} · ${escapeHtml(leadStatusLabel(leadStatus(l)))} ${t.done ? '' : leadDueHtml(t.due)}</div></div>
+        <button class="btn btn-ghost" data-tdel="${escapeHtml(t.id)}" style="padding:2px 8px;" title="Удалить">×</button></div>`;
+    };
+    return `<div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:10px;">
+      ${managerForDate(today) ? `<button class="btn ${who===managerForDate(today)?'btn-primary':'btn-ghost'}" id="lt-duty" data-duty="${escapeHtml(managerForDate(today))}">Сегодня на смене: ${escapeHtml(managerForDate(today))}</button>` : '<span style="font-size:12.5px;color:var(--ink-soft);">Менеджер на сегодня в календаре не назначен</span>'}
+      <select id="lt-who-filter"><option value="">Все ответственные</option>${names.map(n=>`<option value="${escapeHtml(n)}" ${who===n?'selected':''}>${escapeHtml(n)}</option>`).join('')}</select>
+      <label style="font-size:12.5px;cursor:pointer;display:flex;gap:6px;align-items:center;"><input type="checkbox" id="lt-show-done" ${showDone?'checked':''}> показывать выполненные</label>
+      <span style="font-size:12.5px;color:var(--ink-soft);">Открытых: <b>${open.length}</b></span>
+      <span style="margin-left:auto;display:flex;gap:6px;"><button class="btn btn-ghost" id="lt-export-json" title="Файл для импорта в Единый журнал">⬇ Для журнала (JSON)</button><button class="btn btn-ghost" id="lt-export-csv" title="Таблица для Excel">⬇ CSV</button></span>
+    </div>
+    ${groups.map(g=> g[1].length ? `<div class="analytics-section"><h4 style="${g[0]==='Просрочено'?'color:var(--danger);':''}">${g[0]} (${g[1].length})</h4>${g[1].map(row).join('')}</div>` : '').join('') || '<div class="host-empty">Открытых задач нет. Задачи создаются автоматически при смене этапа заявки и вручную кнопкой «+ задача» на карточке.</div>'}
+    ${showDone && done.length ? `<div class="analytics-section"><h4>Выполнено (последние 30)</h4>${done.map(row).join('')}</div>` : ''}`;
+  }
+  // выгрузка задач для «Единого журнала»: у каждой задачи стабильный externalId — при повторном импорте
+  // журнал обновит существующую задачу, а не создаст дубль
+  function leadTasksExportRows(onlyOpen){
+    const today = todayStr();
+    return (state.leadTasks||[]).filter(t=> (!onlyOpen || !t.done)).map(t=>{
+      const l = state.leads.find(x=>x.id === t.leadId); if(!l) return null;
+      return { externalId: 'sched-task-' + t.id, source: 'schedule', leadId: l.id, title: t.title, due: t.due || '', assignee: t.assignee || '',
+        done: !!t.done, overdue: !t.done && !!t.due && t.due < today, client: l.contact || '', product: l.product || '', stage: leadStatusLabel(leadStatus(l)),
+        amount: Number(l.revenue) || 0, comment: l.comment || '', createdAt: t.createdAt || '' };
+    }).filter(Boolean);
+  }
+  function exportLeadTasks(kind){
+    const rows = leadTasksExportRows(true); const stamp = todayStr();
+    if(!rows.length){ showGapWarningBanner('Открытых задач для выгрузки нет.'); return; }
+    if(kind === 'csv'){
+      const cols = [['title','Задача'],['due','Срок'],['assignee','Ответственный'],['client','Клиент'],['product','Продукт'],['stage','Этап заявки'],['amount','Сумма'],['comment','Комментарий'],['externalId','ID']];
+      const q = v=> '"' + String(v==null?'':v).replace(/"/g,'""') + '"';
+      const csv = '\uFEFF' + [cols.map(c=>q(c[1])).join(';')].concat(rows.map(r=>cols.map(c=>q(r[c[0]])).join(';'))).join('\r\n');
+      downloadFile('zadachi-iz-raspisaniya-' + stamp + '.csv', csv, 'text/csv;charset=utf-8');
+    } else {
+      downloadFile('zadachi-iz-raspisaniya-' + stamp + '.json', JSON.stringify({ format: 'sp-lead-tasks', version: 1, exportedAt: new Date().toISOString(), tasks: rows }, null, 2), 'application/json');
+    }
+    recordAction('Задачи выгружены для журнала: ' + rows.length);
+  }
+  function attachLeadBoardEvents(){
+    const jb = document.getElementById('btn-js-open'); if(jb) jb.onclick = ()=> openJournalSyncPopup();
+    const ej = document.getElementById('lt-export-json'); if(ej) ej.onclick = ()=> exportLeadTasks('json');
+    const ec = document.getElementById('lt-export-csv'); if(ec) ec.onclick = ()=> exportLeadTasks('csv');
+    document.querySelectorAll('[data-convtab]').forEach(b=> b.onclick = ()=>{ state.convTab = b.dataset.convtab; render(); });
+    document.querySelectorAll('[data-bkind]').forEach(b=> b.onclick = ()=>{ state.leadBoardKind = b.dataset.bkind; render(); });
+    const q = document.getElementById('lb-q'); if(q) q.onchange = ()=>{ state.leadBoardQ = q.value; render(); };
+    const ow = document.getElementById('lb-owner'); if(ow) ow.onchange = ()=>{ state.leadBoardOwner = ow.value; render(); };
+    const openLead = (id)=>{ const l = state.leads.find(x=>x.id === id); if(!l) return; requireUnlock(()=>{ state.modal = {type:'lead', isNew:false, lead:{...l}}; render(); }); };
+    document.querySelectorAll('.lb-card').forEach(c=>{
+      c.onclick = (e)=>{ if(e.target.closest('button, input, label, a')) return; openLead(c.dataset.lid); };
+      c.ondragstart = (e)=>{ c.classList.add('dragging'); try{ e.dataTransfer.setData('text/plain', c.dataset.lid); e.dataTransfer.effectAllowed = 'move'; }catch(x){} };
+      c.ondragend = ()=> c.classList.remove('dragging');
+    });
+    document.querySelectorAll('.lb-col').forEach(col=>{
+      col.ondragover = (e)=>{ e.preventDefault(); col.classList.add('over'); };
+      col.ondragleave = ()=> col.classList.remove('over');
+      col.ondrop = (e)=>{ e.preventDefault(); col.classList.remove('over'); let id = ''; try{ id = e.dataTransfer.getData('text/plain'); }catch(x){} if(id) leadBoardMove(id, col.dataset.stage); };
+    });
+    document.querySelectorAll('[data-next]').forEach(b=> b.onclick = ()=>{ const [id, st] = b.dataset.next.split(':'); leadBoardMove(id, st); });
+    document.querySelectorAll('[data-lost]').forEach(b=> b.onclick = ()=> leadBoardMove(b.dataset.lost, 'lost'));
+    document.querySelectorAll('[data-addtask]').forEach(b=> b.onclick = ()=> requireUnlock(()=> openLeadTaskPopup(b.dataset.addtask)));
+    document.querySelectorAll('.lb-task input[data-tid], [data-tdone]').forEach(cb=> cb.onchange = async ()=>{
+      const id = cb.dataset.tid || cb.dataset.tdone; const t = (state.leadTasks||[]).find(x=>x.id === id); if(!t) return;
+      t.done = cb.checked; t.doneAt = cb.checked ? new Date().toISOString() : ''; await saveLeadTasks(); render();
+    });
+    document.querySelectorAll('[data-tdel]').forEach(b=> b.onclick = async ()=>{
+      if(!confirm('Удалить задачу?')) return;
+      state.leadTasks = (state.leadTasks||[]).filter(t=>t.id !== b.dataset.tdel); await saveLeadTasks(); render();
+    });
+    document.querySelectorAll('[data-openlead]').forEach(a=> a.onclick = (e)=>{ e.preventDefault(); openLead(a.dataset.openlead); });
+    const duty = document.getElementById('lt-duty'); if(duty) duty.onclick = ()=>{ state.leadTasksWho = (state.leadTasksWho === duty.dataset.duty) ? '' : duty.dataset.duty; render(); };
+    const wf = document.getElementById('lt-who-filter'); if(wf) wf.onchange = ()=>{ state.leadTasksWho = wf.value; render(); };
+    const sd = document.getElementById('lt-show-done'); if(sd) sd.onchange = ()=>{ state.leadTasksDone = sd.checked; render(); };
+  }
+  function leadBoardMove(id, stage){
+    const l = state.leads.find(x=>x.id === id); if(!l) return;
+    const cur = leadStatus(l); if(cur === stage) return;
+    if(leadKind(l) === 'b2b' && stage !== 'sold' && stage !== 'lost'){ showGapWarningBanner('B2B-заявка ведётся в Едином журнале: этапы и задачи меняются там. Здесь отмечается только «Сделка» или «Отказ».'); return; }
+    if(cur === 'sold'){ showGapWarningBanner('Проданную заявку отсюда не перенести: откройте её и снимите статус «Продано» вручную.'); return; }
+    requireUnlock(async ()=>{
+      if(stage === 'sold'){
+        state.modal = {type:'lead', isNew:false, lead:{ ...l, sold:true, status:'sold', saleDate: l.saleDate || todayStr(), saleKind: l.saleKind || 'event' }}; render(); return;
+      }
+      if(stage === 'lost'){
+        state.modal = {type:'lead', isNew:false, lead:{ ...l, sold:false, status:'lost' }}; render(); return;
+      }
+      l.status = stage; l.sold = false; if(cur === 'lost') l.lostReason = '';
+      l.statusAt = new Date().toISOString();
+      await saveLeads();
+      await leadStageTasks(l, cur);
+      recordAction('Заявка перенесена: ' + leadStatusLabel(stage));
+      render();
+    });
+  }
+
   function renderConversionView(){
+    const tab = state.convTab || 'board';
+    const tabs = [['board','Воронка'],['tasks','Задачи'],['stats','Статистика и список']];
+    const nOpen = (state.leadTasks||[]).filter(t=>!t.done && t.due && t.due <= todayStr() && state.leads.some(l=>l.id===t.leadId)).length;
+    const bar = `<div class="sub-tabs" style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:12px;">${tabs.map(t=>`<button class="btn ${tab===t[0]?'btn-primary':'btn-ghost'}" data-convtab="${t[0]}">${t[1]}${t[0]==='tasks' && nOpen ? ' <span style="color:'+(tab==='tasks'?'#fff':'var(--danger)')+';">('+nOpen+')</span>' : ''}</button>`).join('')}</div>`;
+    return bar + (tab === 'tasks' ? renderLeadTasksView() : (tab === 'stats' ? renderConversionStatsView() : renderLeadBoard()));
+  }
+  function renderConversionStatsView(){
     const { navHtml, period } = buildPeriodNav('conversionCursor', 'conversionMode', 'conv');
     const allLeadsInPeriod = state.leads.filter(l=> period.inPeriod(l.requestDate));
     const leads = [...allLeadsInPeriod].sort((a,b)=> (b.requestDate||'').localeCompare(a.requestDate||''));
@@ -8608,6 +9073,8 @@
     }
     const bySource = breakdown(l=>l.source||'—', allLeadsInPeriod);
     const byProduct = breakdown(l=>l.product||'—', allLeadsInPeriod);
+    const byKind = breakdown(l=> leadKind(l)==='b2b' ? 'B2B (компании)' : 'B2C (частные гости)', allLeadsInPeriod);
+    const maxKindTotal = Math.max(1, ...byKind.map(x=>x.total));
     const maxSourceTotal = Math.max(1, ...bySource.map(x=>x.total));
     const maxProductTotal = Math.max(1, ...byProduct.map(x=>x.total));
 
@@ -8729,6 +9196,16 @@
           return `<div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:10px;">${LEAD_STATUSES.map(x=>`<div style="border:1px solid var(--line);border-radius:var(--radius);padding:6px 12px;font-size:13px;"><b>${cnt[x[0]]||0}</b> <span style="color:var(--ink-soft);">${escapeHtml(x[1])}</span></div>`).join('')}</div>` +
             (rsRows.length ? rsRows.map(k=>`<div class="stat-row"><div class="stat-label">${escapeHtml(k)}</div><div class="stat-bar-track"><div class="stat-bar-fill" style="width:${Math.round(rs[k]/maxR*100)}%;background:var(--danger);"></div></div><div class="stat-count" style="width:auto;font-size:12px;">${rs[k]}</div></div>`).join('') : '<div style="font-size:12.5px;color:var(--ink-soft);">Отказов с причиной за период нет.</div>');
         })()}
+      </div>
+      <div class="analytics-section">
+        <h4>Конверсия: B2C и B2B</h4>
+        ${byKind.map(x=>`
+          <div class="stat-row">
+            <div class="stat-label">${escapeHtml(x.name)}</div>
+            <div class="stat-bar-track"><div class="stat-bar-fill" style="width:${Math.round(x.total/maxKindTotal*100)}%;background:#7E57A8;"></div></div>
+            <div class="stat-count" style="width:auto;font-size:12px;">${x.sold}/${x.total} · ${x.pct}%${x.soldSum||x.unsoldSum?` · <span style="color:var(--status-green);">${formatMoney(x.soldSum)}</span>`:''}</div>
+          </div>
+        `).join('')}
       </div>
       <div class="analytics-section">
         <h4>Конверсия по источникам</h4>
@@ -9406,6 +9883,14 @@
               ${LEAD_MONTH_OPTIONS.map(m=>`<option value="${escapeHtml(m)}" ${lead.eventMonth===m?'selected':''}>${escapeHtml(m)}</option>`).join('')}
             </select>
           </div>
+          <div class="field">
+            <label>Вид заявки</label>
+            <select id="l-kind">
+              <option value="" ${!(lead.kind || !isNew) ? 'selected' : ''}>— выберите —</option>
+              <option value="b2c" ${(lead.kind || (isNew ? '' : 'b2c')) === 'b2c' ? 'selected' : ''}>B2C — частный гость (ведём в расписании)</option>
+              <option value="b2b" ${lead.kind === 'b2b' ? 'selected' : ''}>B2B — компания (работа в Едином журнале)</option>
+            </select>
+          </div>
           <div class="row2">
             <div class="field">
               <label>Источник</label>
@@ -9669,7 +10154,7 @@
     };
 
     overlay.querySelector('#btn-save-lead').onclick = async ()=>{
-      ['l-date','l-contact','l-month','l-source','l-product','l-revenue','l-sale-date','l-comment'].forEach(id=>{
+      ['l-date','l-contact','l-month','l-source','l-kind','l-product','l-revenue','l-sale-date','l-comment'].forEach(id=>{
         const el = overlay.querySelector('#'+id);
         if(el) el.style.borderColor = '';
       });
@@ -9677,6 +10162,7 @@
       const contactVal = overlay.querySelector('#l-contact').value.trim();
       const monthVal = overlay.querySelector('#l-month').value;
       const sourceVal = overlay.querySelector('#l-source').value;
+      const kindVal = overlay.querySelector('#l-kind').value;
       const productVal = overlay.querySelector('#l-product').value;
       const locationVal = overlay.querySelector('#l-location').value || 'in_studio';
       const revenueRaw = overlay.querySelector('#l-revenue').value;
@@ -9698,6 +10184,7 @@
       if(!contactVal) markInvalid('l-contact');
       if(!monthVal) markInvalid('l-month');
       if(!sourceVal) markInvalid('l-source');
+      if(!kindVal) markInvalid('l-kind');
       if(!productVal) markInvalid('l-product');
       if(revenueRaw === '') markInvalid('l-revenue');
       if(!commentVal) markInvalid('l-comment');
@@ -9723,7 +10210,7 @@
       if(leadEventMissing) markInvalid('l-event-search');
       const leadOrderMissing = soldVal && saleKindVal==='order' && !leadOrderVal;
       if(leadOrderMissing) markInvalid('l-order-search');
-      if(!dateVal || !contactVal || !monthVal || !sourceVal || !productVal || revenueRaw==='' || !commentVal || saleDateMissing || leadEventMissing || leadOrderMissing){
+      if(!dateVal || !contactVal || !monthVal || !sourceVal || !kindVal || !productVal || revenueRaw==='' || !commentVal || saleDateMissing || leadEventMissing || leadOrderMissing){
         showGapWarningBanner(leadEventMissing ? 'Заявка отмечена как «Продано» — выберите мероприятие, которое из неё создано.' : leadOrderMissing ? 'Заявка отмечена как «Продано» — выберите заказ, который из неё создан.' : saleDateMissing ? 'Заявка отмечена как «Продано» — укажите дату продажи.' : 'Заполните все поля перед сохранением заявки — включая номер/ник гостя и комментарий.');
         if(firstInvalid && firstInvalid.scrollIntoView) firstInvalid.scrollIntoView({block:'center', behavior:'smooth'});
         return;
@@ -9748,7 +10235,14 @@
         status: soldVal ? 'sold' : (statusSel === 'sold' ? 'new' : statusSel),
         lostReason: (!soldVal && statusSel === 'lost') ? lostVal : '',
         kpId: state.modal.lead.kpId || '',
+        owner: state.modal.lead.owner || leadOwnerNow(),
+        kind: kindVal,
+        jStage: state.modal.lead.jStage || '',
+        statusAt: state.modal.lead.statusAt || '',
       };
+      const _prevLead = state.leads.find(x=>x.id===updated.id);
+      const _prevSt = _prevLead ? leadStatus(_prevLead) : null;
+      if(!_prevLead || leadStatus(updated) !== _prevSt) updated.statusAt = new Date().toISOString();
 
       // фото заявки — сохраняем/удаляем отдельным ключом, только если что-то поменяли в этой сессии модалки
       if(pendingLeadPhoto === 'REMOVE'){
@@ -9762,6 +10256,7 @@
       const idx = state.leads.findIndex(x=>x.id===updated.id);
       if(idx >= 0) state.leads[idx] = updated; else state.leads.push(updated);
       await saveLeads();
+      await leadStageTasks(updated, _prevSt);
       recordAction("Заявка сохранена");
       state.modal = null; overlay.remove(); render();
     };
@@ -9807,6 +10302,7 @@
             <div id="is-cert-hint" style="font-size:12px;color:var(--ink-soft);margin-top:4px;"></div>
           </div>
           <div id="is-split-preview" style="font-size:13px;font-family:var(--font-mono);color:var(--ink-soft);"></div>
+          ${payerFieldHtml('is', itemSale)}
           <div class="field">
             <label>Комментарий <span style="font-weight:400;color:var(--ink-soft);">— необязательно</span></label>
             <textarea id="is-comment" placeholder="Что продали...">${escapeHtml(itemSale.comment||'')}</textarea>
@@ -9824,6 +10320,7 @@
   }
 
   function attachItemSaleModalEvents(overlay){
+    attachPayerField(overlay, 'is', state.modal && state.modal.itemSale && state.modal.itemSale.id);
     const cancelBtn = overlay.querySelector('#btn-cancel-itemsale');
     if(cancelBtn) cancelBtn.onclick = ()=>{ state.modal = null; overlay.remove(); };
 
@@ -9943,6 +10440,7 @@
         return;
       }
 
+      const payerIs = readPayer(overlay, 'is'); if(!payerIs) return;
       const updated = {
         id: state.modal.itemSale.id,
         date: dateVal,
@@ -9951,6 +10449,8 @@
         source: sourceVal,
         comment: commentVal,
         incomeId: state.modal.itemSale.incomeId || '',
+        payerType: payerIs.payerType,
+        companyName: payerIs.companyName,
       };
 
       // оплата сертификатом (полностью или частично)
@@ -10004,6 +10504,157 @@
     };
   }
 
+  // ===== юрлица: единый выбор плательщика + сводка по всей работе с юрлицами =====
+  function payerFieldHtml(prefix, obj){
+    const legal = obj && obj.payerType === 'legal';
+    return `<div class="field">
+      <label>Плательщик</label>
+      <div class="status-select-wrap">
+        <div class="dishes-opt ${!legal?'active':''}" data-pp="${prefix}:individual"><span class="dot" style="background:var(--ink-soft)"></span>Физ.лицо</div>
+        <div class="dishes-opt ${legal?'active':''}" data-pp="${prefix}:legal"><span class="dot" style="background:var(--status-blue)"></span>Юр.лицо</div>
+      </div>
+      <input type="hidden" id="${prefix}-payer" value="${legal?'legal':'individual'}">
+      <div id="${prefix}-company-wrap" style="display:${legal?'block':'none'};margin-top:8px;">
+        <input type="text" id="${prefix}-company" list="legal-names" value="${escapeHtml((obj && obj.companyName)||'')}" placeholder="Название юрлица — обязательно, например ООО «Ромашка»">
+        ${legalNamesDatalist()}
+        <div id="${prefix}-legal-card"></div>
+      </div>
+    </div>`;
+  }
+  function attachPayerField(overlay, prefix, curId){
+    const cardEl = overlay.querySelector('#'+prefix+'-legal-card'), nameEl = overlay.querySelector('#'+prefix+'-company');
+    const updCard = ()=>{ if(cardEl && nameEl) cardEl.innerHTML = legalCardHtml(nameEl.value, curId); };
+    if(nameEl){ nameEl.addEventListener('input', updCard); nameEl.addEventListener('change', updCard); updCard(); }
+    overlay.querySelectorAll('[data-pp^="'+prefix+':"]').forEach(opt=>{
+      opt.onclick = ()=>{
+        const v = opt.dataset.pp.split(':')[1];
+        overlay.querySelectorAll('[data-pp^="'+prefix+':"]').forEach(o=>o.classList.toggle('active', o===opt));
+        const h = overlay.querySelector('#'+prefix+'-payer'); if(h) h.value = v;
+        const w = overlay.querySelector('#'+prefix+'-company-wrap'); if(w) w.style.display = v==='legal' ? 'block' : 'none';
+      };
+    });
+  }
+  // читает плательщика из формы; если юрлицо без названия — подсвечивает поле и возвращает null
+  function readPayer(overlay, prefix){
+    const t = (overlay.querySelector('#'+prefix+'-payer') || {}).value === 'legal' ? 'legal' : 'individual';
+    const el = overlay.querySelector('#'+prefix+'-company'); const c = el ? el.value.trim() : '';
+    if(el) el.style.borderColor = '';
+    if(t === 'legal' && !c){
+      if(el){ el.style.borderColor = 'var(--danger)'; if(el.scrollIntoView) el.scrollIntoView({block:'center', behavior:'smooth'}); }
+      showGapWarningBanner('Плательщик — юрлицо: укажите название юрлица.');
+      return null;
+    }
+    return { payerType: t, companyName: t === 'legal' ? c : '' };
+  }
+  const LEGAL_MONEY_ROLES = ['owner','assistant','manager','marketer'];
+  function legalNamesDatalist(){
+    const seen = {}; const out = [];
+    const add = (x)=>{ if(x && x.payerType === 'legal' && (x.companyName||'').trim()){ const k = legalKey(x); if(!seen[k]){ seen[k] = 1; out.push(x.companyName.trim()); } } };
+    (state.events||[]).forEach(add); (state.orders||[]).forEach(add); (state.itemSales||[]).forEach(add); (state.certificates||[]).forEach(add);
+    out.sort((a,b)=>a.localeCompare(b,'ru'));
+    return '<datalist id="legal-names">' + out.map(n=>'<option value="' + escapeHtml(n) + '">').join('') + '</datalist>';
+  }
+  // карточка юрлица: вся работа с ним (без текущей записи), чтобы видеть историю прямо в форме
+  function legalCardHtml(name, curId){
+    const nm = (name||'').trim();
+    const soft = 'font-size:12.5px;color:var(--ink-soft);';
+    if(!nm) return `<div style="${soft}margin-top:6px;">Введите название — покажу всё, что уже было с этим юрлицом.</div>`;
+    const key = legalKey({companyName:nm});
+    const rows = legalCollect(()=>true).filter(r=> legalKey(r.x) === key && r.x.id !== curId).sort((a,b)=>b.date.localeCompare(a.date));
+    if(!rows.length) return `<div style="${soft}margin-top:6px;">Юрлицо «${escapeHtml(nm)}» — других операций пока нет, это первая.</div>`;
+    const money = LEGAL_MONEY_ROLES.includes(state.currentRole);
+    const by = {}; let total = 0; rows.forEach(r=>{ const b = by[r.kind] || (by[r.kind] = {n:0,sum:0}); b.n++; b.sum += r.amount; total += r.amount; });
+    const kindName = { event:'Мероприятие', order:'Заказ', item:'Изделие', cert:'Сертификат' };
+    return `<div style="border:1px solid var(--line);border-radius:var(--radius);padding:8px 10px;margin-top:8px;background:var(--paper);">
+      <div style="font-size:13px;"><b>Юрлицо «${escapeHtml(nm)}»</b> — уже было: ${LEGAL_KINDS.filter(k=>by[k[0]]).map(k=>`${k[1].toLowerCase()} ${by[k[0]].n}${money?' ('+formatMoney(by[k[0]].sum)+')':''}`).join(', ')}${money?` · всего <b>${formatMoney(total)}</b>`:''}</div>
+      <div style="margin-top:4px;">${rows.slice(0,8).map(r=>`<div style="${soft}">${formatDateText(r.date)} · ${kindName[r.kind]} · ${escapeHtml(r.title)}${money?' — '+formatMoney(r.amount):''}</div>`).join('')}${rows.length>8?`<div style="${soft}">…и ещё ${rows.length-8}. Полный список — в аналитике, блок «Юрлица».</div>`:''}</div>
+    </div>`;
+  }
+  function legalName(x){ return ((x && x.companyName) || '').trim() || 'Без названия'; }
+  function legalKey(x){ return legalName(x).toLowerCase().replace(/[«»"'“”]/g,'').replace(/\s+/g,' ').trim(); }
+  const LEGAL_KINDS = [['event','Мероприятия'],['order','Заказы'],['item','Изделия'],['cert','Сертификаты']];
+  // вся работа с юрлицами: мероприятия, заказы, продажи изделий, проданные сертификаты
+  function legalCollect(match){
+    const rows = [];
+    (state.events||[]).forEach(e=>{
+      if(e.payerType !== 'legal' || !e.date || !match(e.date) || e.status === 'cancelled' || e.status === 'marketing') return;
+      rows.push({ kind:'event', date:e.date, x:e, title:e.title || 'Мероприятие', amount: eventRevenueForecast(e) });
+    });
+    (state.orders||[]).forEach(o=>{
+      if(o.payerType !== 'legal' || !o.date || !match(o.date)) return;
+      rows.push({ kind:'order', date:o.date, x:o, title:'Заказ' + (o.masterName ? ' — ' + o.masterName : ''), amount: Number(o.revenue)||0 });
+    });
+    (state.itemSales||[]).forEach(i=>{
+      if(i.payerType !== 'legal' || !i.date || !match(i.date)) return;
+      rows.push({ kind:'item', date:i.date, x:i, title:'Изделие' + (i.masterName ? ' — ' + i.masterName : ''), amount: Number(i.revenue)||0 });
+    });
+    (state.certificates||[]).forEach(c=>{
+      if(c.payerType !== 'legal' || !c.saleDate || !match(c.saleDate) || (c.purpose||'sale') !== 'sale' || c.status === 'refunded') return;
+      rows.push({ kind:'cert', date:c.saleDate, x:c, title:'Сертификат №' + c.number, amount: Number(c.amount)||0 });
+    });
+    return rows;
+  }
+  function legalGroup(rows){
+    const m = {};
+    rows.forEach(r=>{
+      const k = legalKey(r.x);
+      const g = m[k] || (m[k] = { name: legalName(r.x), rows: [], by: {}, total: 0 });
+      g.rows.push(r); g.total += r.amount;
+      const b = g.by[r.kind] || (g.by[r.kind] = { n: 0, sum: 0 }); b.n++; b.sum += r.amount;
+    });
+    return Object.values(m).sort((a,b)=> b.total - a.total);
+  }
+  function buildLegalPanel(cursor, noMoney, legalEvts, legalIncomplete, legalComplete){
+    const ym = cursor.getFullYear() + '-' + pad(cursor.getMonth()+1);
+    const monthLabel = MONTHS[cursor.getMonth()] + ' ' + cursor.getFullYear();
+    const money = (v)=> noMoney ? '' : formatMoney(v);
+    const cell = (b)=> b ? (b.n + (noMoney ? '' : ' · ' + formatMoney(b.sum))) : '—';
+    const gm = legalGroup(legalCollect(d=>d.startsWith(ym)));
+    const ga = legalGroup(legalCollect(()=>true));
+    const totM = gm.reduce((s,g)=>s+g.total,0), totA = ga.reduce((s,g)=>s+g.total,0);
+    const sumKind = (arr, k)=> arr.reduce((a,g)=>{ const b = g.by[k]; return b ? { n:a.n+b.n, sum:a.sum+b.sum } : a; }, {n:0,sum:0});
+    const th = (t)=> `<td style="font-weight:600;white-space:nowrap;">${t}</td>`;
+    const monthTable = gm.length ? `<div style="overflow:auto;"><table class="ref-table" style="min-width:520px;"><tr>${th('Юрлицо')}${LEGAL_KINDS.map(k=>th(k[1])).join('')}${noMoney?'':th('Всего')}</tr>
+      ${gm.map(g=>`<tr><td><b>${escapeHtml(g.name)}</b></td>${LEGAL_KINDS.map(k=>`<td>${cell(g.by[k[0]])}</td>`).join('')}${noMoney?'':`<td><b>${formatMoney(g.total)}</b></td>`}</tr>`).join('')}
+      <tr style="font-weight:700;"><td>Итого</td>${LEGAL_KINDS.map(k=>{ const s = sumKind(gm, k[0]); return `<td>${s.n ? cell(s) : '—'}</td>`; }).join('')}${noMoney?'':`<td>${formatMoney(totM)}</td>`}</tr></table></div>`
+      : `<div style="color:var(--ink-soft);font-size:13px;">В ${escapeHtml(monthLabel)} работы с юрлицами нет.</div>`;
+    const allTable = ga.length ? `<table class="ref-table"><tr>${th('Юрлицо')}${th('Операций')}${noMoney?'':th('Сумма за всё время')}</tr>
+      ${ga.map(g=>`<tr><td><b>${escapeHtml(g.name)}</b></td><td>${g.rows.length}</td>${noMoney?'':`<td>${formatMoney(g.total)}</td>`}</tr>`).join('')}
+      <tr style="font-weight:700;"><td>Итого</td><td>${ga.reduce((s,g)=>s+g.rows.length,0)}</td>${noMoney?'':`<td>${formatMoney(totA)}</td>`}</tr></table>` : '<div style="color:var(--ink-soft);font-size:13px;">Юрлиц пока нет.</div>';
+    const kindName = { event:'Мероприятие', order:'Заказ', item:'Изделие', cert:'Сертификат' };
+    const lgRows = (g)=> g.rows.slice().sort((a,b)=>b.date.localeCompare(a.date)).map(r=>`<div class="lg-link" data-lgk="${r.kind}" data-lgid="${escapeHtml(r.x.id)}" title="Открыть" style="font-size:12.5px;padding:3px 0 3px 14px;color:var(--ink-soft);cursor:pointer;text-decoration:underline dotted;">${formatDateText(r.date)} · ${kindName[r.kind]} · ${escapeHtml(r.title)}${noMoney?'':' — <b style="color:var(--ink);">'+formatMoney(r.amount)+'</b>'} ↗</div>`).join('');
+    const detail = gm.map(g=>`<details style="margin:4px 0;"><summary style="cursor:pointer;font-size:13px;"><b>${escapeHtml(g.name)}</b> — ${g.rows.length} шт.${noMoney?'':' · '+formatMoney(g.total)}</summary>
+      ${lgRows(g)}</details>`).join('');
+    const detailAll = ga.map(g=>`<details style="margin:4px 0;"><summary style="cursor:pointer;font-size:13px;"><b>${escapeHtml(g.name)}</b> — ${g.rows.length} шт.${noMoney?'':' · '+formatMoney(g.total)}</summary>${lgRows(g)}</details>`).join('');
+    return `      <div class="analytics-section">
+        <h4>Юрлица — вся работа за ${escapeHtml(monthLabel)}${noMoney?'':` · <span style="font-family:var(--font-mono);">${formatMoney(totM)}</span>`}</h4>
+        ${monthTable}
+        ${detail ? `<div style="margin-top:8px;">${detail}</div>` : ''}
+        <div style="font-size:11.5px;color:var(--ink-soft);margin-top:8px;">Мероприятия — ожидаемая выручка (без оплаты сертификатами, чтобы не считать дважды); заказы и изделия — выручка; сертификаты — проданные (по дате продажи, без возвращённых). Один и тот же плательщик объединяется по названию.</div>
+      </div>
+      <div class="analytics-section">
+        <h4>Юрлица — за всё время</h4>
+        ${allTable}
+        ${detailAll ? `<div style="margin-top:8px;">${detailAll}</div>` : ''}
+        <div style="font-size:11.5px;color:var(--ink-soft);margin-top:6px;">Нажмите на строку, чтобы открыть мероприятие, заказ, изделие или сертификат.</div>
+      </div>
+      <div class="analytics-section">
+        <h4>Юр.лица — контроль документов ${legalEvts.length ? `(${legalComplete} из ${legalEvts.length} в порядке)` : ''}</h4>
+        ${legalEvts.length === 0 ? `<div style="color:var(--ink-soft);font-size:13px;">В этом месяце нет мероприятий с юр.лицами.</div>` : (
+          legalIncomplete.length === 0
+          ? `<div style="color:var(--status-green);font-size:13px;">✓ У всех мероприятий с юр.лицами документы в порядке.</div>`
+          : legalIncomplete.map(e=>`
+            <div class="stat-row">
+              <div class="stat-label" style="width:100%;flex:1;">
+                <b>${escapeHtml(e.companyName || 'Юр.лицо')}</b> — ${escapeHtml(e.title)} ${spaceBadge(getSpace(e.spaceId),'xs')} · ${formatDateText(e.date)}
+                <div style="color:var(--status-red);font-size:12px;margin-top:2px;">Не хватает: ${missingDocs(e).join(', ')}</div>
+              </div>
+            </div>
+          `).join('')
+        )}
+      </div>
+`;
+  }
   function renderOrderModal(order, isNew){
     return `
       <div class="modal" style="max-width:420px;">
@@ -10058,6 +10709,7 @@
             <input type="hidden" id="or-cost-source" value="${order.costSource==='master'?'master':'studio'}">
           </div>
           <div id="or-split-preview" style="font-size:13px;font-family:var(--font-mono);color:var(--ink-soft);"></div>
+          ${payerFieldHtml('or', order)}
           <div class="field">
             <label>Комментарий <span style="font-weight:400;color:var(--ink-soft);">— необязательно</span></label>
             <textarea id="or-comment" placeholder="Что заказали, что нужно сделать...">${escapeHtml(order.comment||'')}</textarea>
@@ -10075,6 +10727,7 @@
   }
 
   function attachOrderModalEvents(overlay){
+    attachPayerField(overlay, 'or', state.modal && state.modal.order && state.modal.order.id);
     const cancelBtn = overlay.querySelector('#btn-cancel-order');
     if(cancelBtn) cancelBtn.onclick = ()=>{ state.modal = null; overlay.remove(); };
 
@@ -10259,6 +10912,7 @@
         return;
       }
 
+      const payerOr = readPayer(overlay, 'or'); if(!payerOr) return;
       const finalAdditionalMasters = additionalMastersDraft
         .map(m=>({ name: (m.name||'').trim(), share: (m.share!==undefined&&m.share!==null&&m.share!=='')?parseInt(m.share):null }))
         .filter(m=>m.name && m.share!==null);
@@ -10275,6 +10929,8 @@
         cost: costRaw !== '' ? parseInt(costRaw) : 0,
         costSource: costSourceVal,
         comment: commentVal,
+        payerType: payerOr.payerType,
+        companyName: payerOr.companyName,
       };
       const idx = state.orders.findIndex(x=>x.id===updated.id);
       if(idx >= 0) state.orders[idx] = updated; else state.orders.push(updated);
@@ -12876,6 +13532,7 @@
               <input type="text" id="c-owner-contact" value="${escapeHtml(cert.ownerContact||'')}" placeholder="Телефон или @телеграм">
             </div>
           </div>
+          ${payerFieldHtml('c', cert)}
           <div class="field">
             <label>Тип сертификата</label>
             <div class="status-select-wrap">
@@ -12954,6 +13611,7 @@
   }
 
   function attachCertificateModalEvents(overlay){
+    attachPayerField(overlay, 'c', state.modal && state.modal.cert && state.modal.cert.id);
     const cancelBtn = overlay.querySelector('#btn-cancel-cert');
     if(cancelBtn) cancelBtn.onclick = ()=>{ state.modal = null; overlay.remove(); };
 
@@ -13258,6 +13916,7 @@
         return;
       }
 
+      const payerC = readPayer(overlay, 'c'); if(!payerC) return;
       const previousCert = state.modal.cert;
       const previousRedemptions = previousCert.redemptions || [];
 
@@ -13282,6 +13941,8 @@
         account: overlay.querySelector('#c-account') ? overlay.querySelector('#c-account').value : (previousCert.account || 'Точка'),
         comment: commentVal,
         hasReceiptPhoto: previousCert.hasReceiptPhoto || false,
+        payerType: payerC.payerType,
+        companyName: payerC.companyName,
       };
 
       // 0) фото чека — сохраняем/удаляем отдельным ключом, только если что-то поменяли в этой сессии модалки
@@ -14208,7 +14869,8 @@
     if(dirFilter) dirFilter.onchange = ()=>{ state.calFilterDirection = dirFilter.value; render(); };
     if(hostFilter) hostFilter.onchange = ()=>{ state.calFilterHost = hostFilter.value; render(); };
     const filterReset = document.getElementById('cal-filter-reset');
-    if(filterReset) filterReset.onclick = ()=>{ state.calFilterDirection = ''; state.calFilterHost = ''; render(); };
+    if(filterReset) filterReset.onclick = ()=>{ state.calFilterDirection = ''; state.calFilterHost = ''; state.calFilterKind = ''; render(); };
+    document.querySelectorAll('[data-calkind]').forEach(b=> b.onclick = ()=>{ state.calFilterKind = (state.calFilterKind === b.dataset.calkind) ? '' : b.dataset.calkind; render(); });
   }
 
   function attachHostEvents(){
@@ -17989,22 +18651,7 @@
         `).join('')}
       </div>
 `;
-    const analyticsPanel_legal = `      <div class="analytics-section">
-        <h4>Юр.лица — контроль документов ${legalEvts.length ? `(${legalComplete} из ${legalEvts.length} в порядке)` : ''}</h4>
-        ${legalEvts.length === 0 ? `<div style="color:var(--ink-soft);font-size:13px;">В этом месяце нет мероприятий с юр.лицами.</div>` : (
-          legalIncomplete.length === 0
-          ? `<div style="color:var(--status-green);font-size:13px;">✓ У всех мероприятий с юр.лицами документы в порядке.</div>`
-          : legalIncomplete.map(e=>`
-            <div class="stat-row">
-              <div class="stat-label" style="width:100%;flex:1;">
-                <b>${escapeHtml(e.companyName || 'Юр.лицо')}</b> — ${escapeHtml(e.title)} ${spaceBadge(getSpace(e.spaceId),'xs')} · ${formatDateText(e.date)}
-                <div style="color:var(--status-red);font-size:12px;margin-top:2px;">Не хватает: ${missingDocs(e).join(', ')}</div>
-              </div>
-            </div>
-          `).join('')
-        )}
-      </div>
-`;
+    const analyticsPanel_legal = buildLegalPanel(cursor, isAdminFinRestricted, legalEvts, legalIncomplete, legalComplete);
 
     const analyticsPanel_reports = `      <div class="analytics-section">
         <h4 style="color:${missingReportEvtsRequired.length>0?'var(--status-red)':'inherit'};">Отчёты мастеров ${reportableEvts.length ? `(${reportableEvts.length - missingReportEvts.length} из ${reportableEvts.length} сдано)` : ''}</h4>
@@ -18210,7 +18857,7 @@
           <button class="btn btn-ghost analytics-panel-btn" data-panel="days">📅 Сводка по дням</button>
           <button class="btn btn-ghost analytics-panel-btn" data-panel="ceramics">🏺 Изделия (керамика)</button>
           <button class="btn btn-ghost analytics-panel-btn" data-panel="guests">👥 Гости (продукты/направления/ведущие/пространства)</button>
-          <button class="btn btn-ghost analytics-panel-btn" data-panel="legal">📄 Документы юрлиц</button>
+          <button class="btn btn-ghost analytics-panel-btn" data-panel="legal">🏢 Юрлица (суммы и документы)</button>
           <button class="btn btn-ghost analytics-panel-btn" data-panel="reports">📝 Отчёты мастеров</button>
           <button class="btn btn-ghost analytics-panel-btn" data-panel="redo" style="${redoRows.length>0?'border-color:var(--status-cyan);color:var(--status-cyan);':''}">🔁 Переделки</button>
           <button class="btn btn-ghost analytics-panel-btn" data-panel="yearsummary">📆 Сводка по годам</button>
@@ -19165,6 +19812,7 @@
         if(Array.isArray(pendingImportData.cashAdjustments)) await rawReplace('cashAdjustments', 'cash-adjustments', '_cashAdjustmentsBaseline', pendingImportData.cashAdjustments);
         if(Array.isArray(pendingImportData.leads)) await rawReplace('leads', 'leads', '_leadsBaseline', pendingImportData.leads);
         if(Array.isArray(pendingImportData.kpOffers)) await rawReplace('kp-offers', 'kpOffers', '_kpOffersBaseline', pendingImportData.kpOffers);
+        if(Array.isArray(pendingImportData.leadTasks)) await rawReplace('lead-tasks', 'leadTasks', '_leadTasksBaseline', pendingImportData.leadTasks);
         if(Array.isArray(pendingImportData.incomes)) await rawReplace('incomes', 'incomes', '_incomesBaseline', pendingImportData.incomes);
         if(Array.isArray(pendingImportData.expenses)) await rawReplace('expenses', 'expenses', '_expensesBaseline', pendingImportData.expenses);
         if(Array.isArray(pendingImportData.eventTypes)) await rawReplace('eventTypes', 'event-types', '_eventTypesBaseline', pendingImportData.eventTypes);
@@ -19535,6 +20183,7 @@
         delete state.managerShifts[shiftDate];
       }
       await saveManagerShifts();
+      try{ journalSyncSoon(1500); }catch(e){}
       recordAction('Менеджер на день сохранён');
       overlay.remove();
       state.modal = {type:'day', date: shiftDate};
@@ -21096,7 +21745,7 @@
     days: '📅 Сводка по дням',
     ceramics: '🏺 Изделия (керамика, гончарный круг)',
     guests: '👥 Гости — по продуктам, направлениям, ведущим, пространствам',
-    legal: '📄 Документы юрлиц',
+    legal: '🏢 Юрлица — суммы и документы',
     reports: '📝 Отчёты мастеров',
     netprofit: '🔒 Чистая прибыль',
     yearsummary: '📆 Сводка по годам',
@@ -21106,7 +21755,7 @@
   };
   function renderAnalyticsPanelModal(panel){
     const content = (state.analyticsPanels && state.analyticsPanels[panel]) || '<div style="color:var(--ink-soft);font-size:13px;">Нет данных.</div>';
-    const modalWidth = panel === 'yearsummary' ? '920px' : '600px';
+    const modalWidth = (panel === 'yearsummary') ? '920px' : (panel === 'legal' ? '780px' : '600px');
     return `
       <div class="modal" style="max-width:${modalWidth};">
         <div class="modal-head">
@@ -21121,6 +21770,21 @@
   }
 
   function attachAnalyticsPanelModalEvents(overlay){
+    overlay.querySelectorAll('.lg-link').forEach(el=>{
+      el.onclick = ()=>{
+        const k = el.dataset.lgk, id = el.dataset.lgid;
+        if(k === 'event'){
+          const e = state.events.find(x=>x.id === id); if(!e) return;
+          state.modal = {type:'event', event:{...e}, isNew:false, keepAll:true}; render(); return;
+        }
+        requireUnlock(()=>{
+          if(k === 'order'){ const o = state.orders.find(x=>x.id === id); if(o) state.modal = {type:'order', isNew:false, order:{...o}}; }
+          else if(k === 'item'){ const i = state.itemSales.find(x=>x.id === id); if(i) state.modal = {type:'item-sale', isNew:false, itemSale:{...i}}; }
+          else if(k === 'cert'){ const c = state.certificates.find(x=>x.id === id); if(c) state.modal = {type:'certificate', isNew:false, cert:{...c}}; }
+          render();
+        });
+      };
+    });
     overlay.querySelectorAll('[data-dirfilter]').forEach(b=>{
       b.onclick = ()=>{ state.directionStatusFilter = b.dataset.dirfilter; render(); };
     });
@@ -23029,8 +23693,10 @@
             <input type="hidden" id="f-payer-type" value="${ev.payerType||'individual'}">
           </div>
           <div class="field" id="legal-field" style="display:${ev.payerType==='legal'?'block':'none'};">
-            <label>Название компании</label>
-            <input type="text" id="f-company-name" value="${escapeHtml(ev.companyName||'')}" placeholder="ООО «Ромашка»">
+            <label>Название компании <span style="font-weight:400;color:var(--danger);">— обязательно</span></label>
+            <input type="text" id="f-company-name" list="legal-names" value="${escapeHtml(ev.companyName||'')}" placeholder="ООО «Ромашка»">
+            ${legalNamesDatalist()}
+            <div id="legal-card"></div>
             <label style="margin-top:10px;">Документы <span style="font-weight:400;color:var(--ink-soft);">— обязательно прикрепить файлы (PDF, Word или фото)</span></label>
             <div style="display:flex;flex-direction:column;gap:10px;">
               ${LEGAL_DOC_KINDS.map(k=>`
@@ -24597,6 +25263,11 @@
       if(removeBtn) removeBtn.style.display = canRemove ? 'inline-block' : 'none';
     }
     LEGAL_DOC_KINDS.forEach(k=> refreshLegalDocRow(k.key));
+    {
+      const lcEl = overlay.querySelector('#legal-card'), cnEl = overlay.querySelector('#f-company-name');
+      const updLc = ()=>{ if(lcEl && cnEl) lcEl.innerHTML = legalCardHtml(cnEl.value, state.modal && state.modal.event && state.modal.event.id); };
+      if(cnEl){ cnEl.addEventListener('input', updLc); cnEl.addEventListener('change', updLc); updLc(); }
+    }
     overlay.querySelectorAll('.legal-doc-file').forEach(input=>{
       input.onchange = async ()=>{
         const kind = input.dataset.doc;
@@ -24863,6 +25534,15 @@
         leadSourceVal = overlay.querySelector('#f-lead-source') ? overlay.querySelector('#f-lead-source').value : '';
       }
 
+      {
+        const ptEl = overlay.querySelector('#f-payer-type'), cnEl = overlay.querySelector('#f-company-name');
+        if(cnEl) cnEl.style.borderColor = '';
+        if(ptEl && ptEl.value === 'legal' && cnEl && !cnEl.value.trim()){
+          cnEl.style.borderColor = 'var(--danger)'; if(cnEl.scrollIntoView) cnEl.scrollIntoView({block:'center', behavior:'smooth'});
+          showGapWarningBanner('Плательщик — юрлицо: укажите название компании.');
+          return;
+        }
+      }
       syncAdditionalHostsFromInputs();
       const finalAdditionalHosts = additionalHostsDraft
         .map(h=>({ name: (h.name||'').trim(), masterPay: h.masterPay, masterPayAuto: h.masterPayAuto }))
@@ -25232,6 +25912,8 @@
   setupPrivacyToggle();
 
   loadData();
+  setTimeout(()=>{ try{ journalSyncSoon(500); }catch(e){} }, 15000);
+  setInterval(()=>{ try{ journalSyncSoon(500); }catch(e){} }, 300000);
 })();
 </script>
 
