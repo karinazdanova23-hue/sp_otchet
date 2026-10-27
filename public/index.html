@@ -1,19 +1,3 @@
-<!DOCTYPE html>
-<html lang="ru">
-<head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
-<title>Свободное Пространство</title>
-<link rel="manifest" href="/manifest.json">
-<meta name="theme-color" content="#171512">
-<link rel="icon" href="/favicon.ico" sizes="any">
-<link rel="icon" type="image/png" sizes="192x192" href="/icon-192.png">
-<link rel="icon" type="image/png" sizes="512x512" href="/icon-512.png">
-<link rel="apple-touch-icon" href="/apple-touch-icon.png">
-<meta name="apple-mobile-web-app-capable" content="yes">
-<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-<meta name="apple-mobile-web-app-title" content="Свободное Пространство">
-<meta name="mobile-web-app-capable" content="yes">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,500;9..144,600;9..144,700&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
@@ -814,48 +798,6 @@
     .proc-row > div:nth-child(1)::before{ content:none; }
   }
 </style>
-</head>
-<body>
-<script>
-  (function(){
-    function getDeviceId(){
-      try{
-        let id = localStorage.getItem('sp-device-id');
-        if(!id){
-          id = 'dev-' + Math.random().toString(36).slice(2) + Date.now().toString(36);
-          localStorage.setItem('sp-device-id', id);
-        }
-        return id;
-      }catch(e){ return 'dev-fallback'; }
-    }
-    const DEVICE_ID = getDeviceId();
-    const API_BASE = new URL('/api/storage', window.location.origin).toString();
-    window.storage = {
-      async get(key, shared){
-        const res = await fetch(`${API_BASE}/${encodeURIComponent(key)}?shared=${!!shared}`, { headers: { 'X-Device-Id': DEVICE_ID } });
-        if(res.status === 404) return null;
-        if(!res.ok) throw new Error('storage.get failed: ' + res.status);
-        return res.json();
-      },
-      async set(key, value, shared){
-        const res = await fetch(`${API_BASE}/${encodeURIComponent(key)}`, { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Device-Id': DEVICE_ID }, body: JSON.stringify({ value, shared: !!shared }) });
-        if(!res.ok) throw new Error('storage.set failed: ' + res.status);
-        return res.json();
-      },
-      async delete(key, shared){
-        const res = await fetch(`${API_BASE}/${encodeURIComponent(key)}?shared=${!!shared}`, { method: 'DELETE', headers: { 'X-Device-Id': DEVICE_ID } });
-        if(!res.ok) throw new Error('storage.delete failed: ' + res.status);
-        return res.json();
-      },
-      async list(prefix, shared){
-        const res = await fetch(`${API_BASE}?prefix=${encodeURIComponent(prefix||'')}&shared=${!!shared}`, { headers: { 'X-Device-Id': DEVICE_ID } });
-        if(!res.ok) throw new Error('storage.list failed: ' + res.status);
-        return res.json();
-      }
-    };
-  })();
-</script>
-
 
 <div class="app" id="app">
   <div class="loading-note">Загружаю расписание…</div>
@@ -8598,13 +8540,15 @@
   function leadWho(){ return state.loggedInManagerName || state.loggedInHostessName || (ROLE_LABELS[state.currentRole] || state.currentRole); }
   // владелец новой заявки: сам менеджер, если он вошёл; иначе менеджер, стоящий в календаре на сегодня
   function leadOwnerNow(){ return state.loggedInManagerName || managerForDate(todayStr()) || leadWho(); }
-  // ближайший день, когда в календаре стоит менеджер (до 14 дней вперёд); если график не заполнен — дата как есть
-  function leadWorkDay(dateStr){
-    if(!dateStr) return dateStr;
-    for(let i = 0; i <= 14; i++){ const d = loadAddDays(dateStr, i); if(managerForDate(d)) return d; }
-    return dateStr;
+  // сроки задач считаются по обычным календарным дням (без привязки к рабочим дням менеджера);
+  // исполнитель — менеджер, стоящий в календаре на этот день, а если его нет — владелец заявки
+  function leadWorkDay(dateStr){ return dateStr; }
+  // исполнитель: менеджер на этот день; если в календаре никого — ближайший следующий менеджер (до 30 дней), затем владелец заявки
+  function leadAssigneeFor(dateStr, lead){
+    const m = managerForDate(dateStr); if(m) return m;
+    for(let i = 1; i <= 30; i++){ const n = managerForDate(loadAddDays(dateStr, i)); if(n) return n; }
+    return (lead && lead.owner) || leadWho();
   }
-  function leadAssigneeFor(dateStr, lead){ return managerForDate(dateStr) || (lead && lead.owner) || leadWho(); }
 
   // ===== связка с «Единым журналом»: заявки и задачи уходят в B2B журнала автоматически =====
   // секретный ключ журнала лежит в отдельной записи и подгружается только на устройствах Руководителя, Ассистента и менеджеров
@@ -25930,13 +25874,3 @@
   setInterval(()=>{ try{ journalSyncSoon(500); }catch(e){} }, 300000);
 })();
 </script>
-
-
-<script>
-  if('serviceWorker' in navigator){
-    window.addEventListener('load', ()=>{ navigator.serviceWorker.register('/sw.js').catch(()=>{}); });
-  }
-</script>
-
-</body>
-</html>
