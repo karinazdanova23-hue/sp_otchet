@@ -1118,9 +1118,9 @@
   // ЗП мастера по заказам не считается по фиксированному %, а договаривается индивидуально —
   // сумма вводится вручную по каждому заказу (в отличие от "Изделия", где действует общий процент)
 
-  const LEAD_STATUSES = [['new','Новая заявка'],['needs','Выявление потребности'],['brief','Готовим КП'],['kp','Отправлено КП'],['follow','Добивка'],['sold','Продано'],['lost','Отказ']];
+  const LEAD_STATUSES = [['new','Новая заявка'],['needs','Отправленные брифы'],['brief','КП в разработке'],['kp','Отправленные КП'],['sold','Продажи'],['lost','Отказы']];
   const LEAD_LOST_REASONS = ['Дорого','Не подошла дата','Выбрали другую студию','Передумали / отложили','Пропал, не отвечает','Не подошёл формат / программа','Нет свободного зала','Другое'];
-  function leadStatus(l){ if(!l) return 'new'; if(l.sold) return 'sold'; const st = (l.status && l.status !== 'sold') ? l.status : 'new'; return st === 'thinking' ? 'follow' : st; }
+  function leadStatus(l){ if(!l) return 'new'; if(l.sold) return 'sold'; const st = (l.status && l.status !== 'sold') ? l.status : 'new'; return (st === 'thinking' || st === 'follow') ? 'kp' : st; } // старые «Добивка»/«Думает» теперь в «Отправленные КП»
   // вид заявки: B2C — частные гости (ведём здесь), B2B — компании (работа идёт в Едином журнале, здесь — продажа и конверсия)
   function leadKind(l){ return l && l.kind === 'b2b' ? 'b2b' : 'b2c'; }
   function leadStatusLabel(s){ const f = LEAD_STATUSES.find(x=>x[0]===s); return f ? f[1] : s; }
@@ -1128,10 +1128,9 @@
     const st = leadStatus(l); let h;
     if(st === 'sold') h = '✅';
     else if(st === 'lost') h = '<span style="color:var(--danger);">❌ отказ</span>' + (l.lostReason ? '<br><span style="font-size:10px;color:var(--ink-soft);">' + escapeHtml(l.lostReason) + '</span>' : '');
-    else if(st === 'needs') h = '<span style="font-size:11px;">🔎 выявляем</span>';
-    else if(st === 'brief') h = '<span style="font-size:11px;">📋 готовим КП</span>';
-    else if(st === 'kp') h = '<span style="font-size:11px;">📨 КП</span>';
-    else if(st === 'follow') h = '<span style="font-size:11px;">🔔 добивка</span>';
+    else if(st === 'needs') h = '<span style="font-size:11px;">📋 бриф отправлен</span>';
+    else if(st === 'brief') h = '<span style="font-size:11px;">✍️ КП в разработке</span>';
+    else if(st === 'kp') h = '<span style="font-size:11px;">📨 КП отправлено</span>';
     else h = '—';
     if(l.kpId && st !== 'kp') h += '<br><span style="font-size:10px;color:var(--ink-soft);">📝 есть КП</span>';
     return h;
@@ -6325,7 +6324,7 @@
         if(!ok) return;
         copyText(txt, btn);
         pos.forEach(x=> refLogEvent('quote', x.cat, x.item, x.v, x.n, x.c.total));
-        const sv = detEl.querySelector('#br-saved'); if(sv) sv.innerHTML = '✅ Заявка создана/обновлена, статус «КП отправлено». Дальше ведите её во вкладке «Конверсия».';
+        const sv = detEl.querySelector('#br-saved'); if(sv) sv.innerHTML = '✅ Заявка создана/обновлена, статус «Отправленные КП». Дальше ведите её во вкладке «Конверсия».';
       };
       const bs = detEl.querySelector('#br-save');
       if(bs) bs.onclick = async ()=>{
@@ -6405,7 +6404,7 @@
       const lostRows = Object.keys(lostBy).sort((a,b)=>lostBy[b]-lostBy[a]).map(k=>[escapeHtml(k), lostBy[k]]);
       const kpStatsHtml = `<div class="ref-box"><h4>📝 Коммерческие предложения и продажи</h4>
         ${kpList.length ? `<div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:8px;">
-          ${[['КП всего', kpList.length],['Отправлено', kpList.filter(x=>['kp','follow','sold','lost'].includes(x.st)).length],['В добивке', kpList.filter(x=>x.st==='follow').length],['Продано', kpSold.length],['Отказ', kpList.filter(x=>x.st==='lost').length],['Конверсия', pct(kpSold.length, kpList.length)]].map(c=>`<div style="border:1px solid var(--line);border-radius:var(--radius);padding:6px 12px;font-size:13px;"><b>${c[1]}</b> <span style="color:var(--ink-soft);">${c[0]}</span></div>`).join('')}</div>
+          ${[['КП всего', kpList.length],['Отправлено', kpList.filter(x=>['kp','sold','lost'].includes(x.st)).length],['Продано', kpSold.length],['Отказ', kpList.filter(x=>x.st==='lost').length],['Конверсия', pct(kpSold.length, kpList.length)]].map(c=>`<div style="border:1px solid var(--line);border-radius:var(--radius);padding:6px 12px;font-size:13px;"><b>${c[1]}</b> <span style="color:var(--ink-soft);">${c[0]}</span></div>`).join('')}</div>
           <div style="font-size:13px;margin-bottom:8px;">Предложено на <b>${escapeHtml(formatMoney(sumOffered))}</b> · продано на <b>${escapeHtml(formatMoney(sumSold))}</b>${kpSold.length?` · средний чек <b>${escapeHtml(formatMoney(Math.round(sumSold/kpSold.length)))}</b>`:''}${cycle.length?` · от КП до продажи в среднем <b>${Math.round(cycle.reduce((s,v)=>s+v,0)/cycle.length)}</b> дн.`:''}</div>
           <div style="font-size:12px;color:var(--ink-soft);margin-top:6px;">По менеджерам</div>${tbl(byMgr, ['Менеджер','КП','Продано','Конв.','Сумма продаж'])}
           <div style="font-size:12px;color:var(--ink-soft);margin-top:6px;">По направлениям</div>${tbl(byDir, ['Направление','КП','Продано','Конв.'])}
@@ -8608,9 +8607,9 @@
   }
 
   // ===== воронка заявок (канбан) и задачи по заявкам =====
-  const LEAD_STAGES = ['new','needs','brief','kp','follow','sold','lost'];
-  const LEAD_STAGE_COLORS = { new:'#2F8F9D', needs:'#4C86B8', brief:'#B8863A', kp:'#7E57A8', follow:'#C2693A', sold:'#3F8F6B', lost:'#B0443B' };
-  const LEAD_NEXT = { new:[['needs','Выявить потребность →']], needs:[['brief','Готовим КП →']], brief:[['kp','КП отправлено →']], kp:[['follow','В добивку →'],['sold','Сделка ✓']], follow:[['sold','Сделка ✓']] };
+  const LEAD_STAGES = ['new','needs','brief','kp','sold','lost'];
+  const LEAD_STAGE_COLORS = { new:'#2F8F9D', needs:'#4C86B8', brief:'#B8863A', kp:'#7E57A8', sold:'#3F8F6B', lost:'#B0443B' };
+  const LEAD_NEXT = { new:[['needs','Бриф отправлен →']], needs:[['brief','КП в разработке →']], brief:[['kp','КП отправлено →']], kp:[['sold','Продажа ✓']] };
   async function saveLeadTasks(){
     if(!Array.isArray(state.leadTasks)) state.leadTasks = [];
     await saveCollectionMerged('lead-tasks', state.leadTasks, state._leadTasksBaseline || [], (a)=>{ state.leadTasks = a; state._leadTasksBaseline = JSON.parse(JSON.stringify(a)); });
@@ -8803,17 +8802,8 @@
   }
   function leadOpenTasks(leadId){ return (state.leadTasks||[]).filter(t=>t.leadId === leadId && !t.done).sort((a,b)=>(a.due||'9999').localeCompare(b.due||'9999')); }
   // при смене этапа: закрываем автозадачи прошлого этапа и ставим новую; при «Сделка/Отказ» закрываем все
-  // серия «Добивки»: закрыли напоминание — через несколько дней ставится следующее; после третьего — вопрос «закрыть заявку?»
-  const FOLLOW_STEPS = [null, [3, 'Добивка 2 из 3: напомнить клиенту ещё раз'], [5, 'Добивка 3 из 3: последнее напоминание'], [1, 'Решить: клиент молчит — закрыть заявку как «не отвечает»?']];
-  async function leadFollowNext(task){
-    if(!task || !task.followN || !task.done) return false;
-    const lead = state.leads.find(l=>l.id === task.leadId); if(!lead || leadStatus(lead) !== 'follow' || leadKind(lead) === 'b2b') return false;
-    const step = FOLLOW_STEPS[task.followN]; if(!step) return false;
-    if((state.leadTasks||[]).some(t=>t.leadId === lead.id && !t.done && t.followN > task.followN)) return false;
-    const due = leadWorkDay(loadAddDays(todayStr(), step[0]));
-    state.leadTasks.push({ id: uid(), leadId: lead.id, title: step[1], due, done: false, doneAt: '', assignee: leadAssigneeFor(due, lead), createdBy: leadWho(), createdAt: new Date().toISOString(), auto: true, followN: task.followN + 1 });
-    await saveLeadTasks(); return true;
-  }
+  // серия «Добивки» отменена: колонка «Отправленные КП» сразу ставит две задачи (через 1 и 2 дня), см. leadStageTasks
+  async function leadFollowNext(task){ return false; }
   async function leadStageTasks(lead, prevSt){
     if(leadKind(lead) === 'b2b') return; // B2B-задачи ведутся в Едином журнале
     const st = leadStatus(lead);
@@ -8824,9 +8814,17 @@
     if(st === 'sold' || st === 'lost'){ open.forEach(t=>{ t.done = true; t.doneAt = now; }); }
     else {
       open.filter(t=>t.auto).forEach(t=>{ t.done = true; t.doneAt = now; });
-      const T = { new:['Связаться с клиентом, назначить разговор',0], needs:['Выявить потребность: дата, число гостей, формат, бюджет',1], brief:['Подготовить и отправить КП',1], kp:['Связаться по КП, узнать решение',2], follow:['Добивка 1 из 3: напомнить клиенту о КП',2] }[st];
-      if(T){ const due = leadWorkDay(loadAddDays(todayStr(), T[1]));
-        state.leadTasks.push({ id: uid(), leadId: lead.id, title: T[0], due, done: false, doneAt: '', assignee: leadAssigneeFor(due, lead), createdBy: leadWho(), createdAt: now, auto: true, followN: st === 'follow' ? 1 : 0 }); }
+      // сроки — в календарных днях от момента, когда заявка попала в колонку
+      const T = {
+        new:   [['Связаться с клиентом, назначить разговор', 1]],
+        needs: [['Написать клиенту: получил ли бриф, ответить на вопросы', 1]],
+        brief: [['Подготовить и отправить КП', 2]],
+        kp:    [['Написать клиенту по КП: посмотрел ли, есть ли вопросы', 1], ['Написать клиенту ещё раз: узнать решение по КП', 2]]
+      }[st];
+      (T || []).forEach(([title, days])=>{
+        const due = leadWorkDay(loadAddDays(todayStr(), days));
+        state.leadTasks.push({ id: uid(), leadId: lead.id, title, due, done: false, doneAt: '', assignee: leadAssigneeFor(due, lead), createdBy: leadWho(), createdAt: now, auto: true, followN: 0 });
+      });
     }
     await saveLeadTasks();
   }
@@ -8883,7 +8881,7 @@
     const card = (l, st)=>{
       const tasks = leadOpenTasks(l.id);
       const isB2b = leadKind(l) === 'b2b';
-      const nxtList = isB2b ? (st === 'sold' || st === 'lost' ? [] : [['sold','Сделка ✓']]) : (LEAD_NEXT[st] || []);
+      const nxtList = isB2b ? (st === 'sold' || st === 'lost' ? [] : [['sold','Продажа ✓']]) : (LEAD_NEXT[st] || []);
       const days = l.requestDate ? Math.max(0, Math.round((parseDate(today) - parseDate(l.requestDate))/864e5)) : 0;
       return `<div class="lb-card" draggable="${st==='sold'?'false':'true'}" data-lid="${escapeHtml(l.id)}">
         <div class="lb-meta"><span style="font-weight:700;color:${isB2b?'#7E57A8':'#2F8F9D'};">${isB2b?'B2B':'B2C'}</span> · ${escapeHtml(l.owner||'не назначен')} · ${escapeHtml(l.product||'')}${l.location==='offsite'?' · выезд':''}</div>
