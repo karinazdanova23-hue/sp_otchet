@@ -10015,6 +10015,7 @@
   function crmKeys(s){
     s = String(s||''); const keys = [];
     (s.match(/\+?\d[\d\s\-()]{8,}\d/g) || []).forEach(x=>{ const d = x.replace(/\D/g,''); if(d.length >= 10) keys.push('p' + d.slice(-10)); });
+    s = s.replace(/(?:https?:\/\/)?(?:[a-z0-9-]+\.)*vk\.(?:com|ru|me)\/[^\s]*[?&]sel=(\d+)[^\s]*/gi, (m, id)=>{ keys.push('v' + id); return ' '; });
     (s.match(/@[A-Za-z0-9_.]{3,}/g) || []).forEach(h=> keys.push('h' + h.slice(1).toLowerCase()));
     (s.match(/(?:t\.me|instagram\.com|vk\.com|vk\.ru)\/([A-Za-z0-9_.]{3,})/gi) || []).forEach(u=> keys.push('h' + u.split('/').pop().toLowerCase()));
     if(!keys.length){
@@ -10359,7 +10360,7 @@
 
   // ===================== Заявка: имя, телефон, ссылка на соцсеть =====================
   const SOCIAL_NETS = {
-    'ВК': { label:'ВК', domains:['vk.com','vk.ru','m.vk.com','vkontakte.ru'], base:'https://vk.com/' },
+    'ВК': { label:'ВК', domains:['vk.com','vk.ru','vk.me','vkontakte.ru'], base:'https://vk.com/' },
     'Инста': { label:'Instagram', domains:['instagram.com','instagr.am'], base:'https://instagram.com/' },
     'ТГ': { label:'Telegram', domains:['t.me','telegram.me','telegram.org'], base:'https://t.me/' },
     'Макс': { label:'Макс', domains:['max.ru'], base:'' },
@@ -10370,7 +10371,9 @@
   };
   const SOCIAL_DOMAIN_LABEL = { 'vk.com':'ВК','vk.ru':'ВК','m.vk.com':'ВК','vkontakte.ru':'ВК','instagram.com':'Instagram','instagr.am':'Instagram','t.me':'Telegram','telegram.me':'Telegram','wa.me':'WhatsApp','api.whatsapp.com':'WhatsApp','max.ru':'Макс','ok.ru':'Одноклассники','tiktok.com':'TikTok','youtube.com':'YouTube','dzen.ru':'Дзен' };
   function socialHostOf(url){ try{ return new URL(url).hostname.replace(/^www\./,'').toLowerCase(); }catch(e){ return ''; } }
-  function socialLabelOfUrl(url){ const h = socialHostOf(url); return SOCIAL_DOMAIN_LABEL[h] || (h ? 'ссылка' : ''); }
+  function socialDomainOk(host, domains){ return domains.some(d=> host === d || host.endsWith('.' + d)); }
+  function socialLabelOfHost(h){ if(!h) return ''; if(SOCIAL_DOMAIN_LABEL[h]) return SOCIAL_DOMAIN_LABEL[h]; if(/(^|\.)vk\.(com|ru|me)$/.test(h)) return 'ВК'; for(const d in SOCIAL_DOMAIN_LABEL){ if(h.endsWith('.' + d)) return SOCIAL_DOMAIN_LABEL[d]; } return ''; }
+  function socialLabelOfUrl(url){ const h = socialHostOf(url); return socialLabelOfHost(h) || (h ? 'ссылка' : ''); }
   // raw — то, что ввели (ссылка, @ник или просто ник); source — источник заявки.
   // Возвращает { url, error }: url пустой, если поле пустое или ссылку построить нельзя
   function socialResolve(source, raw){
@@ -10380,8 +10383,8 @@
     if(looksUrl){
       const url = /^https?:\/\//i.test(raw) ? raw : 'https://' + raw;
       const host = socialHostOf(url); if(!host) return { url:'', error:'Ссылка выглядит неверно.' };
-      if(net && !net.domains.includes(host)){
-        return { url:'', error:'Источник «' + source + '», а ссылка ведёт на ' + (SOCIAL_DOMAIN_LABEL[host] || host) + '. Исправьте источник или ссылку.' };
+      if(net && !socialDomainOk(host, net.domains)){
+        return { url:'', error:'Источник «' + source + '», а ссылка ведёт на ' + (socialLabelOfHost(host) || host) + '. Исправьте источник или ссылку.' };
       }
       return { url, error:'' };
     }
