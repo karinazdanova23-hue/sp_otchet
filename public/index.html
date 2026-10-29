@@ -2129,6 +2129,8 @@
     leads: null,
     kpOffers: null,
     leadTasks: null,
+    clients: [],
+    crmSettings: {},
     journalSync: null,
     convTab: 'board',
     hostessShifts: null,
@@ -2425,6 +2427,7 @@
     if(view==='reportsfeed') return true; // лента отчётов — для всех сотрудников (после входа)
     if(view==='reference') return roleCanSeeReference(state.currentRole);
     if(view==='planprogress') return roleCanSeePlanProgress(state.currentRole);
+    if(view==='print') return roleCanAccessPrint(state.currentRole);
     if(view==='procurement') return roleCanAccessProcurement(state.currentRole);
     return false;
   }
@@ -2840,6 +2843,17 @@
     }catch(e){ state.leadTasks = []; }
 
     try{
+      const clr = await window.storage.get('clients', true);
+      state.clients = clr ? JSON.parse(clr.value) : [];
+      if(!Array.isArray(state.clients)) state.clients = [];
+    }catch(e){ state.clients = []; }
+    try{
+      const crr = await window.storage.get('crm-settings', true);
+      state.crmSettings = crr ? JSON.parse(crr.value) : {};
+      if(!state.crmSettings || typeof state.crmSettings !== 'object' || Array.isArray(state.crmSettings)) state.crmSettings = {};
+    }catch(e){ state.crmSettings = {}; }
+
+    try{
       const jsr = await window.storage.get('journal-sync', true);
       state.journalSync = jsr ? JSON.parse(jsr.value) : {};
       if(!state.journalSync || typeof state.journalSync !== 'object' || Array.isArray(state.journalSync)) state.journalSync = {};
@@ -2902,6 +2916,8 @@
     state._leadsBaseline = JSON.parse(JSON.stringify(state.leads));
     state._kpOffersBaseline = JSON.parse(JSON.stringify(state.kpOffers || []));
     state._leadTasksBaseline = JSON.parse(JSON.stringify(state.leadTasks || []));
+    state._clientsBaseline = JSON.parse(JSON.stringify(state.clients || []));
+    state._crmSettingsBaseline = JSON.parse(JSON.stringify(state.crmSettings || {}));
     state._journalSyncBaseline = JSON.parse(JSON.stringify(state.journalSync || {}));
     state._hostessShiftsBaseline = JSON.parse(JSON.stringify(state.hostessShifts));
     state._managerShiftsBaseline = JSON.parse(JSON.stringify(state.managerShifts));
@@ -3439,6 +3455,8 @@
       leads: state.leads,
       kpOffers: state.kpOffers || [],
       leadTasks: state.leadTasks || [],
+      clients: state.clients || [],
+      crmSettings: state.crmSettings || {},
       incomes: state.incomes,
       expenses: state.expenses,
       eventTypes: state.eventTypes,
@@ -3606,6 +3624,8 @@
     'expenses': ()=>saveExpenses(),
     'audit-log': ()=>saveAuditLog(),
     'events': ()=>saveEvents(),
+    'clients': ()=>saveClients(),
+    'crm-settings': ()=>saveCrmSettings(),
     'event-types': ()=>saveEventTypes(),
     'event-catalog': ()=>saveEventCatalog(),
     'custom-expense-categories': ()=>saveCustomExpenseCategories(),
@@ -3677,6 +3697,39 @@
     } finally { saveRetryInFlight = false; renderUnsavedBanner(); }
   }
   setInterval(()=>{ retryFailedSaves(false); }, 12000);
+
+  // ===== Свежие данные без перезагрузки страницы =====
+  // Раньше данные подгружались только при открытии страницы, и «старая» вкладка показывала вчерашние мероприятия/оплаты.
+  // Теперь при возврате на вкладку и раз в 90 секунд (если человек ничего не редактирует и всё сохранено) данные обновляются.
+  // Пустой или повреждённый ответ сервера никогда не подставляется вместо рабочих данных.
+  let refreshInFlight = false, lastFreshAt = Date.now();
+  async function refreshSharedData(){
+    if(refreshInFlight || !state.loaded || !state.currentRole) return;
+    if(state.modal || failedSaveKeys.size > 0 || document.hidden) return;
+    if(document.querySelector('.modal, #lead-task-popup, #lead-popup, #crm-popup, #crm-lists-popup')) return;
+    const ae = document.activeElement; if(ae && /^(INPUT|TEXTAREA|SELECT)$/.test(ae.tagName) && ae.id !== 'global-search-input' && ae.id !== 'lb-q') return;
+    refreshInFlight = true;
+    try{
+      const specs = [['events','events','_eventsBaseline'],['certificates','certificates','_certificatesBaseline'],['incomes','incomes','_incomesBaseline'],['leads','leads','_leadsBaseline'],['lead-tasks','leadTasks','_leadTasksBaseline'],['clients','clients','_clientsBaseline']];
+      let changed = false;
+      for(const [key, prop, baseProp] of specs){
+        const cur = Array.isArray(state[prop]) ? state[prop] : [];
+        const d = diffForMerge(state[baseProp] || [], cur);
+        if(d.upserts.length || d.deletes.length) continue; // есть несохранённые правки — не трогаем
+        let res; try{ res = await window.storage.get(key, true); }catch(e){ continue; }
+        if(!res || !res.value) continue;
+        let arr; try{ arr = JSON.parse(res.value); }catch(e){ continue; }
+        if(!Array.isArray(arr) || (arr.length === 0 && cur.length > 0)) continue;
+        if(JSON.stringify(arr) === JSON.stringify(cur)) continue;
+        state[prop] = arr; state[baseProp] = JSON.parse(JSON.stringify(arr)); changed = true;
+      }
+      lastFreshAt = Date.now();
+      if(changed && !state.modal && !document.querySelector('.modal, #lead-task-popup, #lead-popup, #crm-popup, #crm-lists-popup')) render();
+    }catch(e){ console.error('refreshSharedData', e); }
+    finally{ refreshInFlight = false; }
+  }
+  setInterval(()=>{ refreshSharedData(); }, 90000);
+  document.addEventListener('visibilitychange', ()=>{ if(!document.hidden && Date.now() - lastFreshAt > 20000) refreshSharedData(); });
   window.addEventListener('online', ()=>{ retryFailedSaves(false); });
   window.addEventListener('beforeunload', (e)=>{
     if(failedSaveKeys.size > 0){ e.preventDefault(); e.returnValue = ''; return ''; }
@@ -3728,7 +3781,7 @@
     baseMap.forEach((b, key)=>{ if(!curMap.has(key)) deletes.push(key); });
     return { upserts, deletes };
   }
-  async function saveCollectionMerged(storageKey, currentArray, baselineArray, applyMerged, keyFn){
+  async function saveCollectionMerged(storageKey, currentArray, baselineArray, applyMerged, keyFn, mergeItemFn){
     const kf = keyFn || (x=>x.id);
     const { upserts, deletes } = diffForMerge(baselineArray, currentArray, kf);
     let serverArray = null;
@@ -3764,7 +3817,11 @@
     }
     const deleteSet = new Set(deletes);
     const map = new Map(serverArray.filter(Boolean).filter(x=>!deleteSet.has(kf(x))).map(x=>[kf(x), x]));
-    upserts.forEach(x=>{ map.set(kf(x), x); });
+    const baseMapForMerge = mergeItemFn ? new Map((baselineArray||[]).filter(Boolean).map(x=>[kf(x), x])) : null;
+    upserts.forEach(x=>{
+      const srv = mergeItemFn ? map.get(kf(x)) : null;
+      map.set(kf(x), (srv && mergeItemFn) ? mergeItemFn(srv, x, baseMapForMerge.get(kf(x))) : x);
+    });
     const finalArr = Array.from(map.values());
     const okSet = await storageSetWithRetry(storageKey, JSON.stringify(finalArr));
     // если сервер запись не принял — НЕ обновляем «исходное состояние»: иначе при повторной попытке
@@ -3827,11 +3884,20 @@
   async function saveEventsRaw(){
     return storageSetWithRetry('events', JSON.stringify(state.events));
   }
+  // защита оплат: если, пока у человека была открыта старая форма мероприятия, кто-то другой добавил оплату,
+  // то при сохранении этой формы чужая (новая) оплата не затирается, а добавляется к оплатам формы
+  function mergeEventPayments(serverEv, localEv, baseEv){
+    const baseIds = new Set(((baseEv && baseEv.payments) || []).map(p=>p && p.id).filter(Boolean));
+    const localIds = new Set((localEv.payments || []).map(p=>p && p.id).filter(Boolean));
+    const extra = (serverEv.payments || []).filter(p=> p && p.id && !baseIds.has(p.id) && !localIds.has(p.id));
+    if(!extra.length) return localEv;
+    return Object.assign({}, localEv, { payments: (localEv.payments || []).concat(extra) });
+  }
   async function saveEvents(){
     return await saveCollectionMerged('events', state.events, state._eventsBaseline, (finalArr)=>{
       state.events = finalArr;
       state._eventsBaseline = JSON.parse(JSON.stringify(finalArr));
-    });
+    }, undefined, mergeEventPayments);
   }
   function normName(s){ return (s||'').trim().toLowerCase(); }
   // заказ на изготовление теперь может вести несколько мастеров одновременно с разной оплатой —
@@ -4339,7 +4405,7 @@
   }
   async function deleteAttachedPhoto(storageKey){
     delete state.receiptPhotoCache[storageKey];
-    try{ await window.storage.remove(storageKey); }catch(e){ /* не критично */ }
+    try{ if(window.storage.delete) await window.storage.delete(storageKey, true); else await window.storage.remove(storageKey); }catch(e){ /* не критично */ }
   }
   function loadReceiptPhoto(certId){ return loadAttachedPhoto('receipt-photo-'+certId); }
   function saveReceiptPhoto(certId, dataUrl){ return saveAttachedPhoto('receipt-photo-'+certId, dataUrl); }
@@ -4998,6 +5064,8 @@
       html += renderReferenceView();
     } else if(state.view === 'planprogress'){
       html += renderPlanProgressView();
+    } else if(state.view === 'print'){
+      html += renderPrintView();
     } else if(state.view === 'certificates'){
       html += renderCertificatesView();
     } else if(state.view === 'marketing'){
@@ -5020,6 +5088,7 @@
     else if(state.view === 'my-orders'){ /* только чтение, обработчики не нужны */ }
     else if(state.view === 'reference'){ attachReferenceEvents(); }
     else if(state.view === 'planprogress'){ attachPlanProgressViewEvents(); }
+    else if(state.view === 'print'){ attachPrintEvents(); }
     else if(state.view === 'certificates'){ attachCertificatesEvents(); }
     else if(state.view === 'marketing'){ attachMarketingEvents(); }
     else if(state.view === 'procurement'){ attachProcurementEvents(); }
@@ -5371,6 +5440,10 @@
     }
     if(roleCanSeePlanProgress(role)){
       buttons.push({key:'planprogress', html: `<button data-view="planprogress" class="${state.view==='planprogress'?'active':''}">🎯 План</button>`});
+    }
+    if(roleCanAccessPrint(role)){
+      const pn = printOpenCount();
+      buttons.push({key:'print', html: `<button data-view="print" class="${state.view==='print'?'active':''}">🖨 На печать${pn ? ' <span style="background:var(--danger);color:#fff;border-radius:9px;padding:0 6px;font-size:11px;">'+pn+'</span>' : ''}</button>`});
     }
     if(roleCanAccessCertificatesView(role)){
       buttons.push({key:'certificates', html: `<button data-view="certificates" class="${state.view==='certificates'?'active':''}">${role==='hostess' ? 'Сертификаты / Изделия' : 'Для менеджеров'}</button>`});
@@ -8863,10 +8936,12 @@
   function renderLeadBoard(){
     const today = todayStr(); const since = loadAddDays(today, -30);
     const q = refNorm(state.leadBoardQ || '').trim(); const ownerF = state.leadBoardOwner || '';
+    const crmIdx = crmBuildIndex(); const segF = state.leadBoardSeg || '', tagF = state.leadBoardTag || ''; const crmCfgNow = crmCfg();
     const owners = Array.from(new Set(state.leads.map(l=>l.owner).filter(Boolean))).sort((a,b)=>a.localeCompare(b,'ru'));
     const match = (l)=>{
       if(ownerF && (l.owner||'') !== ownerF) return false;
       if(state.leadBoardKind && leadKind(l) !== state.leadBoardKind) return false;
+      if(segF || tagF){ const cl = crmClientOfLead(l, crmIdx); if(segF && (!cl || cl.segmentId !== segF)) return false; if(tagF && (!cl || !(cl.tagIds||[]).includes(tagF))) return false; }
       if(q){ const hay = refNorm([l.contact,l.comment,l.product,l.source,l.owner].join(' ')); if(!q.split(/\s+/).every(t=>hay.includes(t))) return false; }
       return true;
     };
@@ -8883,10 +8958,13 @@
       const isB2b = leadKind(l) === 'b2b';
       const nxtList = isB2b ? (st === 'sold' || st === 'lost' ? [] : [['sold','Продажа ✓']]) : (LEAD_NEXT[st] || []);
       const days = l.requestDate ? Math.max(0, Math.round((parseDate(today) - parseDate(l.requestDate))/864e5)) : 0;
+      const cl = crmClientOfLead(l, crmIdx);
       return `<div class="lb-card" draggable="${st==='sold'?'false':'true'}" data-lid="${escapeHtml(l.id)}">
         <div class="lb-meta"><span style="font-weight:700;color:${isB2b?'#7E57A8':'#2F8F9D'};">${isB2b?'B2B':'B2C'}</span> · ${escapeHtml(l.owner||'не назначен')} · ${escapeHtml(l.product||'')}${l.location==='offsite'?' · выезд':''}</div>
         <div class="lb-title"><b>${escapeHtml(l.contact||'без контакта')}</b></div>
-        <div class="lb-meta">${escapeHtml(l.eventMonth && l.eventMonth !== LEAD_MONTH_OPTIONS[0] ? l.eventMonth + ' · ' : '')}${escapeHtml(l.source||'')} · ${days} дн. в работе</div>
+        ${leadChatLinksHtml(l, cl, true) ? '<div class="lb-meta">' + leadChatLinksHtml(l, cl, true) + '</div>' : ''}
+        ${cl && (cl.segmentId || (cl.tagIds||[]).length) ? '<div>' + crmChipsHtml(cl, true) + '</div>' : ''}
+        <div class="lb-meta">${escapeHtml(l.eventDate ? 'мер-е ' + formatDateText(l.eventDate) + ' · ' : (l.eventMonth && l.eventMonth !== LEAD_MONTH_OPTIONS[0] ? l.eventMonth + ' · ' : ''))}${escapeHtml(l.source||'')} · ${days} дн. в работе</div>
         ${l.comment ? `<div class="lb-comment">${escapeHtml(l.comment)}</div>` : ''}
         <div class="lb-sum">${l.revenue ? escapeHtml(formatMoney(l.revenue)) : '<span style="color:var(--ink-soft);">сумма не указана</span>'}${l.kpId ? ' <span title="Есть КП">📝 КП</span>' : ''}${st==='lost' && l.lostReason ? ' <span style="color:var(--danger);">· '+escapeHtml(l.lostReason)+'</span>' : ''}</div>
         ${isB2b && st !== 'sold' && st !== 'lost' ? '<div class="lb-meta" style="color:#7E57A8;">🔗 В журнале: <b>' + escapeHtml(l.jStage || 'Новая заявка') + '</b> · работа и задачи там</div>' : ''}
@@ -8923,6 +9001,8 @@
       <button class="btn btn-primary" id="btn-add-lead">+ Заявка</button>
       <input type="search" id="lb-q" value="${escapeHtml(state.leadBoardQ||'')}" placeholder="🔎 Поиск: контакт, комментарий…" style="flex:1;min-width:180px;max-width:320px;">
       <span style="display:flex;gap:4px;">${[['','Все'],['b2c','B2C'],['b2b','B2B']].map(k=>`<button class="btn ${(state.leadBoardKind||'')===k[0]?'btn-primary':'btn-ghost'}" data-bkind="${k[0]}" style="padding:4px 10px;">${k[1]}</button>`).join('')}</span>
+      <select id="lb-seg" title="Сегмент клиента"><option value="">Все сегменты</option>${crmCfgNow.segments.map(s=>`<option value="${escapeHtml(s.id)}" ${segF===s.id?'selected':''}>${escapeHtml(s.name)}</option>`).join('')}</select>
+      <select id="lb-tag" title="Тег клиента"><option value="">Все теги</option>${crmCfgNow.tags.map(s=>`<option value="${escapeHtml(s.id)}" ${tagF===s.id?'selected':''}>${escapeHtml(s.name)}</option>`).join('')}</select>
       <select id="lb-owner"><option value="">Все менеджеры</option>${owners.map(o=>`<option value="${escapeHtml(o)}" ${ownerF===o?'selected':''}>${escapeHtml(o)}</option>`).join('')}</select>
       <button class="btn btn-ghost" id="btn-js-open" title="Связка с Единым журналом">🔗 Журнал</button><span id="js-status" style="font-size:12px;">${jsStatusHtml()}</span>
       ${managerForDate(today) ? `<span style="font-size:12.5px;">👤 Сегодня на смене: <b>${escapeHtml(managerForDate(today))}</b></span>` : ''}
@@ -8992,6 +9072,9 @@
     document.querySelectorAll('[data-convtab]').forEach(b=> b.onclick = ()=>{ state.convTab = b.dataset.convtab; render(); });
     document.querySelectorAll('[data-bkind]').forEach(b=> b.onclick = ()=>{ state.leadBoardKind = b.dataset.bkind; render(); });
     const q = document.getElementById('lb-q'); if(q) q.onchange = ()=>{ state.leadBoardQ = q.value; render(); };
+    const sgf = document.getElementById('lb-seg'); if(sgf) sgf.onchange = ()=>{ state.leadBoardSeg = sgf.value; render(); };
+    const tgf = document.getElementById('lb-tag'); if(tgf) tgf.onchange = ()=>{ state.leadBoardTag = tgf.value; render(); };
+    attachClientsEvents();
     const ow = document.getElementById('lb-owner'); if(ow) ow.onchange = ()=>{ state.leadBoardOwner = ow.value; render(); };
     const openLead = (id)=>{ const l = state.leads.find(x=>x.id === id); if(!l) return; requireUnlock(()=>{ state.modal = {type:'lead', isNew:false, lead:{...l}}; render(); }); };
     document.querySelectorAll('.lb-card').forEach(c=>{
@@ -9043,10 +9126,10 @@
 
   function renderConversionView(){
     const tab = state.convTab || 'board';
-    const tabs = [['board','Воронка'],['tasks','Задачи'],['stats','Статистика и список']];
+    const tabs = [['board','Воронка'],['tasks','Задачи'],['clients','Клиенты'],['stats','Статистика и список']];
     const nOpen = (state.leadTasks||[]).filter(t=>!t.done && t.due && t.due <= todayStr() && state.leads.some(l=>l.id===t.leadId)).length;
     const bar = `<div class="sub-tabs" style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:12px;">${tabs.map(t=>`<button class="btn ${tab===t[0]?'btn-primary':'btn-ghost'}" data-convtab="${t[0]}">${t[1]}${t[0]==='tasks' && nOpen ? ' <span style="color:'+(tab==='tasks'?'#fff':'var(--danger)')+';">('+nOpen+')</span>' : ''}</button>`).join('')}</div>`;
-    return bar + (tab === 'tasks' ? renderLeadTasksView() : (tab === 'stats' ? renderConversionStatsView() : renderLeadBoard()));
+    return bar + (tab === 'tasks' ? renderLeadTasksView() : (tab === 'clients' ? renderClientsView() : tab === 'stats' ? renderConversionStatsView() : renderLeadBoard()));
   }
   function renderConversionStatsView(){
     const { navHtml, period } = buildPeriodNav('conversionCursor', 'conversionMode', 'conv');
@@ -9278,7 +9361,7 @@
             <div class="lead-row" data-lid="${l.id}">
               <div class="cell">${l.requestDate ? formatDateText(l.requestDate) : '—'}${l.hasPhoto?' <span title="Есть фото" style="font-size:12px;">📎</span>':''}${l.contact?'<br><span style="color:var(--ink-soft);font-size:11px;">'+escapeHtml(l.contact)+'</span>':''}</div>
               <div class="cell" style="text-transform:capitalize;">${escapeHtml(weekdayFromDate(l.requestDate))}</div>
-              <div class="cell">${escapeHtml(l.eventMonth||'')}</div>
+              <div class="cell">${escapeHtml(l.eventDate ? formatDateText(l.eventDate) : (l.eventMonth||''))}</div>
               <div class="cell">${escapeHtml(l.source||'')}</div>
               <div class="cell">${escapeHtml(l.product||'')}</div>
               <div class="cell">${l.location==='offsite'?'Выезд':'В СП'}</div>
@@ -9894,6 +9977,461 @@
     `;
   }
 
+  // ===================== CRM: клиенты, сегменты, теги, ссылки на чат =====================
+  const CRM_DEFAULTS = {
+    segments: [
+      {id:'seg-private', name:'Частный клиент', color:'#2F8F9D'},
+      {id:'seg-corp', name:'Корпоратив', color:'#7E57A8'},
+      {id:'seg-regular', name:'Постоянный', color:'#3F8F6B'},
+      {id:'seg-vip', name:'VIP', color:'#B8863A'},
+      {id:'seg-partner', name:'Блогер / партнёр', color:'#4C86B8'}
+    ],
+    tags: [
+      {id:'tag-warm', name:'Тёплый', color:'#B8863A'},
+      {id:'tag-hot', name:'Горячий', color:'#B0443B'},
+      {id:'tag-repeat', name:'Повторный', color:'#3F8F6B'},
+      {id:'tag-waitkp', name:'Ждёт КП', color:'#7E57A8'},
+      {id:'tag-ref', name:'По рекомендации', color:'#2F8F9D'},
+      {id:'tag-price', name:'Возражение по цене', color:'#8A6D5A'}
+    ]
+  };
+  function crmCfg(){
+    const s = state.crmSettings || {};
+    return {
+      segments: Array.isArray(s.segments) ? s.segments : CRM_DEFAULTS.segments,
+      tags: Array.isArray(s.tags) ? s.tags : CRM_DEFAULTS.tags
+    };
+  }
+  function crmCanEditLists(){ return ['owner','assistant','admin'].includes(state.currentRole); }
+  function crmCanDeleteClient(){ return ['owner','assistant'].includes(state.currentRole); }
+  async function saveClients(){
+    if(!Array.isArray(state.clients)) state.clients = [];
+    await saveCollectionMerged('clients', state.clients, state._clientsBaseline || [], (a)=>{ state.clients = a; state._clientsBaseline = JSON.parse(JSON.stringify(a)); });
+  }
+  async function saveCrmSettings(){
+    await saveMapMerged('crm-settings', state.crmSettings || {}, state._crmSettingsBaseline || {}, (m)=>{ state.crmSettings = m; state._crmSettingsBaseline = JSON.parse(JSON.stringify(m)); });
+  }
+  // ключи для сопоставления: телефон (последние 10 цифр) и ник (без @, в нижнем регистре)
+  function crmKeys(s){
+    s = String(s||''); const keys = [];
+    (s.match(/\+?\d[\d\s\-()]{8,}\d/g) || []).forEach(x=>{ const d = x.replace(/\D/g,''); if(d.length >= 10) keys.push('p' + d.slice(-10)); });
+    (s.match(/@[A-Za-z0-9_.]{3,}/g) || []).forEach(h=> keys.push('h' + h.slice(1).toLowerCase()));
+    (s.match(/(?:t\.me|instagram\.com|vk\.com|vk\.ru)\/([A-Za-z0-9_.]{3,})/gi) || []).forEach(u=> keys.push('h' + u.split('/').pop().toLowerCase()));
+    if(!keys.length){
+      const t = s.trim().toLowerCase();
+      if(/^[a-z0-9_.]{4,}$/.test(t) && !/^\d+$/.test(t)) keys.push('h' + t);
+    }
+    return Array.from(new Set(keys));
+  }
+  function crmBuildIndex(){
+    const byKey = new Map(), byId = new Map();
+    (state.clients || []).forEach(c=>{ byId.set(c.id, c); crmKeys((c.contact||'') + ' ' + (c.contact2||'')).forEach(k=>{ if(!byKey.has(k)) byKey.set(k, c); }); });
+    return { byKey, byId };
+  }
+  function crmClientOfLead(l, idx){
+    idx = idx || crmBuildIndex();
+    if(l.clientId && idx.byId.has(l.clientId)) return idx.byId.get(l.clientId);
+    for(const k of crmKeys(l.contact)){ if(idx.byKey.has(k)) return idx.byKey.get(k); }
+    return null;
+  }
+  function crmLeadsOfClient(c, idx){
+    idx = idx || crmBuildIndex();
+    return state.leads.filter(l=> { const x = crmClientOfLead(l, idx); return x && x.id === c.id; });
+  }
+  function crmSegOf(id){ return crmCfg().segments.find(s=>s.id === id) || null; }
+  function crmTagOf(id){ return crmCfg().tags.find(s=>s.id === id) || null; }
+  function crmChip(item, small){
+    if(!item) return '';
+    return `<span style="display:inline-block;background:${item.color||'#888'};color:#fff;border-radius:10px;padding:${small?'0 6px':'1px 8px'};font-size:${small?'10.5px':'11.5px'};margin:1px 2px 1px 0;white-space:nowrap;">${escapeHtml(item.name)}</span>`;
+  }
+  function crmChipsHtml(c, small){
+    if(!c) return '';
+    return crmChip(crmSegOf(c.segmentId), small) + (c.tagIds||[]).map(id=>crmChip(crmTagOf(id), small)).join('');
+  }
+  function crmChatLinks(contact){
+    const out = []; const keys = crmKeys(contact);
+    const ph = keys.find(k=>k[0]==='p'); const hd = keys.find(k=>k[0]==='h');
+    if(ph) out.push(['WhatsApp', 'https://wa.me/7' + ph.slice(1)]);
+    if(hd) out.push(['Telegram', 'https://t.me/' + hd.slice(1)]);
+    return out;
+  }
+  function crmSafeUrl(u){ u = String(u||'').trim(); if(!u) return ''; if(!/^https?:\/\//i.test(u)) u = 'https://' + u; return /^https?:\/\/[^\s]+$/i.test(u) ? u : ''; }
+  function crmChatBtn(c, small){
+    const u = c ? crmSafeUrl(c.chatUrl) : '';
+    if(!u) return '';
+    return `<a href="${escapeHtml(u)}" target="_blank" rel="noopener" class="crm-chat" style="font-size:${small?'11px':'12.5px'};text-decoration:none;">💬 чат</a>`;
+  }
+  // найти или создать клиента по заявке; поля seg/tags/chat применяются, только если переданы
+  function crmUpsertForLead(lead, vals, prefClientId){
+    if(!Array.isArray(state.clients)) state.clients = [];
+    const idx = crmBuildIndex();
+    let c = null;
+    for(const k of crmKeys(lead.contact)){ if(idx.byKey.has(k)){ c = idx.byKey.get(k); break; } }
+    if(!c && lead.clientId && idx.byId.has(lead.clientId) && !crmKeys(lead.contact).length) c = idx.byId.get(lead.clientId);
+    const isNewClient = !c;
+    if(!c){
+      c = { id: 'c' + uid().slice(1), contact: lead.contact || '', name: '', chatUrl: '', segmentId: '', tagIds: [], note: '', createdAt: new Date().toISOString() };
+      state.clients.push(c);
+    }
+    const sameAsPref = isNewClient || c.id === prefClientId;
+    if(vals){
+      if(sameAsPref){ c.segmentId = vals.segmentId || ''; c.tagIds = (vals.tagIds || []).slice(); if(vals.chatUrl) c.chatUrl = vals.chatUrl; }
+      else if(!c.chatUrl && vals.chatUrl){ c.chatUrl = vals.chatUrl; }
+    }
+    return c;
+  }
+  function crmTagPicker(selected, attrName){
+    const tags = crmCfg().tags;
+    if(!tags.length) return '<span style="font-size:12px;color:var(--ink-soft);">Теги пока не заведены</span>';
+    return tags.map(t=>{ const on = selected.includes(t.id); return `<button type="button" ${attrName}="${escapeHtml(t.id)}" style="border:1px solid ${t.color};background:${on?t.color:'transparent'};color:${on?'#fff':t.color};border-radius:12px;padding:2px 9px;font-size:12px;margin:2px 4px 2px 0;cursor:pointer;">${escapeHtml(t.name)}</button>`; }).join('');
+  }
+  function crmSegSelect(id, selected){
+    return `<select id="${id}"><option value="">— не выбран —</option>${crmCfg().segments.map(s=>`<option value="${escapeHtml(s.id)}" ${selected===s.id?'selected':''}>${escapeHtml(s.name)}</option>`).join('')}</select>`;
+  }
+
+  // ---- редактор списков (сегменты и теги) ----
+  function openCrmListsPopup(onDone){
+    if(!crmCanEditLists()){ showGapWarningBanner('Списки сегментов и тегов правит владелец, ассистент или старший администратор.'); return; }
+    const old = document.getElementById('crm-lists-popup'); if(old) old.remove();
+    const draft = JSON.parse(JSON.stringify(crmCfg()));
+    const wrap = document.createElement('div'); wrap.id = 'crm-lists-popup';
+    wrap.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.4);z-index:3100;display:flex;align-items:center;justify-content:center;padding:16px;';
+    document.body.appendChild(wrap);
+    const usage = (kind, id)=> (state.clients||[]).filter(c=> kind==='segments' ? c.segmentId===id : (c.tagIds||[]).includes(id)).length;
+    const draw = ()=>{
+      const sect = (kind, title, hint)=> `<div style="margin-bottom:14px;"><div style="font-weight:700;margin-bottom:2px;">${title}</div><div style="font-size:12px;color:var(--ink-soft);margin-bottom:6px;">${hint}</div>
+        ${draft[kind].map((it,i)=>`<div style="display:flex;gap:6px;align-items:center;margin-bottom:5px;">
+          <input type="color" value="${escapeHtml(it.color||'#888888')}" data-cl="${kind}:${i}:color" style="width:34px;height:30px;padding:0;border:none;background:none;">
+          <input type="text" value="${escapeHtml(it.name)}" data-cl="${kind}:${i}:name" style="flex:1;">
+          <span style="font-size:11px;color:var(--ink-soft);white-space:nowrap;">${usage(kind,it.id)} кл.</span>
+          <button class="btn btn-ghost" data-cldel="${kind}:${i}" style="padding:2px 8px;">✕</button></div>`).join('')}
+        <button class="btn btn-ghost" data-cladd="${kind}" style="font-size:12.5px;">+ добавить</button></div>`;
+      wrap.innerHTML = `<div style="background:var(--white);border-radius:var(--radius);padding:18px;max-width:460px;width:100%;max-height:90vh;overflow:auto;">
+        <h3 style="margin:0 0 10px;">Сегменты и теги</h3>
+        ${sect('segments','Сегменты клиента','Один сегмент на клиента: кто он для студии.')}
+        ${sect('tags','Теги','Несколько на клиента: состояние, особенности, пометки.')}
+        <div style="font-size:11.5px;color:var(--ink-soft);margin-bottom:8px;">Переименование меняется у всех клиентов сразу. Удаление снимает метку у клиентов.</div>
+        <div style="display:flex;gap:8px;justify-content:flex-end;"><button class="btn btn-ghost" id="cl-cancel">Отмена</button><button class="btn btn-primary" id="cl-save">Сохранить</button></div></div>`;
+      wrap.querySelectorAll('[data-cl]').forEach(inp=> inp.oninput = ()=>{ const [k,i,f] = inp.dataset.cl.split(':'); draft[k][+i][f] = inp.value; });
+      wrap.querySelectorAll('[data-cladd]').forEach(b=> b.onclick = ()=>{ const k = b.dataset.cladd; draft[k].push({ id: (k==='segments'?'seg-':'tag-') + uid().slice(1), name: '', color: '#4C86B8' }); draw(); const ins = wrap.querySelectorAll(`[data-cl^="${k}:${draft[k].length-1}:name"]`); if(ins[0]) ins[0].focus(); });
+      wrap.querySelectorAll('[data-cldel]').forEach(b=> b.onclick = ()=>{ const [k,i] = b.dataset.cldel.split(':'); const it = draft[k][+i]; const n = usage(k, it.id); if(n && !confirm('«' + (it.name||'без названия') + '» стоит у клиентов: ' + n + '. Удалить и снять у них метку?')) return; draft[k].splice(+i,1); draw(); });
+      wrap.querySelector('#cl-cancel').onclick = ()=> wrap.remove();
+      wrap.querySelector('#cl-save').onclick = async ()=>{
+        const clean = k=> draft[k].map(x=>({ id:x.id, name:String(x.name||'').trim(), color:x.color||'#888888' })).filter(x=>x.name);
+        const segs = clean('segments'), tags = clean('tags');
+        const segIds = new Set(segs.map(s=>s.id)), tagIds = new Set(tags.map(t=>t.id));
+        let chg = false;
+        (state.clients||[]).forEach(c=>{
+          if(c.segmentId && !segIds.has(c.segmentId)){ c.segmentId = ''; chg = true; }
+          const nt = (c.tagIds||[]).filter(id=>tagIds.has(id)); if(nt.length !== (c.tagIds||[]).length){ c.tagIds = nt; chg = true; }
+        });
+        state.crmSettings = { segments: segs, tags: tags };
+        wrap.remove();
+        await saveCrmSettings();
+        if(chg) await saveClients();
+        recordAction('Списки сегментов и тегов изменены');
+        if(typeof onDone === 'function') onDone(); else render();
+      };
+    };
+    draw();
+  }
+
+  // ---- карточка клиента ----
+  function openClientPopup(clientId){
+    const old = document.getElementById('crm-popup'); if(old) old.remove();
+    const isNew = !clientId;
+    const src = isNew ? { id: 'c' + uid().slice(1), contact:'', name:'', chatUrl:'', segmentId:'', tagIds:[], note:'', createdAt:new Date().toISOString() } : (state.clients||[]).find(c=>c.id === clientId);
+    if(!src) return;
+    const c = JSON.parse(JSON.stringify(src));
+    const wrap = document.createElement('div'); wrap.id = 'crm-popup';
+    wrap.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.4);z-index:3000;display:flex;align-items:center;justify-content:center;padding:16px;';
+    document.body.appendChild(wrap);
+    const leads = isNew ? [] : crmLeadsOfClient(src).sort((a,b)=>(b.requestDate||'').localeCompare(a.requestDate||''));
+    const sold = leads.filter(l=>leadStatus(l)==='sold');
+    const sum = sold.reduce((s,l)=>s+(Number(l.revenue)||0),0);
+    const draw = ()=>{
+      const sug = crmChatLinks(c.contact);
+      wrap.innerHTML = `<div style="background:var(--white);border-radius:var(--radius);padding:18px;max-width:520px;width:100%;max-height:92vh;overflow:auto;">
+        <div style="display:flex;justify-content:space-between;align-items:center;"><h3 style="margin:0;">${isNew?'Новый клиент':'Карточка клиента'}</h3><button class="modal-close" id="cc-x">×</button></div>
+        <div class="field"><label>Имя</label><input type="text" id="cc-name" value="${escapeHtml(c.name||'')}" placeholder="Как зовут"></div>
+        <div class="field"><label>Телефон / ник (можно несколько через пробел)</label><input type="text" id="cc-contact" value="${escapeHtml(c.contact||'')}" placeholder="+7 999 123-45-67 @nickname"></div>
+        <div class="field"><label>Ссылка на чат</label><input type="text" id="cc-chat" value="${escapeHtml(c.chatUrl||'')}" placeholder="https://t.me/… или https://wa.me/…">
+          <div style="margin-top:4px;font-size:12px;">${sug.map(s=>`<button type="button" class="btn btn-ghost" data-cc-sug="${escapeHtml(s[1])}" style="padding:2px 8px;font-size:12px;margin-right:4px;">подставить ${s[0]}</button>`).join('')} ${crmChatBtn(c)}</div></div>
+        <div class="field"><label>Сегмент</label>${crmSegSelect('cc-seg', c.segmentId)}</div>
+        <div class="field"><label>Теги</label><div id="cc-tags">${crmTagPicker(c.tagIds||[], 'data-cc-tag')}</div></div>
+        ${crmCanEditLists() ? '<div style="margin:-4px 0 8px;"><a href="#" id="cc-lists" style="font-size:12px;">⚙ изменить списки сегментов и тегов</a></div>' : ''}
+        <div class="field"><label>Заметка</label><textarea id="cc-note" rows="3" placeholder="Что важно помнить о клиенте">${escapeHtml(c.note||'')}</textarea></div>
+        ${isNew ? '' : `<div style="font-size:12.5px;margin:6px 0;"><b>Заявок:</b> ${leads.length} · <b>продаж:</b> ${sold.length} · <b>выручка:</b> ${escapeHtml(formatMoney(sum))}</div>
+        <div style="max-height:170px;overflow:auto;border:1px solid var(--line);border-radius:6px;">${leads.length ? leads.map(l=>`<div data-cc-lead="${escapeHtml(l.id)}" style="padding:6px 8px;border-bottom:1px solid var(--line);font-size:12.5px;cursor:pointer;">${escapeHtml(formatDateText(l.requestDate))} · ${escapeHtml(l.product||'')} · <b>${escapeHtml(leadStatusLabel(leadStatus(l)))}</b>${l.revenue?' · '+escapeHtml(formatMoney(l.revenue)):''}</div>`).join('') : '<div style="padding:8px;font-size:12.5px;color:var(--ink-soft);">Заявок пока нет</div>'}</div>`}
+        <div style="display:flex;gap:8px;justify-content:space-between;margin-top:12px;"><span>${(!isNew && crmCanDeleteClient()) ? '<button class="btn btn-ghost" id="cc-del" style="color:var(--danger);">Удалить клиента</button>' : ''}</span>
+        <span style="display:flex;gap:8px;"><button class="btn btn-ghost" id="cc-cancel">Закрыть</button><button class="btn btn-primary" id="cc-save">Сохранить</button></span></div></div>`;
+      const g = id=> wrap.querySelector(id);
+      const keep = ()=>{ c.name = g('#cc-name').value; c.contact = g('#cc-contact').value; c.chatUrl = g('#cc-chat').value; c.segmentId = g('#cc-seg').value; c.note = g('#cc-note').value; };
+      g('#cc-x').onclick = g('#cc-cancel').onclick = ()=> wrap.remove();
+      wrap.querySelectorAll('[data-cc-sug]').forEach(b=> b.onclick = ()=>{ keep(); c.chatUrl = b.dataset.ccSug; draw(); });
+      wrap.querySelectorAll('[data-cc-tag]').forEach(b=> b.onclick = ()=>{ keep(); const id = b.dataset.ccTag; c.tagIds = (c.tagIds||[]).includes(id) ? c.tagIds.filter(x=>x!==id) : (c.tagIds||[]).concat(id); draw(); });
+      const ll = g('#cc-lists'); if(ll) ll.onclick = (e)=>{ e.preventDefault(); keep(); openCrmListsPopup(()=>{ c.tagIds = (c.tagIds||[]).filter(id=>crmTagOf(id)); if(!crmSegOf(c.segmentId)) c.segmentId=''; draw(); }); };
+      wrap.querySelectorAll('[data-cc-lead]').forEach(d=> d.onclick = ()=>{ const l = state.leads.find(x=>x.id===d.dataset.ccLead); if(!l) return; wrap.remove(); state.modal = {type:'lead', isNew:false, lead:{...l}}; render(); });
+      const del = g('#cc-del'); if(del) del.onclick = async ()=>{ if(!confirm('Удалить клиента из базы? Заявки останутся.')) return; state.clients = state.clients.filter(x=>x.id!==c.id); wrap.remove(); await saveClients(); recordAction('Клиент удалён из базы'); render(); };
+      g('#cc-save').onclick = async ()=>{
+        keep();
+        if(!c.contact.trim() && !c.name.trim()){ g('#cc-contact').style.borderColor = 'var(--danger)'; return; }
+        const url = c.chatUrl.trim() ? crmSafeUrl(c.chatUrl) : '';
+        if(c.chatUrl.trim() && !url){ g('#cc-chat').style.borderColor = 'var(--danger)'; showGapWarningBanner('Ссылка на чат выглядит неверно — нужен адрес вида https://t.me/ник'); return; }
+        c.chatUrl = url; c.name = c.name.trim(); c.contact = c.contact.trim(); c.note = c.note.trim(); c.updatedAt = new Date().toISOString();
+        if(!Array.isArray(state.clients)) state.clients = [];
+        const i = state.clients.findIndex(x=>x.id===c.id);
+        if(i >= 0) state.clients[i] = c; else state.clients.push(c);
+        wrap.remove(); await saveClients(); recordAction('Карточка клиента сохранена'); render();
+      };
+    };
+    draw();
+  }
+
+  // ---- вкладка «Клиенты» ----
+  function renderClientsView(){
+    const idx = crmBuildIndex(); const cfg = crmCfg();
+    const q = refNorm(state.clientQ || '').trim(), fs = state.clientSeg || '', ft = state.clientTag || '';
+    const stat = new Map();
+    state.leads.forEach(l=>{ const c = crmClientOfLead(l, idx); if(!c) return; const s = stat.get(c.id) || { n:0, sold:0, sum:0, last:'' }; s.n++; if(leadStatus(l)==='sold'){ s.sold++; s.sum += Number(l.revenue)||0; } if((l.requestDate||'') > s.last) s.last = l.requestDate||''; stat.set(c.id, s); });
+    let list = (state.clients||[]).filter(c=>{
+      if(fs === '__none' ? c.segmentId : (fs && c.segmentId !== fs)) return false;
+      if(ft && !(c.tagIds||[]).includes(ft)) return false;
+      if(q && !refNorm([c.name,c.contact,c.note].join(' ')).includes(q)) return false;
+      return true;
+    }).sort((a,b)=> ((stat.get(b.id)||{}).last || b.createdAt || '').localeCompare((stat.get(a.id)||{}).last || a.createdAt || ''));
+    const total = list.length; const shown = list.slice(0, 300);
+    const missing = state.leads.filter(l=> crmKeys(l.contact).length && !crmClientOfLead(l, idx)).length;
+    return `<div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:10px;">
+      <button class="btn btn-primary" id="cl-add">+ Клиент</button>
+      <input type="search" id="cl-q" value="${escapeHtml(state.clientQ||'')}" placeholder="🔎 Имя, телефон, ник, заметка…" style="flex:1;min-width:180px;max-width:320px;">
+      <select id="cl-seg"><option value="">Все сегменты</option><option value="__none" ${fs==='__none'?'selected':''}>Без сегмента</option>${cfg.segments.map(s=>`<option value="${escapeHtml(s.id)}" ${fs===s.id?'selected':''}>${escapeHtml(s.name)}</option>`).join('')}</select>
+      <select id="cl-tag"><option value="">Все теги</option>${cfg.tags.map(s=>`<option value="${escapeHtml(s.id)}" ${ft===s.id?'selected':''}>${escapeHtml(s.name)}</option>`).join('')}</select>
+      ${crmCanEditLists() ? '<button class="btn btn-ghost" id="cl-lists">⚙ Сегменты и теги</button>' : ''}
+      ${crmCanEditLists() && missing ? `<button class="btn btn-ghost" id="cl-build" title="Создаст карточки для контактов из заявок, у которых их ещё нет. Сами заявки не меняются.">Собрать из заявок (${missing})</button>` : ''}
+      <span style="font-size:12.5px;color:var(--ink-soft);">Клиентов: <b>${total}</b></span>
+    </div>
+    ${shown.length ? `<div style="overflow-x:auto;"><table class="crm-table" style="width:100%;border-collapse:collapse;font-size:13px;">
+      <thead><tr style="text-align:left;color:var(--ink-soft);font-size:11.5px;text-transform:uppercase;"><th style="padding:6px;">Клиент</th><th style="padding:6px;">Сегмент и теги</th><th style="padding:6px;">Заявок / продаж</th><th style="padding:6px;">Выручка</th><th style="padding:6px;">Последняя заявка</th><th style="padding:6px;">Чат</th></tr></thead>
+      <tbody>${shown.map(c=>{ const s = stat.get(c.id) || {n:0,sold:0,sum:0,last:''}; return `<tr data-client="${escapeHtml(c.id)}" style="border-top:1px solid var(--line);cursor:pointer;">
+        <td style="padding:6px;"><b>${escapeHtml(c.name || c.contact || 'без имени')}</b>${c.name && c.contact ? `<div style="font-size:12px;color:var(--ink-soft);">${escapeHtml(c.contact)}</div>` : ''}</td>
+        <td style="padding:6px;">${crmChipsHtml(c, true) || '<span style="color:var(--ink-soft);">—</span>'}</td>
+        <td style="padding:6px;">${s.n} / ${s.sold}</td><td style="padding:6px;white-space:nowrap;">${s.sum ? escapeHtml(formatMoney(s.sum)) : '—'}</td>
+        <td style="padding:6px;white-space:nowrap;">${s.last ? escapeHtml(formatDateText(s.last)) : '—'}</td><td style="padding:6px;">${crmChatBtn(c, true)}</td></tr>`; }).join('')}</tbody></table></div>
+      ${total > shown.length ? `<div style="font-size:12px;color:var(--ink-soft);margin-top:6px;">Показаны первые ${shown.length}, уточните поиск.</div>` : ''}`
+    : `<div style="padding:20px;color:var(--ink-soft);font-size:13.5px;">${(state.clients||[]).length ? 'Под фильтр никто не подошёл.' : 'Клиентов пока нет. Они появляются сами, когда вы сохраняете заявку' + (crmCanEditLists() ? ', или нажмите «Собрать из заявок».' : '.')}</div>`}`;
+  }
+  function attachClientsEvents(){
+    const q = document.getElementById('cl-q'); if(q) q.onchange = ()=>{ state.clientQ = q.value; render(); };
+    const s = document.getElementById('cl-seg'); if(s) s.onchange = ()=>{ state.clientSeg = s.value; render(); };
+    const t = document.getElementById('cl-tag'); if(t) t.onchange = ()=>{ state.clientTag = t.value; render(); };
+    const a = document.getElementById('cl-add'); if(a) a.onclick = ()=> requireUnlock(()=> openClientPopup(''));
+    const l = document.getElementById('cl-lists'); if(l) l.onclick = ()=> openCrmListsPopup();
+    document.querySelectorAll('tr[data-client]').forEach(r=> r.onclick = (e)=>{ if(e.target.closest('a')) return; requireUnlock(()=> openClientPopup(r.dataset.client)); });
+    const b = document.getElementById('cl-build'); if(b) b.onclick = ()=> requireUnlock(async ()=>{
+      const idx = crmBuildIndex(); let n = 0;
+      state.leads.slice().sort((x,y)=>(x.requestDate||'').localeCompare(y.requestDate||'')).forEach(ld=>{
+        if(!crmKeys(ld.contact).length || crmClientOfLead(ld, idx)) return;
+        const c = { id: 'c' + uid().slice(1), contact: ld.contact || '', name: '', chatUrl: '', segmentId: '', tagIds: [], note: '', createdAt: new Date().toISOString() };
+        state.clients.push(c); idx.byId.set(c.id, c); crmKeys(c.contact).forEach(k=>{ if(!idx.byKey.has(k)) idx.byKey.set(k, c); }); n++;
+      });
+      await saveClients(); recordAction('Клиентская база собрана из заявок: ' + n); showGapWarningBanner('Создано карточек клиентов: ' + n); render();
+    });
+  }
+  // блок «Клиент» в карточке заявки
+  function crmLeadBlockHtml(st){
+    return `<div class="field" style="border:1px dashed var(--line);border-radius:8px;padding:8px 10px;">
+      <label>Сегмент клиента</label>${crmSegSelect('l-seg', st.segmentId)}
+      <label style="margin-top:8px;">Теги</label><div id="l-tags">${crmTagPicker(st.tagIds||[], 'data-l-tag')}</div>
+      ${crmCanEditLists() ? '<div style="margin-top:4px;"><a href="#" id="l-crm-lists" style="font-size:12px;">⚙ изменить списки сегментов и тегов</a></div>' : ''}
+    </div>`;
+  }
+
+  // ===================== Файлы к печати у гостей + вкладка «На печать» =====================
+  const PRINT_PREFIX = 'print-file-';
+  const PRINT_MAX_BYTES = 4 * 1024 * 1024;
+  function roleCanAccessPrint(role){ return ['hostess','admin','manager','assistant','owner'].includes(role); }
+  function printEventEndMs(e){
+    if(!e || !e.date) return 0;
+    const t = /^\d{1,2}:\d{2}$/.test(e.time||'') ? e.time : '23:59';
+    const start = new Date(e.date + 'T' + (t.length === 4 ? '0' + t : t) + ':00').getTime();
+    if(isNaN(start)) return 0;
+    const dur = Number(e.duration) > 0 ? Number(e.duration) : 0;
+    return start + dur * 60000;
+  }
+  function printExpired(e){ const end = printEventEndMs(e); return end > 0 && Date.now() > end + 24 * 3600 * 1000; }
+  function printNewKey(guestId){ return PRINT_PREFIX + String(guestId||'g').replace(/[^a-zA-Z0-9]/g,'') + '-' + Date.now().toString(36) + Math.random().toString(36).slice(2,5); }
+  async function printDeleteKey(key){
+    try{ if(window.storage.delete) await window.storage.delete(key, true); else if(window.storage.remove) await window.storage.remove(key, true); }catch(e){ /* не критично */ }
+    delete state.receiptPhotoCache[key];
+  }
+  function printReadFile(file){
+    return new Promise((resolve, reject)=>{
+      if(file.type && file.type.startsWith('image/') && file.size > 2.5 * 1024 * 1024){
+        compressImageFile(file, 2600, 0.9).then(resolve, reject); return;
+      }
+      if(file.size > PRINT_MAX_BYTES){ reject(new Error('big')); return; }
+      const r = new FileReader(); r.onload = ()=> resolve(r.result); r.onerror = ()=> reject(new Error('read')); r.readAsDataURL(file);
+    });
+  }
+  async function printOpenFile(key){
+    let data = state.receiptPhotoCache[key];
+    if(!data){ try{ const r = await window.storage.get(key, true); if(r && r.value) data = r.value; }catch(e){} }
+    if(!data){ showGapWarningBanner('Файл не найден — возможно, уже удалён (файлы хранятся сутки после мероприятия).'); return; }
+    state.receiptPhotoCache[key] = data;
+    try{
+      const m = /^data:([^;]+);base64,(.*)$/.exec(data); if(!m) throw new Error('fmt');
+      const bin = atob(m[2]); const arr = new Uint8Array(bin.length); for(let i=0;i<bin.length;i++) arr[i] = bin.charCodeAt(i);
+      const url = URL.createObjectURL(new Blob([arr], { type: m[1] }));
+      window.open(url, '_blank');
+      setTimeout(()=> URL.revokeObjectURL(url), 120000);
+    }catch(e){ showGapWarningBanner('Не удалось открыть файл.'); }
+  }
+  let printCleanupBusy = false;
+  async function printCleanup(){
+    if(printCleanupBusy || !state.loaded || !state.currentRole) return;
+    printCleanupBusy = true;
+    try{
+      let changed = false; const kill = [];
+      (state.events||[]).forEach(e=>{
+        if(!Array.isArray(e.guestList) || !printExpired(e)) return;
+        e.guestList.forEach(g=>{
+          if(Array.isArray(g.printFiles) && g.printFiles.length){ g.printFiles.forEach(f=>kill.push(f.key)); g.printFiles = []; g.printStatus = ''; changed = true; }
+        });
+      });
+      for(const k of kill) await printDeleteKey(k);
+      if(changed){ await saveEvents(); recordAction('Файлы к печати удалены (прошли сутки после мероприятия): ' + kill.length); }
+      // «осиротевшие» файлы: ни на одном госте не числятся и старше суток
+      let keys = [];
+      try{ const r = await window.storage.list(PRINT_PREFIX, true); keys = (r && r.keys) || []; }catch(e){ keys = []; }
+      if(keys.length){
+        const used = new Set(); (state.events||[]).forEach(e=> (e.guestList||[]).forEach(g=> (g.printFiles||[]).forEach(f=> used.add(f.key))));
+        for(const k of keys){
+          if(used.has(k)) continue;
+          const ts = parseInt(String(k).split('-').pop().slice(0,-3), 36);
+          if(!ts || Date.now() - ts > 24 * 3600 * 1000) await printDeleteKey(k);
+        }
+      }
+    }catch(e){ console.error('printCleanup', e); }
+    finally{ printCleanupBusy = false; }
+  }
+  setInterval(()=>{ printCleanup(); }, 3600 * 1000);
+  setTimeout(()=>{ printCleanup(); }, 20000);
+
+  function printGuestRows(){
+    const rows = [];
+    (state.events||[]).forEach(e=>{
+      if(e.status === 'cancelled' || !Array.isArray(e.guestList)) return;
+      e.guestList.forEach(g=>{ if(g && Array.isArray(g.printFiles) && g.printFiles.length) rows.push({ e, g }); });
+    });
+    rows.sort((a,b)=> ((a.e.date||'') + (a.e.time||'')).localeCompare((b.e.date||'') + (b.e.time||'')));
+    return rows;
+  }
+  function printOpenCount(){ return printGuestRows().filter(r=> (r.g.printStatus || 'print') !== 'done').length; }
+  function renderPrintView(){
+    const f = state.printFilter || 'print';
+    const all = printGuestRows();
+    const rows = all.filter(r=> f === 'all' ? true : (f === 'done' ? r.g.printStatus === 'done' : (r.g.printStatus || 'print') !== 'done'));
+    const nPrint = all.filter(r=> (r.g.printStatus || 'print') !== 'done').length;
+    const btn = (k, t)=> `<button class="btn ${f===k?'btn-primary':'btn-ghost'}" data-printf="${k}">${t}</button>`;
+    return `<div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin:4px 0 12px;">
+      ${btn('print','На печать (' + nPrint + ')')}${btn('done','Готово (' + (all.length - nPrint) + ')')}${btn('all','Все (' + all.length + ')')}
+      <span style="font-size:12px;color:var(--ink-soft);">Файлы добавляются в карточке гостя в мероприятии и удаляются сами через сутки после его окончания.</span></div>
+    ${rows.length ? `<div style="overflow-x:auto;"><table style="width:100%;border-collapse:collapse;font-size:13.5px;">
+      <thead><tr style="text-align:left;color:var(--ink-soft);font-size:11.5px;text-transform:uppercase;"><th style="padding:6px;">Дата</th><th style="padding:6px;">Время</th><th style="padding:6px;">Мероприятие</th><th style="padding:6px;">Гость</th><th style="padding:6px;">Файлы</th><th style="padding:6px;">Статус</th></tr></thead>
+      <tbody>${rows.map(({e,g})=>{ const done = g.printStatus === 'done'; return `<tr style="border-top:1px solid var(--line);">
+        <td style="padding:6px;white-space:nowrap;">${escapeHtml(formatDateText(e.date))}</td><td style="padding:6px;">${escapeHtml(e.time||'')}</td>
+        <td style="padding:6px;">${escapeHtml(e.title||e.product||'')}</td><td style="padding:6px;"><b>${escapeHtml(g.name||'без имени')}</b></td>
+        <td style="padding:6px;">${g.printFiles.map(pf=>`<button class="btn btn-ghost" data-pf-open="${escapeHtml(pf.key)}" style="padding:2px 8px;font-size:12px;margin:1px 3px 1px 0;" title="${escapeHtml(pf.name)}">📄 ${escapeHtml(String(pf.name||'файл').slice(0,22))}</button>`).join('')}</td>
+        <td style="padding:6px;"><button class="btn ${done?'btn-ghost':'btn-primary'}" data-pf-toggle="${escapeHtml(e.id)}:${escapeHtml(g.id)}" style="padding:3px 10px;font-size:12.5px;${done?'color:#3F8F6B;border-color:#3F8F6B;':''}">${done ? '✓ Готово' : '🖨 На печать'}</button></td></tr>`; }).join('')}</tbody></table></div>`
+    : `<div style="padding:20px;color:var(--ink-soft);">${all.length ? 'В этом списке пусто.' : 'Файлов к печати нет. Прикрепите файл в карточке гостя внутри мероприятия.'}</div>`}`;
+  }
+  function attachPrintEvents(){
+    document.querySelectorAll('[data-printf]').forEach(b=> b.onclick = ()=>{ state.printFilter = b.dataset.printf; render(); });
+    document.querySelectorAll('[data-pf-open]').forEach(b=> b.onclick = ()=> printOpenFile(b.dataset.pfOpen));
+    document.querySelectorAll('[data-pf-toggle]').forEach(b=> b.onclick = async ()=>{
+      const [eid, gid] = b.dataset.pfToggle.split(':'); const ev = state.events.find(x=>x.id === eid); if(!ev) return;
+      const g = (ev.guestList||[]).find(x=>x.id === gid); if(!g) return;
+      g.printStatus = g.printStatus === 'done' ? 'print' : 'done';
+      await saveEvents(); recordAction('Печать: ' + (g.printStatus === 'done' ? 'готово' : 'вернули на печать')); render();
+    });
+  }
+
+  // ===================== Заявка: имя, телефон, ссылка на соцсеть =====================
+  const SOCIAL_NETS = {
+    'ВК': { label:'ВК', domains:['vk.com','vk.ru','m.vk.com','vkontakte.ru'], base:'https://vk.com/' },
+    'Инста': { label:'Instagram', domains:['instagram.com','instagr.am'], base:'https://instagram.com/' },
+    'ТГ': { label:'Telegram', domains:['t.me','telegram.me','telegram.org'], base:'https://t.me/' },
+    'Макс': { label:'Макс', domains:['max.ru'], base:'' },
+    'Одноклассники': { label:'Одноклассники', domains:['ok.ru'], base:'' },
+    'Дзен': { label:'Дзен', domains:['dzen.ru','zen.yandex.ru'], base:'' },
+    'TikTok': { label:'TikTok', domains:['tiktok.com'], base:'https://tiktok.com/@' },
+    'YouTube': { label:'YouTube', domains:['youtube.com','youtu.be'], base:'' }
+  };
+  const SOCIAL_DOMAIN_LABEL = { 'vk.com':'ВК','vk.ru':'ВК','m.vk.com':'ВК','vkontakte.ru':'ВК','instagram.com':'Instagram','instagr.am':'Instagram','t.me':'Telegram','telegram.me':'Telegram','wa.me':'WhatsApp','api.whatsapp.com':'WhatsApp','max.ru':'Макс','ok.ru':'Одноклассники','tiktok.com':'TikTok','youtube.com':'YouTube','dzen.ru':'Дзен' };
+  function socialHostOf(url){ try{ return new URL(url).hostname.replace(/^www\./,'').toLowerCase(); }catch(e){ return ''; } }
+  function socialLabelOfUrl(url){ const h = socialHostOf(url); return SOCIAL_DOMAIN_LABEL[h] || (h ? 'ссылка' : ''); }
+  // raw — то, что ввели (ссылка, @ник или просто ник); source — источник заявки.
+  // Возвращает { url, error }: url пустой, если поле пустое или ссылку построить нельзя
+  function socialResolve(source, raw){
+    raw = String(raw||'').trim(); if(!raw) return { url:'', error:'' };
+    const net = SOCIAL_NETS[source] || null;
+    const looksUrl = /^https?:\/\//i.test(raw) || /^(www\.)?[a-z0-9-]+\.[a-z]{2,}\//i.test(raw);
+    if(looksUrl){
+      const url = /^https?:\/\//i.test(raw) ? raw : 'https://' + raw;
+      const host = socialHostOf(url); if(!host) return { url:'', error:'Ссылка выглядит неверно.' };
+      if(net && !net.domains.includes(host)){
+        return { url:'', error:'Источник «' + source + '», а ссылка ведёт на ' + (SOCIAL_DOMAIN_LABEL[host] || host) + '. Исправьте источник или ссылку.' };
+      }
+      return { url, error:'' };
+    }
+    if(/\s/.test(raw)) return { url:'', error:'В ссылке есть пробелы — вставьте адрес страницы или ник без пробелов.' };
+    const nick = raw.replace(/^@/,'');
+    if(net && net.base) return { url: net.base + nick, error:'' };
+    return { url:'', error: net ? 'Для источника «' + source + '» вставьте ссылку целиком.' : 'Источник не соцсеть — вставьте ссылку целиком (https://…).' };
+  }
+  function leadContactParts(lead){
+    if(lead.name !== undefined || lead.phone !== undefined || lead.socialUrl !== undefined){
+      return { name: lead.name||'', phone: lead.phone||'', social: lead.socialUrl||'' };
+    }
+    const c = String(lead.contact||'').trim(); let rest = c; let phone = '', social = '';
+    const pm = c.match(/\+?\d[\d\s\-()]{8,}\d/); if(pm && pm[0].replace(/\D/g,'').length >= 10){ phone = pm[0].trim(); rest = rest.replace(pm[0],' '); }
+    const um = rest.match(/(?:https?:\/\/)?(?:www\.)?(?:t\.me|vk\.com|vk\.ru|instagram\.com)\/\S+/i); if(um){ social = um[0]; rest = rest.replace(um[0],' '); }
+    else { const hm = rest.match(/@[A-Za-z0-9_.]{3,}/); if(hm){ social = hm[0]; rest = rest.replace(hm[0],' '); } }
+    rest = rest.replace(/[·,;]+/g,' ').replace(/\s+/g,' ').trim();
+    const name = (!phone && !social) ? c : rest;
+    return { name: (/^[A-Za-z0-9_.]{4,}$/.test(name) && !phone && !social) ? '' : name, phone, social: social || ((!phone && /^[A-Za-z0-9_.]{4,}$/.test(c) && !/^\d+$/.test(c)) ? c : '') };
+  }
+  function leadComposeContact(name, phone, social, resolvedUrl){
+    const short = resolvedUrl ? resolvedUrl.replace(/^https?:\/\/(www\.)?/i,'').replace(/\/$/,'') : String(social||'').trim();
+    return [String(name||'').trim(), String(phone||'').trim(), short].filter(Boolean).join(' · ');
+  }
+  function leadComposeFromModal(overlay){
+    const v = id=>{ const el = overlay.querySelector(id); return el ? el.value.trim() : ''; };
+    const name = v('#l-name'), phone = v('#l-phone'), socialRaw = v('#l-social'), source = v('#l-source');
+    const res = socialResolve(source, socialRaw);
+    return { name, phone, socialRaw, res, contact: leadComposeContact(name, phone, socialRaw, res.url) };
+  }
+  function leadWaUrl(phone){
+    const d = String(phone||'').replace(/\D/g,''); if(d.length < 10) return '';
+    return 'https://wa.me/' + (d.length === 10 ? '7' + d : '7' + d.slice(-10));
+  }
+  // кнопки быстрого перехода в диалог: соцсеть + WhatsApp по телефону
+  function leadChatLinksHtml(l, cl, small){
+    const parts = []; const sz = small ? '11px' : '12.5px';
+    const parsed = leadContactParts(l);
+    let url = l.socialUrl || '';
+    if(!url && parsed.social){ const r = socialResolve(l.source, parsed.social); url = r.url; }
+    if(!url && cl && crmSafeUrl(cl.chatUrl)) url = cl.chatUrl;
+    if(url && crmSafeUrl(url)) parts.push(`<a href="${escapeHtml(url)}" target="_blank" rel="noopener" class="crm-chat" title="Открыть диалог" style="font-size:${sz};text-decoration:none;">💬 ${escapeHtml(socialLabelOfUrl(url) || 'чат')}</a>`);
+    const wa = leadWaUrl(parsed.phone || l.phone); if(wa) parts.push(`<a href="${wa}" target="_blank" rel="noopener" class="crm-chat" title="Написать в WhatsApp" style="font-size:${sz};text-decoration:none;">📱 WhatsApp</a>`);
+    return parts.join(' ');
+  }
+
+  function crmLeadState(lead){
+    const c = crmClientOfLead(lead);
+    return { contact: lead.contact||'', chatUrl: c ? (c.chatUrl||'') : '', segmentId: c ? (c.segmentId||'') : '', tagIds: c ? (c.tagIds||[]).slice() : [], clientId: c ? c.id : '' };
+  }
   function renderLeadModal(lead, isNew){
     return `
       <div class="modal">
@@ -9907,16 +10445,22 @@
             <input type="date" id="l-date" value="${lead.requestDate||''}">
             <div style="font-size:12px;color:var(--ink-soft);margin-top:6px;font-family:var(--font-mono);text-transform:capitalize;" id="l-weekday-hint">${weekdayFromDate(lead.requestDate)}</div>
           </div>
-          <div class="field">
-            <label>Номер телефона или ник в соцсети</label>
-            <input type="text" id="l-contact" value="${escapeHtml(lead.contact||'')}" placeholder="+7 999 123-45-67 или @nickname">
+          ${(()=>{ const cp = leadContactParts(lead); return `
+          <div class="row2">
+            <div class="field"><label>Имя <span style="font-weight:400;color:var(--ink-soft);">— необязательно</span></label>
+              <input type="text" id="l-name" value="${escapeHtml(cp.name)}" placeholder="Как зовут"></div>
+            <div class="field"><label>Телефон <span style="font-weight:400;color:var(--ink-soft);">— необязательно</span></label>
+              <input type="tel" id="l-phone" value="${escapeHtml(cp.phone)}" placeholder="+7 999 123-45-67"></div>
           </div>
+          <div class="field"><label>Ссылка на соцсеть (по источнику) или ник</label>
+            <input type="text" id="l-social" value="${escapeHtml(lead.socialUrl || cp.social)}" placeholder="https://vk.com/… или @ник">
+            <div id="l-social-hint" style="font-size:12px;margin-top:4px;min-height:16px;"></div>
+          </div>`; })()}
+          <div id="crm-lead-block">${crmLeadBlockHtml(crmLeadState(lead))}</div>
           <div class="field">
-            <label>Месяц мероприятия</label>
-            <select id="l-month">
-              <option value="" ${!lead.eventMonth?'selected':''}>— выберите —</option>
-              ${LEAD_MONTH_OPTIONS.map(m=>`<option value="${escapeHtml(m)}" ${lead.eventMonth===m?'selected':''}>${escapeHtml(m)}</option>`).join('')}
-            </select>
+            <label>Дата мероприятия <span style="font-weight:400;color:var(--ink-soft);">— необязательно</span></label>
+            <input type="date" id="l-evdate" value="${escapeHtml(lead.eventDate||'')}">
+            ${(!lead.eventDate && lead.eventMonth && lead.eventMonth !== LEAD_MONTH_OPTIONS[0]) ? `<div style="font-size:12px;color:var(--ink-soft);margin-top:4px;">Раньше был указан месяц: <b>${escapeHtml(lead.eventMonth)}</b> — если дату не выбирать, он сохранится.</div>` : ''}
           </div>
           <div class="field">
             <label>Вид заявки</label>
@@ -10027,6 +10571,41 @@
   function attachLeadModalEvents(overlay){
     const cancelBtn = overlay.querySelector('#btn-cancel-lead');
     if(cancelBtn) cancelBtn.onclick = ()=>{ state.modal = null; overlay.remove(); };
+
+    // клиент: ссылка на чат, сегмент, теги
+    const crmSt = crmLeadState(state.modal.lead); let crmPref = crmSt.clientId;
+    const crmBlock = overlay.querySelector('#crm-lead-block');
+    const crmBind = ()=>{
+      if(!crmBlock) return;
+      const keep = ()=>{ const ch = crmBlock.querySelector('#l-chat'), sg = crmBlock.querySelector('#l-seg'); if(ch) crmSt.chatUrl = ch.value; if(sg) crmSt.segmentId = sg.value; };
+      const redraw = ()=>{ crmBlock.innerHTML = crmLeadBlockHtml(crmSt); crmBind(); };
+      crmBlock.querySelectorAll('[data-l-sug]').forEach(b=> b.onclick = ()=>{ keep(); crmSt.chatUrl = b.dataset.lSug; redraw(); });
+      crmBlock.querySelectorAll('[data-l-tag]').forEach(b=> b.onclick = ()=>{ keep(); const id = b.dataset.lTag; crmSt.tagIds = crmSt.tagIds.includes(id) ? crmSt.tagIds.filter(x=>x!==id) : crmSt.tagIds.concat(id); redraw(); });
+      const ch = crmBlock.querySelector('#l-chat'); if(ch) ch.oninput = keep;
+      const ll = crmBlock.querySelector('#l-crm-lists'); if(ll) ll.onclick = (e)=>{ e.preventDefault(); keep(); openCrmListsPopup(()=>{ crmSt.tagIds = crmSt.tagIds.filter(id=>crmTagOf(id)); if(!crmSegOf(crmSt.segmentId)) crmSt.segmentId = ''; redraw(); }); };
+    };
+    crmBind();
+    let crmAuto = false, crmTimer = null;
+    const socialHint = ()=>{
+      const h = overlay.querySelector('#l-social-hint'); if(!h) return;
+      const c = leadComposeFromModal(overlay);
+      if(!c.socialRaw){ h.innerHTML = ''; return; }
+      h.innerHTML = c.res.url ? `<a href="${escapeHtml(c.res.url)}" target="_blank" rel="noopener">💬 Открыть диалог (${escapeHtml(socialLabelOfUrl(c.res.url))}): ${escapeHtml(c.res.url)}</a>` : `<span style="color:var(--danger);">${escapeHtml(c.res.error)}</span>`;
+    };
+    const crmOnContact = ()=>{
+      socialHint();
+      clearTimeout(crmTimer);
+      crmTimer = setTimeout(()=>{
+        if(!document.body.contains(overlay)) return;
+        const v = leadComposeFromModal(overlay).contact; crmSt.contact = v;
+        const found = crmClientOfLead({ contact: v });
+        if(found && found.id !== crmPref){ crmPref = found.id; crmAuto = true; crmSt.segmentId = found.segmentId || ''; crmSt.tagIds = (found.tagIds||[]).slice(); }
+        else if(!found && crmAuto){ crmAuto = false; crmPref = ''; crmSt.segmentId = ''; crmSt.tagIds = []; }
+        if(crmBlock){ crmBlock.innerHTML = crmLeadBlockHtml(crmSt); crmBind(); }
+      }, 350);
+    };
+    ['#l-name','#l-phone','#l-social','#l-source'].forEach(s=>{ const el = overlay.querySelector(s); if(el){ el.addEventListener('input', crmOnContact); el.addEventListener('change', crmOnContact); } });
+    socialHint();
 
     // фото заявки: null — без изменений, 'REMOVE' — удалить, иначе — новый dataURL для сохранения при "Сохранить"
     let pendingLeadPhoto = null;
@@ -10189,13 +10768,14 @@
     };
 
     overlay.querySelector('#btn-save-lead').onclick = async ()=>{
-      ['l-date','l-contact','l-month','l-source','l-kind','l-product','l-revenue','l-sale-date','l-comment'].forEach(id=>{
+      ['l-date','l-name','l-phone','l-social','l-evdate','l-source','l-kind','l-product','l-revenue','l-sale-date','l-comment'].forEach(id=>{
         const el = overlay.querySelector('#'+id);
         if(el) el.style.borderColor = '';
       });
       const dateVal = overlay.querySelector('#l-date').value;
-      const contactVal = overlay.querySelector('#l-contact').value.trim();
-      const monthVal = overlay.querySelector('#l-month').value;
+      const lc0 = leadComposeFromModal(overlay);
+      const contactVal = lc0.contact;
+      const evDateVal = (overlay.querySelector('#l-evdate').value || '').trim();
       const sourceVal = overlay.querySelector('#l-source').value;
       const kindVal = overlay.querySelector('#l-kind').value;
       const productVal = overlay.querySelector('#l-product').value;
@@ -10215,9 +10795,18 @@
         const el = overlay.querySelector('#'+id);
         if(el){ el.style.borderColor = 'var(--danger)'; if(!firstInvalid) firstInvalid = el; }
       };
+      const crmSegEl = overlay.querySelector('#l-seg');
+      const lc = leadComposeFromModal(overlay);
+      const socialInit = (state.modal.lead.socialUrl || leadContactParts(state.modal.lead).social || '').trim();
+      if(lc.socialRaw && !lc.res.url && lc.socialRaw !== socialInit){
+        markInvalid('l-social');
+        showGapWarningBanner(lc.res.error);
+        if(firstInvalid && firstInvalid.scrollIntoView) firstInvalid.scrollIntoView({block:'center', behavior:'smooth'});
+        return;
+      }
+      const crmChatUrl = lc.res.url || '';
       if(!dateVal) markInvalid('l-date');
-      if(!contactVal) markInvalid('l-contact');
-      if(!monthVal) markInvalid('l-month');
+      if(!lc0.phone && !lc0.socialRaw){ markInvalid('l-phone'); markInvalid('l-social'); }
       if(!sourceVal) markInvalid('l-source');
       if(!kindVal) markInvalid('l-kind');
       if(!productVal) markInvalid('l-product');
@@ -10245,7 +10834,7 @@
       if(leadEventMissing) markInvalid('l-event-search');
       const leadOrderMissing = soldVal && saleKindVal==='order' && !leadOrderVal;
       if(leadOrderMissing) markInvalid('l-order-search');
-      if(!dateVal || !contactVal || !monthVal || !sourceVal || !kindVal || !productVal || revenueRaw==='' || !commentVal || saleDateMissing || leadEventMissing || leadOrderMissing){
+      if(!dateVal || (!lc0.phone && !lc0.socialRaw) || !sourceVal || !kindVal || !productVal || revenueRaw==='' || !commentVal || saleDateMissing || leadEventMissing || leadOrderMissing){
         showGapWarningBanner(leadEventMissing ? 'Заявка отмечена как «Продано» — выберите мероприятие, которое из неё создано.' : leadOrderMissing ? 'Заявка отмечена как «Продано» — выберите заказ, который из неё создан.' : saleDateMissing ? 'Заявка отмечена как «Продано» — укажите дату продажи.' : 'Заполните все поля перед сохранением заявки — включая номер/ник гостя и комментарий.');
         if(firstInvalid && firstInvalid.scrollIntoView) firstInvalid.scrollIntoView({block:'center', behavior:'smooth'});
         return;
@@ -10255,7 +10844,11 @@
         id: state.modal.lead.id,
         requestDate: dateVal,
         contact: contactVal,
-        eventMonth: monthVal,
+        name: lc0.name,
+        phone: lc0.phone,
+        socialUrl: lc0.res.url || '',
+        eventDate: evDateVal,
+        eventMonth: evDateVal ? (MONTHS[parseDate(evDateVal).getMonth()].charAt(0).toUpperCase()+MONTHS[parseDate(evDateVal).getMonth()].slice(1)) : ((state.modal.lead.eventDate ? LEAD_MONTH_OPTIONS[0] : (state.modal.lead.eventMonth || LEAD_MONTH_OPTIONS[0]))),
         source: sourceVal,
         product: productVal,
         location: locationVal,
@@ -10277,6 +10870,10 @@
       };
       const _prevLead = state.leads.find(x=>x.id===updated.id);
       const _prevSt = _prevLead ? leadStatus(_prevLead) : null;
+      try{
+        const _cl = crmUpsertForLead(updated, { chatUrl: crmChatUrl, segmentId: crmSegEl ? crmSegEl.value : '', tagIds: crmSt.tagIds }, crmPref);
+        updated.clientId = _cl.id;
+      }catch(e){ console.error('crm upsert', e); }
       if(!_prevLead || leadStatus(updated) !== _prevSt) updated.statusAt = new Date().toISOString();
 
       // фото заявки — сохраняем/удаляем отдельным ключом, только если что-то поменяли в этой сессии модалки
@@ -10290,6 +10887,7 @@
 
       const idx = state.leads.findIndex(x=>x.id===updated.id);
       if(idx >= 0) state.leads[idx] = updated; else state.leads.push(updated);
+      try{ await saveClients(); }catch(e){ console.error('saveClients', e); }
       await saveLeads();
       await leadStageTasks(updated, _prevSt);
       recordAction("Заявка сохранена");
@@ -19885,6 +20483,8 @@
         if(Array.isArray(pendingImportData.leads)) await rawReplace('leads', 'leads', '_leadsBaseline', pendingImportData.leads);
         if(Array.isArray(pendingImportData.kpOffers)) await rawReplace('kp-offers', 'kpOffers', '_kpOffersBaseline', pendingImportData.kpOffers);
         if(Array.isArray(pendingImportData.leadTasks)) await rawReplace('lead-tasks', 'leadTasks', '_leadTasksBaseline', pendingImportData.leadTasks);
+        if(Array.isArray(pendingImportData.clients)) await rawReplace('clients', 'clients', '_clientsBaseline', pendingImportData.clients);
+        if(pendingImportData.crmSettings && typeof pendingImportData.crmSettings === 'object' && !Array.isArray(pendingImportData.crmSettings) && (pendingImportData.crmSettings.segments || pendingImportData.crmSettings.tags)){ state.crmSettings = pendingImportData.crmSettings; await saveCrmSettings(); }
         if(Array.isArray(pendingImportData.incomes)) await rawReplace('incomes', 'incomes', '_incomesBaseline', pendingImportData.incomes);
         if(Array.isArray(pendingImportData.expenses)) await rawReplace('expenses', 'expenses', '_expensesBaseline', pendingImportData.expenses);
         if(Array.isArray(pendingImportData.eventTypes)) await rawReplace('eventTypes', 'event-types', '_eventTypesBaseline', pendingImportData.eventTypes);
@@ -24494,6 +25094,7 @@
     try{ guestListArr = guestListHidden ? JSON.parse(guestListHidden.value || '[]') : []; }catch(e){ guestListArr = []; }
     // старые мероприятия (до этого раздела) хранили имя гостя в отдельном поле, которого в форме больше нет —
     // переносим его в список гостей один раз при открытии, чтобы имя не "потерялось" из вида
+    const printNewKeys = new Set();
     function persistGuestList(){ if(guestListHidden) guestListHidden.value = JSON.stringify(guestListArr); if(typeof updateGuestsFillHint === 'function') updateGuestsFillHint(); }
     if(guestListArr.length === 0 && state.modal.event && state.modal.event.guestName && state.modal.event.guestName.trim()){
       guestListArr.push({ id: uid(), name: state.modal.event.guestName.trim(), seats: 1, items: 1, phone: '', comment: '', expected: null });
@@ -24809,6 +25410,14 @@
           <div style="margin-top:6px;">
             <input type="text" class="guest-comment" data-gid="${g.id}" value="${escapeHtml(g.comment||'')}" placeholder="Комментарий — необязательно" style="width:100%;box-sizing:border-box;border:1px solid var(--line-strong);border-radius:var(--radius);padding:6px 8px;font-family:var(--font-body);font-size:12.5px;">
           </div>
+          <div class="guest-print" style="margin-top:6px;padding:6px 8px;border:1px dashed var(--line-strong);border-radius:var(--radius);">
+            <div style="font-size:10.5px;font-family:var(--font-mono);color:var(--ink-soft);margin-bottom:4px;">🖨 Файлы к печати <span style="opacity:.8;">· удалятся через сутки после мероприятия</span></div>
+            ${(g.printFiles||[]).map(pf=>`<div style="display:flex;gap:6px;align-items:center;font-size:12px;margin-bottom:3px;"><button type="button" class="guest-print-open" data-key="${escapeHtml(pf.key)}" style="background:none;border:none;color:var(--accent);cursor:pointer;text-align:left;padding:0;flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">📄 ${escapeHtml(pf.name||'файл')}</button><button type="button" class="guest-print-del" data-gid="${g.id}" data-key="${escapeHtml(pf.key)}" style="background:none;border:none;color:var(--danger);cursor:pointer;">✕</button></div>`).join('')}
+            <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
+              <input type="file" class="guest-print-file" data-gid="${g.id}" multiple accept="image/*,.pdf,.doc,.docx,.ai,.psd,.svg" style="font-size:12px;max-width:100%;">
+              ${(g.printFiles||[]).length ? `<select class="guest-print-status" data-gid="${g.id}" style="border:1px solid var(--line-strong);border-radius:var(--radius);padding:4px 6px;font-size:12px;"><option value="print" ${g.printStatus!=='done'?'selected':''}>На печать</option><option value="done" ${g.printStatus==='done'?'selected':''}>Готово</option></select>` : ''}
+            </div>
+          </div>
           <details style="margin-top:6px;" ${openGuestDetailsIds.has(g.id)?'open':''}>
             <summary style="cursor:pointer;font-size:11.5px;color:var(--ink-soft);font-family:var(--font-mono);">Оплата: ${formatMoneyPrecise(gTotal)}${gPayments.length?' · '+gPayments.length+' плат.':''}${gRemainder!==null ? ` · Остаток: <span style="color:${gRemainder>0?'var(--status-red)':'var(--status-green)'};">${formatMoneyPrecise(gRemainder)}</span>` : ''}</summary>
             <div style="margin-top:6px;">
@@ -24925,6 +25534,33 @@
           if(g){ g.comment = inp.value; persistGuestList(); }
         };
       });
+      overlay.querySelectorAll('.guest-print-file').forEach(inp=>{
+        inp.onchange = async ()=>{
+          const g = guestListArr.find(x=>x.id===inp.dataset.gid); if(!g || !inp.files || !inp.files.length) return;
+          const files = Array.from(inp.files); let bad = 0;
+          for(const file of files){
+            try{
+              const data = await printReadFile(file); const key = printNewKey(g.id);
+              const ok = await storageSetWithRetry(key, data);
+              if(!ok){ bad++; continue; }
+              state.receiptPhotoCache[key] = data; printNewKeys.add(key);
+              if(!Array.isArray(g.printFiles)) g.printFiles = [];
+              g.printFiles.push({ key, name: file.name, type: file.type || '', at: new Date().toISOString() });
+              if(!g.printStatus) g.printStatus = 'print';
+            }catch(e){ bad++; }
+          }
+          if(bad) showGapWarningBanner('Не загрузилось файлов: ' + bad + '. Допустимо до 4 МБ на файл (фото ужимаются сами).');
+          persistGuestList(); renderGuestList();
+        };
+      });
+      overlay.querySelectorAll('.guest-print-open').forEach(b=> b.onclick = ()=> printOpenFile(b.dataset.key));
+      overlay.querySelectorAll('.guest-print-del').forEach(b=> b.onclick = async ()=>{
+        const g = guestListArr.find(x=>x.id===b.dataset.gid); if(!g) return;
+        g.printFiles = (g.printFiles||[]).filter(f=>f.key!==b.dataset.key); if(!g.printFiles.length) g.printStatus = '';
+        if(printNewKeys.has(b.dataset.key)) await printDeleteKey(b.dataset.key);
+        persistGuestList(); renderGuestList();
+      });
+      overlay.querySelectorAll('.guest-print-status').forEach(sel=> sel.onchange = ()=>{ const g = guestListArr.find(x=>x.id===sel.dataset.gid); if(g){ g.printStatus = sel.value; persistGuestList(); } });
       overlay.querySelectorAll('.guest-remove').forEach(btn=>{
         btn.onclick = ()=>{
           const gid = btn.dataset.gid;
@@ -25518,6 +26154,8 @@
         isBlogger: !!g.isBlogger,
         isRedo: !!g.isRedo,
         redoOriginalEventId: g.isRedo ? (g.redoOriginalEventId||'') : '',
+        printFiles: Array.isArray(g.printFiles) ? g.printFiles : [],
+        printStatus: g.printStatus || '',
       }));
       const guestNameVal = guestListForSave.map(g=>g.name).filter(Boolean).join(', ');
       // обязательно только имя у гостя, который уже добавлен (пустая строка "гость без имени" — ошибка);
