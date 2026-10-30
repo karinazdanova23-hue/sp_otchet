@@ -2269,6 +2269,7 @@
   // список заявок для привязки к новому мероприятию — только те, что ещё ни к чему не привязаны
   // (без eventId и без orderId), плюс сама текущая заявка мероприятия (при редактировании), чтобы
   // поиск не путал админа уже занятыми заявками
+  function eventLinkedLead(ev){ return (ev && ev.id) ? (state.leads.find(l=>l.eventId === ev.id) || null) : null; }
   function leadSelectOptionsForEvent(currentLeadId){
     return state.leads
       .filter(l=> l.id===currentLeadId || (!l.eventId && !l.orderId))
@@ -2407,7 +2408,9 @@
   function roleCanAccessCashbox(role){ return ['hostess','admin','owner','assistant','manager'].includes(role); }
   // отмечать себя выходным в календаре могут менеджеры, ассистент, старший администратор и руководитель —
   // каждый только сам за себя (см. canDayOffEntryBeRemovedByMe)
-  function roleCanMarkDayOff(role){ return ['manager','assistant','admin','owner'].includes(role); }
+  function roleCanMarkDayOff(role){ return ['manager','assistant','admin','owner','hostess'].includes(role); }
+  // кто может отмечать выходными сразу нескольких сотрудников (за других)
+  function roleCanMarkDayOffForOthers(role){ return ['owner','assistant','admin'].includes(role); }
   // метку "Остаток" (сколько ещё должны заплатить за мероприятие) видят все роли, кроме мастера —
   // у мастера открывается отдельная урезанная модалка без финансовых полей (см. quick-host)
   function roleCanSeeGuestBalances(role){ return role !== 'master' && role !== 'marketer'; }
@@ -3822,8 +3825,42 @@
       const srv = mergeItemFn ? map.get(kf(x)) : null;
       map.set(kf(x), (srv && mergeItemFn) ? mergeItemFn(srv, x, baseMapForMerge.get(kf(x))) : x);
     });
-    const finalArr = Array.from(map.values());
-    const okSet = await storageSetWithRetry(storageKey, JSON.stringify(finalArr));
+    let finalArr = Array.from(map.values());
+    let okSet = await storageSetWithRetry(storageKey, JSON.stringify(finalArr));
+    // ПРОВЕРКА ПОСЛЕ ЗАПИСИ: если двое сохраняли в одну и ту же долю секунды, чужая запись могла перезаписать нашу
+    // (между чтением и записью на сервере нет блокировки). Читаем обратно: если наши правки пропали (запись вернулась
+    // к старой версии / исчезла / удалённая вернулась) — сливаем заново и пишем ещё раз, до 4 попыток.
+    if(okSet){
+      const baseMapV = new Map((baselineArray||[]).filter(Boolean).map(x=>[kf(x), x]));
+      for(let vt=0; vt<4; vt++){
+        await sleep(250 + Math.random()*350);
+        let back = null;
+        try{ const r2 = await window.storage.get(storageKey, true); back = r2 ? JSON.parse(r2.value) : []; }catch(e){ break; }
+        if(!Array.isArray(back)) break;
+        const backMap = new Map(back.filter(Boolean).map(x=>[kf(x), x]));
+        const finalMap = new Map(finalArr.map(x=>[kf(x), x]));
+        let lost = false;
+        upserts.forEach(x=>{
+          const k = kf(x); const got = backMap.get(k); const want = finalMap.get(k);
+          if(!want) return;
+          if(!got){ lost = true; return; }
+          const same = JSON.stringify(got) === JSON.stringify(want);
+          const b0 = baseMapV.get(k);
+          if(!same && b0 && JSON.stringify(got) === JSON.stringify(b0)) lost = true; // вернулась старая версия
+        });
+        deletes.forEach(k=>{ if(backMap.has(k)) lost = true; });
+        if(!lost) break;
+        const delSet2 = new Set(deletes);
+        const m2 = new Map(back.filter(Boolean).filter(x=>!delSet2.has(kf(x))).map(x=>[kf(x), x]));
+        upserts.forEach(x=>{
+          const srv = mergeItemFn ? m2.get(kf(x)) : null;
+          m2.set(kf(x), (srv && mergeItemFn) ? mergeItemFn(srv, x, baseMapV.get(kf(x))) : x);
+        });
+        finalArr = Array.from(m2.values());
+        okSet = await storageSetWithRetry(storageKey, JSON.stringify(finalArr));
+        if(!okSet) break;
+      }
+    }
     // если сервер запись не принял — НЕ обновляем «исходное состояние»: иначе при повторной попытке
     // приложение решит, что менять нечего, и новая запись так и не уйдёт на сервер
     if(okSet) applyMerged(finalArr);
@@ -4212,6 +4249,7 @@
     const role = state.currentRole;
     if(!roleCanMarkDayOff(role)) return null;
     if(role==='manager' && state.loggedInManagerName) return { role, name: state.loggedInManagerName, locked:true };
+    if(role==='hostess' && state.loggedInHostessName) return { role, name: state.loggedInHostessName, locked:true };
     return { role, name: getRememberedDayOffName(role), locked:false };
   }
   function getRememberedDayOffName(role){
@@ -4221,7 +4259,7 @@
     try{ localStorage.setItem('dayoff-myname-'+role, name); }catch(e){ /* браузер без localStorage — не критично */ }
   }
   function canDayOffEntryBeRemovedByMe(entry){
-    if(state.currentRole==='owner') return true; // руководитель может поправить любую запись
+    if(roleCanMarkDayOffForOthers(state.currentRole)) return true; // руководитель, ассистент и ст. администратор правят любую запись
     if(state.currentRole!==entry.role) return false;
     const identity = currentDayOffIdentity();
     if(identity && identity.locked) return identity.name.trim().toLowerCase()===entry.name.trim().toLowerCase();
@@ -5585,7 +5623,7 @@
           <div class="cal-daynum">${d.getDate()}${hasWarning?' <span class="cal-warn-icon" title="Перерыв между мероприятиями меньше 30 минут">⚠</span>':''}</div>
           ${hostessLine ? `<div class="cal-hostess" title="Админ: ${escapeHtml(hostessLine)}">🧑 ${escapeHtml(hostessLine)}</div>` : ''}
           ${managerLine ? `<div class="cal-manager" title="Менеджер: ${escapeHtml(managerLine)}">👔 ${escapeHtml(managerLine)}</div>` : ''}
-          ${dayOffEntries.length ? `<div class="cal-dayoff-line" title="Выходной: ${escapeHtml(dayOffEntries.map(x=>`${x.name} (${ROLE_LABELS[x.role]||x.role})`).join(', '))}">🚫 ${escapeHtml(dayOffEntries.map(x=>x.name).join(', '))}</div>` : ''}
+          ${dayOffEntries.length ? `<div class="cal-dayoff-line" title="Выходной: ${escapeHtml(dayOffEntries.map(x=>ROLE_LABELS[x.role] ? `${x.name} (${ROLE_LABELS[x.role]})` : x.name).join(', '))}">🚫 ${escapeHtml(dayOffEntries.map(x=>x.name).join(', '))}</div>` : ''}
           <div class="cal-events">
             ${shown.map(e=>`<div class="cal-evt-chip" style="background:${statusColor(e.status)}">${isAll?spaceBadge(getSpace(e.spaceId),'xs'):''}<span class="t">${e.time}</span><span class="evt-title">${escapeHtml(e.title)}</span>${scheduleFillText(e)?`<span class="evt-fill" style="margin-left:4px;font-family:var(--font-mono);font-size:10.5px;opacity:0.95;white-space:nowrap;">${scheduleFillText(e)}</span>`:''}</div>`).join('')}
             ${extra>0?`<div class="cal-more">+${extra} ещё</div>`:''}
@@ -10619,9 +10657,11 @@
       .dsm-free{ flex-shrink:0; border-top:1px solid var(--line); padding-top:6px; margin-top:6px; max-height:34%; overflow-y:auto; }
     </style>
     <div class="day-screen">
-      <div class="dsm-top"><button class="btn btn-ghost" data-dsnav="-1">‹</button><h3 data-dsnav="today">${escapeHtml(dLabel)}</h3><button class="btn btn-ghost" data-dsnav="1">›</button><button class="modal-close">×</button></div>
+      <div class="dsm-top"><button class="btn btn-primary modal-close" id="ds-close" style="width:auto;height:auto;padding:6px 10px;font-size:13px;color:#fff;">✕</button><button class="btn btn-ghost" data-dsnav="-1">‹</button><h3 data-dsnav="today">${escapeHtml(dLabel)}</h3><button class="btn btn-ghost" data-dsnav="1">›</button></div>
       <div class="ds-sum" style="text-align:center;font-size:12px;color:var(--ink-soft);">${dayEvs.length} мер. · 👥 ${guests}${showMoney ? ' · ' + escapeHtml(formatMoney(revenue)) : ''}${mgr ? ' · ' + escapeHtml(mgr) : ''}${noHost ? ' · <span style="color:var(--danger);">без вед.: ' + noHost + '</span>' : ''}</div>
       <div style="display:flex;gap:6px;margin:6px 0 0;"><button class="btn btn-primary" id="ds-find" style="flex:2;">🔎 Подобрать время</button>${state.currentRole !== 'hostess' ? '<button class="btn btn-ghost" id="ds-add" style="flex:1;">＋ новое</button>' : ''}<button class="btn btn-ghost" id="ds-list" style="flex:1;" title="Список с деталями">📋 список</button></div>
+      <div style="margin-top:6px;"><button class="btn ${state.dsOffOpen?'btn-primary':'btn-ghost'}" data-dsoff="1" style="width:100%;">🚫 Выходные${dayOffEntriesFor(ds).length ? ': ' + escapeHtml(dayOffEntriesFor(ds).map(x=>x.name).join(', ')) : ''}</button></div>
+      ${state.dsOffOpen ? `<div style="max-height:40%;overflow:auto;margin-top:6px;">${renderDaysOffBlock(ds)}</div>` : ''}
       <div class="dsm-chips"><button class="btn ${sel==='all'?'btn-primary':'btn-ghost'}" data-dsm="all">Все</button>${spaces.map(s=>`<button class="btn ${sel===s.id?'btn-primary':'btn-ghost'}" data-dsm="${s.id}">${escapeHtml(s.name)}</button>`).join('')}</div>
       <div class="dsm-list">${list.length ? list.map(e=> dsCardHtml(e, warn, fs, tag(e))).join('') : '<div style="padding:16px;color:var(--ink-soft);text-align:center;">В этот день мероприятий нет</div>'}</div>
       <div class="dsm-free"><div style="font-size:12px;color:var(--ink-soft);">🟢 Свободно — нажмите, чтобы создать мероприятие</div>${free}</div>
@@ -10713,6 +10753,7 @@
     </style>
     <div class="day-screen">
       <div class="ds-head">
+        <button class="btn btn-primary modal-close" id="ds-close" style="width:auto;height:auto;padding:8px 14px;font-size:14px;color:#fff;" title="Закрыть">✕ Закрыть</button>
         <button class="btn btn-ghost" data-dsnav="-1" title="Предыдущий день">‹</button>
         <h3>${escapeHtml(dLabel)}</h3>
         <button class="btn btn-ghost" data-dsnav="1" title="Следующий день">›</button>
@@ -10722,11 +10763,13 @@
         ${proposals ? `<span style="color:var(--status-cyan);font-size:12.5px;">🙋 слотов от мастеров: ${proposals}</span>` : ''}
         <span style="flex:1;"></span>
         <span style="display:inline-flex;gap:0;"><button class="btn ${layout==='cards'?'btn-primary':'btn-ghost'}" data-dslayout="cards" title="Полная информация о каждом мероприятии">Карточки</button><button class="btn ${layout==='timeline'?'btn-primary':'btn-ghost'}" data-dslayout="timeline" title="Время по вертикали, свободные окна по размеру">Шкала</button></span>
+        <button class="btn ${state.dsOffOpen?'btn-primary':'btn-ghost'}" data-dsoff="1" title="Отметить выходных">🚫 Выходные${dayOffEntriesFor(ds).length ? ' (' + dayOffEntriesFor(ds).length + ')' : ''}</button>
         <button class="btn btn-primary" id="ds-find">🔎 Подобрать время</button>
         ${state.currentRole !== 'hostess' ? '<button class="btn btn-ghost" id="ds-add">+ мероприятие</button>' : ''}
         <button class="btn btn-ghost" id="ds-list" title="Список мероприятий с деталями, сменами, мастерами">📋 Список с деталями</button>
-        <button class="modal-close">×</button>
       </div>
+      ${dayOffEntriesFor(ds).length && !state.dsOffOpen ? `<div style="font-size:12px;margin-bottom:4px;color:var(--ink-soft);">🚫 Выходные: ${escapeHtml(dayOffEntriesFor(ds).map(x=>x.name).join(', '))}</div>` : ''}
+      ${state.dsOffOpen ? `<div style="max-height:40%;overflow:auto;margin-bottom:6px;">${renderDaysOffBlock(ds)}</div>` : ''}
       ${offsite.length ? `<div style="font-size:12px;margin-bottom:4px;">🚐 Выезд: ${offsite.map(e=>`<button type="button" class="ft-chip ds-off" data-eid="${escapeHtml(e.id)}">${escapeHtml(e.time)} ${escapeHtml(e.title||'')}</button>`).join(' ')}</div>` : ''}
       <div class="ds-grid">
         ${layout === 'cards' ? '' : `<div class="ds-axis">${hours.map(m=>`<span style="top:${pct(m)}%;">${String(m/60).padStart(2,'0')}:00</span>`).join('')}</div>`}
@@ -10736,6 +10779,8 @@
   }
   function attachDayScreen(overlay, ds){
     overlay.style.padding = '8px';
+    attachDayOffHandlers(overlay, ds);
+    overlay.querySelectorAll('[data-dsoff]').forEach(b=> b.onclick = ()=>{ state.dsOffOpen = !state.dsOffOpen; render(); });
     const openEv = (id)=>{ const e = state.events.find(x=>x.id === id); if(!e) return; requireUnlock(()=>{ state.modal = {type:'event', event:{...e}, isNew:false, keepAll: state.activeSpaceId === 'all'}; render(); }); };
     overlay.querySelectorAll('.ds-evt, .ds-off, .ds-card').forEach(b=> b.onclick = (ev)=>{ if(ev.target.closest('button') && !b.classList.contains('ds-off')) return; openEv(b.dataset.eid); });
     overlay.querySelectorAll('[data-dslayout]').forEach(b=> b.onclick = ()=>{ setDayLayout(b.dataset.dslayout); render(); });
@@ -10871,11 +10916,22 @@
             <input type="text" id="l-order-search" placeholder="Начните вводить дату, мастера или комментарий…" list="l-order-options" value="${escapeHtml(lead.orderId ? (orderSelectOptions().find(o=>o.id===lead.orderId)?.label || '') : '')}">
             <datalist id="l-order-options">${orderSelectOptions().map(o=>`<option value="${escapeHtml(o.label)}">`).join('')}</datalist>
             <input type="hidden" id="l-order" value="${lead.orderId||''}">
-            <div style="font-size:11.5px;color:var(--ink-soft);margin-top:6px;">Если нужного заказа ещё нет в списке — сначала заведите его в «Для менеджеров → Заказ», потом привяжите здесь.</div>
+            <div style="font-size:11.5px;color:var(--ink-soft);margin-top:6px;">Если заказ не выбран — при сохранении он создастся автоматически из заявки, и приложение попросит дозаполнить мастера и ЗП.</div>
           </div>
           <div class="field">
             <label>Комментарий</label>
             <textarea id="l-comment" rows="3" placeholder="Что хочет гость, о чём договорились, на чём остановились">${escapeHtml(lead.comment||'')}</textarea>
+          </div>
+          <div class="field" id="l-tasks-block" style="border:1px solid var(--line);border-radius:8px;padding:8px 10px;">
+            <label>Задачи по заявке</label>
+            <div id="l-tasks-list" style="margin-bottom:6px;"></div>
+            <div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center;">
+              <input type="text" id="lt2-title" placeholder="Что сделать: перезвонить, отправить КП…" style="flex:1 1 180px;min-width:0;">
+              <input type="date" id="lt2-due" value="${leadWorkDay(loadAddDays(todayStr(),1))}" style="flex:0 0 auto;">
+              <input type="text" id="lt2-who" placeholder="Кто" style="flex:0 1 110px;min-width:0;">
+              <button type="button" class="btn btn-ghost" id="lt2-add">+ задача</button>
+            </div>
+            <div id="lt2-hint" style="font-size:11.5px;color:var(--ink-soft);margin-top:3px;">Задачи сохранятся вместе с заявкой и появятся на вкладке «Задачи».</div>
           </div>
           <div class="field">
             <label>Фото</label>
@@ -10898,6 +10954,49 @@
   function attachLeadModalEvents(overlay){
     const cancelBtn = overlay.querySelector('#btn-cancel-lead');
     if(cancelBtn) cancelBtn.onclick = ()=>{ state.modal = null; overlay.remove(); };
+
+    // задачи по заявке (черновик: применяется при сохранении заявки)
+    let tasksApply = null;
+    const tlist = overlay.querySelector('#l-tasks-list');
+    if(tlist){
+      const leadId = state.modal.lead.id;
+      const draft = (state.leadTasks||[]).filter(t=>t.leadId === leadId).map(t=>({...t}));
+      const orig = new Map(draft.map(t=>[t.id, JSON.stringify(t)])); const removed = new Set();
+      const titleEl = overlay.querySelector('#lt2-title'), dueEl = overlay.querySelector('#lt2-due'), whoEl = overlay.querySelector('#lt2-who'), hintEl = overlay.querySelector('#lt2-hint');
+      let whoManual = false;
+      const syncWho = ()=>{ if(!whoManual && dueEl.value){ whoEl.value = leadAssigneeFor(dueEl.value, state.modal.lead); const m = managerForDate(dueEl.value); hintEl.textContent = m ? 'В этот день по графику: ' + m : 'На эту дату менеджер в графике не назначен — подставлен ближайший.'; } };
+      dueEl.onchange = syncWho; whoEl.oninput = ()=>{ whoManual = true; }; syncWho();
+      const draw = ()=>{
+        const rows = draft.slice().sort((a,b)=> (a.done?1:0) - (b.done?1:0) || (a.due||'9999').localeCompare(b.due||'9999'));
+        tlist.innerHTML = rows.length ? rows.map(t=>`<div style="display:flex;gap:8px;align-items:center;padding:4px 0;border-bottom:1px solid var(--line);font-size:13px;${t.done?'opacity:.55;':''}">
+          <input type="checkbox" data-tk="${escapeHtml(t.id)}" ${t.done?'checked':''} style="width:18px;height:18px;flex-shrink:0;">
+          <span style="flex:1;min-width:0;${t.done?'text-decoration:line-through;':''}">${escapeHtml(t.title)}<br><span style="font-size:11.5px;color:var(--ink-soft);">${t.done ? '' : leadDueHtml(t.due)}${t.assignee ? ' · ' + escapeHtml(t.assignee) : ''}</span></span>
+          <button type="button" data-tkdel="${escapeHtml(t.id)}" style="background:none;border:none;color:var(--danger);cursor:pointer;font-size:15px;">✕</button></div>`).join('') : '<div style="font-size:12.5px;color:var(--ink-soft);">Задач пока нет</div>';
+        tlist.querySelectorAll('[data-tk]').forEach(cb=> cb.onchange = ()=>{ const t = draft.find(x=>x.id === cb.dataset.tk); if(!t) return; t.done = cb.checked; t.doneAt = cb.checked ? new Date().toISOString() : ''; draw(); });
+        tlist.querySelectorAll('[data-tkdel]').forEach(b=> b.onclick = ()=>{ const id = b.dataset.tkdel; const i = draft.findIndex(x=>x.id === id); if(i < 0) return; if(orig.has(id)) removed.add(id); draft.splice(i,1); draw(); });
+      };
+      const addDraft = ()=>{
+        const title = titleEl.value.trim(); if(!title){ titleEl.style.borderColor = 'var(--danger)'; return false; }
+        titleEl.style.borderColor = '';
+        draft.push({ id: uid(), leadId, title, due: dueEl.value || '', done: false, doneAt: '', assignee: whoEl.value.trim() || leadWho(), createdBy: leadWho(), createdAt: new Date().toISOString(), auto: false });
+        titleEl.value = ''; draw(); return true;
+      };
+      overlay.querySelector('#lt2-add').onclick = ()=>{ addDraft(); titleEl.focus(); };
+      titleEl.addEventListener('keydown', (e)=>{ if(e.key === 'Enter'){ e.preventDefault(); addDraft(); } });
+      draw();
+      tasksApply = async ()=>{
+        if(titleEl.value.trim()) addDraft();
+        if(!Array.isArray(state.leadTasks)) state.leadTasks = [];
+        let ch = false; const newlyDone = [];
+        draft.forEach(t=>{
+          const i = state.leadTasks.findIndex(x=>x.id === t.id);
+          if(i < 0){ state.leadTasks.push(t); ch = true; }
+          else if(JSON.stringify(t) !== orig.get(t.id)){ if(t.done && !state.leadTasks[i].done) newlyDone.push(t); state.leadTasks[i] = t; ch = true; }
+        });
+        removed.forEach(id=>{ const n = state.leadTasks.length; state.leadTasks = state.leadTasks.filter(x=>x.id !== id); if(state.leadTasks.length !== n) ch = true; });
+        if(ch){ await saveLeadTasks(); for(const t of newlyDone) await leadFollowNext(t); }
+      };
+    }
 
     // клиент: ссылка на чат, сегмент, теги
     const crmSt = crmLeadState(state.modal.lead); let crmPref = crmSt.clientId;
@@ -11159,8 +11258,8 @@
       // иначе конверсию потом невозможно сверить с реальным расписанием/заказами
       const leadEventMissing = soldVal && saleKindVal==='event' && !leadEventVal;
       if(leadEventMissing) markInvalid('l-event-search');
-      const leadOrderMissing = soldVal && saleKindVal==='order' && !leadOrderVal;
-      if(leadOrderMissing) markInvalid('l-order-search');
+      // заказ не выбран — не блокируем, а создаём его автоматически после сохранения заявки и просим дозаполнить
+      const leadOrderMissing = false;
       if(!dateVal || (!lc0.phone && !lc0.socialRaw) || !sourceVal || !kindVal || !productVal || revenueRaw==='' || !commentVal || saleDateMissing || leadEventMissing || leadOrderMissing){
         showGapWarningBanner(leadEventMissing ? 'Заявка отмечена как «Продано» — выберите мероприятие, которое из неё создано.' : leadOrderMissing ? 'Заявка отмечена как «Продано» — выберите заказ, который из неё создан.' : saleDateMissing ? 'Заявка отмечена как «Продано» — укажите дату продажи.' : 'Заполните все поля перед сохранением заявки — включая номер/ник гостя и комментарий.');
         if(firstInvalid && firstInvalid.scrollIntoView) firstInvalid.scrollIntoView({block:'center', behavior:'smooth'});
@@ -11197,6 +11296,18 @@
       };
       const _prevLead = state.leads.find(x=>x.id===updated.id);
       const _prevSt = _prevLead ? leadStatus(_prevLead) : null;
+      // продажа «Заказ на изготовление» без выбранного заказа → создаём заказ сами из данных заявки
+      let _autoOrder = null;
+      if(updated.sold && updated.saleKind==='order' && !updated.orderId){
+        _autoOrder = {
+          id: uid(), date: updated.saleDate || todayStr(), deadline: null, masterName: '',
+          revenue: updated.revenue, received: null, masterShare: null, additionalMasters: [], cost: 0, costSource: 'studio',
+          comment: [updated.name, updated.phone || updated.socialUrl, updated.comment].filter(Boolean).join(' · '),
+          payerType: 'individual', companyName: '', fromLeadId: updated.id, incomplete: true,
+        };
+        state.orders.push(_autoOrder);
+        updated.orderId = _autoOrder.id;
+      }
       try{
         const _cl = crmUpsertForLead(updated, { chatUrl: crmChatUrl, segmentId: crmSegEl ? crmSegEl.value : '', tagIds: crmSt.tagIds }, crmPref);
         updated.clientId = _cl.id;
@@ -11216,8 +11327,18 @@
       if(idx >= 0) state.leads[idx] = updated; else state.leads.push(updated);
       try{ await saveClients(); }catch(e){ console.error('saveClients', e); }
       await saveLeads();
+      if(tasksApply) await tasksApply();
       await leadStageTasks(updated, _prevSt);
       recordAction("Заявка сохранена");
+      if(_autoOrder){
+        try{ await saveOrders(); }catch(e){ console.error('saveOrders', e); }
+        recordAction('Заказ создан из заявки', _autoOrder.id);
+        overlay.remove();
+        state.modal = {type:'order', isNew:false, order:{..._autoOrder}};
+        render();
+        showGapWarningBanner('Заявка продана — заказ создан автоматически. Укажите мастера, его ЗП и проверьте сумму, затем сохраните заказ.');
+        return;
+      }
       state.modal = null; overlay.remove(); render();
     };
   }
@@ -14243,6 +14364,22 @@
               <input type="date" id="gc-date" value="${g.date||todayStr()}">
             </div>
             <div style="font-size:11px;color:var(--ink-soft);">Остальное (условия, контакты, QR, адрес) — фиксированный шаблон, не меняется.</div>
+            <div class="row2">
+              <div class="field">
+                <label>Имя получателя <span style="font-weight:400;color:var(--ink-soft);">— необязательно</span></label>
+                <input type="text" id="gc-owner-name" value="${escapeHtml(g.ownerName||'')}" placeholder="Имя и фамилия">
+              </div>
+              <div class="field">
+                <label>Телефон / @телеграм <span style="font-weight:400;color:var(--ink-soft);">— необяз.</span></label>
+                <input type="text" id="gc-owner-contact" value="${escapeHtml(g.ownerContact||'')}" placeholder="+7… или @ник">
+              </div>
+            </div>
+            <div class="field">
+              <label>Фото чека <span style="font-weight:400;color:var(--ink-soft);">— необязательно</span></label>
+              <div id="gc-receipt-preview" style="margin-bottom:6px;">${g.receiptData ? `<img src="${g.receiptData}" style="max-width:120px;max-height:120px;border-radius:var(--radius);border:1px solid var(--line-strong);">` : '<div style="font-size:12.5px;color:var(--ink-soft);">Чек не прикреплён</div>'}</div>
+              <input type="file" id="gc-receipt-file" accept="image/*">
+              <button type="button" class="btn btn-ghost" id="gc-receipt-remove" style="margin-top:6px;display:${g.receiptData?'inline-block':'none'};">Убрать чек</button>
+            </div>
             <div class="field">
               <label>Назначение сертификата</label>
               <div style="display:flex;gap:8px;">
@@ -14307,9 +14444,35 @@
       });
     });
 
+    const gcOwnerNameEl = overlay.querySelector('#gc-owner-name');
+    const gcOwnerContactEl = overlay.querySelector('#gc-owner-contact');
+    const gcReceiptFileEl = overlay.querySelector('#gc-receipt-file');
+    const gcReceiptRemoveEl = overlay.querySelector('#gc-receipt-remove');
+    const gcReceiptPrevEl = overlay.querySelector('#gc-receipt-preview');
+    function gcShowReceipt(){
+      const d = state.modal.giftCert.receiptData;
+      if(gcReceiptPrevEl) gcReceiptPrevEl.innerHTML = d ? `<img src="${d}" style="max-width:120px;max-height:120px;border-radius:var(--radius);border:1px solid var(--line-strong);">` : '<div style="font-size:12.5px;color:var(--ink-soft);">Чек не прикреплён</div>';
+      if(gcReceiptRemoveEl) gcReceiptRemoveEl.style.display = d ? 'inline-block' : 'none';
+    }
+    if(gcReceiptFileEl) gcReceiptFileEl.onchange = async ()=>{
+      const file = gcReceiptFileEl.files && gcReceiptFileEl.files[0];
+      if(!file) return;
+      if(!/^image\//.test(file.type)){ showGapWarningBanner('Можно прикрепить только изображение (фото или скриншот чека).'); gcReceiptFileEl.value=''; return; }
+      try{
+        state.modal.giftCert.receiptData = await compressImageFile(file);
+        state.modal.giftCert.receiptChanged = true;
+        gcShowReceipt();
+        if(saveStatusEl) saveStatusEl.textContent = '';
+      }catch(err){ showGapWarningBanner('Не получилось прочитать фото чека.'); }
+    };
+    if(gcReceiptRemoveEl) gcReceiptRemoveEl.onclick = ()=>{
+      state.modal.giftCert.receiptData = null; state.modal.giftCert.receiptChanged = true;
+      if(gcReceiptFileEl) gcReceiptFileEl.value=''; gcShowReceipt();
+    };
     function currentState(){
       state.modal.giftCert = {
         ...state.modal.giftCert,
+        ownerName: gcOwnerNameEl ? gcOwnerNameEl.value.trim() : '', ownerContact: gcOwnerContactEl ? gcOwnerContactEl.value.trim() : '',
         text: textEl.value, number: numberEl.value, date: dateEl.value,
         account: accountEl.value, amount: amountEl.value, purpose: purposeEl.value || 'sale',
       };
@@ -14371,12 +14534,16 @@
       const certEntry = {
         id: certId, number: String(g.number).trim(), channel: CERT_CHANNELS[0], certType: 'Электронный',
         certKind: 'value', purpose: isSale ? 'sale' : 'marketing', specificEventType: '', saleDate: g.date, amount: amountNum,
-        status: 'in_progress', redemptions: [], useDate: '', eventId: '', ownerName: '', ownerContact: '',
+        status: 'in_progress', redemptions: [], useDate: '', eventId: '', ownerName: g.ownerName || '', ownerContact: g.ownerContact || '',
         incomeId: incomeId, account: g.account || 'Точка', comment: 'Сгенерирован через «Создать сертификат»',
-        hasReceiptPhoto: false,
+        hasReceiptPhoto: !!g.receiptData,
       };
+      if(g.receiptChanged){
+        if(g.receiptData) await saveReceiptPhoto(certId, g.receiptData); else await deleteReceiptPhoto(certId);
+        state.modal.giftCert.receiptChanged = false;
+      }
       const certIdx = state.certificates.findIndex(x=>x.id===certId);
-      if(certIdx >= 0) state.certificates[certIdx] = {...state.certificates[certIdx], ...certEntry}; else state.certificates.push(certEntry);
+      if(certIdx >= 0){ const _o = state.certificates[certIdx]; state.certificates[certIdx] = {..._o, ...certEntry, ownerName: certEntry.ownerName || _o.ownerName || '', ownerContact: certEntry.ownerContact || _o.ownerContact || '', hasReceiptPhoto: certEntry.hasReceiptPhoto || (!g.receiptChanged && !!_o.hasReceiptPhoto)}; } else state.certificates.push(certEntry);
       await saveCertificates();
 
       state.modal.giftCert.certId = certId;
@@ -24199,24 +24366,43 @@
     `;
   }
 
+  function dayOffStaffList(){
+    const res = []; const seen = new Set();
+    const add = (n, r)=>{ n = (n||'').trim(); const k = n.toLowerCase(); if(!n || seen.has(k)) return; seen.add(k); res.push({ name: n, role: r }); };
+    MANAGER_LIST.forEach(n=> add(n, 'manager')); HOSTESS_LIST.forEach(n=> add(n, 'hostess'));
+    (state.hostsList||[]).forEach(n=> add(typeof n === 'string' ? n : (n && n.name), 'master'));
+    return res;
+  }
+  function dayOffRoleSuffix(x){ const l = ROLE_LABELS[x.role] || ''; return l ? ` <span style="color:var(--ink-soft);font-weight:400;">· ${escapeHtml(l)}</span>` : ''; }
   function renderDaysOffBlock(dateStr){
     const entries = dayOffEntriesFor(dateStr);
     const canMark = roleCanMarkDayOff(state.currentRole);
+    const forOthers = roleCanMarkDayOffForOthers(state.currentRole);
     const identity = currentDayOffIdentity();
-    const alreadyMarked = identity && identity.name ? entries.some(x=>x.role===identity.role && x.name.trim().toLowerCase()===identity.name.trim().toLowerCase()) : false;
+    // у роли с общим кодом имя вводится вручную, поэтому «уже отмечен» скрывает ввод только для личного входа
+    const alreadyMarked = identity && identity.locked && identity.name ? entries.some(x=>x.role===identity.role && x.name.trim().toLowerCase()===identity.name.trim().toLowerCase()) : false;
     if(!entries.length && !canMark) return '';
+    const marked = new Set(entries.map(x=>x.name.trim().toLowerCase()));
+    const staff = forOthers ? dayOffStaffList().filter(s=> !marked.has(s.name.toLowerCase())) : [];
     return `
       <div class="shift-block">
-        <div class="shift-block-title">Выходные в этот день</div>
+        <div class="shift-block-title">Выходные в этот день${entries.length ? ` (${entries.length})` : ''}</div>
         ${entries.length ? entries.map(x=>`
           <div class="shift-row">
-            <span class="shift-name">✕ ${escapeHtml(x.name)} <span style="color:var(--ink-soft);font-weight:400;">· ${escapeHtml(ROLE_LABELS[x.role]||x.role)}</span></span>
+            <span class="shift-name">✕ ${escapeHtml(x.name)}${dayOffRoleSuffix(x)}</span>
             ${canDayOffEntryBeRemovedByMe(x) ? `<button type="button" class="dayoff-del-btn" data-id="${x.id}" title="Убрать отметку">✕</button>` : ''}
           </div>
         `).join('') : `<div style="font-size:12.5px;color:var(--ink-soft);">Пока никто не отмечен</div>`}
-        ${canMark && !alreadyMarked ? `
+        ${forOthers ? `
+          <details style="margin-top:8px;"><summary style="cursor:pointer;font-size:12.5px;font-weight:600;">➕ Отметить выходными нескольких сотрудников</summary>
+            <div style="margin-top:6px;display:flex;flex-wrap:wrap;gap:6px;">
+              ${staff.length ? staff.map(s=>`<label style="display:inline-flex;align-items:center;gap:5px;border:1px solid var(--line-strong);border-radius:14px;padding:4px 10px;font-size:12.5px;cursor:pointer;"><input type="checkbox" class="dayoff-staff-cb" data-name="${escapeHtml(s.name)}" data-role="${s.role}"> ${escapeHtml(s.name)} <span style="color:var(--ink-soft);font-size:11px;">${escapeHtml(ROLE_LABELS[s.role]||'')}</span></label>`).join('') : '<span style="font-size:12px;color:var(--ink-soft);">Все сотрудники из списка уже отмечены</span>'}
+            </div>
+            <div style="display:flex;gap:6px;margin-top:8px;"><input type="text" id="dayoff-extra-name" placeholder="Другой сотрудник (имя), если нет в списке" style="flex:1;padding:6px 8px;"><button type="button" class="btn btn-primary" id="btn-mark-dayoff-multi" style="font-size:12.5px;padding:6px 12px;white-space:nowrap;">Отметить</button></div>
+          </details>` : ''}
+        ${canMark && !alreadyMarked && !forOthers ? `
           <div style="display:flex;gap:6px;margin-top:8px;">
-            <input type="text" id="dayoff-name-input" placeholder="Ваше имя" value="${escapeHtml((identity&&identity.name)||'')}" ${identity&&identity.locked?'readonly':''} style="flex:1;padding:6px 8px;border:1px solid var(--line-strong);border-radius:var(--radius);font-size:13px;background:${identity&&identity.locked?'var(--paper)':'var(--white)'};">
+            <input type="text" id="dayoff-name-input" placeholder="Ваше имя" value="${escapeHtml((identity&&identity.name)||'')}" ${identity&&identity.locked?'readonly':''} style="flex:1;padding:6px 8px;">
             <button type="button" class="btn btn-ghost" id="btn-mark-dayoff" style="font-size:12.5px;padding:6px 12px;white-space:nowrap;">🚫 Я выходной</button>
           </div>
         ` : ''}
@@ -24330,6 +24516,48 @@
     `;
   }
 
+  function attachDayOffHandlers(overlay, dateStr){
+    const markDayOffBtn = overlay.querySelector('#btn-mark-dayoff');
+    if(markDayOffBtn) markDayOffBtn.onclick = async (ev)=>{
+      ev.stopPropagation();
+      const input = overlay.querySelector('#dayoff-name-input');
+      const name = (input.value||'').trim();
+      if(!name){ input.style.borderColor = 'var(--danger)'; input.focus(); return; }
+      if(!state.daysOff) state.daysOff = [];
+      state.daysOff.push({ id: uid(), date: dateStr, role: state.currentRole, name });
+      await saveDaysOff();
+      setRememberedDayOffName(state.currentRole, name);
+      recordAction(`${name} отметил(а) себя выходным на ${formatDateText(dateStr)}`);
+      overlay.remove();
+      state.modal = {type:'day', date: dateStr};
+      render();
+    };
+    const markMulti = overlay.querySelector('#btn-mark-dayoff-multi');
+    if(markMulti) markMulti.onclick = async (ev)=>{
+      ev.stopPropagation();
+      const picks = Array.from(overlay.querySelectorAll('.dayoff-staff-cb:checked')).map(cb=>({ name: cb.dataset.name, role: cb.dataset.role }));
+      const extra = (overlay.querySelector('#dayoff-extra-name').value || '').trim();
+      if(extra) picks.push({ name: extra, role: '' });
+      if(!picks.length){ showGapWarningBanner('Отметьте галочками сотрудников или впишите имя.'); return; }
+      if(!state.daysOff) state.daysOff = [];
+      const have = new Set(dayOffEntriesFor(dateStr).map(x=>x.name.trim().toLowerCase()));
+      picks.forEach(p=>{ if(have.has(p.name.toLowerCase())) return; have.add(p.name.toLowerCase()); state.daysOff.push({ id: uid(), date: dateStr, role: p.role, name: p.name, by: state.currentRole }); });
+      await saveDaysOff();
+      recordAction(`Выходные на ${formatDateText(dateStr)}: ${picks.map(p=>p.name).join(', ')}`);
+      overlay.remove(); state.modal = {type:'day', date: dateStr}; render();
+    };
+    overlay.querySelectorAll('.dayoff-del-btn').forEach(btn=>{
+      btn.onclick = async (ev)=>{
+        ev.stopPropagation();
+        const id = btn.dataset.id;
+        state.daysOff = (state.daysOff||[]).filter(x=>x.id!==id);
+        await saveDaysOff();
+        overlay.remove();
+        state.modal = {type:'day', date: dateStr};
+        render();
+      };
+    });
+  }
   function attachDayModalEvents(overlay, dateStr){
     if(overlay.querySelector('.day-screen')){ attachDayScreen(overlay, dateStr); return; }
     overlay.querySelectorAll('.shift-edit-btn').forEach(btn=>{
@@ -24352,32 +24580,7 @@
         render();
       };
     });
-    const markDayOffBtn = overlay.querySelector('#btn-mark-dayoff');
-    if(markDayOffBtn) markDayOffBtn.onclick = async (ev)=>{
-      ev.stopPropagation();
-      const input = overlay.querySelector('#dayoff-name-input');
-      const name = (input.value||'').trim();
-      if(!name){ input.style.borderColor = 'var(--danger)'; input.focus(); return; }
-      if(!state.daysOff) state.daysOff = [];
-      state.daysOff.push({ id: uid(), date: dateStr, role: state.currentRole, name });
-      await saveDaysOff();
-      setRememberedDayOffName(state.currentRole, name);
-      recordAction(`${name} отметил(а) себя выходным на ${formatDateText(dateStr)}`);
-      overlay.remove();
-      state.modal = {type:'day', date: dateStr};
-      render();
-    };
-    overlay.querySelectorAll('.dayoff-del-btn').forEach(btn=>{
-      btn.onclick = async (ev)=>{
-        ev.stopPropagation();
-        const id = btn.dataset.id;
-        state.daysOff = (state.daysOff||[]).filter(x=>x.id!==id);
-        await saveDaysOff();
-        overlay.remove();
-        state.modal = {type:'day', date: dateStr};
-        render();
-      };
-    });
+    attachDayOffHandlers(overlay, dateStr);
     overlay.querySelectorAll('.slot-proposal-cancel').forEach(btn=>{
       btn.onclick = async (ev)=>{
         ev.stopPropagation();
@@ -24610,7 +24813,7 @@
             <label>Информация по еде <span style="font-weight:400;color:var(--ink-soft);">— необязательно, что планируется из еды (пишут менеджеры, читают админы)</span></label>
             <textarea id="f-food-info" rows="2" placeholder="например: пицца и чай от гостей, торт приносят свой">${escapeHtml(ev.foodInfo||'')}</textarea>
           </div>
-          ${isNew ? `
+          ${true ? `
           <div class="field" id="lead-link-field" style="display:${EVENT_STATUSES_NEEDING_LEAD.includes(ev.status||'confirmed')?'block':'none'};">
             <label>Заявка, из которой пришёл гость <span style="font-weight:400;color:var(--ink-soft);">— необязательно, но полезно заполнить, чтобы не терялся источник продажи</span></label>
             <div class="status-select-wrap" style="margin-bottom:8px;">
@@ -24623,9 +24826,10 @@
             </div>
             <input type="hidden" id="f-lead-mode" value="existing">
             <div id="lead-existing-wrap">
-              <input type="text" id="f-lead-search" placeholder="Начните вводить дату, контакт или источник…" list="f-lead-options" value="">
-              <datalist id="f-lead-options">${leadSelectOptionsForEvent('').map(opt=>`<option value="${escapeHtml(opt.label)}">`).join('')}</datalist>
-              <input type="hidden" id="f-lead-id" value="">
+              <input type="text" id="f-lead-search" placeholder="Начните вводить дату, контакт или источник…" list="f-lead-options" value="${escapeHtml((()=>{ const cl = isNew ? null : eventLinkedLead(ev); if(!cl) return ''; const o = leadSelectOptionsForEvent(cl.id).find(x=>x.id===cl.id); return o ? o.label : ''; })())}">
+              <datalist id="f-lead-options">${leadSelectOptionsForEvent(isNew ? '' : ((eventLinkedLead(ev)||{}).id || '')).map(opt=>`<option value="${escapeHtml(opt.label)}">`).join('')}</datalist>
+              <input type="hidden" id="f-lead-id" value="${escapeHtml(isNew ? '' : ((eventLinkedLead(ev)||{}).id || ''))}">
+              ${(!isNew && !eventLinkedLead(ev)) ? '<div style="font-size:11px;color:var(--ink-soft);margin-top:4px;">Выберите заявку из конверсии — она отметится как проданная этим мероприятием.</div>' : ''}
               ${leadSelectOptionsForEvent('').length===0 ? `<div style="font-size:11px;color:var(--ink-soft);margin-top:4px;">Свободных заявок (ещё ни к чему не привязанных) пока нет — переключитесь на «Создать новую заявку».</div>` : ''}
             </div>
             <div id="lead-new-wrap" style="display:none;">
@@ -25064,10 +25268,13 @@
       };
       titleInput.addEventListener('change', recalcPayOnTitle);
     }
+    if(durationInput){ durationInput.addEventListener('input', ()=>{ durationInput.dataset.manual = '1'; }); }
     if(titleInput && durationInput){
       titleInput.addEventListener('input', ()=>{
         const match = state.eventTypes.find(t=>t.name.toLowerCase() === titleInput.value.trim().toLowerCase());
-        if(match){ durationInput.value = match.duration; }
+        // длительность из справочника подставляем только в НОВОЕ мероприятие и только пока её не правили руками
+        const _isNewEv = !!(state.modal && state.modal.isNew);
+        if(match && _isNewEv && durationInput.dataset.manual !== '1'){ durationInput.value = match.duration; }
         const itemsField = overlay.querySelector('#items-count-field');
         if(itemsField){
           const show = isCeramicsEvent(titleInput.value);
@@ -26259,7 +26466,7 @@
     const leadIdHidden = overlay.querySelector('#f-lead-id');
     if(leadSearchInput && leadIdHidden){
       const leadLabelToId = {};
-      leadSelectOptionsForEvent('').forEach(o=>{ leadLabelToId[o.label] = o.id; });
+      leadSelectOptionsForEvent(leadIdHidden.value || '').forEach(o=>{ leadLabelToId[o.label] = o.id; });
       leadSearchInput.addEventListener('input', ()=>{
         const val = leadSearchInput.value.trim();
         leadSearchInput.style.borderColor = '';
@@ -26570,7 +26777,7 @@
       // Поле скрыто и не проверяется при редактировании и для маркетинга/слота/отменённых
       // (см. EVENT_STATUSES_NEEDING_LEAD).
       let leadModeVal = '', leadIdVal = '', leadContactVal = '', leadSourceVal = '';
-      if(state.modal.isNew && EVENT_STATUSES_NEEDING_LEAD.includes(statusVal)){
+      if(EVENT_STATUSES_NEEDING_LEAD.includes(statusVal)){
         leadModeVal = overlay.querySelector('#f-lead-mode') ? (overlay.querySelector('#f-lead-mode').value || 'existing') : 'existing';
         const leadContactEl = overlay.querySelector('#f-lead-contact');
         leadIdVal = overlay.querySelector('#f-lead-id') ? overlay.querySelector('#f-lead-id').value : '';
@@ -26814,8 +27021,9 @@
 
       // привязка заявки к новому мероприятию (см. блок валидации выше) — создаём новую заявку или
       // дописываем eventId в выбранную существующую, сразу помечая её проданной этим мероприятием
-      if(state.modal.isNew && EVENT_STATUSES_NEEDING_LEAD.includes(statusVal)){
-        if(leadModeVal === 'new' && leadContactVal){
+      if(EVENT_STATUSES_NEEDING_LEAD.includes(statusVal)){
+        const curLinked = eventLinkedLead(updated);
+        if(leadModeVal === 'new' && leadContactVal && (!curLinked || state.modal.isNew)){
           const monthName = updated.date ? MONTHS[parseDate(updated.date).getMonth()].charAt(0).toUpperCase()+MONTHS[parseDate(updated.date).getMonth()].slice(1) : LEAD_MONTH_OPTIONS[0];
           state.leads.push({
             id: uid(), requestDate: updated.date || todayStr(), contact: leadContactVal, eventMonth: monthName,
@@ -26824,11 +27032,15 @@
             sold: true, saleDate: updated.date || todayStr(), saleKind: 'event', eventId: updated.id, orderId: '', hasPhoto: false,
           });
           await saveLeads();
-        } else if(leadModeVal === 'existing' && leadIdVal){
+        } else if(leadModeVal === 'existing' && leadIdVal && (!curLinked || curLinked.id !== leadIdVal)){
           const leadIdx = state.leads.findIndex(l=>l.id===leadIdVal);
           if(leadIdx >= 0){
+            if(curLinked){
+              const oi = state.leads.findIndex(l=>l.id===curLinked.id);
+              if(oi >= 0) state.leads[oi] = { ...state.leads[oi], eventId: '', sold: false, status: 'kp', saleDate: '', saleKind: '', statusAt: new Date().toISOString() };
+            }
             state.leads[leadIdx] = {
-              ...state.leads[leadIdx], sold: true, saleKind: 'event', eventId: updated.id, orderId: '',
+              ...state.leads[leadIdx], sold: true, status: 'sold', statusAt: new Date().toISOString(), saleKind: 'event', eventId: updated.id, orderId: '',
               saleDate: state.leads[leadIdx].saleDate || updated.date || todayStr(),
               revenue: (state.leads[leadIdx].revenue!==undefined && state.leads[leadIdx].revenue!==null) ? state.leads[leadIdx].revenue : ((updated.price!==undefined&&updated.price!==null)?updated.price:null),
             };
