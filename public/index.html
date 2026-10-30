@@ -3706,7 +3706,7 @@
   async function refreshSharedData(){
     if(refreshInFlight || !state.loaded || !state.currentRole) return;
     if(state.modal || failedSaveKeys.size > 0 || document.hidden) return;
-    if(document.querySelector('.modal, #lead-task-popup, #lead-popup, #crm-popup, #crm-lists-popup')) return;
+    if(document.querySelector('.modal, #lead-task-popup, #lead-popup, #crm-popup, #crm-lists-popup, #ft-popup')) return;
     const ae = document.activeElement; if(ae && /^(INPUT|TEXTAREA|SELECT)$/.test(ae.tagName) && ae.id !== 'global-search-input' && ae.id !== 'lb-q') return;
     refreshInFlight = true;
     try{
@@ -3724,7 +3724,7 @@
         state[prop] = arr; state[baseProp] = JSON.parse(JSON.stringify(arr)); changed = true;
       }
       lastFreshAt = Date.now();
-      if(changed && !state.modal && !document.querySelector('.modal, #lead-task-popup, #lead-popup, #crm-popup, #crm-lists-popup')) render();
+      if(changed && !state.modal && !document.querySelector('.modal, #lead-task-popup, #lead-popup, #crm-popup, #crm-lists-popup, #ft-popup')) render();
     }catch(e){ console.error('refreshSharedData', e); }
     finally{ refreshInFlight = false; }
   }
@@ -5617,6 +5617,7 @@
           <option value="">Все сотрудники</option>
           ${allHosts().map(h=>`<option value="${escapeHtml(h)}" ${state.calFilterHost===h?'selected':''}>${escapeHtml(h)}</option>`).join('')}
         </select>
+        ${ftCanUse() ? `<button class="btn btn-primary" id="btn-find-slot" style="font-size:12.5px;padding:6px 12px;">🔎 Подобрать время</button>` : ''}
         ${filterActive ? `<button class="btn btn-ghost" id="cal-filter-reset" style="font-size:12px;padding:6px 12px;">✕ Сбросить фильтр</button>` : ''}
       </div>
     `;
@@ -10429,6 +10430,329 @@
     if(url && crmSafeUrl(url)) parts.push(`<a href="${escapeHtml(url)}" target="_blank" rel="noopener" class="crm-chat" title="Открыть диалог" style="font-size:${sz};text-decoration:none;">💬 ${escapeHtml(socialLabelOfUrl(url) || 'чат')}</a>`);
     const wa = leadWaUrl(parsed.phone || l.phone); if(wa) parts.push(`<a href="${wa}" target="_blank" rel="noopener" class="crm-chat" title="Написать в WhatsApp" style="font-size:${sz};text-decoration:none;">📱 WhatsApp</a>`);
     return parts.join(' ');
+  }
+
+  // ===================== Свободное время: подбор окна под заявку =====================
+  const FT_DAY_FROM = '10:00', FT_DAY_TO = '22:00';
+  function ftCanUse(){ return !!state.currentRole && state.currentRole !== 'master'; }
+  function ftMinToTime(m){ m = Math.max(0, Math.round(m)); return String(Math.floor(m/60)).padStart(2,'0') + ':' + String(m%60).padStart(2,'0'); }
+  function ftDurLabel(m){ const h = Math.floor(m/60), r = m%60; return (h ? h + ' ч' : '') + (h && r ? ' ' : '') + (r ? r + ' мин' : ''); }
+  function ftDayLabel(ds){ const d = parseDate(ds); const dow = ['вс','пн','вт','ср','чт','пт','сб'][d.getDay()]; return dow + ', ' + d.getDate() + ' ' + ['янв','фев','мар','апр','мая','июн','июл','авг','сен','окт','ноя','дек'][d.getMonth()]; }
+  function ftSpaces(){ return state.spaces.filter(s=> s.id !== 's5'); }
+  // свободные окна пространства в дне: между мероприятиями оставляем обязательный перерыв (MIN_GAP_MINUTES)
+  function ftWindows(spaceId, ds, fromMin, toMin){
+    const busy = (state.events||[]).filter(e=> e.date === ds && e.spaceId === spaceId && e.status !== 'cancelled' && e.time)
+      .map(e=>[effectiveStart(e), effectiveEnd(e)]).sort((a,b)=>a[0]-b[0]);
+    let cur = fromMin; const out = [];
+    for(const [s,e] of busy){
+      const bs = s - MIN_GAP_MINUTES;
+      if(bs > cur) out.push([cur, Math.min(bs, toMin)]);
+      cur = Math.max(cur, e + MIN_GAP_MINUTES);
+      if(cur >= toMin) break;
+    }
+    if(cur < toMin) out.push([cur, toMin]);
+    return out.filter(w=> w[1] > w[0]);
+  }
+  function ftBestSpaceId(guests){
+    const sp = ftSpaces().filter(s=> !guests || (SPACE_CAPACITY[s.id] || 0) >= guests);
+    if(!sp.length) return '';
+    return sp.slice().sort((a,b)=> (SPACE_CAPACITY[a.id]||99) - (SPACE_CAPACITY[b.id]||99))[0].id;
+  }
+  function ftCreateEvent(o){
+    const keepAll = state.activeSpaceId === 'all';
+    requireUnlock(()=>{
+      state.modal = {type:'event', isNew:true, keepAll, event:{
+        id: uid(), spaceId: o.spaceId, date: o.date, time: ftMinToTime(o.start), duration: o.duration, guests: o.guests || null, itemsCount:null, itemsCountAuto:true, masterPay:null, masterPayAuto:true, additionalHosts:[], guestName:'', price:null, agreedPrice:null, materialsItems:[], pickupItems:[], payments:[], title:'', product:'', host:'', dishes:'', dishesWasher:'', rentalBefore:o.before||0, rentalAfter:o.after||0, payerType:'individual', companyName:'', documents:{contract:false,paymentOrder:false,act:false}, masterReport:null, notes:'', availableMasters:[]
+      }};
+      render();
+    });
+  }
+  // сводка «свободно» внутри дня (для окна дня)
+  function ftDayHtml(ds){
+    if(!ftCanUse()) return '';
+    const fromM = timeToMinutes(FT_DAY_FROM), toM = timeToMinutes(FT_DAY_TO);
+    const rows = ftSpaces().map(s=>{
+      const w = ftWindows(s.id, ds, fromM, toM).filter(x=> x[1]-x[0] >= 60);
+      return `<div style="font-size:12.5px;margin:3px 0;display:flex;gap:6px;flex-wrap:wrap;align-items:center;"><b style="min-width:110px;">${escapeHtml(s.name)}</b>${w.length ? w.map(x=>`<button type="button" class="ft-chip" data-ftday="${ds}|${s.id}|${x[0]}|${x[1]-x[0]}" title="Создать мероприятие в это время">${ftMinToTime(x[0])}–${ftMinToTime(x[1])}</button>`).join('') : '<span style="color:var(--ink-soft);">занято</span>'}</div>`;
+    }).join('');
+    return `<details style="margin:10px 0;"><summary style="cursor:pointer;font-weight:600;font-size:13px;">🟢 Свободное время (${FT_DAY_FROM}–${FT_DAY_TO}, окна от 1 ч)</summary><div style="margin-top:6px;">${rows}<div style="font-size:11px;color:var(--ink-soft);margin-top:4px;">Учтён перерыв ${MIN_GAP_MINUTES} мин между мероприятиями. Нажмите на окно — откроется новое мероприятие.</div></div></details>`;
+  }
+  function attachFtDay(overlay, ds){
+    overlay.querySelectorAll('.ft-chip[data-ftday]').forEach(b=> b.onclick = ()=>{
+      const [d, sp, st, len] = b.dataset.ftday.split('|');
+      overlay.remove(); ftCreateEvent({ date:d, spaceId:sp, start:+st, duration: Math.min(+len, 120) });
+    });
+  }
+  function openFreeTimePopup(){
+    const old = document.getElementById('ft-popup'); if(old) old.remove();
+    const st = state.ft = state.ft || { from: todayStr(), to: loadAddDays(todayStr(), 13), dur: 120, guests: '', before: 0, after: 0, open: FT_DAY_FROM, close: FT_DAY_TO, shown: 8 };
+    if(st.from < todayStr()){ st.from = todayStr(); if(st.to < st.from) st.to = loadAddDays(st.from, 13); }
+    const wrap = document.createElement('div'); wrap.id = 'ft-popup';
+    wrap.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.4);z-index:3000;display:flex;align-items:center;justify-content:center;padding:12px;';
+    const DURS = [60,90,120,150,180,240,300];
+    wrap.innerHTML = `<div style="background:var(--white);border-radius:var(--radius);padding:16px;max-width:620px;width:100%;max-height:94vh;display:flex;flex-direction:column;">
+      <div style="display:flex;justify-content:space-between;align-items:center;"><h3 style="margin:0;">🔎 Подобрать время</h3><button class="modal-close" id="ft-x">×</button></div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;margin:10px 0 6px;align-items:flex-end;">
+        <label style="font-size:11.5px;">С<br><input type="date" id="ft-from" value="${st.from}"></label>
+        <label style="font-size:11.5px;">По<br><input type="date" id="ft-to" value="${st.to}"></label>
+        <label style="font-size:11.5px;">Длительность<br><select id="ft-dur">${DURS.map(m=>`<option value="${m}" ${st.dur===m?'selected':''}>${ftDurLabel(m)}</option>`).join('')}</select></label>
+        <label style="font-size:11.5px;">Гостей<br><input type="number" id="ft-guests" min="1" step="1" value="${st.guests||''}" style="width:70px;" placeholder="любое"></label>
+      </div>
+      <details style="margin-bottom:6px;"><summary style="cursor:pointer;font-size:12px;color:var(--ink-soft);">Дополнительно: аренда до/после, часы работы</summary>
+        <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:6px;">
+          <label style="font-size:11.5px;">Аренда до, мин<br><input type="number" id="ft-before" min="0" step="15" value="${st.before||0}" style="width:80px;"></label>
+          <label style="font-size:11.5px;">Аренда после, мин<br><input type="number" id="ft-after" min="0" step="15" value="${st.after||0}" style="width:80px;"></label>
+          <label style="font-size:11.5px;">Работаем с<br><input type="time" id="ft-open" value="${st.open}"></label>
+          <label style="font-size:11.5px;">до<br><input type="time" id="ft-close" value="${st.close}"></label>
+        </div></details>
+      <div id="ft-res" style="overflow:auto;flex:1;min-height:120px;"></div></div>`;
+    document.body.appendChild(wrap);
+    const g = id=> wrap.querySelector(id);
+    let lastSig = '';
+    const calc = (force)=>{
+      const sig = ['#ft-from','#ft-to','#ft-dur','#ft-guests','#ft-before','#ft-after','#ft-open','#ft-close'].map(id=>g(id).value).join('|') + '|' + (st.shown||8);
+      if(!force && sig === lastSig) return; lastSig = sig;
+      st.from = g('#ft-from').value || todayStr(); st.to = g('#ft-to').value || st.from; st.dur = +g('#ft-dur').value;
+      st.guests = parseInt(g('#ft-guests').value) || ''; st.before = Math.max(0, parseInt(g('#ft-before').value)||0); st.after = Math.max(0, parseInt(g('#ft-after').value)||0);
+      st.open = g('#ft-open').value || FT_DAY_FROM; st.close = g('#ft-close').value || FT_DAY_TO;
+      const need = st.before + st.dur + st.after; const fromM = timeToMinutes(st.open), toM = timeToMinutes(st.close);
+      const spaces = ftSpaces().filter(s=> !st.guests || (SPACE_CAPACITY[s.id] || 0) >= st.guests);
+      const best = ftBestSpaceId(st.guests);
+      const days = []; let d = st.from, n = 0;
+      while(d <= st.to && n < 45){
+        const per = spaces.map(s=>({ s, w: ftWindows(s.id, d, fromM, toM).filter(w=> w[1]-w[0] >= need) })).filter(x=>x.w.length);
+        if(per.length) days.push({ d, per });
+        d = loadAddDays(d, 1); n++;
+      }
+      if(!spaces.length){ g('#ft-res').innerHTML = `<div style="padding:14px;color:var(--danger);">Ни одно пространство не вмещает ${st.guests} гостей.</div>`; return; }
+      // ближайшие варианты: в подходящем по размеру пространстве, иначе в любом
+      const top = [];
+      for(const day of days){
+        const pick = day.per.find(x=>x.s.id === best) || day.per[0];
+        top.push({ d: day.d, s: pick.s, w: pick.w[0] });
+        if(top.length >= 3) break;
+      }
+      const chip = (d, s, w)=> `<button type="button" class="ft-chip" data-ftp="${d}|${s.id}|${w[0] + st.before}">${ftMinToTime(w[0])}–${ftMinToTime(w[1])}</button>`;
+      const shown = days.slice(0, st.shown || 8);
+      g('#ft-res').innerHTML = `
+        ${top.length ? `<div style="margin:6px 0 10px;"><div style="font-size:12px;color:var(--ink-soft);margin-bottom:4px;">Ближайшие варианты (${ftDurLabel(need)}${st.guests ? ', ' + st.guests + ' гост.' : ''}):</div>${top.map(t=>`<button type="button" class="btn btn-primary ft-top" data-ftp="${t.d}|${t.s.id}|${t.w[0] + st.before}" style="font-size:12.5px;padding:5px 10px;margin:0 6px 6px 0;">${ftDayLabel(t.d)} · ${ftMinToTime(t.w[0] + st.before)} · ${escapeHtml(t.s.name)}</button>`).join('')}</div>` : ''}
+        ${days.length ? shown.map(day=>`<div style="border-top:1px solid var(--line);padding:6px 0;"><div style="font-weight:700;font-size:13px;">${ftDayLabel(day.d)} <span style="font-weight:400;color:var(--ink-soft);font-size:11.5px;">свободно: ${day.per.length} из ${spaces.length}</span></div>
+          ${day.per.map(x=>`<div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center;margin:3px 0;font-size:12.5px;"><span style="min-width:120px;">${x.s.id === best ? '★ ' : ''}${escapeHtml(x.s.name)} <span style="color:var(--ink-soft);font-size:11px;">до ${SPACE_CAPACITY[x.s.id]}</span></span>${x.w.map(w=>chip(day.d, x.s, w)).join('')}</div>`).join('')}</div>`).join('')
+          + (days.length > shown.length ? `<button class="btn btn-ghost" id="ft-more" style="margin:6px 0;">Показать ещё (${days.length - shown.length} дн.)</button>` : '')
+        : `<div style="padding:14px;color:var(--ink-soft);">В этом периоде нет окон на ${ftDurLabel(need)}. Расширьте даты или уменьшите длительность.</div>`}
+        <div style="font-size:11px;color:var(--ink-soft);margin-top:6px;">★ — подходящее по размеру пространство. Учтён перерыв ${MIN_GAP_MINUTES} мин между мероприятиями. Нажмите на время — откроется новое мероприятие с готовыми датой, временем и пространством.</div>`;
+      wrap.querySelectorAll('[data-ftp]').forEach(b=> b.onclick = ()=>{ const [dd, sp, s0] = b.dataset.ftp.split('|'); wrap.remove(); ftCreateEvent({ date:dd, spaceId:sp, start:+s0, duration: st.dur, guests: st.guests || null, before: st.before, after: st.after }); });
+      const more = g('#ft-more'); if(more) more.onclick = ()=>{ st.shown = (st.shown||8) + 8; calc(true); };
+    };
+    ['#ft-from','#ft-to','#ft-dur','#ft-guests','#ft-before','#ft-after','#ft-open','#ft-close'].forEach(id=>{ const el = g(id); const h = ()=>{ if(st.shown !== 8 && el.dataset.k !== el.value){ st.shown = 8; } el.dataset.k = el.value; calc(); }; el.addEventListener('input', h); el.addEventListener('change', h); });
+    g('#ft-x').onclick = ()=> wrap.remove();
+    wrap.addEventListener('click', (e)=>{ if(e.target === wrap) wrap.remove(); });
+    calc();
+  }
+
+  // ===================== День на весь экран (без прокрутки) =====================
+  function dayScreenOn(){
+    if(!state.currentRole || state.currentRole === 'master') return false;
+    if(state.dayMode === undefined){ try{ state.dayMode = localStorage.getItem('sp-day-mode') || 'screen'; }catch(e){ state.dayMode = 'screen'; } }
+    return state.dayMode !== 'list';
+  }
+  function dayLayout(){
+    if(state.dayLayout === undefined){ try{ state.dayLayout = localStorage.getItem('sp-day-layout') || 'cards'; }catch(e){ state.dayLayout = 'cards'; } }
+    return state.dayLayout === 'timeline' ? 'timeline' : 'cards';
+  }
+  function setDayLayout(m){ state.dayLayout = m; try{ localStorage.setItem('sp-day-layout', m); }catch(e){} }
+  function dsCardHtml(e, warn, fs, spaceTag){
+    const remainder = roleCanSeeGuestBalances(state.currentRole) ? eventRemainderTotal(e) : 0;
+    const fill = scheduleFillText(e);
+    const w = warn[e.id];
+    const gTxt = fill ? ' · 👤 ' + fill : ((e.guests !== undefined && e.guests !== null && e.guests !== '') ? ' · 👤 ' + e.guests : '');
+    const hostLine = allHostNamesDisplay(e) + (e.product ? ' · ' + e.product : '') + (showsDishesAndRental(e.status) && e.dishes ? ' · 🍽 ' + (e.dishes === 'needed' ? 'нужна посуда' : 'без посуды') : '');
+    const priv = isPrivateEventStatus(e.status);
+    const tip = [e.title, e.notes, e.foodInfo, e.ageCategory].filter(Boolean).join('\n');
+    return `<div class="ds-card" data-eid="${escapeHtml(e.id)}" title="${escapeHtml(tip)}" style="font-size:${fs}px;border-left:4px solid ${statusColor(e.status)};">
+      <div class="ds-card-main">
+        <div class="ds-ct">${spaceTag || ''}<b>${escapeHtml(e.time || '')}</b>${e.duration ? ' · ' + escapeHtml(formatDuration(e.duration)) : ''}${escapeHtml(gTxt)}</div>
+        <div class="ds-ctitle">${escapeHtml(e.title || '')}</div>
+        <div class="ds-ch">${isPrivateWithoutHost(e) ? '<span style="color:var(--danger);">без ведущего</span>' : escapeHtml(hostLine)}${isPrivateWithoutHost(e) && (e.product || '') ? ' · ' + escapeHtml(e.product) : ''}${escapeHtml(rentalSuffix(e))}${legalSuffix(e)}</div>
+        ${priv && e.ageCategory ? `<div class="ds-cn">🎂 ${escapeHtml(e.ageCategory)}</div>` : ''}
+        ${priv && e.foodInfo ? `<div class="ds-cn">🍕 ${escapeHtml(e.foodInfo)}</div>` : ''}
+        ${e.notes ? `<div class="ds-cn">💬 ${escapeHtml(e.notes)}</div>` : ''}
+        ${w ? `<div class="ds-cn" style="color:var(--danger);">⚠ ${w.gap < 0 ? 'наложение ' + Math.abs(w.gap) + ' мин' : 'перерыв ' + w.gap + ' мин'}</div>` : ''}
+        ${remainder > 0 ? `<div class="ds-cn" style="color:var(--status-red);-webkit-line-clamp:1;">💳 Остаток: ${escapeHtml(formatMoney(remainder))}</div>` : ''}
+      </div>
+      <div class="ds-cbtn"><button class="quick-host-btn" data-eid="${escapeHtml(e.id)}" title="Сменить мастера (без кода)">✎ мастер</button>${isMyEventForReport(e) ? `<button class="quick-report-btn" data-eid="${escapeHtml(e.id)}">📝 ${hasMasterReport(e) ? 'отчёт ✓' : 'отчёт'}</button>` : ''}</div>
+    </div>`;
+  }
+  function setDayMode(m){ state.dayMode = m; try{ localStorage.setItem('sp-day-mode', m); }catch(e){} }
+  function dsIsMobile(){ return window.innerWidth <= 700; }
+  let dsLastMobile = null;
+  window.addEventListener('resize', ()=>{
+    const m = dsIsMobile(); if(dsLastMobile === null){ dsLastMobile = m; return; }
+    if(m !== dsLastMobile){ dsLastMobile = m; if(state.modal && state.modal.type === 'day' && dayScreenOn()) render(); }
+  });
+  function renderDayScreenMobile(ds){
+    dsLastMobile = true;
+    const d = parseDate(ds);
+    const dLabel = d.toLocaleDateString('ru-RU', {weekday:'short', day:'numeric', month:'long'});
+    const spaces = ftSpaces(); const sel = state.dsMobSpace || 'all';
+    const showSp = spaces.filter(s=> sel === 'all' || s.id === sel);
+    const dayEvs = state.events.filter(e=> e.date === ds && e.status !== 'cancelled' && e.time);
+    const list = dayEvs.filter(e=> sel === 'all' ? true : e.spaceId === sel).sort((a,b)=> timeToMinutes(a.time) - timeToMinutes(b.time));
+    const warn = {}; spaces.forEach(s=> Object.assign(warn, computeGapWarnings(dayEvs.filter(e=>e.spaceId === s.id))));
+    const guests = dayEvs.reduce((s,e)=> s + (Number(e.guests)||0), 0);
+    const showMoney = ['owner','admin','assistant','manager'].includes(state.currentRole);
+    const revenue = dayEvs.reduce((s,e)=> s + (Number(e.price)||0), 0);
+    const noHost = dayEvs.filter(e=> isPrivateWithoutHost(e)).length;
+    const mgr = managerForDate(ds);
+    const fs = list.length <= 5 ? 14 : (list.length <= 8 ? 13 : 12);
+    const tag = e=> { const sp = getSpace(e.spaceId); return sel === 'all' && sp ? `<span style="font-size:.85em;background:var(--paper-2);border-radius:8px;padding:0 6px;margin-right:5px;">${escapeHtml(sp.name)}</span>` : ''; };
+    const free = showSp.map(s=>{ const w = ftWindows(s.id, ds, 10*60, 22*60).filter(x=> x[1]-x[0] >= 60); return `<div style="margin:3px 0;font-size:12.5px;"><b>${escapeHtml(s.name)}</b> ${w.length ? w.map(x=>`<button type="button" class="ft-chip" data-dsfree="${s.id}|${x[0]}|${x[1]-x[0]}" style="padding:5px 10px;margin:2px 3px 2px 0;">${ftMinToTime(x[0])}–${ftMinToTime(x[1])}</button>`).join('') : '<span style="color:var(--ink-soft);">занято</span>'}</div>`; }).join('');
+    return `<style>
+      .day-screen{ background:var(--white); border-radius:var(--radius); width:100%; height:calc(100vh - 16px); height:calc(100dvh - 16px); display:flex; flex-direction:column; padding:8px 10px; box-sizing:border-box; }
+      .dsm-top{ display:flex; align-items:center; gap:6px; } .dsm-top h3{ margin:0; font-size:17px; flex:1; text-align:center; text-transform:capitalize; }
+      .dsm-top .btn{ min-width:40px; min-height:38px; padding:4px 10px; }
+      .dsm-chips{ display:flex; gap:6px; overflow-x:auto; padding:6px 0; flex-shrink:0; } .dsm-chips .btn{ white-space:nowrap; padding:5px 12px; flex-shrink:0; }
+      .dsm-list{ flex:1; min-height:0; overflow-y:auto; display:flex; flex-direction:column; gap:6px; -webkit-overflow-scrolling:touch; }
+      .ds-card{ flex:0 0 auto; background:var(--white); border:1px solid var(--line-strong); border-radius:8px; padding:8px 10px; display:flex; gap:8px; justify-content:space-between; align-items:flex-start; line-height:1.3; box-shadow:0 1px 2px rgba(0,0,0,.1); }
+      .ds-card-main{ min-width:0; flex:1; } .ds-ct{ font-family:var(--font-mono); } .ds-ctitle{ font-weight:700; } .ds-ch{ color:var(--ink-soft); font-size:.9em; } .ds-cn{ font-size:.9em; display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; overflow:hidden; }
+      .ds-cbtn{ display:flex; flex-direction:column; gap:4px; flex-shrink:0; } .ds-cbtn button{ font-size:.85em; padding:5px 8px; border:1px solid var(--line-strong); background:var(--white); border-radius:6px; }
+      .dsm-free{ flex-shrink:0; border-top:1px solid var(--line); padding-top:6px; margin-top:6px; max-height:34%; overflow-y:auto; }
+    </style>
+    <div class="day-screen">
+      <div class="dsm-top"><button class="btn btn-ghost" data-dsnav="-1">‹</button><h3 data-dsnav="today">${escapeHtml(dLabel)}</h3><button class="btn btn-ghost" data-dsnav="1">›</button><button class="modal-close">×</button></div>
+      <div class="ds-sum" style="text-align:center;font-size:12px;color:var(--ink-soft);">${dayEvs.length} мер. · 👥 ${guests}${showMoney ? ' · ' + escapeHtml(formatMoney(revenue)) : ''}${mgr ? ' · ' + escapeHtml(mgr) : ''}${noHost ? ' · <span style="color:var(--danger);">без вед.: ' + noHost + '</span>' : ''}</div>
+      <div style="display:flex;gap:6px;margin:6px 0 0;"><button class="btn btn-primary" id="ds-find" style="flex:2;">🔎 Подобрать время</button>${state.currentRole !== 'hostess' ? '<button class="btn btn-ghost" id="ds-add" style="flex:1;">＋ новое</button>' : ''}<button class="btn btn-ghost" id="ds-list" style="flex:1;" title="Список с деталями">📋 список</button></div>
+      <div class="dsm-chips"><button class="btn ${sel==='all'?'btn-primary':'btn-ghost'}" data-dsm="all">Все</button>${spaces.map(s=>`<button class="btn ${sel===s.id?'btn-primary':'btn-ghost'}" data-dsm="${s.id}">${escapeHtml(s.name)}</button>`).join('')}</div>
+      <div class="dsm-list">${list.length ? list.map(e=> dsCardHtml(e, warn, fs, tag(e))).join('') : '<div style="padding:16px;color:var(--ink-soft);text-align:center;">В этот день мероприятий нет</div>'}</div>
+      <div class="dsm-free"><div style="font-size:12px;color:var(--ink-soft);">🟢 Свободно — нажмите, чтобы создать мероприятие</div>${free}</div>
+    </div>`;
+  }
+  function renderDayScreen(ds){
+    if(dsIsMobile()) return renderDayScreenMobile(ds);
+    dsLastMobile = false;
+    const d = parseDate(ds);
+    const dLabel = d.toLocaleDateString('ru-RU', {weekday:'long', day:'numeric', month:'long'});
+    const spaces = ftSpaces();
+    const dayEvs = state.events.filter(e=> e.date === ds && e.status !== 'cancelled' && e.time);
+    const offsite = dayEvs.filter(e=> e.spaceId === 's5');
+    const inSpaces = dayEvs.filter(e=> spaces.some(s=>s.id === e.spaceId));
+    let t0 = 10*60, t1 = 22*60;
+    inSpaces.forEach(e=>{ t0 = Math.min(t0, Math.floor(effectiveStart(e)/60)*60); t1 = Math.max(t1, Math.ceil(effectiveEnd(e)/60)*60); });
+    t0 = Math.max(0, t0); t1 = Math.min(24*60, t1); const span = t1 - t0;
+    const pct = m => ((m - t0) / span * 100);
+    const showMoney = ['owner','admin','assistant','manager'].includes(state.currentRole);
+    const revenue = dayEvs.reduce((s,e)=> s + (Number(e.price)||0), 0);
+    const guests = dayEvs.reduce((s,e)=> s + (Number(e.guests)||0), 0);
+    const noHost = dayEvs.filter(e=> isPrivateWithoutHost(e)).length;
+    const proposals = state.events.filter(e=> e.date === ds && isUnassignedSlotProposal(e)).length;
+    const mgr = managerForDate(ds);
+    const hours = []; for(let m = t0; m <= t1; m += 60) hours.push(m);
+    const layout = dayLayout();
+    const cols = spaces.map(s=>{
+      const evs = inSpaces.filter(e=> e.spaceId === s.id).sort((a,b)=> effectiveStart(a) - effectiveStart(b));
+      const warn = computeGapWarnings(evs);
+      // дорожки для пересекающихся мероприятий
+      const lanes = []; const info = new Map(); let cluster = [], clusterEnd = -1;
+      const flush = ()=>{ const n = Math.max(1, ...cluster.map(x=>info.get(x.id).lane + 1)); cluster.forEach(x=> info.get(x.id).n = n); cluster = []; };
+      evs.forEach(e=>{
+        const st = effectiveStart(e), en = effectiveEnd(e);
+        if(cluster.length && st >= clusterEnd){ flush(); lanes.length = 0; clusterEnd = -1; }
+        let ln = lanes.findIndex(le => le <= st); if(ln < 0){ ln = lanes.length; lanes.push(0); }
+        lanes[ln] = en; info.set(e.id, { lane: ln, n: 1 }); cluster.push(e); clusterEnd = Math.max(clusterEnd, en);
+      });
+      if(cluster.length) flush();
+      const free = ftWindows(s.id, ds, t0, t1).filter(w=> w[1]-w[0] >= 60);
+      if(layout === 'cards'){
+        const items = evs.map(e=>({ t: effectiveStart(e), ev: e })).concat(free.map(w=>({ t: w[0], free: w })));
+        items.sort((a,b)=> a.t - b.t);
+        const n = evs.length; const fs = n <= 3 ? 13 : (n <= 5 ? 12 : (n <= 7 ? 11 : 10));
+        const body = items.length ? items.map(it=> it.ev ? dsCardHtml(it.ev, warn, fs) : `<div class="ds-free-strip" data-dsfree="${s.id}|${it.free[0]}|${it.free[1]-it.free[0]}">🟢 свободно ${ftMinToTime(it.free[0])}–${ftMinToTime(it.free[1])}</div>`).join('') : '<div class="ds-free-strip" data-dsfree="' + s.id + '|' + t0 + '|' + (t1 - t0) + '">🟢 свободно весь день</div>';
+        return `<div class="ds-col"><div class="ds-colhead"><b>${escapeHtml(s.name)}</b> <span>до ${SPACE_CAPACITY[s.id] || '?'} · ${evs.length ? evs.length + ' мер.' : 'пусто'}</span></div><div class="ds-cards">${body}</div></div>`;
+      }
+      const evHtml = evs.map(e=>{
+        const st = timeToMinutes(e.time), en = st + (Number(e.duration)||60); const inf = info.get(e.id);
+        const col = statusColor(e.status || 'confirmed');
+        const rb = Number(e.rentalBefore)||0, ra = Number(e.rentalAfter)||0;
+        const hatch = (a,b)=> `<div style="position:absolute;left:0;right:0;top:${pct(a)}%;height:${(b-a)/span*100}%;background:repeating-linear-gradient(45deg,rgba(0,0,0,.08),rgba(0,0,0,.08) 4px,transparent 4px,transparent 8px);pointer-events:none;"></div>`;
+        const conflict = inf.n > 1;
+        return (rb ? hatch(st - rb, st) : '') + (ra ? hatch(en, en + ra) : '') + `<div class="ds-evt" data-eid="${escapeHtml(e.id)}" title="${escapeHtml((e.title||e.product||'') + ' · ' + e.time + ' · ' + (STATUS_LABEL[e.status||'confirmed']||''))}" style="top:${pct(st)}%;height:${(en-st)/span*100}%;left:${inf.lane/inf.n*100}%;width:${100/inf.n}%;border-left:4px solid ${col};${conflict ? 'outline:2px solid var(--danger);' : ''}">
+          <div class="ds-t"><b>${escapeHtml(e.time)}–${ftMinToTime(en)}</b> ${escapeHtml(e.title || e.product || '')}</div>
+          <div class="ds-s">${(e.host||'').trim() ? escapeHtml(e.host) : (isPrivateWithoutHost(e) ? '<span style="color:var(--danger);">без ведущего</span>' : '')}${Number(e.guests) ? ' · 👥 ' + Number(e.guests) : ''}${warn[e.id] ? ' · <span style="color:var(--danger);">⚠ перерыв ' + Math.max(0, warn[e.id].gap) + ' мин</span>' : ''}</div></div>`;
+      }).join('');
+      const freeHtml = free.map(w=> `<div class="ds-free" data-dsfree="${s.id}|${w[0]}|${w[1]-w[0]}" style="top:${pct(w[0])}%;height:${(w[1]-w[0])/span*100}%;" title="Создать мероприятие в это время">свободно ${ftMinToTime(w[0])}–${ftMinToTime(w[1])}</div>`).join('');
+      return `<div class="ds-col"><div class="ds-colhead"><b>${escapeHtml(s.name)}</b> <span>до ${SPACE_CAPACITY[s.id] || '?'} · ${evs.length ? evs.length + ' мер.' : 'пусто'}</span></div>
+        <div class="ds-colbody">${hours.map(m=>`<div class="ds-hline" style="top:${pct(m)}%;"></div>`).join('')}${freeHtml}${evHtml}</div></div>`;
+    }).join('');
+    return `<style>
+      .day-screen{ background:var(--white); border-radius:var(--radius); width:100%; height:calc(100vh - 16px); display:flex; flex-direction:column; padding:10px 12px; box-sizing:border-box; }
+      .ds-head{ display:flex; gap:8px; align-items:center; flex-wrap:wrap; margin-bottom:6px; }
+      .ds-head h3{ margin:0; text-transform:capitalize; font-size:18px; }
+      .ds-sum{ font-size:12.5px; color:var(--ink-soft); }
+      .ds-grid{ flex:1; min-height:0; display:grid; grid-template-columns:${layout==='cards' ? '' : '42px '}repeat(${Math.max(1,spaces.length)}, minmax(0,1fr)); gap:0 6px; }
+      .ds-cards{ flex:1; min-height:0; display:flex; flex-direction:column; gap:4px; overflow:hidden; }
+      .ds-card{ flex:0 1 auto; min-height:0; overflow:hidden; background:var(--white); border:1px solid var(--line-strong); border-radius:6px; padding:5px 7px; display:flex; gap:6px; justify-content:space-between; align-items:flex-start; cursor:pointer; line-height:1.28; box-shadow:0 1px 2px rgba(0,0,0,.1); }
+      .ds-card:hover{ box-shadow:0 2px 8px rgba(0,0,0,.25); }
+      .ds-card-main{ min-width:0; flex:1; } .ds-ct{ font-family:var(--font-mono); } .ds-ctitle{ font-weight:700; }
+      .ds-ch{ color:var(--ink-soft); font-size:.9em; } .ds-cn{ font-size:.9em; display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; overflow:hidden; }
+      .ds-cbtn{ display:flex; flex-direction:column; gap:3px; flex-shrink:0; } .ds-cbtn button{ font-size:.85em; padding:2px 6px; border:1px solid var(--line-strong); background:var(--white); border-radius:5px; cursor:pointer; }
+      .ds-free-strip{ flex:0 0 auto; border:1px dashed #3F8F6B; background:rgba(63,143,107,.10); color:#2d6b4f; border-radius:5px; font-size:12px; padding:3px 7px; cursor:pointer; }
+      .ds-free-strip:hover{ background:rgba(63,143,107,.28); }
+      .ds-axis{ position:relative; margin-top:26px; }
+      .ds-axis span{ position:absolute; right:4px; transform:translateY(-50%); font-size:11px; color:var(--ink-soft); font-family:var(--font-mono); }
+      .ds-col{ display:flex; flex-direction:column; min-height:0; }
+      .ds-colhead{ height:26px; font-size:12.5px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; } .ds-colhead span{ font-size:11px; color:var(--ink-soft); }
+      .ds-colbody{ position:relative; flex:1; min-height:0; border:1px solid var(--line); border-radius:6px; background:var(--paper); overflow:hidden; }
+      .ds-hline{ position:absolute; left:0; right:0; border-top:1px solid var(--line); opacity:.7; pointer-events:none; }
+      .ds-free{ position:absolute; left:3px; right:3px; border:1px dashed #3F8F6B; background:rgba(63,143,107,.10); color:#2d6b4f; border-radius:5px; font-size:11.5px; padding:3px 6px; cursor:pointer; box-sizing:border-box; overflow:hidden; }
+      .ds-free:hover{ background:rgba(63,143,107,.28); }
+      .ds-evt{ position:absolute; background:var(--white); border:1px solid var(--line-strong); border-radius:5px; padding:3px 6px; font-size:12px; line-height:1.25; cursor:pointer; box-sizing:border-box; overflow:hidden; z-index:2; box-shadow:0 1px 3px rgba(0,0,0,.12); }
+      .ds-evt:hover{ box-shadow:0 2px 8px rgba(0,0,0,.25); }
+      .ds-evt .ds-s{ font-size:11px; color:var(--ink-soft); }
+      ${layout==='cards' ? `@media (max-width:700px){ .ds-grid{ overflow-x:auto; grid-template-columns:repeat(${Math.max(1,spaces.length)}, 230px) !important; } }` : ''}
+      @media (max-width:700px){ .ds-evt{ font-size:10.5px; padding:2px 3px; } .ds-evt .ds-s{ display:none; } .ds-grid{ grid-template-columns:32px repeat(${Math.max(1,spaces.length)}, minmax(0,1fr)); gap:0 3px; } .ds-free{ font-size:10px; padding:2px; } }
+    </style>
+    <div class="day-screen">
+      <div class="ds-head">
+        <button class="btn btn-ghost" data-dsnav="-1" title="Предыдущий день">‹</button>
+        <h3>${escapeHtml(dLabel)}</h3>
+        <button class="btn btn-ghost" data-dsnav="1" title="Следующий день">›</button>
+        <button class="btn btn-ghost" data-dsnav="today">сегодня</button>
+        <span class="ds-sum">${dayEvs.length} мер. · 👥 ${guests}${showMoney ? ' · ' + escapeHtml(formatMoney(revenue)) : ''}${mgr ? ' · менеджер: ' + escapeHtml(mgr) : ''}</span>
+        ${noHost ? `<span style="color:var(--danger);font-size:12.5px;">⚠ без ведущего: ${noHost}</span>` : ''}
+        ${proposals ? `<span style="color:var(--status-cyan);font-size:12.5px;">🙋 слотов от мастеров: ${proposals}</span>` : ''}
+        <span style="flex:1;"></span>
+        <span style="display:inline-flex;gap:0;"><button class="btn ${layout==='cards'?'btn-primary':'btn-ghost'}" data-dslayout="cards" title="Полная информация о каждом мероприятии">Карточки</button><button class="btn ${layout==='timeline'?'btn-primary':'btn-ghost'}" data-dslayout="timeline" title="Время по вертикали, свободные окна по размеру">Шкала</button></span>
+        <button class="btn btn-primary" id="ds-find">🔎 Подобрать время</button>
+        ${state.currentRole !== 'hostess' ? '<button class="btn btn-ghost" id="ds-add">+ мероприятие</button>' : ''}
+        <button class="btn btn-ghost" id="ds-list" title="Список мероприятий с деталями, сменами, мастерами">📋 Список с деталями</button>
+        <button class="modal-close">×</button>
+      </div>
+      ${offsite.length ? `<div style="font-size:12px;margin-bottom:4px;">🚐 Выезд: ${offsite.map(e=>`<button type="button" class="ft-chip ds-off" data-eid="${escapeHtml(e.id)}">${escapeHtml(e.time)} ${escapeHtml(e.title||'')}</button>`).join(' ')}</div>` : ''}
+      <div class="ds-grid">
+        ${layout === 'cards' ? '' : `<div class="ds-axis">${hours.map(m=>`<span style="top:${pct(m)}%;">${String(m/60).padStart(2,'0')}:00</span>`).join('')}</div>`}
+        ${cols}
+      </div>
+    </div>`;
+  }
+  function attachDayScreen(overlay, ds){
+    overlay.style.padding = '8px';
+    const openEv = (id)=>{ const e = state.events.find(x=>x.id === id); if(!e) return; requireUnlock(()=>{ state.modal = {type:'event', event:{...e}, isNew:false, keepAll: state.activeSpaceId === 'all'}; render(); }); };
+    overlay.querySelectorAll('.ds-evt, .ds-off, .ds-card').forEach(b=> b.onclick = (ev)=>{ if(ev.target.closest('button') && !b.classList.contains('ds-off')) return; openEv(b.dataset.eid); });
+    overlay.querySelectorAll('[data-dslayout]').forEach(b=> b.onclick = ()=>{ setDayLayout(b.dataset.dslayout); render(); });
+    overlay.querySelectorAll('.quick-host-btn').forEach(btn=> btn.onclick = (ev)=>{ ev.stopPropagation(); const e = state.events.find(x=>x.id===btn.dataset.eid); if(!e) return; overlay.remove(); state.modal = {type:'quick-host', event:{...e}, keepAll: state.activeSpaceId==='all'}; render(); });
+    overlay.querySelectorAll('.quick-report-btn').forEach(btn=> btn.onclick = (ev)=>{ ev.stopPropagation(); const e = state.events.find(x=>x.id===btn.dataset.eid); if(!e || !isMyEventForReport(e)) return; overlay.remove(); state.modal = {type:'quick-report', event:{...e}, keepAll: state.activeSpaceId==='all'}; render(); });
+    overlay.querySelectorAll('[data-dsfree]').forEach(b=> b.onclick = ()=>{
+      if(state.currentRole === 'hostess') return;
+      const [sp, st, len] = b.dataset.dsfree.split('|'); ftCreateEvent({ date: ds, spaceId: sp, start: +st, duration: Math.min(+len, 120) });
+    });
+    overlay.querySelectorAll('[data-dsnav]').forEach(b=> b.onclick = ()=>{
+      const v = b.dataset.dsnav; const nd = v === 'today' ? todayStr() : loadAddDays(ds, +v);
+      state.modal = {type:'day', date: nd}; render();
+    });
+    overlay.querySelectorAll('[data-dsm]').forEach(b=> b.onclick = ()=>{ state.dsMobSpace = b.dataset.dsm; render(); });
+    const f = overlay.querySelector('#ds-find'); if(f) f.onclick = ()=> openFreeTimePopup();
+    const l = overlay.querySelector('#ds-list'); if(l) l.onclick = ()=>{ setDayMode('list'); render(); };
+    const a = overlay.querySelector('#ds-add'); if(a) a.onclick = ()=> ftCreateEvent({ date: ds, spaceId: state.activeSpaceId === 'all' ? ftSpaces()[0].id : state.activeSpaceId, start: 10*60, duration: 60 });
   }
 
   function crmLeadState(lead){
@@ -15518,6 +15842,7 @@
     const hostFilter = document.getElementById('cal-filter-host');
     if(dirFilter) dirFilter.onchange = ()=>{ state.calFilterDirection = dirFilter.value; render(); };
     if(hostFilter) hostFilter.onchange = ()=>{ state.calFilterHost = hostFilter.value; render(); };
+    const findSlot = document.getElementById('btn-find-slot'); if(findSlot) findSlot.onclick = ()=> openFreeTimePopup();
     const filterReset = document.getElementById('cal-filter-reset');
     if(filterReset) filterReset.onclick = ()=>{ state.calFilterDirection = ''; state.calFilterHost = ''; state.calFilterKind = ''; render(); };
     const kindSel = document.getElementById('cal-filter-kind');
@@ -23900,6 +24225,7 @@
   }
 
   function renderDayModal(dateStr){
+    if(dayScreenOn()) return renderDayScreen(dateStr);
     const d = parseDate(dateStr);
     const dLabel = d.toLocaleDateString('ru-RU', {weekday:'long', day:'numeric', month:'long'});
     const isAll = state.activeSpaceId === 'all';
@@ -23925,6 +24251,7 @@
       <div class="modal">
         <div class="modal-head">
           <h3 style="text-transform:capitalize">${dLabel}</h3>
+          ${state.currentRole !== 'master' ? '<button type="button" class="btn btn-ghost" id="ds-screen" style="margin-left:auto;margin-right:8px;font-size:12.5px;">⛶ Весь день на экране</button>' : ''}
           <button class="modal-close">×</button>
         </div>
         <div class="modal-body">
@@ -23996,6 +24323,7 @@
               </div>
             </div>
           `;}).join('') : `<div style="color:var(--ink-soft);font-size:13.5px;">На этот день пока ничего не запланировано</div>`}
+          ${ftDayHtml(dateStr)}
           ${state.currentRole === 'hostess' ? '' : state.currentRole !== 'master' ? `<button class="add-evt-btn" id="btn-add-evt">+ добавить мероприятие</button>` : `<button class="add-evt-btn" id="btn-add-slot">+ добавить слот</button>`}
         </div>
       </div>
@@ -24003,6 +24331,7 @@
   }
 
   function attachDayModalEvents(overlay, dateStr){
+    if(overlay.querySelector('.day-screen')){ attachDayScreen(overlay, dateStr); return; }
     overlay.querySelectorAll('.shift-edit-btn').forEach(btn=>{
       btn.onclick = (ev)=>{
         ev.stopPropagation();
@@ -24133,6 +24462,8 @@
         render();
       };
     });
+    attachFtDay(overlay, dateStr);
+    const dsScreenBtn = overlay.querySelector('#ds-screen'); if(dsScreenBtn) dsScreenBtn.onclick = ()=>{ setDayMode('screen'); render(); };
     const addBtn = overlay.querySelector('#btn-add-evt');
     if(addBtn) addBtn.onclick = ()=>{
       const defaultSpaceId = state.activeSpaceId === 'all' ? state.spaces[0].id : state.activeSpaceId;
