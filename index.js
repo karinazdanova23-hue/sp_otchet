@@ -460,6 +460,39 @@ app.get('/api/backup/snapshots/:slot', async (req, res) => {
   }
 });
 
+// сжатие главной страницы: index.html весит ~2,8 МБ, в gzip — в 4–5 раз меньше. Отдаём заранее сжатую копию
+// (делается один раз и пересоздаётся, если файл изменился) + ETag, чтобы браузер мог получить «304 не изменилось».
+const zlib = require('zlib');
+const fsSync = require('fs');
+let _idxCache = { mtime: 0, raw: null, gz: null, etag: '' };
+function loadIndexCache() {
+  const file = path.join(__dirname, 'public', 'index.html');
+  const st = fsSync.statSync(file);
+  if (st.mtimeMs !== _idxCache.mtime) {
+    const raw = fsSync.readFileSync(file);
+    _idxCache = { mtime: st.mtimeMs, raw, gz: zlib.gzipSync(raw, { level: 9 }), etag: '"' + crypto.createHash('md5').update(raw).digest('hex') + '"' };
+  }
+  return _idxCache;
+}
+function serveIndex(req, res) {
+  try {
+    const c = loadIndexCache();
+    res.setHeader('Content-Type', 'text/html; charset=utf-8');
+    res.setHeader('Cache-Control', 'no-cache');
+    res.setHeader('ETag', c.etag);
+    res.setHeader('Vary', 'Accept-Encoding');
+    if (req.headers['if-none-match'] === c.etag) return res.status(304).end();
+    if (/\bgzip\b/.test(req.headers['accept-encoding'] || '')) {
+      res.setHeader('Content-Encoding', 'gzip');
+      return res.end(c.gz);
+    }
+    return res.end(c.raw);
+  } catch (e) {
+    return res.sendFile(path.join(__dirname, 'public', 'index.html'));
+  }
+}
+app.get(['/', '/index.html'], serveIndex);
+
 // статический фронтенд
 app.use(express.static(path.join(__dirname, 'public'), {
   setHeaders: (res, filePath) => {
@@ -470,10 +503,7 @@ app.use(express.static(path.join(__dirname, 'public'), {
     }
   },
 }));
-app.get('*', (req, res) => {
-  res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
-  res.sendFile(path.join(__dirname, 'public', 'index.html'));
-});
+app.get('*', (req, res) => serveIndex(req, res));
 
 app.listen(PORT, () => {
   console.log(`Сервер запущен на порту ${PORT}`);
