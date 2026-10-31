@@ -10625,6 +10625,15 @@
     return state.dayLayout === 'timeline' ? 'timeline' : 'cards';
   }
   function setDayLayout(m){ state.dayLayout = m; try{ localStorage.setItem('sp-day-layout', m); }catch(e){} }
+  // разбивка по времени, если у мероприятия есть аренда до/после: «14:30–15:00 аренда · 15:00–17:00 мастер-класс · 17:00–18:00 аренда»
+  function dsRentalHtml(e){
+    const rb = Number(e.rentalBefore) || 0, ra = Number(e.rentalAfter) || 0;
+    if(!(rb > 0 || ra > 0) || !e.time) return '';
+    const st = timeToMinutes(e.time), en = st + (Number(e.duration) || 0);
+    const rent = (a,b)=> `<span style="background:#FFF1CC;border:1px solid #E8B84B;border-radius:4px;padding:0 4px;white-space:nowrap;">${ftMinToTime(a)}–${ftMinToTime(b)} аренда ${escapeHtml(formatDuration(b-a))}</span>`;
+    const main = `<span style="background:#E4F1E8;border:1px solid #3F8F6B;border-radius:4px;padding:0 4px;white-space:nowrap;"><b>${ftMinToTime(st)}–${ftMinToTime(en)}</b> ${escapeHtml((e.product || 'мероприятие').toLowerCase())} ${escapeHtml(formatDuration(en-st))}</span>`;
+    return `<div style="display:flex;flex-direction:column;align-items:flex-start;gap:2px;margin:3px 0;font-size:.88em;">${rb > 0 ? rent(st-rb, st) : ''}${main}${ra > 0 ? rent(en, en+ra) : ''}</div>`;
+  }
   function dsCardHtml(e, warn, fs, spaceTag){
     const remainder = roleCanSeeGuestBalances(state.currentRole) ? eventRemainderTotal(e) : 0;
     const fill = scheduleFillText(e);
@@ -10632,15 +10641,18 @@
     const gTxt = fill ? ' · 👤 ' + fill : ((e.guests !== undefined && e.guests !== null && e.guests !== '') ? ' · 👤 ' + e.guests : '');
     const hostLine = allHostNamesDisplay(e) + (e.product ? ' · ' + e.product : '') + (showsDishesAndRental(e.status) && e.dishes ? ' · 🍽 ' + (e.dishes === 'needed' ? 'нужна посуда' : 'без посуды') : '');
     const priv = isPrivateEventStatus(e.status);
-    const tip = [e.title, e.notes, e.foodInfo, e.ageCategory].filter(Boolean).join('\n');
-    return `<div class="ds-card" data-eid="${escapeHtml(e.id)}" title="${escapeHtml(tip)}" style="font-size:${fs}px;border-left:4px solid ${statusColor(e.status)};">
+    const _gn = guestNamesText(e) || ((e.guestName||'').trim());
+    const tip = [e.title, _gn ? 'Гости: ' + _gn : '', e.notes, e.foodInfo, e.ageCategory].filter(Boolean).join('\n');
+    return `<div class="ds-card" data-eid="${escapeHtml(e.id)}" data-tdate="${escapeHtml(e.date||'')}" data-tst="${timeToMinutes(e.time)}" data-ten="${timeToMinutes(e.time) + (Number(e.duration)||0)}" title="${escapeHtml(tip)}" style="font-size:${fs}px;border-left:4px solid ${statusColor(e.status)};">
       <div class="ds-card-main">
         <div class="ds-ct">${spaceTag || ''}<b>${escapeHtml(e.time || '')}</b>${e.duration ? ' · ' + escapeHtml(formatDuration(e.duration)) : ''}${escapeHtml(gTxt)}</div>
         <div class="ds-ctitle">${escapeHtml(e.title || '')}</div>
-        <div class="ds-ch">${isPrivateWithoutHost(e) ? '<span style="color:var(--danger);">без ведущего</span>' : escapeHtml(hostLine)}${isPrivateWithoutHost(e) && (e.product || '') ? ' · ' + escapeHtml(e.product) : ''}${escapeHtml(rentalSuffix(e))}${legalSuffix(e)}</div>
+        <div class="ds-ch">${isPrivateWithoutHost(e) ? '<span style="color:var(--danger);">без ведущего</span>' : escapeHtml(hostLine)}${isPrivateWithoutHost(e) && (e.product || '') ? ' · ' + escapeHtml(e.product) : ''}${legalSuffix(e)}</div>
+        ${dsRentalHtml(e)}
+        ${_gn ? `<div class="ds-cn" style="-webkit-line-clamp:3;font-weight:500;">👥 ${escapeHtml(_gn)}</div>` : ''}
         ${priv && e.ageCategory ? `<div class="ds-cn">🎂 ${escapeHtml(e.ageCategory)}</div>` : ''}
         ${priv && e.foodInfo ? `<div class="ds-cn">🍕 ${escapeHtml(e.foodInfo)}</div>` : ''}
-        ${e.notes ? `<div class="ds-cn">💬 ${escapeHtml(e.notes)}</div>` : ''}
+        ${e.notes ? `<div style="font-size:.92em;white-space:pre-wrap;overflow-wrap:anywhere;">💬 ${escapeHtml(e.notes)}</div>` : ''}
         ${w ? `<div class="ds-cn" style="color:var(--danger);">⚠ ${w.gap < 0 ? 'наложение ' + Math.abs(w.gap) + ' мин' : 'перерыв ' + w.gap + ' мин'}</div>` : ''}
         ${remainder > 0 ? `<div class="ds-cn" style="color:var(--status-red);-webkit-line-clamp:1;">💳 Остаток: ${escapeHtml(formatMoney(remainder))}</div>` : ''}
       </div>
@@ -10673,6 +10685,9 @@
     const free = showSp.map(s=>{ const w = ftWindows(s.id, ds, 10*60, 22*60).filter(x=> x[1]-x[0] >= 60); return `<div style="margin:3px 0;font-size:12.5px;"><b>${escapeHtml(s.name)}</b> ${w.length ? w.map(x=>`<button type="button" class="ft-chip" data-dsfree="${s.id}|${x[0]}|${x[1]-x[0]}" style="padding:5px 10px;margin:2px 3px 2px 0;">${ftMinToTime(x[0])}–${ftMinToTime(x[1])}</button>`).join('') : '<span style="color:var(--ink-soft);">занято</span>'}</div>`; }).join('');
     return `<style>
       .day-screen{ background:var(--white); border-radius:var(--radius); width:100%; height:calc(100vh - 16px); height:calc(100dvh - 16px); display:flex; flex-direction:column; padding:8px 10px; box-sizing:border-box; }
+      .ds-past{ opacity:.5; filter:saturate(.35); }
+      .ds-now{ box-shadow:0 0 0 2px #2F9E5F, 0 2px 10px rgba(47,158,95,.35) !important; background:#F3FBF6 !important; position:relative; }
+      .ds-now::after{ content:'● идёт сейчас'; position:absolute; right:6px; bottom:3px; font-size:10px; font-weight:700; color:#2F9E5F; background:rgba(255,255,255,.85); border-radius:4px; padding:0 4px; pointer-events:none; }
       .dsm-top{ display:flex; align-items:center; gap:6px; } .dsm-top h3{ margin:0; font-size:17px; flex:1; text-align:center; text-transform:capitalize; }
       .dsm-top .btn{ min-width:40px; min-height:38px; padding:4px 10px; }
       .dsm-chips{ display:flex; gap:6px; overflow-x:auto; padding:6px 0; flex-shrink:0; } .dsm-chips .btn{ white-space:nowrap; padding:5px 12px; flex-shrink:0; }
@@ -10684,7 +10699,7 @@
     </style>
     <div class="day-screen">
       <div class="dsm-top"><button class="btn btn-primary modal-close" id="ds-close" style="width:auto;height:auto;padding:6px 10px;font-size:13px;color:#fff;">✕</button><button class="btn btn-ghost" data-dsnav="-1">‹</button><h3 data-dsnav="today">${escapeHtml(dLabel)}</h3><button class="btn btn-ghost" data-dsnav="1">›</button></div>
-      <div class="ds-sum" style="text-align:center;font-size:12px;color:var(--ink-soft);">${dayEvs.length} мер. · 👥 ${guests}${showMoney ? ' · ' + escapeHtml(formatMoney(revenue)) : ''}${mgr ? ' · ' + escapeHtml(mgr) : ''}${noHost ? ' · <span style="color:var(--danger);">без вед.: ' + noHost + '</span>' : ''}</div>
+      <div class="ds-sum" style="text-align:center;font-size:12px;color:var(--ink-soft);">🕒 <b data-dsclock></b> · <span style="color:#2F9E5F;font-weight:700;">● идут</span> ярче, прошедшие бледнее<br>${dayEvs.length} мер. · 👥 ${guests}${showMoney ? ' · ' + escapeHtml(formatMoney(revenue)) : ''}${mgr ? ' · ' + escapeHtml(mgr) : ''}${noHost ? ' · <span style="color:var(--danger);">без вед.: ' + noHost + '</span>' : ''}</div>
       <div style="display:flex;gap:6px;margin:6px 0 0;"><button class="btn btn-primary" id="ds-find" style="flex:2;">🔎 Подобрать время</button>${state.currentRole !== 'hostess' ? '<button class="btn btn-ghost" id="ds-add" style="flex:1;">＋ новое</button>' : ''}<button class="btn btn-ghost" id="ds-list" style="flex:1;" title="Список с деталями">📋 список</button></div>
       <div style="margin-top:6px;"><button class="btn ${state.dsOffOpen?'btn-primary':'btn-ghost'}" data-dsoff="1" style="width:100%;">🚫 Выходные${dayOffEntriesFor(ds).length ? ': ' + escapeHtml(dayOffEntriesFor(ds).map(x=>x.name).join(', ')) : ''}</button></div>
       ${state.dsOffOpen ? `<div style="max-height:40%;overflow:auto;margin-top:6px;">${renderDaysOffBlock(ds)}</div>` : ''}
@@ -10731,7 +10746,12 @@
       if(layout === 'cards'){
         const items = evs.map(e=>({ t: effectiveStart(e), ev: e })).concat(free.map(w=>({ t: w[0], free: w })));
         items.sort((a,b)=> a.t - b.t);
-        const n = evs.length; const fs = n <= 3 ? 13 : (n <= 5 ? 12 : (n <= 7 ? 11 : 10));
+        const n = evs.length;
+        // подбираем шрифт так, чтобы весь текст (включая полный комментарий) поместился в колонку без прокрутки; меньше 10px не уменьшаем
+        const _colChars = Math.max(30, Math.floor((window.innerWidth - 60) / Math.max(1, spaces.length) / 6.3));
+        const _lines = evs.reduce((a,e)=> a + 4 + Math.ceil(((e.notes||'').length + (e.foodInfo||'').length + (e.ageCategory||'').length) / _colChars) + ((Number(e.rentalBefore)||0) + (Number(e.rentalAfter)||0) > 0 ? 2 : 0) + (guestNamesText(e) ? 1 : 0), 0) + free.length;
+        const _avail = Math.max(300, window.innerHeight - 200);
+        let fs = 14; while(fs > 10 && _lines * fs * 1.32 > _avail) fs--;
         const body = items.length ? items.map(it=> it.ev ? dsCardHtml(it.ev, warn, fs) : `<div class="ds-free-strip" data-dsfree="${s.id}|${it.free[0]}|${it.free[1]-it.free[0]}">🟢 свободно ${ftMinToTime(it.free[0])}–${ftMinToTime(it.free[1])}</div>`).join('') : '<div class="ds-free-strip" data-dsfree="' + s.id + '|' + t0 + '|' + (t1 - t0) + '">🟢 свободно весь день</div>';
         return `<div class="ds-col"><div class="ds-colhead"><b>${escapeHtml(s.name)}</b> <span>до ${SPACE_CAPACITY[s.id] || '?'} · ${evs.length ? evs.length + ' мер.' : 'пусто'}</span></div><div class="ds-cards">${body}</div></div>`;
       }
@@ -10741,7 +10761,7 @@
         const rb = Number(e.rentalBefore)||0, ra = Number(e.rentalAfter)||0;
         const hatch = (a,b)=> `<div style="position:absolute;left:0;right:0;top:${pct(a)}%;height:${(b-a)/span*100}%;background:repeating-linear-gradient(45deg,rgba(0,0,0,.08),rgba(0,0,0,.08) 4px,transparent 4px,transparent 8px);pointer-events:none;"></div>`;
         const conflict = inf.n > 1;
-        return (rb ? hatch(st - rb, st) : '') + (ra ? hatch(en, en + ra) : '') + `<div class="ds-evt" data-eid="${escapeHtml(e.id)}" title="${escapeHtml((e.title||e.product||'') + ' · ' + e.time + ' · ' + (STATUS_LABEL[e.status||'confirmed']||''))}" style="top:${pct(st)}%;height:${(en-st)/span*100}%;left:${inf.lane/inf.n*100}%;width:${100/inf.n}%;border-left:4px solid ${col};${conflict ? 'outline:2px solid var(--danger);' : ''}">
+        return (rb ? hatch(st - rb, st) : '') + (ra ? hatch(en, en + ra) : '') + `<div class="ds-evt" data-eid="${escapeHtml(e.id)}" data-tdate="${escapeHtml(e.date||'')}" data-tst="${timeToMinutes(e.time)}" data-ten="${timeToMinutes(e.time) + (Number(e.duration)||0)}" title="${escapeHtml((e.title||e.product||'') + ' · ' + e.time + ' · ' + (STATUS_LABEL[e.status||'confirmed']||'') + ((guestNamesText(e)||e.guestName) ? '\nГости: ' + (guestNamesText(e) || e.guestName) : ''))}" style="top:${pct(st)}%;height:${(en-st)/span*100}%;left:${inf.lane/inf.n*100}%;width:${100/inf.n}%;border-left:4px solid ${col};${conflict ? 'outline:2px solid var(--danger);' : ''}">
           <div class="ds-t"><b>${escapeHtml(e.time)}–${ftMinToTime(en)}</b> ${escapeHtml(e.title || e.product || '')}</div>
           <div class="ds-s">${(e.host||'').trim() ? escapeHtml(e.host) : (isPrivateWithoutHost(e) ? '<span style="color:var(--danger);">без ведущего</span>' : '')}${Number(e.guests) ? ' · 👥 ' + Number(e.guests) : ''}${warn[e.id] ? ' · <span style="color:var(--danger);">⚠ перерыв ' + Math.max(0, warn[e.id].gap) + ' мин</span>' : ''}</div></div>`;
       }).join('');
@@ -10755,8 +10775,8 @@
       .ds-head h3{ margin:0; text-transform:capitalize; font-size:18px; }
       .ds-sum{ font-size:12.5px; color:var(--ink-soft); }
       .ds-grid{ flex:1; min-height:0; display:grid; grid-template-columns:${layout==='cards' ? '' : '42px '}repeat(${Math.max(1,spaces.length)}, minmax(0,1fr)); gap:0 6px; }
-      .ds-cards{ flex:1; min-height:0; display:flex; flex-direction:column; gap:4px; overflow:hidden; }
-      .ds-card{ flex:0 1 auto; min-height:0; overflow:hidden; background:var(--white); border:1px solid var(--line-strong); border-radius:6px; padding:5px 7px; display:flex; gap:6px; justify-content:space-between; align-items:flex-start; cursor:pointer; line-height:1.28; box-shadow:0 1px 2px rgba(0,0,0,.1); }
+      .ds-cards{ flex:1; min-height:0; display:flex; flex-direction:column; gap:4px; overflow-y:auto; overflow-x:hidden; }
+      .ds-card{ flex:0 0 auto; min-height:0; overflow:visible; background:var(--white); border:1px solid var(--line-strong); border-radius:6px; padding:5px 7px; display:flex; gap:6px; justify-content:space-between; align-items:flex-start; cursor:pointer; line-height:1.28; box-shadow:0 1px 2px rgba(0,0,0,.1); }
       .ds-card:hover{ box-shadow:0 2px 8px rgba(0,0,0,.25); }
       .ds-card-main{ min-width:0; flex:1; } .ds-ct{ font-family:var(--font-mono); } .ds-ctitle{ font-weight:700; }
       .ds-ch{ color:var(--ink-soft); font-size:.9em; } .ds-cn{ font-size:.9em; display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; overflow:hidden; }
@@ -10768,6 +10788,11 @@
       .ds-col{ display:flex; flex-direction:column; min-height:0; }
       .ds-colhead{ height:26px; font-size:12.5px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; } .ds-colhead span{ font-size:11px; color:var(--ink-soft); }
       .ds-colbody{ position:relative; flex:1; min-height:0; border:1px solid var(--line); border-radius:6px; background:var(--paper); overflow:hidden; }
+      .ds-past{ opacity:.5; filter:saturate(.35); }
+      .ds-past:hover{ opacity:.85; }
+      .ds-now{ box-shadow:0 0 0 2px #2F9E5F, 0 2px 10px rgba(47,158,95,.35) !important; background:#F3FBF6 !important; position:relative; }
+      .ds-now::after{ content:'● идёт сейчас'; position:absolute; right:6px; bottom:3px; font-size:10px; font-weight:700; color:#2F9E5F; background:rgba(255,255,255,.85); border-radius:4px; padding:0 4px; pointer-events:none; }
+      .ds-legend{ font-size:11.5px; color:var(--ink-soft); }
       .ds-hline{ position:absolute; left:0; right:0; border-top:1px solid var(--line); opacity:.7; pointer-events:none; }
       .ds-free{ position:absolute; left:3px; right:3px; border:1px dashed #3F8F6B; background:rgba(63,143,107,.10); color:#2d6b4f; border-radius:5px; font-size:11.5px; padding:3px 6px; cursor:pointer; box-sizing:border-box; overflow:hidden; }
       .ds-free:hover{ background:rgba(63,143,107,.28); }
@@ -10785,6 +10810,7 @@
         <button class="btn btn-ghost" data-dsnav="1" title="Следующий день">›</button>
         <button class="btn btn-ghost" data-dsnav="today">сегодня</button>
         <span class="ds-sum">${dayEvs.length} мер. · 👥 ${guests}${showMoney ? ' · ' + escapeHtml(formatMoney(revenue)) : ''}${mgr ? ' · менеджер: ' + escapeHtml(mgr) : ''}</span>
+        <span class="ds-legend" data-dsnow title="Время считается по Омску">🕒 <b data-dsclock></b> · <span style="color:#2F9E5F;font-weight:700;">● идут</span> и будущие яркие, прошедшие бледные</span>
         ${noHost ? `<span style="color:var(--danger);font-size:12.5px;">⚠ без ведущего: ${noHost}</span>` : ''}
         ${proposals ? `<span style="color:var(--status-cyan);font-size:12.5px;">🙋 слотов от мастеров: ${proposals}</span>` : ''}
         <span style="flex:1;"></span>
@@ -10803,8 +10829,35 @@
       </div>
     </div>`;
   }
+  // «сейчас» по Омску (UTC+6), независимо от часового пояса устройства
+  function omskNow(){
+    try{
+      const parts = new Intl.DateTimeFormat('en-CA', {timeZone:'Asia/Omsk', year:'numeric', month:'2-digit', day:'2-digit', hour:'2-digit', minute:'2-digit', hourCycle:'h23'}).formatToParts(new Date());
+      const g = t => (parts.find(x=>x.type===t)||{}).value;
+      return { date: g('year')+'-'+g('month')+'-'+g('day'), min: (+g('hour'))*60 + (+g('minute')), label: g('hour')+':'+g('minute') };
+    }catch(e){
+      const d = new Date(Date.now() + 6*3600000); const iso = d.toISOString();
+      return { date: iso.slice(0,10), min: d.getUTCHours()*60 + d.getUTCMinutes(), label: iso.slice(11,16) };
+    }
+  }
+  // прошедшие мероприятия — бледнее, идущие сейчас — подсвечены, будущие — обычные яркие
+  function dsApplyTime(root){
+    if(!root || !root.isConnected) return false;
+    const now = omskNow();
+    root.querySelectorAll('[data-tdate]').forEach(el=>{
+      const d = el.dataset.tdate, st = +el.dataset.tst, en = +el.dataset.ten;
+      let past = false, cur = false;
+      if(d && d < now.date) past = true;
+      else if(d === now.date){ if(en <= now.min) past = true; else if(st <= now.min) cur = true; }
+      el.classList.toggle('ds-past', past); el.classList.toggle('ds-now', cur);
+    });
+    root.querySelectorAll('[data-dsclock]').forEach(c=> c.textContent = now.label + ' Омск');
+    return true;
+  }
   function attachDayScreen(overlay, ds){
     overlay.style.padding = '8px';
+    dsApplyTime(overlay);
+    const _dsTimer = setInterval(()=>{ if(!dsApplyTime(overlay)) clearInterval(_dsTimer); }, 30000);
     attachDayOffHandlers(overlay, ds);
     overlay.querySelectorAll('[data-dsoff]').forEach(b=> b.onclick = ()=>{ state.dsOffOpen = !state.dsOffOpen; render(); });
     const openEv = (id)=>{ const e = state.events.find(x=>x.id === id); if(!e) return; requireUnlock(()=>{ state.modal = {type:'event', event:{...e}, isNew:false, keepAll: state.activeSpaceId === 'all'}; render(); }); };
@@ -16783,7 +16836,7 @@
     const hasMap = Object.keys(map).length > 0;
     const finalKey = (n)=> (n||'').trim().toLowerCase();
     const final = {};
-    rows.forEach(r=>{ final[finalKey(r.name)] = r.roles; });
+    rows.forEach(r=>{ const fk = finalKey(r.name); const prev = final[fk]; final[fk] = prev ? { master: !!(prev.master||r.roles.master), hostess: !!(prev.hostess||r.roles.hostess), manager: !!(prev.manager||r.roles.manager) } : r.roles; });
     const origAdmins = new Set(getAllAdminNames().map(finalKey));
     const origManagers = new Set(MANAGER_LIST.map(finalKey));
 
@@ -16823,7 +16876,7 @@
       Object.keys(state.managerShifts||{}).forEach(d=>{ const v = rn(state.managerShifts[d]); if(v !== state.managerShifts[d]){ state.managerShifts[d] = v; ch = true; } });
       if(ch) await saveManagerShifts();
       // карты, где имя — ключ
-      const rekey = (obj)=>{ let c = false; const out = {}; Object.keys(obj||{}).forEach(k=>{ const nk = rn(k); if(nk !== k) c = true; out[nk] = obj[k]; }); return {out, c}; };
+      const rekey = (obj)=>{ let c = false; const out = {}; Object.keys(obj||{}).forEach(k=>{ const nk = rn(k); if(nk !== k) c = true; if(!(nk in out) || nk === k) out[nk] = obj[k]; }); return {out, c}; };
       { const r = rekey(state.masterPayOverrides); if(r.c){ state.masterPayOverrides = r.out; await saveMasterPayOverrides(); } }
       ch = false;
       Object.keys(state.hostessBonuses||{}).forEach(ym=>{ const r = rekey(state.hostessBonuses[ym]); if(r.c){ state.hostessBonuses[ym] = r.out; ch = true; } });
@@ -16885,7 +16938,7 @@
     // пароли: переезжают на новое имя; пароль снятой должности удаляется
     const movePw = (obj, role)=>{
       const out = {};
-      Object.keys(obj||{}).forEach(k=>{ const nk = rn(k); const f = final[finalKey(nk)]; if(f && f[role]) out[nk] = obj[k]; });
+      Object.keys(obj||{}).forEach(k=>{ const nk = rn(k); const f = final[finalKey(nk)]; if(f && f[role] && (!(nk in out) || nk === k)) out[nk] = obj[k]; });
       return out;
     };
     state.masterPersonalPasswords = movePw(state.masterPersonalPasswords, 'master');
@@ -16920,15 +16973,22 @@
           manager: r.querySelector('.staff-role[data-r="manager"]').checked,
         },
       })).filter(r=> r.orig || r.name);
-      const seen = new Set();
+      const seen = new Set(); const mergeNotes = [];
       for(const r of rows){
         if(!r.name){ err.textContent = `У сотрудника «${r.orig}» пустое имя.`; return; }
         if(r.name.includes('|')){ err.textContent = `В имени «${r.name}» нельзя использовать знак «|».`; return; }
         const k = r.name.toLowerCase();
-        if(seen.has(k)){ err.textContent = `Имя «${r.name}» повторяется — у каждого сотрудника должно быть своё.`; return; }
+        if(seen.has(k)){
+          // одно имя у двух строк: допустимо только как ОБЪЕДИНЕНИЕ — когда одну из них переименовали в имя другой (например «Ира Керамика» → «Ира»)
+          const group = rows.filter(x=> x.name.toLowerCase() === k);
+          const renamed = group.filter(x=> x.orig && x.orig.toLowerCase() !== k);
+          if(!renamed.length || renamed.length === group.length && group.every(x=>!x.orig)){ err.textContent = `Имя «${r.name}» повторяется — у каждого сотрудника должно быть своё.`; return; }
+          if(!mergeNotes.some(m=>m.k===k)) mergeNotes.push({k, name: r.name, from: renamed.map(x=>x.orig).join(', ')});
+        }
         seen.add(k);
         if(!r.roles.master && !r.roles.hostess && !r.roles.manager){ err.textContent = `Отметьте должность для «${r.name}».`; return; }
       }
+      if(mergeNotes.length && !window.confirm('Объединить сотрудников?\n\n' + mergeNotes.map(m=>'«' + m.from + '» → «' + m.name + '»').join('\n') + '\n\nВся история (мероприятия, зарплата, расходы, графики) будет записана на «' + mergeNotes.map(m=>m.name).join('», «') + '». Должности объединятся. Если у обоих был личный пароль, останется пароль того, чьё имя остаётся.\n\nОтменить это будет нельзя (только восстановлением из резервной копии).')) return;
       const btn = overlay.querySelector('#staff-save'); btn.disabled = true;
       try{ await applyStaffEdit(rows); }
       catch(e){ console.error(e); err.textContent = 'Не удалось сохранить, попробуйте ещё раз.'; btn.disabled = false; return; }
