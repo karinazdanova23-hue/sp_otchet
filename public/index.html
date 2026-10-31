@@ -16,7 +16,7 @@
 <meta name="mobile-web-app-capable" content="yes">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,500;9..144,600;9..144,700&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,500;9..144,600;9..144,700&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet" media="print" onload="this.media='all'">
 
 <style>
   :root{
@@ -2435,7 +2435,28 @@
     return false;
   }
 
+  // ускорение входа: loadData читает ~67 ключей по одному, друг за другом (каждый — отдельный круг до сервера и S3).
+  // Здесь запрашиваем их все сразу параллельно, а обычные чтения в loadData забирают уже готовые ответы.
+  // Ошибка/пустой ответ повторяются как есть — логика loadData (try/catch, «данных ещё нет») не меняется.
+  function prefetchLoadDataKeys(){
+    try{
+      if(!window.storage || typeof window.storage.get !== 'function') return;
+      const keys = [...new Set((loadData.toString().match(/storage\.get\('[^']+', true\)/g) || []).map(m=>m.split("'")[1]))];
+      if(!keys.length) return;
+      const orig = window.storage.get.bind(window.storage);
+      const cache = new Map(); const t0 = Date.now();
+      keys.forEach(k=>{ cache.set(k, orig(k, true).then(v=>({ok:true, v}), e=>({ok:false, e}))); });
+      window.storage.get = function(k, shared){
+        if(shared === true && cache.has(k) && Date.now() - t0 < 60000){
+          const p = cache.get(k); cache.delete(k);
+          return p.then(r=>{ if(r.ok) return r.v; throw r.e; });
+        }
+        return orig(k, shared);
+      };
+    }catch(e){ console.error('prefetch', e); }
+  }
   async function loadData(){
+    prefetchLoadDataKeys();
     let spacesLoaded = false;
     try{
       const sp = await window.storage.get('spaces-config', true);
@@ -3784,7 +3805,9 @@
     baseMap.forEach((b, key)=>{ if(!curMap.has(key)) deletes.push(key); });
     return { upserts, deletes };
   }
+  const _mergeSaveSeq = {};
   async function saveCollectionMerged(storageKey, currentArray, baselineArray, applyMerged, keyFn, mergeItemFn){
+    const _mySeq = (_mergeSaveSeq[storageKey] = (_mergeSaveSeq[storageKey]||0) + 1);
     const kf = keyFn || (x=>x.id);
     const { upserts, deletes } = diffForMerge(baselineArray, currentArray, kf);
     let serverArray = null;
@@ -3830,10 +3853,11 @@
     // ПРОВЕРКА ПОСЛЕ ЗАПИСИ: если двое сохраняли в одну и ту же долю секунды, чужая запись могла перезаписать нашу
     // (между чтением и записью на сервере нет блокировки). Читаем обратно: если наши правки пропали (запись вернулась
     // к старой версии / исчезла / удалённая вернулась) — сливаем заново и пишем ещё раз, до 4 попыток.
-    if(okSet){
+    const _verify = async ()=>{
       const baseMapV = new Map((baselineArray||[]).filter(Boolean).map(x=>[kf(x), x]));
       for(let vt=0; vt<4; vt++){
-        await sleep(250 + Math.random()*350);
+        await sleep(400 + Math.random()*500);
+        if(_mergeSaveSeq[storageKey] !== _mySeq) return; // началось более новое сохранение этого ключа — не откатываем его старыми данными
         let back = null;
         try{ const r2 = await window.storage.get(storageKey, true); back = r2 ? JSON.parse(r2.value) : []; }catch(e){ break; }
         if(!Array.isArray(back)) break;
@@ -3856,11 +3880,13 @@
           const srv = mergeItemFn ? m2.get(kf(x)) : null;
           m2.set(kf(x), (srv && mergeItemFn) ? mergeItemFn(srv, x, baseMapV.get(kf(x))) : x);
         });
+        if(_mergeSaveSeq[storageKey] !== _mySeq) return;
         finalArr = Array.from(m2.values());
-        okSet = await storageSetWithRetry(storageKey, JSON.stringify(finalArr));
-        if(!okSet) break;
+        const okRe = await storageSetWithRetry(storageKey, JSON.stringify(finalArr));
+        if(!okRe) return;
       }
-    }
+    };
+    if(okSet) _verify().catch(e=>console.error('verify-save', e));
     // если сервер запись не принял — НЕ обновляем «исходное состояние»: иначе при повторной попытке
     // приложение решит, что менять нечего, и новая запись так и не уйдёт на сервер
     if(okSet) applyMerged(finalArr);
@@ -14651,11 +14677,11 @@
           </div>
           <div class="row2">
             <div class="field">
-              <label>Имя владельца</label>
+              <label>Имя владельца <span style="font-weight:400;color:var(--ink-soft);">— необязательно</span></label>
               <input type="text" id="c-owner-name" value="${escapeHtml(cert.ownerName||'')}" placeholder="Имя и фамилия">
             </div>
             <div class="field">
-              <label>Контакт владельца</label>
+              <label>Контакт владельца <span style="font-weight:400;color:var(--ink-soft);">— необязательно</span></label>
               <input type="text" id="c-owner-contact" value="${escapeHtml(cert.ownerContact||'')}" placeholder="Телефон или @телеграм">
             </div>
           </div>
@@ -15001,8 +15027,6 @@
       if(!certTypeVal) markInvalid('c-type');
       if(!dateVal) markInvalid('c-date');
       if(amountRaw === '' || Number(amountRaw) < 0) markInvalid('c-amount');
-      if(!ownerNameVal) markInvalid('c-owner-name');
-      if(!ownerContactVal) markInvalid('c-owner-contact');
       let specificMissing = false, redemptionsMissing = false, redemptionsIncomplete = false;
       if(certKindVal === 'specific' && !specificVal){ specificMissing = true; markInvalid('c-specific-mk'); }
 
@@ -15032,7 +15056,7 @@
         if(remainingEl && !firstInvalid) firstInvalid = remainingEl;
       }
 
-      if(numberRaw==='' || !channelVal || !certTypeVal || !dateVal || amountRaw==='' || Number(amountRaw)<0 || !ownerNameVal || !ownerContactVal || specificMissing || redemptionsMissing || redemptionsIncomplete || redemptionBeforeSale || overspent){
+      if(numberRaw==='' || !channelVal || !certTypeVal || !dateVal || amountRaw==='' || Number(amountRaw)<0 || specificMissing || redemptionsMissing || redemptionsIncomplete || redemptionBeforeSale || overspent){
         let msg = 'Заполните все поля перед сохранением сертификата. Сумма не может быть отрицательной.';
         if(redemptionBeforeSale) msg = 'Дата списания не может быть раньше даты продажи сертификата.';
         if(redemptionsMissing) msg = 'Статус «Использован»/«Частично использован» — добавьте хотя бы одно списание.';
@@ -15088,7 +15112,7 @@
         const incomeEntry = {
           id: updated.incomeId || uid(), date: updated.saleDate, operation: 'Оплата', product: 'Сертификат',
           account: updated.account || 'Точка', eventId: '', amount: updated.amount, masterName: '', itemSaleId: '', orderId: '',
-          comment: `Сертификат №${updated.number} — ${updated.ownerName}`,
+          comment: `Сертификат №${updated.number}${updated.ownerName ? ' — ' + updated.ownerName : ''}`,
         };
         updated.incomeId = incomeEntry.id;
         const incIdx = state.incomes.findIndex(x=>x.id===incomeEntry.id);
@@ -15111,7 +15135,7 @@
             const inc = {
               id: uid(), date: c.saleDate, operation: 'Оплата', product: 'Сертификат',
               account: c.account || 'Точка', eventId: '', amount: c.amount, masterName: '', itemSaleId: '', orderId: '',
-              comment: `Сертификат №${c.number} — ${c.ownerName}`,
+              comment: `Сертификат №${c.number}${c.ownerName ? ' — ' + c.ownerName : ''}`,
             };
             c.incomeId = inc.id;
             state.incomes.push(inc);
