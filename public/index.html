@@ -894,7 +894,7 @@
   function guestNamesText(e){
     return (e && Array.isArray(e.guestList) ? e.guestList : [])
       .filter(g=> g && !g.refunded && String(g.name||'').trim())
-      .map(g=> String(g.name).trim() + (Number(g.seats)>1 ? ' ×'+Math.round(Number(g.seats)) : ''))
+      .map(g=> String(g.name).trim() + (Number(g.seats)>1 ? ' ×'+Math.round(Number(g.seats)) : '') + (g.tuftShape ? ' (' + (g.tuftShape === 'figured' ? 'фигурный' : 'ровный') + ')' : ''))
       .join(', ');
   }
   function scheduleGuestsCount(e){ return realGuestsFromList(e && e.guestList); }
@@ -921,6 +921,78 @@
   function isCeramicsEvent(title){
     const t = (title||'').toLowerCase();
     return t.includes('керамик') || t.includes('круг') || t.includes('гончар');
+  }
+  // тафтинг: у каждого гостя отмечаем форму коврика — «фигурный» или «ровный» (guest.tuftShape: 'figured' | 'straight')
+  function isTuftingEvent(title){ return /тафтинг/i.test(title || ''); }
+  const TUFT_SHAPES = [['figured','Фигурный'],['straight','Ровный']];
+  // тафтинг: мероприятия, которые уже идут/прошли (с 1 ноября 2026), где у кого-то из гостей не выбрана форма коврика
+  const TUFT_PENDING_FROM = '2026-11-01';
+  function roleSeesTuftBlock(role){ return !!role && role !== 'manager'; }
+  function tuftPendingList(){
+    const today = todayStr();
+    const out = [];
+    state.events.forEach(e=>{
+      if(!e.date || e.date < TUFT_PENDING_FROM || e.date > today) return;
+      if(!isTuftingEvent(e.title)) return;
+      if(e.status !== 'confirmed' && e.status !== 'tentative' && e.status !== 'offsite') return;
+      const list = Array.isArray(e.guestList) ? e.guestList : [];
+      const guests = list.filter(g=> g && !g.refunded && !g.isBlogger && !g.tuftShape);
+      if(list.length === 0) out.push({ e, guests: [], noList: true });
+      else if(guests.length) out.push({ e, guests, noList: false });
+    });
+    out.sort((a,b)=> (b.e.date + (b.e.time||'')).localeCompare(a.e.date + (a.e.time||'')));
+    return out;
+  }
+  // ===== Раздел «Тафтинг»: форма коврика (фигурный / ровный) у каждого гостя =====
+  function tuftRows(){
+    const today = todayStr();
+    const rows = [];
+    state.events.forEach(e=>{
+      if(!e.date || e.date < TUFT_PENDING_FROM || !isTuftingEvent(e.title)) return;
+      if(e.status !== 'confirmed' && e.status !== 'tentative' && e.status !== 'offsite') return;
+      const list = Array.isArray(e.guestList) ? e.guestList : [];
+      if(list.length === 0){ rows.push({ e, g: null, started: e.date <= today }); return; }
+      list.forEach(g=>{ if(g && !g.refunded && !g.isBlogger) rows.push({ e, g, started: e.date <= today }); });
+    });
+    rows.sort((a,b)=> (a.e.date + (a.e.time||'')).localeCompare(b.e.date + (b.e.time||'')));
+    return rows;
+  }
+  function tuftTodoCount(){ return tuftRows().filter(r=> r.started && (!r.g || !r.g.tuftShape)).length; }
+  function renderTuftView(){
+    const f = state.tuftFilter || 'todo';
+    const all = tuftRows();
+    const todo = all.filter(r=> r.started && (!r.g || !r.g.tuftShape));
+    const done = all.filter(r=> r.g && r.g.tuftShape);
+    let rows = f === 'all' ? all : (f === 'done' ? done : todo);
+    if(f === 'todo') rows = [...rows].sort((a,b)=> (b.e.date + (b.e.time||'')).localeCompare(a.e.date + (a.e.time||'')));
+    const btn = (k, t)=> `<button class="btn ${f===k?'btn-primary':'btn-ghost'}" data-tuftf="${k}">${t}</button>`;
+    const today = todayStr();
+    return `<div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin:4px 0 12px;">
+      ${btn('todo','Нужно выбрать (' + todo.length + ')')}${btn('done','Готово (' + done.length + ')')}${btn('all','Все (' + all.length + ')')}
+      <span style="font-size:12px;color:var(--ink-soft);">Тафтинги с 1 ноября 2026. В день мероприятия и после него у каждого гостя нужно отметить «фигурный» или «ровный».</span></div>
+    ${rows.length ? `<div style="overflow-x:auto;"><table style="width:100%;border-collapse:collapse;font-size:13.5px;">
+      <thead><tr style="text-align:left;color:var(--ink-soft);font-size:11.5px;text-transform:uppercase;"><th style="padding:6px;">Дата</th><th style="padding:6px;">Время</th><th style="padding:6px;">Мероприятие</th><th style="padding:6px;">Гость</th><th style="padding:6px;">Коврик</th></tr></thead>
+      <tbody>${rows.map(({e,g,started})=> `<tr style="border-top:1px solid var(--line);${started?'':'opacity:.6;'}">
+        <td style="padding:6px;white-space:nowrap;">${escapeHtml(formatDateText(e.date))}${e.date===today?' <span style="color:var(--accent);font-size:11px;">сегодня</span>':''}</td>
+        <td style="padding:6px;">${escapeHtml(e.time||'')}</td>
+        <td style="padding:6px;">${escapeHtml(e.title||'')}</td>
+        ${g ? `<td style="padding:6px;"><b>${escapeHtml(g.name||'без имени')}</b>${Number(g.seats)>1?' ×'+Math.round(Number(g.seats)):''}</td>
+        <td style="padding:6px;white-space:nowrap;">${TUFT_SHAPES.map(([v,lbl])=>`<button type="button" class="tuft-pick" data-eid="${escapeHtml(e.id)}" data-gid="${escapeHtml(g.id)}" data-val="${v}" style="cursor:pointer;padding:4px 12px;margin-right:4px;border-radius:14px;font-size:12.5px;border:1px solid ${g.tuftShape===v?'var(--accent)':'var(--line-strong)'};background:${g.tuftShape===v?'var(--accent)':'var(--white)'};color:${g.tuftShape===v?'#fff':'var(--ink)'};">${lbl}</button>`).join('')}</td>`
+        : `<td colspan="2" style="padding:6px;"><span class="tuft-open" data-eid="${escapeHtml(e.id)}" style="cursor:pointer;color:var(--status-red);text-decoration:underline dotted;">Нет списка гостей — откройте мероприятие и впишите гостей</span></td>`}
+      </tr>`).join('')}</tbody></table></div>`
+    : `<div style="padding:20px;color:var(--ink-soft);">${f==='todo' ? '✓ У всех гостей прошедших тафтингов выбрана форма коврика.' : 'Здесь пока пусто.'}</div>`}`;
+  }
+  function attachTuftEvents(){
+    document.querySelectorAll('[data-tuftf]').forEach(b=> b.onclick = ()=>{ state.tuftFilter = b.dataset.tuftf; render(); });
+    document.querySelectorAll('.tuft-open').forEach(el=> el.onclick = ()=>{ const ev = state.events.find(x=>x.id===el.dataset.eid); if(ev){ state.modal = {type:'event', event:{...ev}, isNew:false, keepAll:true}; render(); } });
+    document.querySelectorAll('.tuft-pick').forEach(btn=> btn.onclick = async ()=>{
+      const ev = state.events.find(x=>x.id===btn.dataset.eid); if(!ev || !Array.isArray(ev.guestList)) return;
+      const g = ev.guestList.find(x=>x.id===btn.dataset.gid); if(!g) return;
+      g.tuftShape = (g.tuftShape === btn.dataset.val) ? '' : btn.dataset.val;
+      document.querySelectorAll('.tuft-pick').forEach(x=> x.disabled = true);
+      try{ await saveEvents(); }catch(e){ showGapWarningBanner('Не удалось сохранить. Проверьте интернет и попробуйте ещё раз.'); }
+      render();
+    });
   }
   function isPaintingEvent(title){
     const t = (title||'').toLowerCase();
@@ -2431,6 +2503,7 @@
     if(view==='reference') return roleCanSeeReference(state.currentRole);
     if(view==='planprogress') return roleCanSeePlanProgress(state.currentRole);
     if(view==='print') return roleCanAccessPrint(state.currentRole);
+    if(view==='tufting') return roleSeesTuftBlock(state.currentRole);
     if(view==='procurement') return roleCanAccessProcurement(state.currentRole);
     return false;
   }
@@ -5130,6 +5203,8 @@
       html += renderPlanProgressView();
     } else if(state.view === 'print'){
       html += renderPrintView();
+    } else if(state.view === 'tufting'){
+      html += renderTuftView();
     } else if(state.view === 'certificates'){
       html += renderCertificatesView();
     } else if(state.view === 'marketing'){
@@ -5153,6 +5228,7 @@
     else if(state.view === 'reference'){ attachReferenceEvents(); }
     else if(state.view === 'planprogress'){ attachPlanProgressViewEvents(); }
     else if(state.view === 'print'){ attachPrintEvents(); }
+    else if(state.view === 'tufting'){ attachTuftEvents(); }
     else if(state.view === 'certificates'){ attachCertificatesEvents(); }
     else if(state.view === 'marketing'){ attachMarketingEvents(); }
     else if(state.view === 'procurement'){ attachProcurementEvents(); }
@@ -5612,6 +5688,10 @@
     if(roleCanAccessPrint(role)){
       const pn = printOpenCount();
       buttons.push({key:'print', html: `<button data-view="print" class="${state.view==='print'?'active':''}">🖨 На печать${pn ? ' <span style="background:var(--danger);color:#fff;border-radius:9px;padding:0 6px;font-size:11px;">'+pn+'</span>' : ''}</button>`});
+    }
+    if(roleSeesTuftBlock(role)){
+      const tn = tuftTodoCount();
+      buttons.push({key:'tufting', html: `<button data-view="tufting" class="${state.view==='tufting'?'active':''}">🧶 Тафтинг${tn ? ' <span style="background:var(--danger);color:#fff;border-radius:9px;padding:0 6px;font-size:11px;">'+tn+'</span>' : ''}</button>`});
     }
     if(roleCanAccessCertificatesView(role)){
       buttons.push({key:'certificates', html: `<button data-view="certificates" class="${state.view==='certificates'?'active':''}">${role==='hostess' ? 'Сертификаты / Изделия' : 'Для менеджеров'}</button>`});
@@ -26472,6 +26552,7 @@
       }
       const titleElForItems = overlay.querySelector('#f-title');
       const showItemsPerGuest = !!(titleElForItems && isCeramicsEvent(titleElForItems.value));
+      const showTuftShape = !!(titleElForItems && isTuftingEvent(titleElForItems.value));
       // "Ожидаемая сумма" на гостя нужна только когда гостей несколько — если гость один, у него и так
       // вся согласованная сумма мероприятия (см. #f-agreed-price / #awaiting-hint)
       const showExpectedPerGuest = roleCanSeeGuestBalances(state.currentRole) && guestListArr.length > 1;
@@ -26492,6 +26573,11 @@
             <button type="button" class="guest-remove" data-gid="${g.id}" title="Удалить гостя" style="background:none;border:none;color:var(--danger);cursor:pointer;font-size:16px;line-height:1;flex-shrink:0;">✕</button>
           </div>
           ${showItemsPerGuest ? `<div style="font-size:10px;color:var(--ink-soft);margin-top:2px;">место(а) · изделий</div>` : ''}
+          ${showTuftShape ? `<div style="display:flex;gap:6px;align-items:center;margin-top:6px;flex-wrap:wrap;">
+            <span style="font-size:11px;color:var(--ink-soft);font-family:var(--font-mono);">Коврик:</span>
+            ${TUFT_SHAPES.map(([v,lbl])=>`<button type="button" class="guest-tuft-btn" data-gid="${g.id}" data-val="${v}" style="cursor:pointer;padding:4px 12px;border-radius:14px;font-size:12.5px;border:1px solid ${g.tuftShape===v?'var(--accent)':'var(--line-strong)'};background:${g.tuftShape===v?'var(--accent)':'var(--white)'};color:${g.tuftShape===v?'#fff':'var(--ink)'};">${lbl}</button>`).join('')}
+            ${g.tuftShape ? '' : `<span style="font-size:11px;color:var(--status-red);">не выбрано</span>`}
+          </div>` : ''}
           ${!g.isBlogger ? `<div style="margin-top:6px;">
             <label style="display:flex;align-items:center;gap:5px;font-size:11px;color:var(--ink-soft);font-family:var(--font-mono);cursor:pointer;width:fit-content;">
               <input type="checkbox" class="guest-redo-toggle" data-gid="${g.id}" ${g.isRedo?'checked':''} style="width:14px;height:14px;">
@@ -26566,6 +26652,13 @@
     }
 
     function attachGuestBlockEvents(){
+      overlay.querySelectorAll('.guest-tuft-btn').forEach(btn=>{
+        btn.onclick = ()=>{
+          const g = guestListArr.find(x=>x.id===btn.dataset.gid); if(!g) return;
+          g.tuftShape = (g.tuftShape === btn.dataset.val) ? '' : btn.dataset.val; // повторный клик снимает выбор
+          persistGuestList(); renderGuestList();
+        };
+      });
       overlay.querySelectorAll('.guest-name').forEach(inp=>{
         inp.oninput = ()=>{
           const g = guestListArr.find(x=>x.id===inp.dataset.gid);
@@ -27259,6 +27352,7 @@
         redoOriginalEventId: g.isRedo ? (g.redoOriginalEventId||'') : '',
         printFiles: Array.isArray(g.printFiles) ? g.printFiles : [],
         printStatus: g.printStatus || '',
+        tuftShape: (g.tuftShape === 'figured' || g.tuftShape === 'straight') ? g.tuftShape : '',
       }));
       const guestNameVal = guestListForSave.map(g=>g.name).filter(Boolean).join(', ');
       // обязательно только имя у гостя, который уже добавлен (пустая строка "гость без имени" — ошибка);
