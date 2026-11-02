@@ -5277,6 +5277,76 @@
     if(printBtn) printBtn.onclick = ()=>{ window.print(); };
   }
 
+  // ===== Напоминания по деньгам и работе с гостями =====
+  function computeReminders(){
+    const role = state.currentRole;
+    const today = todayStr();
+    const out = { unpaid: [], certs: [], leads: [], payouts: [] };
+    const addDays = (d, n)=>{ const x = parseDate(d); x.setDate(x.getDate()+n); return fmtDate(x); };
+    if(['owner','admin','assistant','manager'].includes(role)){
+      const from = (()=>{ const f = addDays(today, -60); return f > '2026-10-01' ? f : '2026-10-01'; })();
+      state.events.forEach(e=>{
+        if(!e.date || e.date >= today || e.date < from) return;
+        if(e.status !== 'confirmed' && e.status !== 'tentative' && e.status !== 'offsite') return;
+        const rem = eventRemainderTotal(e); if(rem > 0) out.unpaid.push({ e, rem });
+      });
+      out.unpaid.sort((a,b)=> b.e.date.localeCompare(a.e.date));
+      // сертификаты со сроком 3 месяца (GIFT_CERT_VALIDITY_TEXT): истекают в ближайшие 14 дней
+      state.certificates.forEach(c=>{
+        if(!c.saleDate || c.purpose === 'marketing' || c.status === 'used' || c.status === 'refunded') return;
+        const d = parseDate(c.saleDate); d.setMonth(d.getMonth()+3); const exp = fmtDate(d);
+        if(exp >= today && exp <= addDays(today, 14)) out.certs.push({ c, exp });
+      });
+      out.certs.sort((a,b)=> a.exp.localeCompare(b.exp));
+      // заявки, по которым гость ждёт ответа/КП уже несколько дней
+      const lf = addDays(today, -14), lt = addDays(today, -3);
+      state.leads.forEach(l=>{
+        if(leadKind(l) === 'b2b' || !l.requestDate || l.requestDate < lf || l.requestDate > lt) return;
+        if(leadStatus(l) === 'sold' || leadStatus(l) === 'lost') return;
+        out.leads.push(l);
+      });
+      out.leads.sort((a,b)=> b.requestDate.localeCompare(a.requestDate));
+    }
+    if(role === 'owner'){
+      if(!state.dc.loaded && !state.dc._loading){ state.dc._loading = true; dcLoad().then(()=>{ try{ render(); }catch(e){} }); }
+      else if(state.dc.loaded && state.dc.from){
+        try{
+          const c = dcCompute();
+          c.payInfo.forEach(m=>{ if(m.pr.pay && m.unpaidN > 0 && m.pr.pay <= addDays(today, 3)) out.payouts.push({ pr: m.pr, n: m.unpaidN, sum: m.unpaidSum }); });
+        }catch(e){}
+      }
+    }
+    out.total = out.unpaid.length + out.certs.length + out.leads.length + out.payouts.length;
+    return out;
+  }
+  function renderRemindersModal(){
+    const r = computeReminders();
+    const sec = (title, html)=> html ? `<div style="margin:14px 0 6px;font-weight:700;font-size:13.5px;">${title}</div>${html}` : '';
+    const row = (attrs, main, sub)=> `<div class="stat-row rem-row" ${attrs} style="cursor:pointer;"><div class="stat-label" style="width:100%;flex:1;">${main}<div style="font-size:12px;color:var(--ink-soft);margin-top:2px;">${sub}</div></div></div>`;
+    const unpaidHtml = r.unpaid.slice(0, 25).map(x=> row(`data-remev="${x.e.id}"`, `<b>${escapeHtml(x.e.title||'без названия')}</b> · ${escapeHtml(formatDateText(x.e.date))}${x.e.guestName?' · '+escapeHtml(x.e.guestName):''}`, `Не доплачено: <b style="color:var(--status-red);">${escapeHtml(formatMoney(x.rem))}</b>`)).join('') + (r.unpaid.length > 25 ? `<div style="font-size:12px;color:var(--ink-soft);">…и ещё ${r.unpaid.length-25}</div>` : '');
+    const certHtml = r.certs.slice(0, 20).map(x=> row(`data-remcert="${x.c.id}"`, `🎁 №${escapeHtml(String(x.c.number))} · ${escapeHtml(x.c.ownerName||'без имени')}`, `Истекает ${escapeHtml(formatDateText(x.exp))} · ${escapeHtml(formatMoney(x.c.amount||0))}${x.c.ownerContact?' · '+escapeHtml(x.c.ownerContact):''}`)).join('') + (r.certs.length > 20 ? `<div style="font-size:12px;color:var(--ink-soft);">…и ещё ${r.certs.length-20}</div>` : '');
+    const leadHtml = r.leads.slice(0, 20).map(l=> row(`data-remlead="${l.id}"`, `📝 ${escapeHtml(l.contact||l.name||'без контакта')}`, `${escapeHtml(formatDateText(l.requestDate))} · ${escapeHtml(leadStatusLabel(leadStatus(l)))} · ${escapeHtml(l.source||'')} ${escapeHtml(l.product||'')}`)).join('') + (r.leads.length > 20 ? `<div style="font-size:12px;color:var(--ink-soft);">…и ещё ${r.leads.length-20}</div>` : '');
+    const payHtml = r.payouts.map(x=> row(`data-rempay="1"`, `Проценты уволенной менеджеру — выплата ${escapeHtml(formatDateText(x.pr.pay))}`, `К выплате ${escapeHtml(formatMoney(x.sum))} (${x.n} шт.) · «Менеджеры → ЗП менеджеров»`)).join('');
+    return `
+      <div class="modal" style="max-width:620px;">
+        <div class="modal-head"><h3>🔔 Напоминания</h3><button class="modal-close">×</button></div>
+        <div class="modal-body">
+          ${r.total === 0 ? '<div style="color:var(--status-green);font-size:13.5px;">✓ Всё в порядке, напоминать пока не о чем.</div>' : ''}
+          ${sec(`💸 Выплаты (${r.payouts.length})`, payHtml)}
+          ${sec(`💰 Прошедшие мероприятия без полной оплаты (${r.unpaid.length})`, unpaidHtml)}
+          ${sec(`⏳ Сертификаты: срок истекает в ближайшие 14 дней (${r.certs.length})`, certHtml)}
+          ${sec(`📝 Заявки без движения 3–14 дней (${r.leads.length})`, leadHtml)}
+          <div class="modal-actions"><span></span><button class="btn btn-ghost" id="btn-close-rem">Закрыть</button></div>
+        </div>
+      </div>`;
+  }
+  function attachRemindersModalEvents(overlay){
+    const close = overlay.querySelector('#btn-close-rem'); if(close) close.onclick = ()=>{ state.modal = null; overlay.remove(); };
+    overlay.querySelectorAll('[data-remev]').forEach(el=> el.onclick = ()=>{ const ev = state.events.find(x=>x.id===el.dataset.remev); if(ev){ state.view='calendar'; state.modal = {type:'event', event:{...ev}, isNew:false, keepAll:true}; render(); } });
+    overlay.querySelectorAll('[data-remcert]').forEach(el=> el.onclick = ()=>{ const c = state.certificates.find(x=>x.id===el.dataset.remcert); if(c){ state.view='certificates'; state.certView='certificates'; state.modal = {type:'certificate', cert:{...c}, isNew:false}; render(); } });
+    overlay.querySelectorAll('[data-remlead]').forEach(el=> el.onclick = ()=>{ const l = state.leads.find(x=>x.id===el.dataset.remlead); if(l){ state.view='certificates'; state.certView='conversion'; state.modal = {type:'lead', lead:{...l}, isNew:false}; render(); } });
+    overlay.querySelectorAll('[data-rempay]').forEach(el=> el.onclick = ()=>{ state.view='certificates'; state.certView='manager-salary'; state.modal = null; render(); });
+  }
   function computeDailyAlerts(){
     const alerts = [];
     const today = todayStr();
@@ -5326,45 +5396,78 @@
       if(noDocsCount > 0) alerts.push({icon:'📎', text:`Юр.лица — не хватает документов (договор / счёт / акт): ${noDocsCount}`, legalDocs:true});
     }
 
+    try{
+      const rm = computeReminders();
+      if(rm.total > 0) alerts.push({icon:'🔔', text:`Напоминания: ${[rm.payouts.length?`выплаты ${rm.payouts.length}`:'', rm.unpaid.length?`недоплаты ${rm.unpaid.length}`:'', rm.certs.length?`сертификаты ${rm.certs.length}`:'', rm.leads.length?`заявки ${rm.leads.length}`:''].filter(Boolean).join(', ')}`, reminders:true});
+    }catch(e){}
+
     return alerts;
   }
 
   function performGlobalSearch(query){
-    const q = query.trim().toLowerCase();
-    if(q.length < 2) return [];
-    const results = [];
+    const norm = x=> String(x==null?'':x).toLowerCase().replace(/ё/g,'е');
+    const qRaw = query.trim();
+    if(qRaw.length < 2) return [];
+    const tokens = norm(qRaw).split(/\s+/).filter(Boolean);
+    const qDigits = qRaw.replace(/\D/g,'');
+    const usePhone = qDigits.length >= 4 && qDigits.length >= qRaw.replace(/\s/g,'').length - 3;
+    const hit = (fields)=>{
+      const hay = norm(fields.filter(v=>v!==undefined && v!==null && v!=='').join(' '));
+      if(usePhone){ const dg = hay.replace(/\D/g,''); if(dg.includes(qDigits)) return true; }
+      return tokens.every(t=> hay.includes(t));
+    };
+    const dateText = d=> d ? formatDateText(d) + ' ' + d.split('-').reverse().join('.') + ' ' + d : '';
+    const today = todayStr();
+    const res = [];
+    const role = state.currentRole;
     state.events.forEach(e=>{
-      const haystack = [e.title, e.host, e.guestName, e.notes].filter(Boolean).join(' ').toLowerCase();
-      if(haystack.includes(q)){
-        results.push({
-          type: 'event', id: e.id,
-          label: `📅 ${e.title||'Без названия'}`,
-          sub: `${e.date?formatDateText(e.date):''} · ${e.host||'без ведущего'}${e.guestName?' · '+e.guestName:''}`,
-        });
+      const gl = Array.isArray(e.guestList) ? e.guestList.map(g=>[g && g.name, g && g.phone, g && g.contact].join(' ')).join(' ') : '';
+      if(hit([e.title, e.product, e.host, (e.additionalHosts||[]).join ? (e.additionalHosts||[]).join(' ') : '', e.guestName, e.companyName, e.notes, gl, dateText(e.date)])){
+        res.push({ type:'event', id:e.id, grp:0, key: e.date ? (e.date >= today ? 0 : 1) + '|' + (e.date >= today ? e.date : String(99999999 - parseInt(e.date.replace(/-/g,''),10)).padStart(8,'0')) : '2|',
+          label: `📅 ${e.title||'Без названия'}${e.status==='cancelled'?' (отменено)':''}`,
+          sub: `${e.date?formatDateText(e.date):''}${e.time?' '+e.time:''} · ${e.host||'без ведущего'}${e.guestName?' · '+e.guestName:''}` });
       }
     });
-    if(roleCanAccessManagersTab(state.currentRole)){
+    if(roleCanAccessManagersTab(role)){
       state.leads.forEach(l=>{
-        if((l.contact||'').toLowerCase().includes(q)){
-          results.push({
-            type: 'lead', id: l.id,
-            label: `📝 Заявка: ${l.contact}`,
-            sub: `${l.requestDate?formatDateText(l.requestDate):''} · ${l.source||''} · ${l.product||''}`,
-          });
+        if(hit([l.contact, l.name, l.phone, l.source, l.product, l.comment, l.note, dateText(l.requestDate)])){
+          res.push({ type:'lead', id:l.id, grp:1, key:'', label: `📝 Заявка: ${l.contact||l.name||''}`,
+            sub: `${l.requestDate?formatDateText(l.requestDate):''} · ${l.source||''} · ${l.product||''}${l.sold||l.saleDate?' · продано':''}` });
         }
       });
       state.certificates.forEach(c=>{
-        const haystack = [String(c.number||''), c.ownerName, c.ownerContact].filter(Boolean).join(' ').toLowerCase();
-        if(haystack.includes(q)){
-          results.push({
-            type: 'certificate', id: c.id,
-            label: `🎁 Сертификат №${c.number} · ${c.ownerName||''}`,
-            sub: `${c.saleDate?formatDateText(c.saleDate):''} · ${formatMoney(c.amount||0)}`,
-          });
+        if(hit([c.number, c.ownerName, c.ownerContact, c.comment, c.certType, dateText(c.saleDate)])){
+          res.push({ type:'certificate', id:c.id, grp:2, key:'', label: `🎁 Сертификат №${c.number} · ${c.ownerName||''}`,
+            sub: `${c.saleDate?formatDateText(c.saleDate):''} · ${formatMoney(c.amount||0)}${c.ownerContact?' · '+c.ownerContact:''}` });
+        }
+      });
+      state.orders.forEach(o=>{
+        if(hit([o.masterName, o.comment, dateText(o.date)])){
+          res.push({ type:'order', id:o.id, grp:3, key:'', label: `📦 Заказ: ${(o.comment||'').split('\n')[0].slice(0,60) || o.masterName || ''}`,
+            sub: `${o.date?formatDateText(o.date):''} · ${o.masterName||''} · ${formatMoney(o.revenue||0)}` });
+        }
+      });
+      (state.refunds||[]).forEach(r=>{
+        if(['owner','admin','assistant'].includes(role) && hit([r.fullName, r.reason, r.amount, dateText(r.requestDate)])){
+          res.push({ type:'refund', id:r.id, grp:4, key:'', label: `↩️ Возврат: ${r.fullName||''}`,
+            sub: `${r.requestDate?formatDateText(r.requestDate):''} · ${formatMoney(r.amount||0)} · ${r.reason||''}` });
         }
       });
     }
-    return results.slice(0, 20);
+    if(['owner','admin','assistant'].includes(role)){
+      state.incomes.forEach(i=>{
+        if(i.autoFromPayment) return;
+        if(hit([i.comment, i.product, i.account, i.amount, dateText(i.date)])){
+          res.push({ type:'income', id:i.id, grp:5, key:'', label: `💰 Доход ${formatMoney(i.amount||0)} · ${i.product||''}`,
+            sub: `${i.date?formatDateText(i.date):''} · ${i.account||''} · ${(i.comment||'').replace(/\n/g,' ').slice(0,70)}` });
+        }
+      });
+    }
+    res.sort((a,b)=> a.grp - b.grp || String(a.key).localeCompare(String(b.key)));
+    // не даём одной группе вытеснить остальные: по 12 на группу, всего до 40
+    const cnt = {}; const out = [];
+    res.forEach(r=>{ cnt[r.grp] = (cnt[r.grp]||0) + 1; if(cnt[r.grp] <= 12 && out.length < 40) out.push(r); });
+    return out;
   }
 
   function renderGlobalSearchResults(results, query){
@@ -5372,12 +5475,13 @@
     if(results.length === 0){
       return `<div style="padding:14px;font-size:13px;color:var(--ink-soft);">Ничего не нашлось</div>`;
     }
-    return results.map(r=>`
+    const GRP = ['Мероприятия','Заявки','Сертификаты','Заказы','Возвраты','Доходы (Книга)'];
+    let _lastGrp = -1;
+    return results.map(r=>{ const head = r.grp !== _lastGrp ? `<div style="padding:5px 14px;font-size:10.5px;letter-spacing:.06em;text-transform:uppercase;color:var(--ink-soft);background:var(--paper-2);">${GRP[r.grp]}</div>` : ''; _lastGrp = r.grp; return head + `
       <div class="global-search-result" data-restype="${r.type}" data-resid="${r.id}" style="padding:10px 14px;border-bottom:1px solid var(--line);cursor:pointer;">
         <div style="font-size:13px;">${escapeHtml(r.label)}</div>
         <div style="font-size:11.5px;color:var(--ink-soft);margin-top:2px;">${escapeHtml(r.sub)}</div>
-      </div>
-    `).join('');
+      </div>`; }).join('');
   }
 
   function urlBase64ToUint8Array(base64String){
@@ -5577,7 +5681,7 @@
         </div>
         <div class="header-actions" style="display:flex; align-items:center; gap:10px; flex-wrap:wrap;">
           <div class="global-search-wrap" style="position:relative;">
-            <input type="text" id="global-search-input" placeholder="🔍 Поиск: мероприятие, гость, сертификат…" style="width:260px; max-width:100%; padding:9px 12px; border:1px solid var(--line-strong); border-radius:var(--radius); font-size:12.5px; font-family:var(--font-body); background:var(--white);">
+            <input type="text" id="global-search-input" placeholder="🔍 Поиск (Ctrl+K): гость, телефон, мероприятие, сертификат, заказ…" style="width:260px; max-width:100%; padding:9px 12px; border:1px solid var(--line-strong); border-radius:var(--radius); font-size:12.5px; font-family:var(--font-body); background:var(--white);">
             <div id="global-search-results" style="display:none; position:absolute; top:calc(100% + 4px); left:0; right:0; background:var(--white); border:1px solid var(--line-strong); border-radius:var(--radius); box-shadow:0 8px 24px rgba(0,0,0,0.12); max-height:360px; overflow-y:auto; z-index:500;"></div>
           </div>
           <div class="view-switch">${renderNavButtonsOrdered(role)}</div>
@@ -5598,7 +5702,7 @@
       </div>
       ${alerts.length ? `
       <div class="daily-alerts-banner">
-        ${alerts.map(a=>`<span class="daily-alert-item${(a.view||a.legalDocs||a.wishes||a.missingReports)?' clickable':''}" ${a.view?`data-alert-view="${a.view}" data-alert-certview="${a.certView||''}"`:''} ${a.missingReports?'data-alert-missingreports="1"':''} ${a.legalDocs?'data-alert-legaldocs="1"':''} ${a.wishes?'data-alert-wishes="1"':''}>${a.icon} ${escapeHtml(a.text)}</span>`).join('')}
+        ${alerts.map(a=>`<span class="daily-alert-item${(a.view||a.legalDocs||a.wishes||a.missingReports||a.reminders)?' clickable':''}" ${a.view?`data-alert-view="${a.view}" data-alert-certview="${a.certView||''}"`:''} ${a.missingReports?'data-alert-missingreports="1"':''} ${a.legalDocs?'data-alert-legaldocs="1"':''} ${a.reminders?'data-alert-reminders="1"':''} ${a.wishes?'data-alert-wishes="1"':''}>${a.icon} ${escapeHtml(a.text)}</span>`).join('')}
       </div>
       ` : ''}
     `;
@@ -8465,6 +8569,7 @@
     if(msSalPrev) msSalPrev.onclick = ()=>{ state.managerSalaryCursor = new Date(state.managerSalaryCursor.getFullYear(), state.managerSalaryCursor.getMonth()-1, 1); render(); };
     if(msSalNext) msSalNext.onclick = ()=>{ state.managerSalaryCursor = new Date(state.managerSalaryCursor.getFullYear(), state.managerSalaryCursor.getMonth()+1, 1); render(); };
     if(msSalToday) msSalToday.onclick = ()=>{ state.managerSalaryCursor = new Date(new Date().getFullYear(), new Date().getMonth(), 1); render(); };
+    attachDismissCalc();
 
     attachPeriodNav('refundsCursor', 'refundsMode', 'refunds-nav');
     attachPeriodNav('itemSalesCursor', 'itemSalesMode', 'itemsales-nav');
@@ -9932,12 +10037,176 @@
     };
   }
 
+  // ===== Расчёт процентов уволенного менеджера: общий процент с продаж, по которым мероприятия ещё впереди =====
+  // Личных продаж у менеджеров нет — платится один общий процент (по умолчанию 3%) со всех продаж, сделанных до даты увольнения,
+  // у которых мероприятие/заказ проходит с этой даты и позже. Продажа и дата продажи берутся из «Конверсии» (проданные заявки).
+  state.dc = { from: '', mode: 'sold', pick: {}, base: '', rate: null, paid: {}, periods: [ {from:'2026-11-01',to:'2026-11-30',pay:'2026-12-02'}, {from:'2026-12-01',to:'2026-12-14',pay:'2026-12-16'}, {from:'2026-12-15',to:'2026-12-31',pay:'2027-01-02'} ], loaded: false, ...(state.dc || {}) };
+  const DC_KEY = 'dismissal-calc';
+  async function dcReadRemote(){ try{ const r = await window.storage.get(DC_KEY, true); return r ? JSON.parse(r.value) : null; }catch(e){ return null; } }
+  async function dcLoad(){
+    const d = await dcReadRemote(); state.dc.loaded = true;
+    if(d){ const st = d.settings || {}; ['from','mode','rate','base'].forEach(k=>{ if(st[k] !== undefined) state.dc[k] = st[k]; }); if(st.periods) state.dc.periods = st.periods; state.dc.paid = d.paid || {}; }
+  }
+  let _dcSaveT = null;
+  function dcSaveSettings(){
+    clearTimeout(_dcSaveT);
+    _dcSaveT = setTimeout(async ()=>{
+      try{ const d = (await dcReadRemote()) || {}; const dc = state.dc; d.settings = { from: dc.from, mode: dc.mode, rate: dc.rate, base: dc.base, periods: dc.periods }; await window.storage.set(DC_KEY, JSON.stringify(d), true); }catch(e){}
+    }, 600);
+  }
+  async function dcSetPaid(key, on, amount, title){
+    const d = (await dcReadRemote()) || {}; d.paid = d.paid || {};
+    if(on) d.paid[key] = { at: omskNow().date, amount, title }; else delete d.paid[key];
+    await window.storage.set(DC_KEY, JSON.stringify(d), true);
+    state.dc.paid = d.paid;
+  }
+  function dcCompute(){
+    const dc = state.dc;
+    const rate = (dc.rate !== null && dc.rate !== '' && dc.rate !== undefined ? Number(dc.rate) : MANAGER_SALARY_PCT_TENTATIVE*100) / 100;
+    const rows = [];
+    const okEv = (e)=> e && (e.status === 'confirmed' || e.status === 'tentative' || e.status === 'offsite');
+    let notLinked = { n: 0, sum: 0 };
+    const linkedEvIds = new Set();
+    (state.leads || []).forEach(l=>{
+      if(leadStatus(l) !== 'sold') return;
+      let date = '', title = '', revenue = 0, status = '', key = '';
+      if(l.eventId){
+        const e = state.events.find(x=>x.id === l.eventId); if(!okEv(e)) return;
+        linkedEvIds.add(e.id);
+        date = e.date || ''; title = (e.title || e.product || 'мероприятие') + (e.time ? ' ' + e.time : ''); revenue = eventRevenueForecast(e); status = STATUS_LABEL[e.status] || e.status; key = 'e' + e.id;
+      } else if(l.orderId){
+        const o = state.orders.find(x=>x.id === l.orderId); if(!o) return;
+        date = o.date || ''; title = 'Заказ' + (o.masterName ? ' — ' + o.masterName : ''); revenue = Number(o.revenue) || 0; status = 'Заказ'; key = 'o' + o.id;
+      } else return;
+      if(!dc.from || !date || date < dc.from) return;
+      const sd = l.saleDate || '';
+      // режим «sold»: только продажи, сделанные ДО даты увольнения; если дата продажи не указана — включаем с пометкой
+      if(dc.mode === 'sold' && sd && sd >= dc.from) return;
+      const picked = Object.prototype.hasOwnProperty.call(dc.pick, key) ? !!dc.pick[key] : true;
+      rows.push({ id: key, contact: l.name || l.phone || l.contact || '', source: l.source || '', saleDate: sd, date, title, status, revenue, amount: Math.round(revenue * rate), picked });
+    });
+    if(dc.mode === 'all'){
+      // режим «все мероприятия с даты»: берём прямо из расписания, без привязки к заявкам
+      const have = new Set(rows.map(r=>r.id));
+      state.events.forEach(e=>{
+        if(!okEv(e) || !e.date || !dc.from || e.date < dc.from) return;
+        if(have.has('e' + e.id)) return;
+        const key = 'e' + e.id; const picked = Object.prototype.hasOwnProperty.call(dc.pick, key) ? !!dc.pick[key] : true;
+        rows.push({ id: key, contact: e.guestName || '', source: '', saleDate: '', date: e.date, title: (e.title || e.product || 'мероприятие') + (e.time ? ' ' + e.time : ''), status: STATUS_LABEL[e.status] || e.status, revenue: eventRevenueForecast(e), amount: Math.round(eventRevenueForecast(e) * rate), picked });
+      });
+    } else {
+      state.events.forEach(e=>{ if(okEv(e) && e.date && dc.from && e.date >= dc.from && !linkedEvIds.has(e.id)){ notLinked.n++; notLinked.sum += eventRevenueForecast(e); } });
+    }
+    const _today = omskNow().date; rows.forEach(r=>{ r.done = r.date < _today; r.today = r.date === _today; r.paid = (dc.paid || {})[r.id] || null; });
+    rows.sort((a,b)=> a.date.localeCompare(b.date));
+    const sel = rows.filter(r=>r.picked);
+    const byMonth = {};
+    sel.forEach(r=>{ const ym = r.date.slice(0,7); byMonth[ym] = (byMonth[ym] || 0) + r.amount; });
+    const total = sel.reduce((s,r)=>s+r.amount, 0);
+    const sumRev = sel.reduce((s,r)=>s+r.revenue, 0);
+    const sumA = a=>a.reduce((t,r)=>t+r.amount,0);
+    const inPer = new Set();
+    const payInfo = (dc.periods || []).map((pr,i)=>{
+      const mr = sel.filter(r=>r.date >= pr.from && r.date <= pr.to); mr.forEach(r=>inPer.add(r.id));
+      const unpaid = mr.filter(r=>!r.paid);
+      return { i, pr, n: mr.length, total: sumA(mr), paidSum: mr.filter(r=>r.paid).reduce((t,r)=>t+(Number(r.paid.amount)||0),0), unpaidSum: sumA(unpaid), unpaidN: unpaid.length, futureN: unpaid.filter(r=>!r.done).length };
+    });
+    const outside = sel.filter(r=>!inPer.has(r.id));
+    const base = Number(dc.base) || 0;
+    const dueRows = sel.filter(r=>r.done && !r.paid); const doneSum = dueRows.reduce((s,r)=>s+r.amount,0), doneN = dueRows.length;
+    const paidRows = sel.filter(r=>r.paid); const paidSum = paidRows.reduce((s,r)=>s+(Number(r.paid.amount)||0),0), paidN = paidRows.length;
+    return { outside, payInfo, doneSum, doneN, paidSum, paidN, rows, sel, byMonth, total, sumRev, base, grand: total + base, rate, notLinked };
+  }
+  function dcTableHtml(){
+    const c = dcCompute(); const dc = state.dc;
+    if(!dc.from) return '<div style="font-size:13px;color:var(--ink-soft);padding:8px 0;">Укажите дату увольнения — ниже появятся продажи, по которым мероприятия ещё впереди.</div>';
+    const mn = (ym)=>{ const [y,m] = ym.split('-'); return MONTHS[Number(m)-1] + ' ' + y; };
+    const rowsHtml = c.rows.map(r=>`
+      <tr style="${r.picked ? '' : 'opacity:.5;'}">
+        <td style="padding:4px 6px;"><input type="checkbox" data-dcpick="${escapeHtml(r.id)}" ${r.picked ? 'checked' : ''} title="Учитывать эту продажу"></td>
+        <td style="padding:4px 6px;white-space:nowrap;">${escapeHtml(formatDateText(r.date))}<div style="font-size:11px;font-weight:600;color:${r.done?'var(--status-green,#2e7d32)':'var(--ink-soft)'};">${r.done?'✓ состоялось':(r.today?'сегодня':'ещё впереди')}</div></td>
+        <td style="padding:4px 6px;">${escapeHtml(r.title)}<div style="font-size:11px;color:var(--ink-soft);">${escapeHtml(r.status)}${r.source ? ' · ' + escapeHtml(r.source) : ''}${r.contact ? ' · ' + escapeHtml(r.contact) : ''}</div></td>
+        <td style="padding:4px 6px;font-size:12px;white-space:nowrap;">${r.saleDate ? escapeHtml(formatDateText(r.saleDate)) : '<span style="color:var(--ink-soft);">дата не указана</span>'}</td>
+        <td style="padding:4px 6px;text-align:right;font-family:var(--font-mono);white-space:nowrap;">${escapeHtml(formatMoney(r.revenue))}</td>
+        <td style="padding:4px 6px;text-align:right;font-family:var(--font-mono);font-weight:600;white-space:nowrap;">${escapeHtml(formatMoney(r.amount))}</td>
+        <td style="padding:4px 6px;font-size:12px;white-space:nowrap;">${r.paid ? `<label style="color:var(--status-green,#2e7d32);font-weight:600;cursor:pointer;"><input type="checkbox" data-dcpaid="${escapeHtml(r.id)}" checked> выплачено ${escapeHtml(formatDateText(r.paid.at))}${Number(r.paid.amount)!==r.amount?'<br><span style="color:var(--status-red);">было '+escapeHtml(formatMoney(r.paid.amount))+'</span>':''}</label>` : (r.done ? `<label style="cursor:pointer;"><input type="checkbox" data-dcpaid="${escapeHtml(r.id)}"> выплатила</label>` : '<span style="color:var(--ink-soft);">ждём мероприятие</span>')}</td>
+      </tr>`).join('');
+    const months = Object.keys(c.byMonth).sort();
+    return `
+      <div style="overflow-x:auto;"><table style="width:100%;border-collapse:collapse;font-size:13px;">
+        <thead><tr style="text-align:left;font-size:11px;color:var(--ink-soft);font-family:var(--font-mono);border-bottom:1px solid var(--line-strong);"><th></th><th>Дата</th><th>Мероприятие / заказ</th><th>Продано</th><th style="text-align:right;">Сумма</th><th style="text-align:right;">К выплате</th><th>Выплата</th></tr></thead>
+        <tbody>${rowsHtml || '<tr><td colspan="7" style="padding:12px;color:var(--ink-soft);">Подходящих продаж нет.</td></tr>'}</tbody>
+      </table></div>
+      <div style="margin-top:10px;font-size:13px;">
+        ${c.payInfo.map(m=>`<div style="border:1px solid var(--line-strong);border-radius:8px;padding:8px 10px;margin-bottom:8px;">
+          <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;justify-content:space-between;font-size:12px;">
+            <div>мероприятия с <input type="date" data-dcper="${m.i}:from" value="${escapeHtml(m.pr.from)}" style="font-size:12px;"> по <input type="date" data-dcper="${m.i}:to" value="${escapeHtml(m.pr.to)}" style="font-size:12px;"></div>
+            <div>выплата <input type="date" data-dcper="${m.i}:pay" value="${escapeHtml(m.pr.pay)}" style="font-size:12px;"></div>
+          </div>
+          <div style="font-size:13px;margin-top:6px;">Выплата ${m.pr.pay ? escapeHtml(formatDateText(m.pr.pay)) : ''}: <b>${escapeHtml(formatMoney(m.unpaidSum))}</b> (${m.unpaidN} шт. из ${m.n}; всего за период ${escapeHtml(formatMoney(m.total))})${m.paidSum ? ' · уже выплачено ' + escapeHtml(formatMoney(m.paidSum)) : ''}${m.futureN ? ` · <span style="color:var(--ink-soft);">из них ещё не состоялись: ${m.futureN}</span>` : ''}</div>
+        </div>`).join('')}
+        ${c.outside.length ? `<div style="font-size:12px;color:var(--status-red);margin-bottom:8px;">⚠ ${c.outside.length} мероприятий на ${escapeHtml(formatMoney(c.outside.reduce((t,r)=>t+r.amount,0)))} не попадают ни в один период выплат.</div>` : ''}
+        <div class="stat-row"><div class="stat-label" style="width:240px;">${Math.round(c.rate*1000)/10}% с ${escapeHtml(formatMoney(c.sumRev))} (${c.sel.length} шт.)</div><div style="flex:1;"></div><div style="width:130px;text-align:right;font-family:var(--font-mono);font-weight:600;">${escapeHtml(formatMoney(c.total))}</div></div>
+        ${c.base ? `<div class="stat-row"><div class="stat-label" style="width:240px;">Оклад / прочее</div><div style="flex:1;"></div><div style="width:130px;text-align:right;font-family:var(--font-mono);">${escapeHtml(formatMoney(c.base))}</div></div>` : ''}
+        <div class="stat-row"><div class="stat-label" style="width:240px;">состоялись, ещё не выплачены (${c.doneN} шт.) — выплатить сейчас</div><div style="flex:1;"></div><div style="width:130px;text-align:right;font-family:var(--font-mono);font-weight:600;">${escapeHtml(formatMoney(c.doneSum))}</div></div>
+        <div class="stat-row"><div class="stat-label" style="width:240px;">уже выплачено (${c.paidN} шт.)</div><div style="flex:1;"></div><div style="width:130px;text-align:right;font-family:var(--font-mono);">${escapeHtml(formatMoney(c.paidSum))}</div></div>
+        <div class="stat-row"><div class="stat-label" style="width:240px;">ещё впереди (${c.sel.length-c.doneN} шт.)</div><div style="flex:1;"></div><div style="width:130px;text-align:right;font-family:var(--font-mono);">${escapeHtml(formatMoney(c.total-c.doneSum))}</div></div>
+        <div class="stat-row" style="border-top:1px solid var(--line-strong);padding-top:8px;"><div class="stat-label" style="width:240px;font-weight:700;">ИТОГО к выплате</div><div style="flex:1;"></div><div style="width:130px;text-align:right;font-family:var(--font-mono);font-size:16px;font-weight:700;">${escapeHtml(formatMoney(c.grand))}</div></div>
+      </div>
+      ${c.notLinked.n ? `<div style="font-size:12px;margin-top:8px;color:var(--status-red);">⚠ Ещё ${c.notLinked.n} мероприятий с этой даты (на ${escapeHtml(formatMoney(c.notLinked.sum))}) не связаны с проданной заявкой, поэтому сюда не вошли. Если считать надо и их — выберите режим «все мероприятия с этой даты».</div>` : ''}
+      <div style="font-size:11.5px;color:var(--ink-soft);margin-top:8px;">Сумма — как в обычной ЗП менеджеров: максимум из «Выручки» и «Согласованной суммы», без привязки к факту оплаты. Отменённые, маркетинг и слоты не считаются. Если сумма или состав мероприятий изменится, итог пересчитается сам.</div>`;
+  }
+  function dcBoxHtml(){
+    const dc = state.dc;
+    return `
+      <div class="analytics-section" id="dc-box" style="margin-top:28px;border:1px solid var(--line-strong);border-radius:10px;padding:14px;">
+        <div style="font-size:15px;font-weight:700;margin-bottom:4px;">💼 Расчёт процентов при увольнении менеджера</div>
+        <div style="font-size:12px;color:var(--ink-soft);margin-bottom:10px;">Общий процент со всех продаж, сделанных до даты увольнения, у которых мероприятие или заказ проходит с этой даты и позже. Продажи — из «Конверсии». Галочкой можно исключить любую строку.</div>
+        <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:flex-end;margin-bottom:10px;">
+          <div class="field" style="margin:0;"><label>Уволена с (мероприятия с этой даты)</label><input type="date" id="dc-from" value="${escapeHtml(dc.from||'')}"></div>
+          <div class="field" style="margin:0;"><label>Что считать</label><select id="dc-mode"><option value="sold" ${dc.mode==='sold'?'selected':''}>продано до этой даты</option><option value="all" ${dc.mode==='all'?'selected':''}>все мероприятия с этой даты</option></select></div>
+          <div class="field" style="margin:0;width:90px;"><label>Процент, %</label><input type="number" id="dc-rate" min="0" step="0.5" value="${dc.rate !== null && dc.rate !== '' && dc.rate !== undefined ? dc.rate : Math.round(MANAGER_SALARY_PCT_TENTATIVE*1000)/10}"></div>
+          <div class="field" style="margin:0;width:160px;"><label>Оклад / прочее, ₽</label><input type="number" id="dc-base" min="0" step="100" value="${escapeHtml(String(dc.base||''))}" placeholder="за отработанные дни"></div>
+        </div>
+        <div id="dc-table">${dcTableHtml()}</div>
+      </div>`;
+  }
+  function attachDismissCalc(){
+    const box = document.getElementById('dc-box'); if(!box) return;
+    const bindPicks = ()=>{ box.querySelectorAll('[data-dcpick]').forEach(cb=> cb.onchange = ()=>{ state.dc.pick[cb.dataset.dcpick] = cb.checked; refresh(); }); };
+    const refresh = ()=>{ const t = document.getElementById('dc-table'); if(t){ t.innerHTML = dcTableHtml(); bindPicks(); } dcSaveSettings(); };
+    const on = (id, ev, fn)=>{ const el = document.getElementById(id); if(el) el.addEventListener(ev, fn); };
+    on('dc-from','input', e=>{ state.dc.from = e.target.value; state.dc.pick = {}; refresh(); });
+    on('dc-mode','change', e=>{ state.dc.mode = e.target.value; state.dc.pick = {}; refresh(); });
+    on('dc-rate','input', e=>{ state.dc.rate = e.target.value; refresh(); });
+    on('dc-base','input', e=>{ state.dc.base = e.target.value; refresh(); });
+    bindPicks();
+    box.addEventListener('change', async (ev)=>{
+      const pi = ev.target.closest && ev.target.closest('[data-dcper]');
+      if(pi){ const [ix, fld] = pi.dataset.dcper.split(':'); const per = state.dc.periods.map(x=>({...x})); per[+ix][fld] = pi.value; state.dc.periods = per; const t = document.getElementById('dc-table'); if(t){ t.innerHTML = dcTableHtml(); bindPicks(); } dcSaveSettings(); return; }
+      const cb = ev.target.closest && ev.target.closest('[data-dcpaid]'); if(!cb) return;
+      const key = cb.dataset.dcpaid; const r = dcCompute().rows.find(x=>x.id === key); if(!r) return;
+      cb.disabled = true;
+      try{ await dcSetPaid(key, cb.checked, r.amount, r.title); }catch(e){ alert('Не удалось сохранить отметку. Проверьте интернет и попробуйте ещё раз.'); }
+      const t = document.getElementById('dc-table'); if(t){ t.innerHTML = dcTableHtml(); bindPicks(); }
+    });
+    if(!state.dc.loaded){ dcLoad().then(()=>{ const b = document.getElementById('dc-box'); if(b){ b.outerHTML = dcBoxHtml(); attachDismissCalc(); } }); }
+  }
+
   function renderManagerSalaryView(){
     const cursor = state.managerSalaryCursor;
     const y = cursor.getFullYear(), m = cursor.getMonth();
     const ym = y+'-'+pad(m+1);
     const label = MONTHS[m] + ' ' + y;
     const calc = computeManagerSalaryForMonth(ym);
+    if(!state.dc.loaded && !state.dc._loading){ state.dc._loading = true; dcLoad().then(()=>{ if(state.view==='certificates' && state.certView==='manager-salary') render(); }); }
+    let dedRows = [], dedSum = 0;
+    if(state.dc.from){ dedRows = dcCompute().sel.filter(r=>r.date.startsWith(ym)); dedSum = dedRows.reduce((t,r)=>t+r.amount,0); }
+    const dedHtml = dedSum > 0 ? `
+      <div class="analytics-summary" style="margin-bottom:20px;">
+        <div class="summary-card"><div class="num" style="font-size:18px;">− ${formatMoney(dedSum)}</div><div class="label">ПРОЦЕНТЫ УВОЛЕННОЙ ЗА ПРОДАЖИ ДО ${escapeHtml(state.dc.from.split('-').reverse().join('.'))} (${dedRows.length} ШТ.)</div></div>
+        <div class="summary-card"><div class="num" style="font-size:22px;">${formatMoney(calc.total - dedSum)}</div><div class="label">НОВОМУ МЕНЕДЖЕРУ ЗА МЕСЯЦ ПОСЛЕ ВЫЧЕТА</div></div>
+      </div>` : '';
     return `
       <div class="cal-nav">
         <div class="month-label" style="text-transform:capitalize;">${escapeHtml(label)}</div>
@@ -9952,6 +10221,7 @@
       <div class="analytics-summary" style="margin-bottom:20px;">
         <div class="summary-card"><div class="num" style="font-size:22px;">${formatMoney(calc.total)}</div><div class="label">ИТОГО ЗА МЕСЯЦ — НА ОДНОГО МЕНЕДЖЕРА</div></div>
       </div>
+      ${dedHtml}
 
       <div class="analytics-section">
         <div class="stat-row">
@@ -9985,6 +10255,7 @@
           <div style="width:110px;text-align:right;font-family:var(--font-mono);font-size:15px;font-weight:700;">${formatMoney(calc.total)}</div>
         </div>
       </div>
+      ${dcBoxHtml()}
     `;
   }
 
@@ -12213,7 +12484,7 @@
           <div class="row2">
             <div class="field">
               <label>Дата</label>
-              <input type="date" id="adj-date" value="${adj.date||''}">
+              <input type="date" id="adj-date" value="${(!isNew && adjEffDate(adj)) || adj.date || ''}">
             </div>
             <div class="field">
               <label>Сумма (₽)</label>
@@ -12357,6 +12628,12 @@
       };
       if(previousAdj.createdAt) updated.createdAt = previousAdj.createdAt;
       else if(!state.salaryAdjustments.some(x=>x.id===updated.id)) updated.createdAt = new Date().toISOString();
+      // период корректировки определяется по createdAt (см. adjEffDate). Если дату в записи изменили вручную —
+      // переносим и период: иначе смена даты ничего бы не меняла в ЗП
+      const _origEff = adjEffDate(previousAdj) || previousAdj.date || '';
+      if(dateVal && dateVal !== _origEff && !(dateVal === todayStr() && !previousAdj.createdAt && !state.salaryAdjustments.some(x=>x.id===updated.id))){
+        updated.createdAt = new Date(dateVal + 'T12:00:00').toISOString();
+      }
 
       // синхронизация с себестоимостью мероприятия: только положительные доплаты (студия должна),
       // отрицательные удержания к конкретному мероприятию не относятся
@@ -12432,14 +12709,122 @@
     if(modeToggleBtn) modeToggleBtn.onclick = ()=>{ state[modeKey] = state[modeKey]==='year' ? 'month' : 'year'; render(); };
   }
 
+  // ===== «Книга → Сверка»: выручка и деньги отдельно + проверки на дубли и расхождения =====
+  function renderReconcileView(){
+    const owner = state.currentRole === 'owner';
+    const cur = state.bookCursor || (state.bookCursor = new Date());
+    const ym = cur.getFullYear() + '-' + pad(cur.getMonth()+1);
+    const today = todayStr();
+    const np = computeNetProfitSnapshot(ym);
+    const num = v=> { const n = Number(v); return isNaN(n) ? 0 : n; };
+    const sum = arr=> arr.reduce((t,i)=> t + num(i.amount), 0);
+    const mon = formatMoney;
+    const row = (label, val, hint, bold)=> `<div class="stat-row"><div class="stat-label" style="width:380px;max-width:60%;${bold?'font-weight:700;':''}"><div>${label}${hint?`<div style="font-size:11px;color:var(--ink-soft);font-weight:400;">${hint}</div>`:''}</div></div><div style="flex:1;"></div><div style="width:130px;text-align:right;font-family:var(--font-mono);${bold?'font-weight:700;':''}">${val}</div></div>`;
+
+    // --- деньги в Книге за месяц ---
+    const inc = state.incomes.filter(i=> i.date && i.date.startsWith(ym) && !i.safeTransfer);
+    const byAcc = {}; inc.forEach(i=>{ const a = i.account || 'без счёта'; byAcc[a] = (byAcc[a]||0) + num(i.amount); });
+    const notRevenue = inc.filter(i=> isYclientsPayoutIncome(i) || i.notRevenue === true);
+    const eventPaid = inc.filter(i=> (i.eventId || i.autoFromPayment || i.autoFromEvent) && !notRevenue.includes(i));
+    const certInc = inc.filter(i=> !eventPaid.includes(i) && !notRevenue.includes(i) && (certCoveredIncomeIds().has(i.id) || i.product === 'Сертификат'));
+    const otherInc = otherIncomesForMonth(ym);
+    const evMonth = state.events.filter(e=> e.date && e.date.startsWith(ym) && e.status !== 'cancelled');
+    const dueNow = evMonth.filter(e=> e.date < today).reduce((t,e)=> t + eventRemainderTotal(e), 0);
+    const dueLater = evMonth.filter(e=> e.date >= today).reduce((t,e)=> t + eventRemainderTotal(e), 0);
+
+    // --- проверки ---
+    const evPaidMap = new Map(); state.incomes.forEach(i=>{ if(i.eventId) evPaidMap.set(i.eventId, (evPaidMap.get(i.eventId)||0) + num(i.amount)); });
+    const overpaid = evMonth.map(e=>{ const base = Math.max(num(e.price), num(e.agreedPrice)); const paid = evPaidMap.get(e.id)||0; return { e, base, paid }; }).filter(x=> x.paid > x.base + 1);
+    const certIds = new Set(state.incomes.map(i=>i.id));
+    const brokenCert = state.certificates.filter(c=> c.saleDate && c.saleDate.startsWith(ym) && c.incomeId && !certIds.has(c.incomeId));
+    const dupKey = i=> [i.date, num(i.amount), i.product||'', i.account||'', (i.comment||'').trim().toLowerCase()].join('|');
+    const dupGroups = {}; inc.filter(i=>!i.autoFromPayment).forEach(i=>{ (dupGroups[dupKey(i)] = dupGroups[dupKey(i)] || []).push(i); });
+    const dups = Object.values(dupGroups).filter(g=> g.length > 1 && num(g[0].amount) > 0);
+    const cancelledPaid = state.events.filter(e=> e.status === 'cancelled' && e.date && e.date.startsWith(ym) && (evPaidMap.get(e.id)||0) > 0);
+
+    const incLine = (i, extra)=> `<div class="stat-row" style="font-size:12.5px;"><div style="flex:1;"><span data-rc-inc="${escapeHtml(i.id)}" style="cursor:pointer;text-decoration:underline dotted;">${escapeHtml(formatDateText(i.date))} · ${escapeHtml(mon(num(i.amount)))} · ${escapeHtml(i.product||'')} · ${escapeHtml(i.account||'')}</span><div style="color:var(--ink-soft);font-size:11.5px;">${escapeHtml((i.comment||'').replace(/\n/g,' ').slice(0,90))}</div></div>${extra||''}</div>`;
+    const flagBtn = i=> owner ? `<button class="btn btn-ghost" data-rc-flag="${escapeHtml(i.id)}" style="padding:2px 8px;font-size:11.5px;">не считать в выручку</button>` : '';
+    const unflagBtn = i=> owner ? `<button class="btn btn-ghost" data-rc-unflag="${escapeHtml(i.id)}" style="padding:2px 8px;font-size:11.5px;">считать в выручке</button>` : '';
+    const block = (title, count, body, openAlways)=> `<details ${count && openAlways ? 'open' : ''} style="border:1px solid var(--line-strong);border-radius:8px;padding:8px 12px;margin-bottom:8px;"><summary style="cursor:pointer;font-weight:600;font-size:13.5px;">${title} <span style="color:${count?'var(--status-red)':'var(--status-green)'};">${count ? '— '+count : '— ✓ нет'}</span></summary><div style="margin-top:8px;">${body||''}</div></details>`;
+
+    // --- расходы: что считает приложение и что реально оплачено в Книге ---
+    const exp = state.expenses.filter(e=> e.date && e.date.startsWith(ym) && !e.safeTransfer);
+    const expCat = c=> exp.filter(e=> e.category === c && !e.netProfitRef).reduce((t,e)=> t + num(e.amount), 0);
+    const salaryApp = np.npMastersSalary + np.npHostessSalary + np.npManagerSalary;
+    const expDupGroups = {}; exp.forEach(e=>{ const k = [e.date, num(e.amount), e.category||'', e.source||'', (e.comment||'').trim().toLowerCase()].join('|'); (expDupGroups[k] = expDupGroups[k] || []).push(e); });
+    const expDups = Object.values(expDupGroups).filter(g=> g.length > 1 && num(g[0].amount) > 0);
+
+    return `
+      <div style="font-size:12px;color:var(--ink-soft);margin:-4px 0 14px;">Сверка за выбранный месяц (<b>${escapeHtml(MONTHS[cur.getMonth()] + ' ' + cur.getFullYear())}</b>). Выручка считается по датам мероприятий и продаж, деньги — по датам поступления в «Книгу», поэтому числа не обязаны совпадать. Здесь видно, из чего складывается разница и где есть дубли.</div>
+
+      <div class="analytics-section">
+        <div style="font-weight:700;margin-bottom:6px;">1. Выручка по приложению</div>
+        ${row('Мероприятия', mon(np.npEventsRevenue))}
+        ${row('Сертификаты (продажи)', mon(np.npCertSalesRevenue))}
+        ${row('Заказы', mon(np.npOrdersRevenue))}
+        ${row('Изделия', mon(np.npItemSalesRevenue))}
+        ${row('Прочие доходы из Книги', mon(num(otherInc.reduce((t,i)=>t+num(i.amount),0))))}
+        ${row('Выручка итого', mon(np.npTotalRevenue), '', true)}
+      </div>
+
+      <div class="analytics-section" style="margin-top:14px;">
+        <div style="font-weight:700;margin-bottom:6px;">2. Деньги, внесённые в Книгу за месяц</div>
+        ${Object.keys(byAcc).sort().map(a=> row(escapeHtml(a), mon(byAcc[a]))).join('')}
+        ${row('Поступило всего', mon(sum(inc)), '', true)}
+        ${row('— оплаты мероприятий', mon(sum(eventPaid)), 'уже входят в выручку мероприятий')}
+        ${row('— сертификаты', mon(sum(certInc)), 'входят в выручку через «Сертификаты»')}
+        ${row('— переводы YCLIENTS / отмечено «не в выручке»', mon(sum(notRevenue)), 'деньги пришли, но выручкой не считаются')}
+        ${row('— прочее (попало в «Прочие доходы»)', mon(sum(otherInc)))}
+        ${row('Ожидаются доплаты по мероприятиям месяца', mon(dueNow + dueLater), `уже прошедших: ${mon(dueNow)}, впереди: ${mon(dueLater)}`)}
+        <div style="font-size:11.5px;color:var(--ink-soft);margin-top:6px;">Разница между выручкой и поступлениями — это обычно предоплаты за другие месяцы, непришедшие остатки и оплаты сертификатами.</div>
+      </div>
+
+      <div style="font-weight:700;margin:16px 0 6px;">3. Проверки доходов</div>
+      ${block('Записи без привязки — идут в выручку как «Прочее»', otherInc.length, otherInc.map(i=> incLine(i, flagBtn(i))).join('') + (otherInc.length ? '<div style="font-size:11.5px;color:var(--ink-soft);">Если это оплата мероприятия, заказа или сертификата, которая уже есть в другом месте — нажмите «не считать в выручку» (кнопка только у владельца).</div>' : ''), true)}
+      ${block('Отмечены «не в выручке»', notRevenue.length, notRevenue.map(i=> incLine(i, unflagBtn(i))).join(''), false)}
+      ${block('Оплачено больше, чем стоит в мероприятии', overpaid.length, overpaid.map(x=> `<div class="stat-row" style="font-size:12.5px;cursor:pointer;" data-rc-ev="${escapeHtml(x.e.id)}"><div style="flex:1;">${escapeHtml(formatDateText(x.e.date))} · ${escapeHtml(x.e.title||'')}${x.e.guestName?' · '+escapeHtml(x.e.guestName):''}</div><div style="font-family:var(--font-mono);">в карточке ${escapeHtml(mon(x.base))} → оплачено ${escapeHtml(mon(x.paid))}</div></div>`).join('') + (overpaid.length ? '<div style="font-size:11.5px;color:var(--ink-soft);">С октября 2026 выручка берётся по большему из двух чисел. Проверьте карточку: либо обновить сумму, либо оплата привязана не к тому мероприятию.</div>' : ''), true)}
+      ${block('Возможные дубли в доходах (одна дата, сумма, счёт, комментарий)', dups.length, dups.map(g=> g.map(i=> incLine(i, flagBtn(i))).join('') + '<hr style="border:none;border-top:1px dashed var(--line);margin:6px 0;">').join(''), false)}
+      ${block('Сертификаты с битой ссылкой на запись в Книге', brokenCert.length, brokenCert.map(c=> `<div class="stat-row" style="font-size:12.5px;"><div style="flex:1;">№${escapeHtml(String(c.number))} · ${escapeHtml(c.ownerName||'')} · ${escapeHtml(formatDateText(c.saleDate))} · ${escapeHtml(mon(num(c.amount)))}</div></div>`).join(''), false)}
+      ${block('Оплаты у отменённых мероприятий', cancelledPaid.length, cancelledPaid.map(e=> `<div class="stat-row" style="font-size:12.5px;cursor:pointer;" data-rc-ev="${escapeHtml(e.id)}"><div style="flex:1;">${escapeHtml(formatDateText(e.date))} · ${escapeHtml(e.title||'')}</div><div style="font-family:var(--font-mono);">${escapeHtml(mon(evPaidMap.get(e.id)))}</div></div>`).join(''), false)}
+
+      <div class="analytics-section" style="margin-top:16px;">
+        <div style="font-weight:700;margin-bottom:6px;">4. Расходы: что считает приложение и что оплачено в Книге</div>
+        ${row('Зарплаты: считает приложение', mon(salaryApp), `мастера ${mon(np.npMastersSalary)}, администраторы ${mon(np.npHostessSalary)}, менеджеры ${mon(np.npManagerSalary)}`)}
+        ${row('Зарплаты: оплачено в Книге', mon(expCat('Зарплата')))}
+        ${row('Материалы: себестоимость мероприятий', mon(np.npMaterialsCost))}
+        ${row('Материалы: закупки в Книге', mon(expCat('Материалы')), 'закупки и расход — разные вещи, тут разница нормальна')}
+        ${row('Маркетинг: в расчёте прибыли', mon(np.npMarketingCost))}
+        ${row('Маркетинг: оплачено в Книге', mon(expCat('Маркетинг')), 'в расчёте прибавлена ещё ЗП мастеров на маркетинговых мероприятиях')}
+        ${row('Прочие расходы Книги (в расчёте прибыли)', mon(np.npOtherLedgerCost))}
+      </div>
+      ${block('Возможные дубли в расходах (одна дата, сумма, категория, комментарий)', expDups.length, expDups.map(g=> g.map(e=> `<div class="stat-row" style="font-size:12.5px;"><div style="flex:1;">${escapeHtml(formatDateText(e.date))} · ${escapeHtml(mon(num(e.amount)))} · ${escapeHtml(e.category||'')} · ${escapeHtml(e.source||'')}<div style="color:var(--ink-soft);font-size:11.5px;">${escapeHtml((e.comment||'').slice(0,90))}</div></div></div>`).join('') + '<hr style="border:none;border-top:1px dashed var(--line);margin:6px 0;">').join(''), false)}
+    `;
+  }
+  function attachReconcileEvents(){
+    document.querySelectorAll('[data-rc-inc]').forEach(el=> el.onclick = ()=>{ const i = state.incomes.find(x=>x.id===el.dataset.rcInc); if(i){ state.modal = {type:'income', isNew:false, income:{...i}}; render(); } });
+    document.querySelectorAll('[data-rc-ev]').forEach(el=> el.onclick = ()=>{ const e = state.events.find(x=>x.id===el.dataset.rcEv); if(e){ state.modal = {type:'event', event:{...e}, isNew:false, keepAll:true}; render(); } });
+    const setFlag = async (id, val)=>{
+      if(state.currentRole !== 'owner') return;
+      const idx = state.incomes.findIndex(x=>x.id===id); if(idx < 0) return;
+      state.incomes[idx] = { ...state.incomes[idx], notRevenue: val };
+      render();
+      try{ await saveIncomes(); }catch(e){ alert('Не удалось сохранить. Проверьте интернет и повторите.'); }
+      render();
+    };
+    document.querySelectorAll('[data-rc-flag]').forEach(el=> el.onclick = ()=> setFlag(el.dataset.rcFlag, true));
+    document.querySelectorAll('[data-rc-unflag]').forEach(el=> el.onclick = ()=> setFlag(el.dataset.rcUnflag, false));
+  }
+
   function renderBookView(){
     const hideTotals = bookTotalsHidden(state.currentRole);
     if(hideTotals && state.bookView === 'book-analytics') state.bookView = 'incomes';
+    if(state.bookView === 'reconcile' && !['owner','admin','assistant'].includes(state.currentRole)) state.bookView = 'incomes';
     const subTabsHtml = `
       <div class="cert-subtabs">
-        <button data-bookview="incomes" class="${state.bookView!=='expenses'&&state.bookView!=='book-analytics'?'active':''}">Доходы</button>
+        <button data-bookview="incomes" class="${state.bookView!=='expenses'&&state.bookView!=='book-analytics'&&state.bookView!=='reconcile'?'active':''}">Доходы</button>
         <button data-bookview="expenses" class="${state.bookView==='expenses'?'active':''}">Расходы</button>
         ${!hideTotals ? `<button data-bookview="book-analytics" class="${state.bookView==='book-analytics'?'active':''}">Аналитика</button>` : ''}
+        ${['owner','admin','assistant'].includes(state.currentRole) ? `<button data-bookview="reconcile" class="${state.bookView==='reconcile'?'active':''}">🔎 Сверка</button>` : ''}
       </div>
     `;
     const mode = state.bookMode || 'month';
@@ -12464,6 +12849,9 @@
     const period = { mode, periodLabel, inPeriod };
     if(state.bookView === 'expenses'){
       return subTabsHtml + navHtml + renderExpensesView(period);
+    }
+    if(state.bookView === 'reconcile'){
+      return subTabsHtml + navHtml + renderReconcileView();
     }
     if(state.bookView === 'book-analytics'){
       return subTabsHtml + navHtml + renderBookAnalyticsView(period);
@@ -13648,7 +14036,7 @@
               <div class="cell">${i.date ? formatDateText(i.date) : '—'}</div>
               <div class="cell">${escapeHtml(i.operation||'')}</div>
               <div class="cell">${escapeHtml(i.product||'')}</div>
-              <div class="cell">${escapeHtml(i.account||'')}${i.viaYuklient?' <span style="color:var(--ink-soft);font-size:11px;">· Юклиент</span>':''}</div>
+              <div class="cell">${escapeHtml(i.account||'')}${i.viaYuklient?' <span style="color:var(--ink-soft);font-size:11px;">· Юклиент</span>':''}${isYclientsPayoutIncome(i)?' <span style="color:var(--ink-soft);font-size:11px;" title="Не входит в выручку: деньги уже учтены в другом месте">· не в выручке</span>':''}</div>
               <div class="amount">${i.amount!==undefined&&i.amount!==null ? formatMoney(i.amount) : ''}</div>
               <div class="reason">${i.eventId ? '🔗 '+escapeHtml(linkedEventLabel(i.eventId))+(i.comment?' · ':'') : ''}${escapeHtml(i.comment||'')}</div>
             </div>
@@ -13759,6 +14147,7 @@
     document.querySelectorAll('[data-bookview]').forEach(btn=>{
       btn.onclick = ()=>{ state.bookView = btn.dataset.bookview; render(); };
     });
+    if(state.bookView === 'reconcile') attachReconcileEvents();
 
     const bookPrevBtn = document.getElementById('book-prev');
     if(bookPrevBtn) bookPrevBtn.onclick = ()=>{
@@ -13903,6 +14292,10 @@
             <input type="checkbox" id="i-yuklient" ${income.viaYuklient?'checked':''} style="width:auto;margin:0;">
             <label for="i-yuklient" style="margin:0;">Оплата принята через Юклиент</label>
           </div>
+          ${state.currentRole === 'owner' ? `<div class="field" style="display:flex;align-items:flex-start;gap:8px;">
+            <input type="checkbox" id="i-notrev" ${(income.notRevenue===true || (income.notRevenue===undefined && !isNew && isYclientsPayoutIncome(income)))?'checked':''} style="width:auto;margin:4px 0 0;">
+            <label for="i-notrev" style="margin:0;"><b>Не считать в выручку</b> — это перевод от YCLIENTS на счёт (выплата онлайн-оплат) или дубль записи, деньги по которой уже учтены в мероприятии, заказе или сертификате</label>
+          </div>` : ''}
           <div class="field" id="income-master-field" style="display:${income.product==='Изделие'?'block':'none'};">
             <label>Мастер, изготовивший изделие</label>
             <input type="text" id="i-master" value="${escapeHtml(income.masterName||'')}" placeholder="Начните вводить имя…" list="host-suggestions-income">
@@ -14064,6 +14457,7 @@
         product: productVal,
         account: accountVal,
         viaYuklient: yuklientVal,
+        notRevenue: overlay.querySelector('#i-notrev') ? overlay.querySelector('#i-notrev').checked : state.modal.income.notRevenue,
         eventId: overlay.querySelector('#i-event').value || '',
         amount: Math.round(Number(amountRaw) * 100) / 100, // округляем только до копеек, а не до целых рублей
         masterName: productVal==='Изделие' ? masterVal : (productVal==='Заказ' ? orderMasterVal : ''),
@@ -14415,7 +14809,24 @@
       if(idx >= 0) state.expenses[idx] = updated; else state.expenses.push(updated);
       await saveExpenses();
       recordAction("Расход сохранён");
-      state.modal = null; overlay.remove(); render();
+      state.modal = null; overlay.remove();
+      // чтобы запись не «пропадала»: показываем тот месяц, в котором расход реально отображается (зарплата 1–2 числа относится к прошлому месяцу),
+      // и предупреждаем, если сам расход скрыт от этой роли
+      let _note = '';
+      const _acc = expenseAccrualDate(updated);
+      if(_acc && /^\d{4}-\d{2}/.test(_acc)){
+        const _y = parseInt(_acc.slice(0,4),10), _m = parseInt(_acc.slice(5,7),10) - 1;
+        const _cur = state.bookCursor || new Date();
+        if(state.bookMode !== 'year' && (_cur.getFullYear() !== _y || _cur.getMonth() !== _m)){
+          state.bookCursor = new Date(_y, _m, 1);
+          _note = 'Расход сохранён и учтён в месяце «' + MONTHS[_m] + ' ' + _y + '» — переключила на него.';
+        }
+      }
+      if(state.currentRole !== 'owner' && (updated.category === 'Аренда' || updated.category === 'Зарплата')){
+        _note = 'Расход сохранён, но категории «Аренда» и «Зарплата» видит только руководитель — в вашем списке его не будет.';
+      }
+      render();
+      if(_note) showGapWarningBanner(_note);
     };
   }
 
@@ -15842,6 +16253,15 @@
   }
 
   function attachHeaderEvents(){
+    if(!window.__gsHotkey){
+      window.__gsHotkey = true;
+      document.addEventListener('keydown', (ev)=>{
+        const t = ev.target, typing = t && /^(INPUT|TEXTAREA|SELECT)$/.test(t.tagName);
+        if(((ev.ctrlKey || ev.metaKey) && (ev.key === 'k' || ev.key === 'K' || ev.key === 'л' || ev.key === 'Л')) || (!typing && ev.key === '/')){
+          const inp = document.getElementById('global-search-input'); if(inp){ ev.preventDefault(); inp.focus(); inp.select(); }
+        }
+      });
+    }
     const searchInput = document.getElementById('global-search-input');
     const searchResultsEl = document.getElementById('global-search-results');
     if(searchInput && searchResultsEl){
@@ -15878,7 +16298,18 @@
               if(!cert) return;
               state.view = 'certificates';
               state.certView = 'certificates';
-              requireUnlock(()=>{ state.modal = {type:'certificate', cert:{...cert}, isNew:false}; render(); });
+              requireUnlock(()=>{ state.modal = {type:'certificate', cert:{...cert}, isNew:false}; render(); });} else if(type === 'order'){
+              const o = state.orders.find(x=>x.id===id); if(!o) return;
+              state.view = 'certificates'; state.certView = 'orders';
+              requireUnlock(()=>{ state.modal = {type:'order', isNew:false, order:{...o}}; render(); });
+            } else if(type === 'refund'){
+              const r = (state.refunds||[]).find(x=>x.id===id); if(!r) return;
+              state.view = 'certificates'; state.certView = 'refunds';
+              requireUnlock(()=>{ state.modal = {type:'refund', isNew:false, refund:{...r}}; render(); });
+            } else if(type === 'income'){
+              const i = state.incomes.find(x=>x.id===id); if(!i) return;
+              state.view = 'book'; state.bookView = 'incomes';
+              requireUnlock(()=>{ state.modal = {type:'income', isNew:false, income:{...i}}; render(); });
             }
           };
         });
@@ -15925,6 +16356,11 @@
         }
         if(item.dataset.alertMissingreports){
           state.modal = {type:'missing-reports'};
+          render();
+          return;
+        }
+        if(item.dataset.alertReminders){
+          state.modal = {type:'reminders'};
           render();
           return;
         }
@@ -16227,6 +16663,8 @@
       overlay.innerHTML = renderMissingReportsModal();
     } else if(state.modal.type === 'legal-docs-missing'){
       overlay.innerHTML = renderLegalDocsMissingModal();
+    } else if(state.modal.type === 'reminders'){
+      overlay.innerHTML = renderRemindersModal();
     }
     document.body.appendChild(overlay);
 
@@ -16302,6 +16740,7 @@
     else if(state.modal.type === 'missing-reports'){ attachMissingReportsModalEvents(overlay); }
     else if(state.modal.type === 'report-move'){ attachReportMoveModalEvents(overlay); }
     else if(state.modal.type === 'legal-docs-missing'){ attachLegalDocsMissingModalEvents(overlay); }
+    else if(state.modal.type === 'reminders'){ attachRemindersModalEvents(overlay); }
   }
 
   // список мероприятий с юр.лицом, где не хватает договора/счёта/акта (открывается кликом по верхнему баннеру)
@@ -17538,11 +17977,24 @@
   // до этой правки сентябрьская выручка по мероприятиям с сертификатной оплатой была занижена ровно на сумму сертификата).
   // отменённое мероприятие (см. статус "cancelled") в выручку не считается вовсе, даже если в полях
   // "Выручка"/"Согласованная сумма" остались ненулевые значения (например, возврат вернули не полностью)
+  // Если по мероприятию в «Книге» уже получено больше, чем указано в «Выручке»/«Согласованной сумме» (сумму забыли обновить),
+  // выручка не может быть меньше реально полученных денег — берём фактически полученное.
+  let _evPaidCache = { t: 0, arr: null, len: -1, map: null };
+  function eventPaidFromBook(id){
+    const now = Date.now(), arr = state.incomes;
+    if(!_evPaidCache.map || _evPaidCache.arr !== arr || _evPaidCache.len !== arr.length || now - _evPaidCache.t > 1500){
+      const m = new Map();
+      arr.forEach(i=>{ if(i.eventId){ const a = Number(i.amount); if(!isNaN(a)) m.set(i.eventId, (m.get(i.eventId) || 0) + a); } });
+      _evPaidCache = { t: now, arr, len: arr.length, map: m };
+    }
+    return _evPaidCache.map.get(id) || 0;
+  }
   function eventRevenueForecast(e){
     if(e.status === 'cancelled') return 0;
     const price = (e.price!==undefined && e.price!==null && !isNaN(e.price)) ? Number(e.price) : 0;
     const agreed = (e.agreedPrice!==undefined && e.agreedPrice!==null && !isNaN(e.agreedPrice)) ? Number(e.agreedPrice) : 0;
-    return Math.max(price, agreed);
+    // только с октября 2026: сентябрь и раньше не пересчитываем (там «Книга» велась иначе)
+    return Math.max(price, agreed, (e.date && e.date >= '2026-10-01') ? eventPaidFromBook(e.id) : 0);
   }
   // полная ожидаемая сумма по мероприятию (максимум из "Выручки" и "Согласованной суммы"), без вычета сертификатов —
   // используется только для метки "Остаток", в отличие от eventRevenueForecast (для аналитики)
@@ -17607,6 +18059,38 @@
     if(lyRatio===null) return { status:'nodata', expectedByNow:null };
     const expectedByNow = Math.round(target*lyRatio);
     return { status: mtdValue>=expectedByNow ? 'ahead' : 'behind', expectedByNow };
+  }
+
+  // ===== «Прочие доходы» без дублей =====
+  // В «Прочее» попадают только записи «Книги», которые не зеркалят другой поток выручки. Не считаем:
+  //  • записи, привязанные к сертификату (certificate.incomeId);
+  //  • записи про сертификат, которые не привязаны, но совпадают с сертификатом по номеру, дате и сумме (битая/пустая ссылка, ручной дубль);
+  //  • переводы от YCLIENTS на счёт (notRevenue:true, либо комментарий ровно «Юклиент»/«Юкл»): это выплата уже учтённых в мероприятиях онлайн-оплат.
+  function isYclientsPayoutIncome(i){
+    if(i.notRevenue === true) return true;
+    if(i.notRevenue === false) return false;
+    if(!i.date || i.date < '2026-10-01') return false; // автоопределение — только с октября 2026
+    if(i.eventId || i.autoFromPayment || i.autoFromEvent || i.account === 'YCLIENTS') return false;
+    return /^\s*(юклиент|юкл|yclients)[\s.!]*$/i.test(i.comment || '');
+  }
+  function certCoveredIncomeIds(){
+    const set = new Set();
+    state.certificates.forEach(c=>{ if(c.incomeId) set.add(c.incomeId); });
+    const certs = state.certificates.filter(c=>c.purpose !== 'marketing' && c.saleDate);
+    const byKey = new Set(certs.map(c=> String(c.number).trim() + '|' + c.saleDate + '|' + Math.round(Number(c.amount)||0)));
+    state.incomes.forEach(i=>{
+      if(i.product !== 'Сертификат' || i.eventId || i.autoFromPayment || i.autoFromEvent) return;
+      const m = /(?:№|номер:?)\s*(\d+)/i.exec(i.comment || ''); if(!m) return;
+      if(byKey.has(m[1] + '|' + i.date + '|' + Math.round(Number(i.amount)||0))) set.add(i.id);
+    });
+    return set;
+  }
+  function otherIncomesForMonth(ym){
+    // Автоматические правила (сертификаты без привязки, переводы YCLIENTS) действуют с октября 2026;
+    // за сентябрь и раньше считаем по-старому. Ручная отметка «не считать в выручку» работает всегда.
+    const legacy = ym < '2026-10';
+    const covered = legacy ? new Set(state.certificates.filter(c=>c.incomeId).map(c=>c.incomeId)) : certCoveredIncomeIds();
+    return state.incomes.filter(i=> i.date && i.date.startsWith(ym) && !i.autoFromEvent && !i.autoFromPayment && !i.itemSaleId && !i.orderId && !i.eventId && !i.safeTransfer && !covered.has(i.id) && !(legacy ? i.notRevenue === true : isYclientsPayoutIncome(i)));
   }
 
   function computeDailyReportLive(dateStr){
@@ -17698,9 +18182,7 @@
       .reduce((s,x)=>s+itemMoneyRev(x),0);
     // "Прочее" — доходы, вписанные прямо в "Книгу → Доходы" вручную, не привязанные ни к одному из потоков выше
     // (как npOtherIncomeRevenue) — без этой строки сумма потоков не сходилась бы с «Выручка (прогноз)».
-    const certIncomeIdsSetDR = new Set(state.certificates.filter(c=>c.incomeId).map(c=>c.incomeId));
-    const otherIncomeRevenueForecast = state.incomes
-      .filter(i=>i.date && i.date.startsWith(ym) && !i.autoFromEvent && !i.autoFromPayment && !i.itemSaleId && !i.orderId && !i.eventId && !i.safeTransfer && !certIncomeIdsSetDR.has(i.id))
+    const otherIncomeRevenueForecast = otherIncomesForMonth(ym)
       .reduce((s,i)=>s+((i.amount!==undefined&&i.amount!==null&&!isNaN(i.amount))?Number(i.amount):0),0);
     const revenueForecastByStreams = privateRevenueForecast + scheduleRevenueForecast + ordersRevenueForecast + certsRevenueForecast + itemSalesRevenueForecast + otherIncomeRevenueForecast;
 
@@ -18350,9 +18832,7 @@
     // доход, на который ссылается certificate.incomeId, тут исключаем, иначе его сумма попадёт в прибыль дважды.
     // То, что вписано вручную без привязки (сдали зал на сторону, "Другое" и т.п.) — реальные деньги студии,
     // без этой строки они вообще не попадали бы в "Чистую прибыль".
-    const certIncomeIdsSet = new Set(state.certificates.filter(c=>c.incomeId).map(c=>c.incomeId));
-    const npOtherIncomeRevenue = state.incomes
-      .filter(i=> i.date && i.date.startsWith(monthYm) && !i.autoFromEvent && !i.autoFromPayment && !i.itemSaleId && !i.orderId && !i.eventId && !i.safeTransfer && !certIncomeIdsSet.has(i.id))
+    const npOtherIncomeRevenue = otherIncomesForMonth(monthYm)
       .reduce((s,i)=> s + ((i.amount!==undefined&&i.amount!==null&&!isNaN(i.amount))?Number(i.amount):0), 0);
     const npTotalRevenue = npEventsRevenue + npItemSalesRevenue + npCertSalesRevenue + npOrdersRevenue + npOtherIncomeRevenue;
 
@@ -23458,9 +23938,7 @@
       .reduce((s,x)=> s + ((x.revenue!==undefined&&x.revenue!==null&&!isNaN(x.revenue))?Number(x.revenue):0), 0);
     // прочие доходы из "Книги → Доходы", не являющиеся зеркалом другого источника (включая сертификаты —
     // см. тот же приём в основном расчёте "Чистой прибыли" выше по файлу).
-    const certIncomeIdsSetSnap = new Set(state.certificates.filter(c=>c.incomeId).map(c=>c.incomeId));
-    const npOtherIncomeRevenue = state.incomes
-      .filter(i=> i.date && i.date.startsWith(ym) && !i.autoFromEvent && !i.autoFromPayment && !i.itemSaleId && !i.orderId && !i.eventId && !i.safeTransfer && !certIncomeIdsSetSnap.has(i.id))
+    const npOtherIncomeRevenue = otherIncomesForMonth(ym)
       .reduce((s,i)=> s + ((i.amount!==undefined&&i.amount!==null&&!isNaN(i.amount))?Number(i.amount):0), 0);
     const npTotalRevenue = npEventsRevenue + npItemSalesRevenue + npCertSalesRevenue + npOrdersRevenue + npOtherIncomeRevenue;
 
