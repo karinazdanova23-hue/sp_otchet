@@ -982,6 +982,14 @@
       </tr>`).join('')}</tbody></table></div>`
     : `<div style="padding:20px;color:var(--ink-soft);">${f==='todo' ? '✓ У всех гостей прошедших тафтингов выбрана форма коврика.' : 'Здесь пока пусто.'}</div>`}`;
   }
+  document.addEventListener('click', (ev)=>{
+    const a = ev.target.closest && ev.target.closest('.sal-evt-open');
+    if(!a) return;
+    ev.preventDefault();
+    const e = state.events.find(x=>x.id===a.dataset.eid);
+    if(!e) return;
+    requireUnlock(()=>{ state.modal = {type:'event', event:{...e}, isNew:false, keepAll:true}; render(); });
+  });
   function attachTuftEvents(){
     document.querySelectorAll('[data-tuftf]').forEach(b=> b.onclick = ()=>{ state.tuftFilter = b.dataset.tuftf; render(); });
     document.querySelectorAll('.tuft-open').forEach(el=> el.onclick = ()=>{ const ev = state.events.find(x=>x.id===el.dataset.eid); if(ev){ state.modal = {type:'event', event:{...ev}, isNew:false, keepAll:true}; render(); } });
@@ -1109,7 +1117,7 @@
   const OFFICIAL_HOSTS = ['Алёна','Анжей','Аня','Арина','Василена','Даша','Дашулик','Елена','Женя','Ира','Кристина','Михаил','Наташа','Ольга','Олюсик'];
   // служебные названия (не из таблицы), которые тоже разрешены; ведущим может быть любой из OFFICIAL_HOSTS
   const SERVICE_EVENT_TITLES = ['Аренда','Кинопоказ','Керамика, кино и вино','Мафия','Аудит','Слот',
-    'Марафон: Керамика','Марафон: Духи','Марафон: Свечи','Марафон: Дофаминовые картины','Марафон: Роспись тыкв','Марафон: Фактурные картины'];
+    'Марафон: Керамика','Марафон: Духи','Марафон: Свечи','Марафон: Дофаминовые картины','Марафон: Роспись тыкв','Роспись тыкв','Марафон: Фактурные картины'];
   // старое название вида (для переноса длительности и статей расхода на новое название)
   const OFFICIAL_TITLE_LEGACY_TYPE = {"Керамика (лепка из глины)": "Керамика", "Гончарный круг": "Круг", "Панно-ваза": "Панно-ваза", "Дофаминовая ваза": "Вазы", "Свободный акрил (рисование акрилом)": "Акрил", "Картина-аффирмация": "Аффирмации", "3D-аффирмации": "3д аффирмации", "Фактурные картины": "Фактурные", "Фактурная луна с подсветкой": "Фактурная луна", "Ботанический барельеф": "Барельеф", "Дофаминовая картина": "Дофаминовая картина", "Рисование вином": "Рисование вином", "Роспись одежды": "Роспись одежды", "Роспись неваляшки": "Неваляшки", "Изготовление свечи": "Свечи", "Свеча и диффузор": "Свечи+диффузоры", "Авторские духи (авторский парфюм)": "Духи", "Эпоксидная смола": "Смола", "Украшения из эпоксидной смолы": "Украшения из смолы", "Тафтинг (создание ковра, в т.ч. на девичнике)": "Тафтинг", "Винная дегустация": "Винная дегустация", "Пивная дегустация": "Пивная дегустация", "Хиромантия": "Хиромантия", "Астровстреча": "Астро", "Таро-вечер": "Таро", "Картина желаний (карта желаний)": "Карта желаний", "Арт-ланч «Керамика»": "Керамика ЛАНЧ", "Арт-ланч «Авторские духи»": "Духи ЛАНЧ", "Арт-ланч «Картина акрилом»": "Акрил ЛАНЧ", "Арт-свидание «Керамика»": "Керамика", "Арт-свидание «Гончарный круг»": "Круг", "Арт-свидание «Свободный акрил»": "Акрил", "Арт-свидание «Картина-аффирмация»": "Аффирмации", "Арт-свидание «Фактурная картина»": "Фактурные", "Арт-свидание «Фактурная луна с подсветкой»": "Фактурная луна", "Арт-свидание «Фактура скорости»": "Фактурные", "Арт-свидание «Авторские духи»": "Духи", "Арт-свидание «Свечи и диффузоры»": "Свечи+диффузоры", "Арт-свидание «Эпоксидная смола»": "Смола", "Арт-свидание «Тафтинг»": "Тафтинг"};
   // при расчёте зарплаты: если для нового имени нет своих ставок, берём ставки прежнего имени
@@ -1125,7 +1133,15 @@
     eventCatalogList().forEach(c=>(c.hosts||[]).forEach(h=>set.add(h)));
     return Array.from(set).sort((a,b)=>a.localeCompare(b,'ru'));
   }
-  function roleCanEditEventCatalog(role){ return ['owner','assistant','manager'].includes(role); }
+  function roleCanEditEventCatalog(role){ return ['owner','admin','assistant','manager'].includes(role); }
+  // себестоимость и цена на одного гостя из единого справочника (могут быть не заполнены)
+  function catalogCostPrice(title){
+    const t = String(title||'').trim().toLowerCase();
+    const c = (state.eventCatalog||[]).find(x=>x.title && x.title.toLowerCase()===t);
+    if(!c) return {cost:null, price:null};
+    const num = v=> (v===undefined || v===null || v==='' || isNaN(Number(v))) ? null : Number(v);
+    return {cost: num(c.cost), price: num(c.price)};
+  }
   function officialEventEntry(title){
     const t = String(title||'').trim().toLowerCase();
     const c = eventCatalogList().find(x=>x.title.toLowerCase()===t);
@@ -1138,7 +1154,14 @@
   }
   function allowedHostsForTitle(title){
     const e = officialEventEntry(title);
-    return e ? e[1] : officialHostsAll();
+    if(e) return e[1];
+    // марафоны и сезонные МК (не из таблицы) ведут и мастера из общего списка «Мастера» (например, Лиза Вета)
+    if(/^(марафон|роспись тыкв)/i.test(String(title||'').trim())){
+      const set = new Set(officialHostsAll());
+      (state.hostsList||[]).forEach(h=>{ const n = String(h||'').trim(); if(n && n !== '--') set.add(n); });
+      return Array.from(set).sort((a,b)=>a.localeCompare(b,'ru'));
+    }
+    return officialHostsAll();
   }
   function isHostAllowedForTitle(host, title){
     const h = String(host||'').trim().toLowerCase();
@@ -1495,7 +1518,8 @@
         return;
       }
       if(!dayShifts) return;
-      SHIFT_DEFS.forEach(s=>{
+      shiftDefsForDate(dateStr).forEach(s=>{
+        if(s.senior) return;
         const entry = normalizeShiftEntry(dayShifts[s.key], s);
         if(!entry || !entry.name) return;
         if(ev.time && ev.time >= entry.start && ev.time < entry.end){
@@ -1520,12 +1544,71 @@
     const name = (state.managerShifts||{})[dateStr];
     return (name && name.trim()) ? name.trim() : '';
   }
+  // стабильные мастера: кто работает в конкретный день (по умолчанию с 15:00 до 22:00)
+  const MASTER_SHIFT_TIME = '15:00–22:00';
+  function mastersOnDuty(dateStr){
+    const v = (state.masterShifts||{})[dateStr];
+    return Array.isArray(v) ? v.filter(n=>n && String(n).trim()).map(n=>String(n).trim()) : [];
+  }
+  function roleCanEditMasterShifts(role){ return role==='owner' || role==='admin' || role==='assistant'; }
   const HOSTESS_WEEKEND_RATE = 1500;
   const HOSTESS_EXTRA_HOUR_RATE = 260;
-  const SHIFT_DEFS = [
+  // с 1 ноября 2026 — график на полный день: 1-й админ 12–21, 2-й админ 13–22 и старший админ
+  // (старший только отмечается в графике, его оплата приложением не считается)
+  const FULLDAY_FROM = '2026-11-01';
+  const HOSTESS_BASE_SALARY = 40000;
+  const SHIFT_DEFS_OLD = [
     { key: 'shift1', label: '12:00–17:00', start: '12:00', end: '17:00' },
     { key: 'shift2', label: '17:00–22:00', start: '17:00', end: '22:00' },
   ];
+  const SHIFT_DEFS_FULL = [
+    { key: 'shift1', label: '1-й админ 12:00–21:00', start: '12:00', end: '21:00' },
+    { key: 'shift2', label: '2-й админ 13:00–22:00', start: '13:00', end: '22:00' },
+    { key: 'shift3', label: 'Старший админ', start: '12:00', end: '22:00', senior: true },
+  ];
+  function shiftDefsForDate(dateStr){ return (dateStr && dateStr >= FULLDAY_FROM) ? SHIFT_DEFS_FULL : SHIFT_DEFS_OLD; }
+  function shiftDefFor(dateStr, key){ return shiftDefsForDate(dateStr).find(x=>x.key===key); }
+  // оплата одной смены: до ноября — ставка за смену + переработка; с ноября — только переработка
+  // (оклад 40 000 ₽ считается отдельно, по половинам месяца), старший админ в приложении не считается
+  function hostessShiftPay(dateStr, rawEntry, def, rate){
+    const extra = shiftExtraHours(rawEntry, def);
+    if(dateStr < FULLDAY_FROM) return rate + extra*HOSTESS_EXTRA_HOUR_RATE;
+    if(def.senior) return 0;
+    return extra*HOSTESS_EXTRA_HOUR_RATE;
+  }
+  // оклад админов с ноября: 40 000 ₽/мес, по 20 000 ₽ за каждую половину месяца, где у человека есть хотя бы одна смена
+  function hostessBaseSalaryFor(ym){
+    const res = {};
+    if(!ym || ym < FULLDAY_FROM.slice(0,7)) return res;
+    const [y, mo] = ym.split('-').map(Number);
+    const dim = new Date(y, mo, 0).getDate();
+    for(let d=1; d<=dim; d++){
+      const ds = ym + '-' + String(d).padStart(2,'0');
+      const day = (state.hostessShifts||{})[ds];
+      if(!day) continue;
+      SHIFT_DEFS_FULL.forEach(def=>{
+        if(def.senior) return;
+        const en = normalizeShiftEntry(day[def.key], def);
+        if(!en || !en.name || !en.name.trim()) return;
+        const n = en.name.trim();
+        if(!res[n]) res[n] = {h1:0, h2:0};
+        res[n][d<=15?'h1':'h2'] = HOSTESS_BASE_SALARY/2;
+      });
+    }
+    return res;
+  }
+  function hostessBaseTotalFor(ym){
+    return Object.values(hostessBaseSalaryFor(ym)).reduce((a,v)=>a+v.h1+v.h2, 0);
+  }
+  // покрытие дня с ноября: нужно минимум 2 человека из 3 (оба админа / админ + старший / все трое)
+  function hostessCoverageCount(dateStr){
+    const day = (state.hostessShifts||{})[dateStr] || {};
+    return SHIFT_DEFS_FULL.filter(def=>{ const en = normalizeShiftEntry(day[def.key], def); return en && en.name && en.name.trim(); }).length;
+  }
+  function hostessCoverageGap(dateStr){
+    if(!dateStr || dateStr < FULLDAY_FROM) return false;
+    return hostessCoverageCount(dateStr) < 2;
+  }
   function normalizeShiftEntry(entry, shiftDef){
     if(!entry) return null;
     if(typeof entry === 'string') return { name: entry, start: shiftDef.start, end: shiftDef.end };
@@ -2207,6 +2290,7 @@
     convTab: 'board',
     hostessShifts: null,
     managerShifts: null,
+    masterShifts: null,
     syncToken: null,
     syncWarningShown: false,
     hostsList: null,
@@ -2965,6 +3049,10 @@
       const ms = await window.storage.get('manager-shifts', true);
       state.managerShifts = ms ? JSON.parse(ms.value) : {};
     }catch(e){ state.managerShifts = {}; }
+    try{
+      const mss = await window.storage.get('master-shifts', true);
+      state.masterShifts = mss ? JSON.parse(mss.value) : {};
+    }catch(e){ state.masterShifts = {}; }
 
     // отправные точки для безопасного слияния при сохранении (см. saveCollectionMerged/saveMapMerged/
     // saveSetMerged) — снимок того, что было получено с сервера при открытии, ДО каких-либо локальных
@@ -3018,14 +3106,17 @@
     state._journalSyncBaseline = JSON.parse(JSON.stringify(state.journalSync || {}));
     state._hostessShiftsBaseline = JSON.parse(JSON.stringify(state.hostessShifts));
     state._managerShiftsBaseline = JSON.parse(JSON.stringify(state.managerShifts));
+    state._masterShiftsBaseline = JSON.parse(JSON.stringify(state.masterShifts||{}));
 
     // демо-данные для тестирования отключены — реальный запуск начинается с чистой базы
     // await seedDemo30Once();
     // await seedDemoExpensesOnce();
     // await seedAugustExtrasOnce();
     await migrateOffsiteSpaceOnce();
+    await migrateFulldayShiftsOnce();
     await autoDeductCanvasesForPastPaintingEvents();
     await autoApplyMaterialRulesForPastEvents();
+    await autoApplyCatalogCostForPastEvents();
     await migrateLeadProductNamesOnce();
     await migrateIncomeProductNamesOnce();
     try{
@@ -3362,6 +3453,28 @@
     if(catalogChanged) await saveMaterialsCatalog();
   }
 
+  // себестоимость на гостя из единого справочника: когда мероприятие прошло и у него ещё нет строк материалов,
+  // добавляем одну строку «гости × себестоимость» (её можно поправить или удалить в самом мероприятии).
+  // Работает только с 1 ноября 2026 и только для прошедших мероприятий — прошлые периоды не трогаем.
+  async function autoApplyCatalogCostForPastEvents(){
+    const today = todayStr();
+    let ch = false;
+    state.events.forEach(e=>{
+      if(!e.date || e.date < '2026-11-01' || e.date > today) return;
+      if(e.status==='cancelled' || e.status==='marketing') return;
+      const guests = Number(e.guests)||0;
+      if(guests <= 0) return;
+      if(Array.isArray(e.materialsItems) && e.materialsItems.length) return;
+      if(e.catalogCostApplied) return;
+      const cp = catalogCostPrice(e.title);
+      if(!cp.cost || cp.cost <= 0) return;
+      e.materialsItems = [{ name: 'Материалы по справочнику ('+cp.cost+' ₽ × '+guests+' гост.)', cost: cp.cost*guests, qty: guests, source: 'studio', autoRuleTag: 'autorule:catalog-cost:studio' }];
+      e.catalogCostApplied = true;
+      ch = true;
+    });
+    if(ch) await saveEvents();
+  }
+
   async function autoApplyMaterialRulesForPastEvents(){
     // для видов мероприятий со статьями расхода материалов (настраивается в "Виды мероприятий", может быть несколько статей на вид) —
     // после того как мероприятие прошло, каждая статья сама добавляется строкой в его себестоимость.
@@ -3567,6 +3680,7 @@
       monthlyPlans: state.monthlyPlans,
       hostessShifts: state.hostessShifts,
       managerShifts: state.managerShifts,
+      masterShifts: state.masterShifts,
       netProfitManual: state.netProfitManual,
       hostessBonuses: state.hostessBonuses,
       yearSummaryManual: state.yearSummaryManual,
@@ -3613,7 +3727,7 @@
       const todayShifts = state.hostessShifts[todayStr()];
       if(todayShifts){
         const names = [];
-        SHIFT_DEFS.forEach(s=>{
+        shiftDefsForDate(todayStr()).forEach(s=>{
           const entry = normalizeShiftEntry(todayShifts[s.key], s);
           if(entry && entry.name) names.push(`${entry.name} (${entry.start}–${entry.end})`);
         });
@@ -3759,7 +3873,8 @@
     'lead-tasks': ()=>saveLeadTasks(),
     'journal-sync': ()=>saveJournalSync(),
     'hostess-shifts': ()=>saveHostessShifts(),
-    'manager-shifts': ()=>saveManagerShifts()
+    'manager-shifts': ()=>saveManagerShifts(),
+    'master-shifts': ()=>saveMasterShifts()
   };
   const failedSaveKeys = new Set();
   let saveRetryInFlight = false;
@@ -4804,10 +4919,34 @@
       state._kpOffersBaseline = JSON.parse(JSON.stringify(finalArr));
     });
   }
+  // один раз при переходе на график «полный день»: очищаем смены с 1 ноября 2026 (старые 12–17 / 17–22),
+  // чтобы владелица расставила их заново; копия удалённого сохраняется на случай, если что-то понадобится вернуть
+  async function migrateFulldayShiftsOnce(){
+    try{
+      const flag = await window.storage.get('migration-fullday-shifts-v1', true);
+      if(flag) return;
+      const removed = {};
+      Object.keys(state.hostessShifts||{}).forEach(k=>{ if(k >= FULLDAY_FROM){ removed[k] = state.hostessShifts[k]; } });
+      if(Object.keys(removed).length){
+        const okBk = await storageSetWithRetry('hostess-shifts-before-fullday', JSON.stringify(removed));
+        if(!okBk) return;
+        Object.keys(removed).forEach(k=>{ delete state.hostessShifts[k]; });
+        const ok = await saveHostessShifts();
+        if(!ok) return;
+      }
+      await storageSetWithRetry('migration-fullday-shifts-v1', new Date().toISOString());
+    }catch(e){ /* не критично: повторим при следующем запуске */ }
+  }
   async function saveHostessShifts(){
-    await saveMapMerged('hostess-shifts', state.hostessShifts, state._hostessShiftsBaseline, (finalMap)=>{
+    return await saveMapMerged('hostess-shifts', state.hostessShifts, state._hostessShiftsBaseline, (finalMap)=>{
       state.hostessShifts = finalMap;
       state._hostessShiftsBaseline = JSON.parse(JSON.stringify(finalMap));
+    });
+  }
+  async function saveMasterShifts(){
+    return await saveMapMerged('master-shifts', state.masterShifts, state._masterShiftsBaseline, (finalMap)=>{
+      state.masterShifts = finalMap;
+      state._masterShiftsBaseline = JSON.parse(JSON.stringify(finalMap));
     });
   }
   async function saveManagerShifts(){
@@ -5654,7 +5793,7 @@
       if(lastSent && lastSent.value === today) return;
       const dayShifts = state.hostessShifts[today];
       if(dayShifts){
-        const names = SHIFT_DEFS.map(s=>{
+        const names = shiftDefsForDate(today).map(s=>{
           const entry = normalizeShiftEntry(dayShifts[s.key], s);
           return (entry && entry.name) ? `${entry.name} (${entry.start}–${entry.end})` : null;
         }).filter(Boolean);
@@ -5826,12 +5965,16 @@
       const extra = evts.length - shown.length;
       const hasWarning = Object.keys(computeGapWarnings(evts)).length > 0;
       const hostessLine = shiftSummaryShort(dStr);
+      const hostessGap = inMonth && hostessCoverageGap(dStr);
+      const masterLine = mastersOnDuty(dStr).join(', ');
       const managerLine = managerForDate(dStr);
       const dayOffEntries = dayOffEntriesFor(dStr);
       cells += `
         <div class="cal-cell ${inMonth?'':'other-month'} ${isToday?'today':''}" data-date="${dStr}">
           <div class="cal-daynum">${d.getDate()}${hasWarning?' <span class="cal-warn-icon" title="Перерыв между мероприятиями меньше 30 минут">⚠</span>':''}</div>
           ${hostessLine ? `<div class="cal-hostess" title="Админ: ${escapeHtml(hostessLine)}">🧑 ${escapeHtml(hostessLine)}</div>` : ''}
+          ${hostessGap ? `<div class="cal-hostess" style="color:#b71c1c;font-weight:600;" title="В этот день меньше двух человек: нужно два админа или админ + старший">⚠ админов: ${hostessCoverageCount(dStr)} из 2</div>` : ''}
+          ${masterLine ? `<div class="cal-hostess" style="color:var(--accent);" title="Мастера (15:00–22:00): ${escapeHtml(masterLine)}">🎨 ${escapeHtml(masterLine)}</div>` : ''}
           ${managerLine ? `<div class="cal-manager" title="Менеджер: ${escapeHtml(managerLine)}">👔 ${escapeHtml(managerLine)}</div>` : ''}
           ${dayOffEntries.length ? `<div class="cal-dayoff-line" title="Выходной: ${escapeHtml(dayOffEntries.map(x=>ROLE_LABELS[x.role] ? `${x.name} (${ROLE_LABELS[x.role]})` : x.name).join(', '))}">🚫 ${escapeHtml(dayOffEntries.map(x=>x.name).join(', '))}</div>` : ''}
           <div class="cal-events">
@@ -10966,6 +11109,17 @@
   }
 
   // ===================== День на весь экран (без прокрутки) =====================
+  // строка «кто работает» для экрана дня: админы (с ноября — с пометкой СА и предупреждением) и мастера 15–22
+  function dayStaffLineHtml(ds){
+    const adm = shiftSummaryShort(ds);
+    const gap = hostessCoverageGap(ds);
+    const ms = mastersOnDuty(ds);
+    const canEd = roleCanEditMasterShifts(state.currentRole);
+    return `<div class="ds-staff" style="font-size:12.5px;line-height:1.5;">
+      <span>🧑 Админы: <b>${adm ? escapeHtml(adm) : 'не назначены'}</b>${gap ? ` <span style="color:#b71c1c;font-weight:700;">⚠ нужно минимум 2 человека</span>` : ''}</span>
+      · <span>🎨 Мастера (${MASTER_SHIFT_TIME}): <b>${ms.length ? escapeHtml(ms.join(', ')) : 'не назначены'}</b></span>${canEd ? ` <button type="button" class="btn btn-ghost" data-msedit="${escapeHtml(ds)}" style="padding:1px 8px;font-size:12px;">✎</button>` : ''}
+    </div>`;
+  }
   function dayScreenOn(){
     if(!state.currentRole || state.currentRole === 'master') return false;
     if(state.dayMode === undefined){ try{ state.dayMode = localStorage.getItem('sp-day-mode') || 'screen'; }catch(e){ state.dayMode = 'screen'; } }
@@ -11051,6 +11205,7 @@
     <div class="day-screen">
       <div class="dsm-top"><button class="btn btn-primary modal-close" id="ds-close" style="width:auto;height:auto;padding:6px 10px;font-size:13px;color:#fff;">✕</button><button class="btn btn-ghost" data-dsnav="-1">‹</button><h3 data-dsnav="today">${escapeHtml(dLabel)}</h3><button class="btn btn-ghost" data-dsnav="1">›</button></div>
       <div class="ds-sum" style="text-align:center;font-size:12px;color:var(--ink-soft);">🕒 <b data-dsclock></b> · <span style="color:#2F9E5F;font-weight:700;">● идут</span> ярче, прошедшие бледнее<br>${dayEvs.length} мер. · 👥 ${guests}${showMoney ? ' · ' + escapeHtml(formatMoney(revenue)) : ''}${mgr ? ' · ' + escapeHtml(mgr) : ''}${noHost ? ' · <span style="color:var(--danger);">без вед.: ' + noHost + '</span>' : ''}</div>
+      <div style="text-align:center;">${dayStaffLineHtml(ds)}</div>
       <div style="display:flex;gap:6px;margin:6px 0 0;"><button class="btn btn-primary" id="ds-find" style="flex:2;">🔎 Подобрать время</button>${state.currentRole !== 'hostess' ? '<button class="btn btn-ghost" id="ds-add" style="flex:1;">＋ новое</button>' : ''}<button class="btn btn-ghost" id="ds-list" style="flex:1;" title="Список с деталями">📋 список</button></div>
       <div style="margin-top:6px;"><button class="btn ${state.dsOffOpen?'btn-primary':'btn-ghost'}" data-dsoff="1" style="width:100%;">🚫 Выходные${dayOffEntriesFor(ds).length ? ': ' + escapeHtml(dayOffEntriesFor(ds).map(x=>x.name).join(', ')) : ''}</button></div>
       ${state.dsOffOpen ? `<div style="max-height:40%;overflow:auto;margin-top:6px;">${renderDaysOffBlock(ds)}</div>` : ''}
@@ -11161,6 +11316,7 @@
         <button class="btn btn-ghost" data-dsnav="1" title="Следующий день">›</button>
         <button class="btn btn-ghost" data-dsnav="today">сегодня</button>
         <span class="ds-sum">${dayEvs.length} мер. · 👥 ${guests}${showMoney ? ' · ' + escapeHtml(formatMoney(revenue)) : ''}${mgr ? ' · менеджер: ' + escapeHtml(mgr) : ''}</span>
+        <span class="ds-sum" style="flex-basis:100%;">${dayStaffLineHtml(ds)}</span>
         <span class="ds-legend" data-dsnow title="Время считается по Омску">🕒 <b data-dsclock></b> · <span style="color:#2F9E5F;font-weight:700;">● идут</span> и будущие яркие, прошедшие бледные</span>
         ${noHost ? `<span style="color:var(--danger);font-size:12.5px;">⚠ без ведущего: ${noHost}</span>` : ''}
         ${proposals ? `<span style="color:var(--status-cyan);font-size:12.5px;">🙋 слотов от мастеров: ${proposals}</span>` : ''}
@@ -11210,6 +11366,7 @@
     dsApplyTime(overlay);
     const _dsTimer = setInterval(()=>{ if(!dsApplyTime(overlay)) clearInterval(_dsTimer); }, 30000);
     attachDayOffHandlers(overlay, ds);
+    overlay.querySelectorAll('[data-msedit]').forEach(b=> b.onclick = ()=>{ state.modal = {type:'quick-master-shift', shiftDate: b.dataset.msedit}; render(); });
     overlay.querySelectorAll('[data-dsoff]').forEach(b=> b.onclick = ()=>{ state.dsOffOpen = !state.dsOffOpen; render(); });
     const openEv = (id)=>{ const e = state.events.find(x=>x.id === id); if(!e) return; requireUnlock(()=>{ state.modal = {type:'event', event:{...e}, isNew:false, keepAll: state.activeSpaceId === 'all'}; render(); }); };
     overlay.querySelectorAll('.ds-evt, .ds-off, .ds-card').forEach(b=> b.onclick = (ev)=>{ if(ev.target.closest('button') && !b.classList.contains('ds-off')) return; openEv(b.dataset.eid); });
@@ -16661,6 +16818,8 @@
       overlay.innerHTML = renderQuickReportModal(state.modal.event);
     } else if(state.modal.type === 'quick-shift'){
       overlay.innerHTML = renderQuickShiftModal(state.modal.shiftDate, state.modal.shiftKey, state.modal.rawEntry);
+    } else if(state.modal.type === 'quick-master-shift'){
+      overlay.innerHTML = renderQuickMasterShiftModal(state.modal.shiftDate);
     } else if(state.modal.type === 'quick-manager-shift'){
       overlay.innerHTML = renderQuickManagerShiftModal(state.modal.shiftDate);
     } else if(state.modal.type === 'quick-add-slot'){
@@ -16779,6 +16938,7 @@
     else if(state.modal.type === 'quick-report'){ attachQuickReportModalEvents(overlay); }
     else if(state.modal.type === 'quick-shift'){ attachQuickShiftModalEvents(overlay); }
     else if(state.modal.type === 'quick-manager-shift'){ attachQuickManagerShiftModalEvents(overlay); }
+    else if(state.modal.type === 'quick-master-shift'){ attachQuickMasterShiftModalEvents(overlay); }
     else if(state.modal.type === 'quick-add-slot'){ attachQuickAddSlotModalEvents(overlay); }
     else if(state.modal.type === 'export'){ attachExportModalEvents(overlay); }
     else if(state.modal.type === 'event-catalog'){ attachEventCatalogModalEvents(overlay); }
@@ -17927,6 +18087,7 @@
       const isHostess = HOSTESS_LIST.some(h=>h.toLowerCase()===name.toLowerCase());
       add(name, Number(a.amount)||0, isHostess ? 'hostess' : 'master');
     });
+    Object.entries(hostessBaseSalaryFor(ym)).forEach(([n,v])=> add(n, v.h1+v.h2, 'hostess'));
     // админы: смены по графику + бонусы за "блюда" + ручная премия владельца
     const [y, mo] = ym.split('-').map(Number);
     const mIdx = mo - 1;
@@ -17938,12 +18099,12 @@
       const dateStr = fmtDate(dateObj);
       const dayShifts = state.hostessShifts[dateStr];
       if(!dayShifts) continue;
-      SHIFT_DEFS.forEach(s=>{
+      shiftDefsForDate(dateStr).forEach(s=>{
         const rawEntry = dayShifts[s.key];
         const entry = normalizeShiftEntry(rawEntry, s);
         if(entry && entry.name){
           const extra = shiftExtraHours(rawEntry, s);
-          add(entry.name, rate + extra*HOSTESS_EXTRA_HOUR_RATE, 'hostess');
+          add(entry.name, hostessShiftPay(dateStr, rawEntry, s, rate), 'hostess');
         }
       });
       Object.entries(hostessDishesBonusesForDate(dateStr, dayShifts)).forEach(([name, bonus])=> add(name, bonus, 'hostess'));
@@ -18751,7 +18912,7 @@
           + state.itemSales.filter(x=>x.date && x.date.startsWith(ym)).reduce((s,x)=> s + Math.round(((x.revenue!==undefined&&x.revenue!==null&&!isNaN(x.revenue))?Number(x.revenue):0) * ITEM_SALE_MASTER_PCT / 100), 0)
           + state.orders.filter(x=>x.date && x.date.startsWith(ym)).reduce((s,x)=> s + orderTotalMasterShare(x), 0)
           + state.salaryAdjustments.filter(a=>adjEffDate(a) && adjEffDate(a).startsWith(ym)).reduce((s,a)=> s + (Number(a.amount)||0), 0);
-        let mHostessSalary = 0;
+        let mHostessSalary = hostessBaseTotalFor(ym);
         {
           const daysInM = new Date(year, mIdx+1, 0).getDate();
           for(let d=1; d<=daysInM; d++){
@@ -18761,12 +18922,12 @@
             const dateStr = fmtDate(dateObj);
             const dayShifts = state.hostessShifts[dateStr];
             if(!dayShifts) continue;
-            SHIFT_DEFS.forEach(s=>{
+            shiftDefsForDate(dateStr).forEach(s=>{
               const rawEntry = dayShifts[s.key];
               const entry = normalizeShiftEntry(rawEntry, s);
               if(entry && entry.name){
                 const extra = shiftExtraHours(rawEntry, s);
-                mHostessSalary += rate + extra*HOSTESS_EXTRA_HOUR_RATE;
+                mHostessSalary += hostessShiftPay(dateStr, rawEntry, s, rate);
               }
             });
             mHostessSalary += Object.values(hostessDishesBonusesForDate(dateStr, dayShifts)).reduce((s,v)=>s+v,0);
@@ -18849,6 +19010,7 @@
       state.salaryAdjustments.filter(a=>adjEffDate(a) && adjEffDate(a).startsWith(ym)).forEach(a=>{
         addStaffPay(a.masterName, mIdx, Number(a.amount)||0);
       });
+      Object.entries(hostessBaseSalaryFor(ym)).forEach(([n,v])=> addStaffPay(n, mIdx, v.h1+v.h2));
       const daysInM = new Date(summaryYear, mIdx+1, 0).getDate();
       for(let d=1; d<=daysInM; d++){
         const dateObj = new Date(summaryYear, mIdx, d);
@@ -18857,12 +19019,12 @@
         const dateStr = fmtDate(dateObj);
         const dayShifts = state.hostessShifts[dateStr];
         if(!dayShifts) continue;
-        SHIFT_DEFS.forEach(s=>{
+        shiftDefsForDate(dateStr).forEach(s=>{
           const rawEntry = dayShifts[s.key];
           const entry = normalizeShiftEntry(rawEntry, s);
           if(entry && entry.name){
             const extra = shiftExtraHours(rawEntry, s);
-            addStaffPay(entry.name, mIdx, rate + extra*HOSTESS_EXTRA_HOUR_RATE);
+            addStaffPay(entry.name, mIdx, hostessShiftPay(dateStr, rawEntry, s, rate));
           }
         });
         const dishesBonusesM2 = hostessDishesBonusesForDate(dateStr, dayShifts);
@@ -18988,17 +19150,18 @@
         const dateStr = fmtDate(dateObj);
         const dayShifts = state.hostessShifts[dateStr];
         if(!dayShifts) continue;
-        SHIFT_DEFS.forEach(s=>{
+        shiftDefsForDate(dateStr).forEach(s=>{
           const rawEntry = dayShifts[s.key];
           const entry = normalizeShiftEntry(rawEntry, s);
           if(entry && entry.name){
             const extra = shiftExtraHours(rawEntry, s);
-            npHostessSalary += rate + extra*HOSTESS_EXTRA_HOUR_RATE;
+            npHostessSalary += hostessShiftPay(dateStr, rawEntry, s, rate);
           }
         });
         npHostessSalary += Object.values(hostessDishesBonusesForDate(dateStr, dayShifts)).reduce((s,v)=>s+v,0);
       }
     }
+    npHostessSalary += hostessBaseTotalFor(monthYm);
     npHostessSalary += npHostessAdjustments;
     const npHostessBonusTotal = Object.values((state.hostessBonuses && state.hostessBonuses[monthYm]) || {}).reduce((s,b)=> s + (Number((b&&b.amount)||0)), 0);
     npHostessSalary += npHostessBonusTotal;
@@ -19661,7 +19824,7 @@
         hostSalary[h.name] = (hostSalary[h.name]||0) + h.pay;
         hostSessionPay[h.name] = (hostSessionPay[h.name]||0) + h.pay;
         if(!masterEventDetails[h.name]) masterEventDetails[h.name] = [];
-        masterEventDetails[h.name].push({ date: e.date, title: e.title || 'Без названия', sessionPay: h.pay, materialsComp: 0, total: h.pay, half, kind: 'session' });
+        masterEventDetails[h.name].push({ date: e.date, title: e.title || 'Без названия', eid: e.id, time: e.time||'', sessionPay: h.pay, materialsComp: 0, total: h.pay, half, kind: 'session' });
       });
     });
     // компенсация за материалы ("Кому платить") — попадает в ЗП за период, когда фактически был расход:
@@ -19678,7 +19841,7 @@
         const label = p.expenseDateOverride
           ? `Материалы к «${e.title || 'без названия'}» (МК ${formatDateText(e.date)})`
           : (e.title || 'Без названия');
-        masterEventDetails[p.name].push({ date: p.date, title: label, sessionPay: 0, materialsComp: p.amount, total: p.amount, half, kind: 'materials' });
+        masterEventDetails[p.name].push({ date: p.date, title: label, eid: e.id, time: e.time||'', sessionPay: 0, materialsComp: p.amount, total: p.amount, half, kind: 'materials' });
       });
     });
 
@@ -19795,12 +19958,12 @@
         const dateStr = fmtDate(dateObj);
         const dayShifts = state.hostessShifts[dateStr];
         if(!dayShifts) continue;
-        SHIFT_DEFS.forEach(s=>{
+        shiftDefsForDate(dateStr).forEach(s=>{
           const rawEntry = dayShifts[s.key];
           const entry = normalizeShiftEntry(rawEntry, s);
           if(entry && entry.name){
             const extra = shiftExtraHours(rawEntry, s);
-            const pay = rate + extra*HOSTESS_EXTRA_HOUR_RATE;
+            const pay = hostessShiftPay(dateStr, rawEntry, s, rate);
             const name = entry.name;
             hostessSalary[name] = (hostessSalary[name]||0) + pay;
             totalHostessSalary += pay;
@@ -19817,6 +19980,13 @@
         });
       }
     }
+    Object.entries(hostessBaseSalaryFor(monthYmForItemSales)).forEach(([n,v])=>{
+      const t = v.h1+v.h2;
+      hostessSalary[n] = (hostessSalary[n]||0) + t;
+      totalHostessSalary += t;
+      hostessSalaryH1[n] = (hostessSalaryH1[n]||0) + v.h1; totalHostessSalaryH1 += v.h1;
+      hostessSalaryH2[n] = (hostessSalaryH2[n]||0) + v.h2; totalHostessSalaryH2 += v.h2;
+    });
     // корректировки ЗП (доплаты/удержания), введённые на имя админа (роль "hostess", HOSTESS_LIST) — добавляются
     // в зарплату админов (и в нужную половину месяца по дате самой корректировки), а не мастеров
     const hostessAdjustmentsByName = {};
@@ -19867,7 +20037,8 @@
         const dateStr = fmtDate(new Date(ySh, mSh, d));
         const dayShifts = state.hostessShifts[dateStr];
         if(!dayShifts) continue;
-        SHIFT_DEFS.forEach(s=>{
+        shiftDefsForDate(dateStr).forEach(s=>{
+          if(s.senior) return;
           const entry = normalizeShiftEntry(dayShifts[s.key], s);
           if(entry && entry.name){
             hostessShiftCounts[entry.name] = (hostessShiftCounts[entry.name]||0) + 1;
@@ -20217,7 +20388,7 @@
                       ${halfDetails.length === 0 ? '<div style="color:var(--ink-soft);font-size:12px;margin-bottom:6px;">Нет начислений в этот период.</div>' : halfDetails.map(d=>`
                         <div class="stat-row" style="margin-bottom:5px;">
                           <div class="stat-label" style="width:170px;">${formatDateText(d.date)}</div>
-                          <div style="flex:1;font-size:12.5px;">${escapeHtml(d.title)}${d.kind==='materials'?' <span style="color:var(--ink-soft);">— себестоимость материалов</span>':''}</div>
+                          <div style="flex:1;font-size:12.5px;">${d.time&&d.kind==='session'?`<b style="font-family:var(--font-mono);">${escapeHtml(d.time)}</b> `:''}${d.eid?`<a href="#" class="sal-evt-open" data-eid="${escapeHtml(d.eid)}" style="color:inherit;text-decoration:underline dotted;cursor:pointer;">${escapeHtml(d.title)}</a>`:escapeHtml(d.title)}${d.kind==='materials'?' <span style="color:var(--ink-soft);">— себестоимость материалов</span>':''}</div>
                           <div style="font-family:var(--font-mono);font-size:12.5px;${d.kind==='materials'?'color:var(--accent);':''}">${formatMoney(d.total)}</div>
                         </div>
                       `).join('')}
@@ -20853,17 +21024,29 @@
       const dateStr = fmtDate(dateObj);
       const dayShifts = state.hostessShifts[dateStr];
       if(!dayShifts) continue;
-      SHIFT_DEFS.forEach(sd=>{
+      shiftDefsForDate(dateStr).forEach(sd=>{
         const raw = dayShifts[sd.key];
         const entry = normalizeShiftEntry(raw, sd);
         if(entry && entry.name && norm(entry.name)===norm(name)){
           const extra = shiftExtraHours(raw, sd);
-          rows.push({date:dateStr, half:d<=15?'H1':'H2', text:`смена ${entry.start}–${entry.end} · ${weekend?'выходной':'будни'} ${formatMoney(rate)}${extra>0?` + ${extra} ч сверх × ${formatMoney(HOSTESS_EXTRA_HOUR_RATE)}`:''}`, pay: rate + extra*HOSTESS_EXTRA_HOUR_RATE});
+          const full = dateStr >= FULLDAY_FROM;
+          const extraTxt = extra>0 ? ` + ${extra} ч сверх × ${formatMoney(HOSTESS_EXTRA_HOUR_RATE)}` : '';
+          const text = full
+            ? `${sd.senior?'старший админ':'смена'} ${entry.start}–${entry.end}${sd.senior?' (без расчёта)':extraTxt}`
+            : `смена ${entry.start}–${entry.end} · ${weekend?'выходной':'будни'} ${formatMoney(rate)}${extraTxt}`;
+          rows.push({date:dateStr, half:d<=15?'H1':'H2', text, pay: hostessShiftPay(dateStr, raw, sd, rate)});
         }
       });
       Object.entries(hostessDishesBonusesForDate(dateStr, dayShifts)).forEach(([n,b])=>{
         if(norm(n)===norm(name)) rows.push({date:dateStr, half:d<=15?'H1':'H2', text:'🍽 бонус за посуду', pay:b});
       });
+    }
+    {
+      const bk = Object.keys(hostessBaseSalaryFor(ym)).find(n=>norm(n)===norm(name));
+      if(bk){ const bv = hostessBaseSalaryFor(ym)[bk];
+        if(bv.h1) rows.push({date:ym+'-01', half:'H1', text:'оклад за 1–15 (40 000 ₽ в месяц пополам)', pay:bv.h1});
+        if(bv.h2) rows.push({date:ym+'-16', half:'H2', text:'оклад за 16 – конец (40 000 ₽ в месяц пополам)', pay:bv.h2});
+      }
     }
     rows.sort((a,b)=>a.date.localeCompare(b.date));
     const key = Object.keys(adjDetails||{}).find(n=>norm(n)===norm(name));
@@ -20901,12 +21084,12 @@
       const dateStr = fmtDate(dateObj);
       const dayShifts = state.hostessShifts[dateStr];
       if(!dayShifts) continue;
-      SHIFT_DEFS.forEach(s=>{
+      shiftDefsForDate(dateStr).forEach(s=>{
         const rawEntry = dayShifts[s.key];
         const entry = normalizeShiftEntry(rawEntry, s);
         if(entry && entry.name && norm(entry.name)===norm(myName)){
           const extra = shiftExtraHours(rawEntry, s);
-          const pay = rate + extra*HOSTESS_EXTRA_HOUR_RATE;
+          const pay = hostessShiftPay(dateStr, rawEntry, s, rate);
           shifts.push({ date: dateStr, start: entry.start, end: entry.end, pay, half: d<=15?'H1':'H2' });
         }
       });
@@ -20916,6 +21099,14 @@
           shifts.push({ date: dateStr, start: '', end: '', pay: bonus, half: d<=15?'H1':'H2', isDishesBonus: true });
         }
       });
+    }
+    {
+      const _ym = y+'-'+pad(m+1);
+      const bk = Object.keys(hostessBaseSalaryFor(_ym)).find(n=>norm(n)===norm(myName));
+      if(bk){ const bv = hostessBaseSalaryFor(_ym)[bk];
+        if(bv.h1) shifts.push({ date: _ym+'-01', start:'', end:'', pay: bv.h1, half:'H1', isBase:true });
+        if(bv.h2) shifts.push({ date: _ym+'-16', start:'', end:'', pay: bv.h2, half:'H2', isBase:true });
+      }
     }
     shifts.sort((a,b)=> a.date.localeCompare(b.date));
     const h1Total = shifts.filter(s=>s.half==='H1').reduce((sum,s)=>sum+s.pay,0);
@@ -20947,7 +21138,7 @@
               ${halfShifts.map(s=>`
                 <div class="stat-row" style="margin-bottom:5px;">
                   <div class="stat-label" style="width:170px;">${formatDateText(s.date)}</div>
-                  <div style="flex:1;font-size:12.5px;">${s.isDishesBonus ? '🍽 бонус за посуду' : `смена ${s.start}–${s.end}`}</div>
+                  <div style="flex:1;font-size:12.5px;">${s.isBase ? 'оклад (40 000 ₽ в месяц пополам)' : s.isDishesBonus ? '🍽 бонус за посуду' : `смена ${s.start}–${s.end}`}</div>
                   <div style="font-family:var(--font-mono);font-size:12.5px;">${formatMoney(s.pay)}</div>
                 </div>
               `).join('')}
@@ -20992,7 +21183,7 @@
         ${rows.map(d=>`
           <div class="stat-row" style="margin-bottom:5px;">
             <div class="stat-label" style="width:170px;">${formatDateText(d.date)}</div>
-            <div style="flex:1;font-size:12.5px;">${escapeHtml(d.title)}</div>
+            <div style="flex:1;font-size:12.5px;">${d.eid?`<a href="#" class="sal-evt-open" data-eid="${escapeHtml(d.eid)}" style="color:inherit;text-decoration:underline dotted;cursor:pointer;">${escapeHtml(d.title)}</a>`:escapeHtml(d.title)}</div>
             <div style="font-family:var(--font-mono);font-size:12.5px;color:var(--accent);">${formatMoney(d.total)}</div>
           </div>`).join('')}
       </div>`;
@@ -21065,7 +21256,7 @@
               ${halfDetails.length === 0 ? '<div style="color:var(--ink-soft);font-size:12.5px;">Нет начислений в этот период.</div>' : halfDetails.map(d=>`
                 <div class="stat-row" style="margin-bottom:5px;">
                   <div class="stat-label" style="width:170px;">${formatDateText(d.date)}</div>
-                  <div style="flex:1;font-size:12.5px;">${escapeHtml(d.title)}${d.kind==='materials'?' <span style="color:var(--ink-soft);">— себестоимость материалов</span>':''}</div>
+                  <div style="flex:1;font-size:12.5px;">${d.time&&d.kind==='session'?`<b style="font-family:var(--font-mono);">${escapeHtml(d.time)}</b> `:''}${d.eid?`<a href="#" class="sal-evt-open" data-eid="${escapeHtml(d.eid)}" style="color:inherit;text-decoration:underline dotted;cursor:pointer;">${escapeHtml(d.title)}</a>`:escapeHtml(d.title)}${d.kind==='materials'?' <span style="color:var(--ink-soft);">— себестоимость материалов</span>':''}</div>
                   <div style="font-family:var(--font-mono);font-size:12.5px;${d.kind==='materials'?'color:var(--accent);':''}">${formatMoney(d.total)}</div>
                 </div>
               `).join('')}
@@ -21638,6 +21829,7 @@
         if(pendingImportData.dailyReportSnapshots) await rawReplace('dailyReportSnapshots', 'daily-report-snapshots', '_dailyReportSnapshotsBaseline', pendingImportData.dailyReportSnapshots);
         if(pendingImportData.hostessShifts) await rawReplace('hostessShifts', 'hostess-shifts', '_hostessShiftsBaseline', pendingImportData.hostessShifts);
         if(pendingImportData.managerShifts) await rawReplace('managerShifts', 'manager-shifts', '_managerShiftsBaseline', pendingImportData.managerShifts);
+        if(pendingImportData.masterShifts) await rawReplace('masterShifts', 'master-shifts', '_masterShiftsBaseline', pendingImportData.masterShifts);
         if(pendingImportData.netProfitManual) await rawReplace('netProfitManual', 'net-profit-manual', '_netProfitManualBaseline', pendingImportData.netProfitManual);
         if(pendingImportData.hostessBonuses) await rawReplace('hostessBonuses', 'hostess-bonuses', '_hostessBonusesBaseline', pendingImportData.hostessBonuses);
         if(pendingImportData.yearSummaryManual) await rawReplace('yearSummaryManual', 'year-summary-manual', '_yearSummaryManualBaseline', pendingImportData.yearSummaryManual);
@@ -21821,7 +22013,7 @@
   }
 
   function renderQuickShiftModal(shiftDate, shiftKey, rawEntry){
-    const shiftDef = SHIFT_DEFS.find(s=>s.key===shiftKey);
+    const shiftDef = shiftDefFor(shiftDate, shiftKey);
     const entry = normalizeShiftEntry(rawEntry, shiftDef) || { name:'', start: shiftDef.start, end: shiftDef.end };
     const currentName = entry.name;
     const isCustom = currentName && !HOSTESS_LIST.includes(currentName);
@@ -21855,7 +22047,7 @@
               <input type="time" id="shift-actual-end" value="${entry.end}">
             </div>
           </div>
-          <div style="font-size:12px;color:var(--ink-soft);">Стандарт: ${shiftDef.start}–${shiftDef.end}. Если попросили выйти раньше или задержаться — переработка оплачивается по ${formatMoney(HOSTESS_EXTRA_HOUR_RATE)}/час сверх обычной ставки за смену.</div>
+          <div style="font-size:12px;color:var(--ink-soft);">${shiftDef.senior ? 'Старший админ: только отметка в графике, оплата здесь не считается. Время — для информации. ' : ''}Стандарт: ${shiftDef.start}–${shiftDef.end}. Если попросили выйти раньше или задержаться — переработка оплачивается по ${formatMoney(HOSTESS_EXTRA_HOUR_RATE)}/час сверх обычной ставки за смену.</div>
           <div id="shift-extra-preview" style="font-size:13px;font-weight:600;color:var(--status-blue);"></div>
           <div style="font-size:11.5px;color:var(--ink-soft);">Это действие не требует кода доступа.</div>
           <div class="modal-actions">
@@ -21872,7 +22064,7 @@
 
   function attachQuickShiftModalEvents(overlay){
     const { shiftDate, shiftKey } = state.modal;
-    const shiftDef = SHIFT_DEFS.find(s=>s.key===shiftKey);
+    const shiftDef = shiftDefFor(shiftDate, shiftKey);
     const selectEl = overlay.querySelector('#shift-name-select');
     const customField = overlay.querySelector('#shift-custom-field');
     const startInput = overlay.querySelector('#shift-actual-start');
@@ -21884,7 +22076,7 @@
     };
 
     const updatePreview = ()=>{
-      const extra = shiftExtraHours({ start: startInput.value, end: endInput.value }, shiftDef);
+      const extra = shiftDef.senior ? 0 : shiftExtraHours({ start: startInput.value, end: endInput.value }, shiftDef);
       previewEl.textContent = extra > 0
         ? `+${extra%1===0?extra:extra.toFixed(1)} ч сверх нормы → доплата ${formatMoney(extra*HOSTESS_EXTRA_HOUR_RATE)}`
         : '';
@@ -22311,6 +22503,10 @@
           <input type="text" class="ec-title" value="${escapeHtml(c.title||'')}" ${isNew?'placeholder="Название нового мероприятия"':'readonly'} style="flex:2;min-width:200px;${isNew?'':'background:var(--paper-2);'}">
           <input type="number" class="ec-duration" value="${c.duration||120}" min="15" step="15" style="width:76px;">
           <span class="et-unit">мин</span>
+          <input type="number" class="ec-cost" value="${c.cost!==undefined&&c.cost!==null&&c.cost!==''?c.cost:''}" min="0" step="10" placeholder="себест." title="Себестоимость на одного гостя, ₽" style="width:84px;">
+          <span class="et-unit">₽ себест./гость</span>
+          <input type="number" class="ec-price" value="${c.price!==undefined&&c.price!==null&&c.price!==''?c.price:''}" min="0" step="100" placeholder="цена" title="Цена для гостя в расписании (мастер-классы по записи), ₽" style="width:84px;">
+          <span class="et-unit">₽ цена/гость</span>
           <button type="button" class="ec-del" title="Убрать из списка" style="border:1px solid var(--line-strong);background:var(--white);border-radius:var(--radius);padding:4px 10px;color:var(--danger);cursor:pointer;">✕</button>
         </div>
         <div class="ec-hosts" style="display:flex;flex-wrap:wrap;gap:4px 12px;margin-top:8px;">
@@ -22347,7 +22543,7 @@
   }
   function attachEventCatalogModalEvents(overlay){
     const list = overlay.querySelector('#ec-list');
-    overlay.querySelector('#ec-cancel').onclick = ()=>{ state.modal = null; overlay.remove(); };
+    overlay.querySelector('#ec-cancel').onclick = ()=>{ const rt = state.modal && state.modal.returnTo; state.modal = rt || null; overlay.remove(); if(rt) render(); };
     const search = overlay.querySelector('#ec-search');
     search.addEventListener('input', ()=>{
       const q = search.value.trim().toLowerCase(); let any = false;
@@ -22365,9 +22561,10 @@
       if(row.dataset.new==='1' || window.confirm('Убрать «'+t+'» из списка? Старые мероприятия с этим названием останутся, но новые с ним создать будет нельзя.')) row.remove();
     });
     overlay.querySelector('#ec-add').onclick = ()=>{
-      list.insertAdjacentHTML('beforeend', eventCatalogRowHtml({title:'', hosts:[], duration:120}, true));
-      const last = list.querySelector('.ec-row:last-child .ec-title'); if(last) last.focus();
+      list.insertAdjacentHTML('beforeend', eventCatalogRowHtml({title:'', hosts:[], duration:120, cost:'', price:''}, true));
+      const last = list.querySelector('.ec-row:last-child .ec-title'); if(last){ last.focus(); if(last.scrollIntoView) last.scrollIntoView({block:'center'}); }
     };
+    if(state.modal && state.modal.addNew) overlay.querySelector('#ec-add').click();
     overlay.querySelector('#ec-save').onclick = async ()=>{
       const err = overlay.querySelector('#ec-error'); err.textContent = '';
       const out = []; const seen = new Set(); const newHosts = new Set();
@@ -22384,7 +22581,10 @@
         if(r.dataset.new==='1' && SERVICE_EVENT_TITLES.some(x=>x.toLowerCase()===k)){ bad = 'Название «'+title+'» уже есть среди служебных.'; return; }
         if(duration < 15 || duration > 720){ bad = 'У «'+title+'» укажите продолжительность от 15 до 720 минут.'; return; }
         if(!hosts.length){ bad = 'У «'+title+'» отметьте хотя бы одного ведущего.'; return; }
-        seen.add(k); out.push({title, hosts, duration});
+        const cRaw = (r.querySelector('.ec-cost').value||'').trim(), pRaw = (r.querySelector('.ec-price').value||'').trim();
+        const cost = cRaw==='' ? null : Number(cRaw), price = pRaw==='' ? null : Number(pRaw);
+        if((cost!==null && (isNaN(cost) || cost<0)) || (price!==null && (isNaN(price) || price<0))){ bad = 'У «'+title+'» себестоимость и цена должны быть числом не меньше нуля.'; return; }
+        seen.add(k); out.push({title, hosts, duration, cost, price});
       });
       if(bad){ err.textContent = bad; return; }
       // длительность — в «Видах мероприятий» (сохраняем их статьи расхода), новые ведущие — в список мастеров
@@ -22395,14 +22595,19 @@
       const lc = new Set((state.hostsList||[]).map(h=>String(h).trim().toLowerCase()));
       const addHosts = [...new Set(out.flatMap(c=>c.hosts))].filter(h=>!lc.has(h.toLowerCase()));
       if(addHosts.length) state.hostsList = [...state.hostsList, ...addHosts];
-      state.eventCatalog = out.map(c=>({title:c.title, hosts:c.hosts}));
+      state.eventCatalog = out.map(c=>({title:c.title, hosts:c.hosts, cost:c.cost, price:c.price}));
       try{
         await saveEventTypes();
         if(addHosts.length) await saveHostsList();
         await saveEventCatalog();
       }catch(e){}
       recordAction('Справочник мероприятий и ведущих обновлён');
-      state.modal = null; overlay.remove(); render();
+      { const rt = state.modal && state.modal.returnTo;
+        if(rt && rt.event){
+          const nr = [...list.querySelectorAll('.ec-row[data-new="1"] .ec-title')].map(i=>i.value.trim()).filter(Boolean).pop();
+          if(nr) rt.event = {...rt.event, title: nr};
+        }
+        state.modal = rt || null; overlay.remove(); render(); }
       showToast('Справочник сохранён');
     };
   }
@@ -24061,17 +24266,18 @@
         const dateStr = fmtDate(dateObj);
         const dayShifts = state.hostessShifts[dateStr];
         if(!dayShifts) continue;
-        SHIFT_DEFS.forEach(s=>{
+        shiftDefsForDate(dateStr).forEach(s=>{
           const rawEntry = dayShifts[s.key];
           const entry = normalizeShiftEntry(rawEntry, s);
           if(entry && entry.name){
             const extra = shiftExtraHours(rawEntry, s);
-            npHostessSalary += rate + extra*HOSTESS_EXTRA_HOUR_RATE;
+            npHostessSalary += hostessShiftPay(dateStr, rawEntry, s, rate);
           }
         });
         npHostessSalary += Object.values(hostessDishesBonusesForDate(dateStr, dayShifts)).reduce((s,v)=>s+v,0);
       }
     }
+    npHostessSalary += hostessBaseTotalFor(ym);
     npHostessSalary += npHostessAdjustments;
     npHostessSalary += Object.values((state.hostessBonuses && state.hostessBonuses[ym]) || {}).reduce((s,b)=> s + (Number((b&&b.amount)||0)), 0);
     const npManagerSalary = computeManagersPayForMonth(ym).total;
@@ -24965,9 +25171,9 @@
     const s = state.hostessShifts[dateStr];
     if(!s) return '';
     const parts = [];
-    SHIFT_DEFS.forEach(def=>{
+    shiftDefsForDate(dateStr).forEach(def=>{
       const entry = normalizeShiftEntry(s[def.key], def);
-      if(entry && entry.name) parts.push(entry.name);
+      if(entry && entry.name) parts.push(def.senior ? entry.name+' (СА)' : entry.name);
     });
     return parts.join(' → ');
   }
@@ -24977,11 +25183,12 @@
     return `
       <div class="shift-block">
         <div class="shift-block-title">График админов</div>
-        ${SHIFT_DEFS.map(s=>{
+        ${hostessCoverageGap(dateStr) ? `<div style="background:#fdecea;border:1px solid #e57373;color:#b71c1c;border-radius:6px;padding:6px 8px;font-size:12.5px;margin-bottom:6px;">⚠ В этот день меньше двух человек (${hostessCoverageCount(dateStr)}). Нужно: оба админа, или админ + старший админ.</div>` : ''}
+        ${shiftDefsForDate(dateStr).map(s=>{
           const raw = dayShifts[s.key];
           const entry = normalizeShiftEntry(raw, s);
-          const extra = entry ? shiftExtraHours(raw, s) : 0;
-          const actualLabel = entry && (entry.start !== s.start || entry.end !== s.end) ? ` (факт: ${entry.start}–${entry.end})` : '';
+          const extra = (entry && !s.senior) ? shiftExtraHours(raw, s) : 0;
+          const actualLabel = entry && !s.senior && (entry.start !== s.start || entry.end !== s.end) ? ` (факт: ${entry.start}–${entry.end})` : '';
           return `
             <div class="shift-row">
               <span class="shift-time">${s.label}</span>
@@ -24995,6 +25202,60 @@
   }
 
   // график менеджеров — просто кто дежурит в этот день, без смен по времени и без расчёта ЗП
+  function renderMasterShiftBlock(dateStr){
+    const names = mastersOnDuty(dateStr);
+    return `
+      <div class="shift-block">
+        <div class="shift-block-title">Мастера в этот день · ${MASTER_SHIFT_TIME}</div>
+        <div class="shift-row">
+          <span class="shift-name ${names.length?'':'empty'}">${names.length ? names.map(escapeHtml).join(', ') : 'не назначены'}</span>
+          ${roleCanEditMasterShifts(state.currentRole) ? `<button class="master-shift-edit-btn shift-edit-btn" data-date="${dateStr}">✎</button>` : ''}
+        </div>
+      </div>
+    `;
+  }
+  function renderQuickMasterShiftModal(shiftDate){
+    const cur = new Set(mastersOnDuty(shiftDate).map(n=>n.toLowerCase()));
+    const list = Array.from(new Set([...(state.hostsList||[]).map(h=>String(h).trim()).filter(Boolean), ...mastersOnDuty(shiftDate)]));
+    const wd = weekdayFromDate(shiftDate);
+    return `
+      <div class="modal" style="max-width:400px;">
+        <div class="modal-head"><h3>Мастера на день</h3><button class="modal-close">×</button></div>
+        <div class="modal-body">
+          <div style="font-size:12.5px;color:var(--ink-soft);margin-top:-6px;">${formatDateText(shiftDate)} · работают ${MASTER_SHIFT_TIME}</div>
+          <div style="display:flex;flex-wrap:wrap;gap:6px;margin:8px 0;">
+            ${list.map(n=>`<label style="display:inline-flex;align-items:center;gap:5px;border:1px solid var(--line-strong);border-radius:14px;padding:4px 10px;font-size:13px;cursor:pointer;"><input type="checkbox" class="ms-cb" value="${escapeHtml(n)}" ${cur.has(n.toLowerCase())?'checked':''}> ${escapeHtml(n)}</label>`).join('') || '<span style="color:var(--ink-soft);font-size:12.5px;">Список мастеров пуст</span>'}
+          </div>
+          <div class="field"><label>Другое имя (если нет в списке)</label><input type="text" id="ms-extra" placeholder="Введите имя"></div>
+          <label style="display:flex;align-items:center;gap:6px;font-size:12.5px;margin-bottom:6px;"><input type="checkbox" id="ms-repeat"> Повторить на все ${escapeHtml(wd)} до конца этого месяца</label>
+          <div style="font-size:11.5px;color:var(--ink-soft);">Это действие не требует кода доступа.</div>
+          <div class="modal-actions"><span></span><div style="display:flex;gap:8px;">
+            <button class="btn btn-ghost" id="ms-cancel">Отмена</button><button class="btn btn-primary" id="ms-save">Сохранить</button>
+          </div></div>
+        </div>
+      </div>`;
+  }
+  function attachQuickMasterShiftModalEvents(overlay){
+    const { shiftDate } = state.modal;
+    const back = ()=>{ overlay.remove(); state.modal = {type:'day', date: shiftDate}; render(); };
+    overlay.querySelector('#ms-cancel').onclick = back;
+    overlay.querySelector('#ms-save').onclick = async ()=>{
+      if(!roleCanEditMasterShifts(state.currentRole)){ back(); return; }
+      const names = Array.from(overlay.querySelectorAll('.ms-cb')).filter(c=>c.checked).map(c=>c.value);
+      const extra = (overlay.querySelector('#ms-extra').value||'').trim();
+      if(extra && !names.some(n=>n.toLowerCase()===extra.toLowerCase())) names.push(extra);
+      if(!state.masterShifts) state.masterShifts = {};
+      const dates = [shiftDate];
+      if(overlay.querySelector('#ms-repeat').checked){
+        const d0 = parseDate(shiftDate);
+        for(let d = new Date(d0.getTime()+7*86400000); d.getMonth()===d0.getMonth(); d = new Date(d.getTime()+7*86400000)) dates.push(fmtDate(d));
+      }
+      dates.forEach(ds=>{ if(names.length) state.masterShifts[ds] = names.slice(); else delete state.masterShifts[ds]; });
+      await saveMasterShifts();
+      recordAction('Мастера на день сохранены');
+      back();
+    };
+  }
   function renderManagerShiftBlock(dateStr){
     const name = managerForDate(dateStr);
     return `
@@ -25100,6 +25361,7 @@
           </div>
           ` : ''}
           ${renderShiftBlock(dateStr)}
+          ${renderMasterShiftBlock(dateStr)}
           ${renderManagerShiftBlock(dateStr)}
           ${renderDaysOffBlock(dateStr)}
           ${!isAll ? `<div style="font-size:12px;color:var(--ink-soft);font-family:var(--font-mono);margin-top:-8px;display:flex;align-items:center;gap:6px;">
@@ -25210,6 +25472,15 @@
         const rawEntry = (state.hostessShifts[shiftDate] || {})[shiftKey] || null;
         overlay.remove();
         state.modal = {type:'quick-shift', shiftDate, shiftKey, rawEntry};
+        render();
+      };
+    });
+    overlay.querySelectorAll('.master-shift-edit-btn').forEach(btn=>{
+      btn.onclick = (ev)=>{
+        ev.stopPropagation();
+        const shiftDate = btn.dataset.date;
+        overlay.remove();
+        state.modal = {type:'quick-master-shift', shiftDate};
         render();
       };
     });
@@ -25496,7 +25767,8 @@
               <option value="" ${(!ev.title || ev.title==='Слот')?'selected':''}>— выберите вид —</option>
               ${Array.from(new Set([...((ev.title && ev.title!=='Слот')?[ev.title]:[]), ...eventCatalogList().map(x=>x.title), ...SERVICE_EVENT_TITLES.filter(x=>x!=='Слот')])).sort((a,b)=>a.localeCompare(b,'ru')).map(t=>`<option value="${escapeHtml(t)}" ${ev.title===t?'selected':''}>${escapeHtml(t)}</option>`).join('')}
             </select>
-            <div style="font-size:11px;color:var(--ink-soft);margin-top:4px;">Названия берутся только из утверждённой таблицы «Мероприятия и ведущие». ${roleCanEditEventCatalog(state.currentRole) ? 'Нужного нет? Добавьте его в «📚 Мероприятия и ведущие» в шапке.' : 'Нужного нет — напишите Карине или менеджеру, список обновим.'}</div>
+            <div style="font-size:11px;color:var(--ink-soft);margin-top:4px;">Названия берутся только из утверждённой таблицы «Мероприятия и ведущие». ${roleCanEditEventCatalog(state.currentRole) ? 'Нужного нет?' : 'Нужного нет — напишите Карине или менеджеру, список обновим.'}</div>
+            ${roleCanEditEventCatalog(state.currentRole) ? `<button type="button" class="btn btn-ghost" id="f-add-to-catalog" style="margin-top:6px;font-size:12.5px;padding:4px 10px;">➕ Нет в списке? Добавить в справочник</button>` : ''}
             ${(ev.title && ev.title!=='Слот' && !isAllowedEventTitle(ev.title)) ? `<div style="font-size:11.5px;color:var(--status-red);margin-top:4px;">Название «${escapeHtml(ev.title)}» устарело. Менять не обязательно, но для новых мероприятий оно недоступно.</div>` : ''}
           </div>
           <div class="field">
@@ -25520,6 +25792,7 @@
             <label>Ведущий <span id="f-host-optional-hint" style="font-weight:400;color:var(--ink-soft);display:inline;">— можно оставить пустым: «ведущий не назначен» (мероприятие попадёт в красный список для распределения)</span></label>
             <input type="text" id="f-host" value="${escapeHtml(ev.host||'')}" placeholder="Ведущий не назначен — или начните вводить имя…" list="host-suggestions">
             <datalist id="host-suggestions">${(()=>{ const al = (ev.title && isAllowedEventTitle(ev.title)) ? allowedHostsForTitle(ev.title) : officialHostsAll(); const l = [...al]; if(ev.host && !l.some(x=>x.toLowerCase()===ev.host.trim().toLowerCase())) l.push(ev.host.trim()); return l; })().map(h=>`<option value="${escapeHtml(h)}">`).join('')}</datalist>
+            <div id="f-host-onduty" style="font-size:11.5px;margin-top:4px;color:var(--accent);">${mastersOnDuty(ev.date).length ? '🎨 В этот день работают (15:00–22:00): ' + escapeHtml(mastersOnDuty(ev.date).join(', ')) : ''}</div>
             <div id="f-host-allowed-hint" style="font-size:11.5px;color:var(--ink-soft);margin-top:4px;">${(ev.title && officialEventEntry(ev.title)) ? 'Может вести: ' + escapeHtml(allowedHostsForTitle(ev.title).join(', ')) : 'Выберите название — покажу, кто может вести.'}</div>
             ${ev.status==='slot' ? `<div style="font-size:11px;color:var(--ink-soft);margin-top:4px;">Статус «Слот» — расписание зафиксировано, но мастер ещё не назначен. Мастера видят этот слот и могут отметить себя свободными (см. выше). Когда определитесь, впишите мастера сюда, выберите продукт/направление и смените статус на нужный.</div>` : ''}
           </div>
@@ -25569,6 +25842,7 @@
           <div class="field" style="${financeHiddenInEventModal()?'display:none;':''}">
             <label>Выручка (₽) — сумма полученных оплат</label>
             <input type="number" id="f-price" value="${financeHiddenInEventModal() ? '' : (ev.price!==undefined && ev.price!==null ? ev.price : '')}" min="0" step="100" placeholder="Например: 8000" ${financeHiddenInEventModal()?'disabled':''}>
+            <div id="f-price-ref" style="font-size:11.5px;color:var(--ink-soft);margin-top:4px;"></div>
             <div id="price-journal-mismatch" style="display:none;color:var(--status-red);font-size:11.5px;margin-top:4px;"></div>
             <div id="quick-payment-controls" style="display:none;">
               <div class="row2" style="margin-top:8px;">
@@ -25939,6 +26213,32 @@
     const guestsInput = overlay.querySelector('#f-guests');
     const masterPayInput = overlay.querySelector('#f-master-pay');
     const spaceSelect = overlay.querySelector('#f-space');
+    { const de = overlay.querySelector('#f-date'), od = overlay.querySelector('#f-host-onduty');
+      if(de && od) de.addEventListener('change', ()=>{ const n = mastersOnDuty(de.value); od.textContent = n.length ? '🎨 В этот день работают (15:00–22:00): ' + n.join(', ') : ''; }); }
+    { const addCat = overlay.querySelector('#f-add-to-catalog');
+      if(addCat) addCat.onclick = ()=>{
+        // переносим уже введённое в форме, чтобы после справочника вернуться к тому же мероприятию
+        const ev0 = {...state.modal.event};
+        const map = {title:'f-title', product:'f-product', date:'f-date', time:'f-time', host:'f-host', notes:'f-notes'};
+        Object.keys(map).forEach(k=>{ const el = overlay.querySelector('#'+map[k]); if(el && !el.disabled) ev0[k] = el.value; });
+        ['duration','guests','price'].forEach(k=>{ const el = overlay.querySelector('#f-'+k); if(el && !el.disabled && el.value!=='') ev0[k] = Number(el.value); });
+        const returnTo = {...state.modal, event: ev0};
+        state.modal = {type:'event-catalog', returnTo, addNew:true};
+        overlay.remove(); render();
+      }; }
+    {
+      const tEl = overlay.querySelector('#f-title'), pEl = overlay.querySelector('#f-product'), gEl = overlay.querySelector('#f-guests'), refEl = overlay.querySelector('#f-price-ref');
+      const upd = ()=>{
+        if(!refEl || !tEl) return;
+        const cp = catalogCostPrice(tEl.value);
+        const priv = pEl && CAL_PRIVATE_KIND.includes(pEl.value);
+        if(priv || !cp.price){ refEl.textContent = ''; return; }
+        const g = gEl ? Number(gEl.value)||0 : 0;
+        refEl.textContent = 'По справочнику: ' + formatMoney(cp.price) + ' за гостя' + (g ? ' · при ' + g + ' гост. ≈ ' + formatMoney(cp.price*g) : '') + ' (только подсказка, сумму вносите по факту)';
+      };
+      [tEl,pEl,gEl].forEach(x=>{ if(x){ x.addEventListener('change', upd); x.addEventListener('input', upd); } });
+      upd();
+    }
     const hostInputEl = overlay.querySelector('#f-host');
     // ведущего мастера может поменять только тот, кто сейчас сам ведёт это мероприятие (может переставить
     // себя на другого), но не может трогать чужие записи — например, поменять Ольгу на кого-то другого
