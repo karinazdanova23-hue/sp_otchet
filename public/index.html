@@ -2310,6 +2310,7 @@
     hostessBonuses: null,
     yearSummaryManual: null,
     auditLog: null,
+    loginLog: null,
     eventsIntegritySnapshot: null,
     eventsIntegrityAlerts: null,
     closedMonths: null,
@@ -2331,6 +2332,7 @@
     masterPersonalPasswords: {},
     loggedInMasterName: null,
     hostessPersonalPasswords: {},
+    staffArchive: [],
     loggedInHostessName: null,
     managerPersonalPasswords: {},
     loggedInManagerName: null,
@@ -2804,6 +2806,12 @@
       }
     }catch(e){}
 
+    try{
+      const sa = await window.storage.get('staff-archive', true);
+      state.staffArchive = sa ? JSON.parse(sa.value) : [];
+      if(!Array.isArray(state.staffArchive)) state.staffArchive = [];
+    }catch(e){ state.staffArchive = []; }
+
     // свои категории расходов, которые кто-либо добавил прямо из формы расхода в "Книге" —
     // общие на всех (хранятся на сервере), в дополнение к базовому списку EXPENSE_CATEGORIES
     try{
@@ -2874,6 +2882,13 @@
       const ysm = await window.storage.get('year-summary-manual', true);
       state.yearSummaryManual = ysm ? JSON.parse(ysm.value) : {};
     }catch(e){ state.yearSummaryManual = {}; }
+
+    try{
+      const ll = await window.storage.get('login-log', true);
+      state.loginLog = ll ? JSON.parse(ll.value) : [];
+      if(!Array.isArray(state.loginLog)) state.loginLog = [];
+    }catch(e){ state.loginLog = []; }
+    state._loginLogBaseline = JSON.parse(JSON.stringify(state.loginLog));
 
     try{
       const al = await window.storage.get('audit-log', true);
@@ -4595,6 +4610,48 @@
     return expenseEntry.id;
   }
 
+  // ----- журнал входов и защита от подбора пароля -----
+  async function saveLoginLog(){
+    await saveCollectionMerged('login-log', state.loginLog, state._loginLogBaseline, (finalArr)=>{
+      finalArr.sort((a,b)=> (a.ts||'').localeCompare(b.ts||''));
+      if(finalArr.length > 500) finalArr = finalArr.slice(-500);
+      state.loginLog = finalArr;
+      state._loginLogBaseline = JSON.parse(JSON.stringify(finalArr));
+    }, x=>x.id);
+  }
+  function loginDeviceLabel(){
+    const ua = navigator.userAgent || '';
+    const os = /iPhone|iPad/.test(ua) ? 'iPhone/iPad' : /Android/.test(ua) ? 'Android' : /Windows/.test(ua) ? 'Windows' : /Mac OS/.test(ua) ? 'Mac' : /Linux/.test(ua) ? 'Linux' : 'устройство';
+    const br = /YaBrowser/.test(ua) ? 'Яндекс' : /Edg\//.test(ua) ? 'Edge' : /Chrome\//.test(ua) ? 'Chrome' : /Safari\//.test(ua) ? 'Safari' : /Firefox\//.test(ua) ? 'Firefox' : '';
+    return os + (br ? ' · ' + br : '');
+  }
+  // пароль в журнал не пишется никогда — только факт попытки, роль/имя (если вошли) и устройство
+  function recordLogin(ok, role, name, how){
+    try{
+      if(!state.loginLog) state.loginLog = [];
+      state.loginLog.push({ id: uid(), ts: new Date().toISOString(), ok: !!ok, role: role || '', name: name || '', how: how || '', device: loginDeviceLabel() });
+      if(state.loginLog.length > 500) state.loginLog = state.loginLog.slice(-500);
+      saveLoginLog();
+    }catch(e){}
+  }
+  const LOGIN_MAX_FAILS = 5, LOGIN_WINDOW_MS = 10*60*1000, LOGIN_LOCK_MS = 5*60*1000;
+  function loginLockLeft(){
+    try{ const d = JSON.parse(localStorage.getItem('sp-login-fails') || '{}'); if(d.lockUntil && d.lockUntil > Date.now()) return Math.ceil((d.lockUntil - Date.now())/1000); }catch(e){}
+    return 0;
+  }
+  function loginNoteFail(){
+    try{
+      const d = JSON.parse(localStorage.getItem('sp-login-fails') || '{}');
+      const now = Date.now();
+      const fails = (d.fails || []).filter(t=> now - t < LOGIN_WINDOW_MS); fails.push(now);
+      const out = { fails };
+      if(fails.length >= LOGIN_MAX_FAILS){ out.lockUntil = now + LOGIN_LOCK_MS; out.fails = []; }
+      localStorage.setItem('sp-login-fails', JSON.stringify(out));
+    }catch(e){}
+  }
+  function loginNoteOk(){ try{ localStorage.removeItem('sp-login-fails'); }catch(e){} }
+  function loginLockMsg(left){ return 'Слишком много неверных попыток. Подождите ' + (left >= 60 ? Math.ceil(left/60) + ' мин.' : left + ' сек.'); }
+
   function recordAction(message, detail){
     showToast(message);
     if(!state.auditLog) state.auditLog = [];
@@ -5241,8 +5298,10 @@
     const errorEl = document.getElementById('gate-error');
     const submit = ()=>{
       const val = input.value.trim();
+      { const _left = loginLockLeft(); if(_left > 0){ errorEl.textContent = loginLockMsg(_left); errorEl.style.display = 'block'; input.value = ''; return; } }
       const matchedRole = CODE_LOGIN_ROLES.find(r => val && val === state.roleCodes[r]);
       if(matchedRole){
+        recordLogin(true, matchedRole, '', 'общий пароль должности'); loginNoteOk();
         state.currentRole = matchedRole;
         state.unlocked = true;
         state.unlockedAdmin = ['assistant','admin','owner'].includes(matchedRole);
@@ -5256,6 +5315,7 @@
       }
       const matchedMasterName = val ? Object.keys(state.masterPersonalPasswords).find(name => state.masterPersonalPasswords[name] && state.masterPersonalPasswords[name] === val) : null;
       if(matchedMasterName){
+        recordLogin(true, 'master', matchedMasterName, 'личный пароль'); loginNoteOk();
         state.currentRole = 'master';
         state.unlocked = true;
         state.unlockedAdmin = false;
@@ -5269,6 +5329,7 @@
       }
       const matchedHostessName = val ? Object.keys(state.hostessPersonalPasswords).find(name => state.hostessPersonalPasswords[name] && state.hostessPersonalPasswords[name] === val) : null;
       if(matchedHostessName){
+        recordLogin(true, 'hostess', matchedHostessName, 'личный пароль'); loginNoteOk();
         state.currentRole = 'hostess';
         state.unlocked = true;
         state.unlockedAdmin = false;
@@ -5282,6 +5343,7 @@
       }
       const matchedManagerName = val ? Object.keys(state.managerPersonalPasswords).find(name => state.managerPersonalPasswords[name] && state.managerPersonalPasswords[name] === val) : null;
       if(matchedManagerName){
+        recordLogin(true, 'manager', matchedManagerName, 'личный пароль'); loginNoteOk();
         state.currentRole = 'manager';
         state.unlocked = true;
         state.unlockedAdmin = false;
@@ -5293,6 +5355,8 @@
         checkPushSubscriptionStatus().then(enabled=>{ state.pushEnabled = enabled; render(); });
         return;
       }
+      recordLogin(false, '', '', 'неверный пароль'); loginNoteFail();
+      { const _l2 = loginLockLeft(); if(_l2 > 0) errorEl.textContent = loginLockMsg(_l2); }
       errorEl.style.display = 'block';
       input.style.borderColor = 'var(--danger)';
       input.value = '';
@@ -11111,12 +11175,19 @@
   // ===================== День на весь экран (без прокрутки) =====================
   // строка «кто работает» для экрана дня: админы (с ноября — с пометкой СА и предупреждением) и мастера 15–22
   function dayStaffLineHtml(ds){
-    const adm = shiftSummaryShort(ds);
     const gap = hostessCoverageGap(ds);
     const ms = mastersOnDuty(ds);
     const canEd = roleCanEditMasterShifts(state.currentRole);
-    return `<div class="ds-staff" style="font-size:12.5px;line-height:1.5;">
-      <span>🧑 Админы: <b>${adm ? escapeHtml(adm) : 'не назначены'}</b>${gap ? ` <span style="color:#b71c1c;font-weight:700;">⚠ нужно минимум 2 человека</span>` : ''}</span>
+    const canEdAdm = state.currentRole !== 'master';
+    const day = (state.hostessShifts||{})[ds] || {};
+    const shortLabel = { shift1: ds >= FULLDAY_FROM ? '1-й' : '12–17', shift2: ds >= FULLDAY_FROM ? '2-й' : '17–22', shift3: 'СА' };
+    const slots = shiftDefsForDate(ds).map(def=>{
+      const en = normalizeShiftEntry(day[def.key], def);
+      const nm = en && en.name ? en.name : '';
+      return `<span style="white-space:nowrap;">${shortLabel[def.key] || ''}: <b${nm ? '' : ' style="color:var(--ink-soft);font-weight:400;"'}>${nm ? escapeHtml(nm) : '—'}</b>${canEdAdm ? ` <button type="button" class="btn btn-ghost" data-shedit="${escapeHtml(ds)}|${def.key}" title="${escapeHtml(def.label)}" style="padding:0 6px;font-size:11.5px;">✎</button>` : ''}</span>`;
+    }).join(' · ');
+    return `<div class="ds-staff" style="font-size:12.5px;line-height:1.7;">
+      <span>🧑 Админы: ${slots}${gap ? ` <span style="color:#b71c1c;font-weight:700;">⚠ нужно минимум 2 человека</span>` : ''}</span>
       · <span>🎨 Мастера (${MASTER_SHIFT_TIME}): <b>${ms.length ? escapeHtml(ms.join(', ')) : 'не назначены'}</b></span>${canEd ? ` <button type="button" class="btn btn-ghost" data-msedit="${escapeHtml(ds)}" style="padding:1px 8px;font-size:12px;">✎</button>` : ''}
     </div>`;
   }
@@ -11150,7 +11221,7 @@
     const tip = [e.title, _gn ? 'Гости: ' + _gn : '', e.notes, e.foodInfo, e.ageCategory].filter(Boolean).join('\n');
     return `<div class="ds-card" data-eid="${escapeHtml(e.id)}" data-tdate="${escapeHtml(e.date||'')}" data-tst="${timeToMinutes(e.time)}" data-ten="${timeToMinutes(e.time) + (Number(e.duration)||0)}" title="${escapeHtml(tip)}" style="font-size:${fs}px;border-left:4px solid ${statusColor(e.status)};">
       <div class="ds-card-main">
-        <div class="ds-ct">${spaceTag || ''}<b>${escapeHtml(e.time || '')}</b>${e.duration ? ' · ' + escapeHtml(formatDuration(e.duration)) : ''}${escapeHtml(gTxt)}</div>
+        <div class="ds-ct">${spaceTag || ''}<b>${escapeHtml(e.time || '')}${e.time && e.duration ? '–' + ftMinToTime(timeToMinutes(e.time) + (Number(e.duration)||0)) : ''}</b>${(e.time && ((Number(e.rentalBefore)||0) > 0 || (Number(e.rentalAfter)||0) > 0)) ? ` <span style="font-size:.9em;background:#FFF1CC;border:1px solid #E8B84B;border-radius:4px;padding:0 4px;white-space:nowrap;">с арендой ${ftMinToTime(effectiveStart(e))}–${ftMinToTime(effectiveEnd(e))}</span>` : ''}${escapeHtml(gTxt)}</div>
         <div class="ds-ctitle">${escapeHtml(e.title || '')}</div>
         <div class="ds-ch">${isPrivateWithoutHost(e) ? '<span style="color:var(--danger);">без ведущего</span>' : escapeHtml(hostLine)}${isPrivateWithoutHost(e) && (e.product || '') ? ' · ' + escapeHtml(e.product) : ''}${legalSuffix(e)}</div>
         ${dsRentalHtml(e)}
@@ -11202,7 +11273,7 @@
       .ds-cbtn{ display:flex; flex-direction:column; gap:4px; flex-shrink:0; } .ds-cbtn button{ font-size:.85em; padding:5px 8px; border:1px solid var(--line-strong); background:var(--white); border-radius:6px; }
       .dsm-free{ flex-shrink:0; border-top:1px solid var(--line); padding-top:6px; margin-top:6px; max-height:34%; overflow-y:auto; }
     </style>
-    <div class="day-screen">
+    <div class="day-screen" data-dsdate="${ds}">
       <div class="dsm-top"><button class="btn btn-primary modal-close" id="ds-close" style="width:auto;height:auto;padding:6px 10px;font-size:13px;color:#fff;">✕</button><button class="btn btn-ghost" data-dsnav="-1">‹</button><h3 data-dsnav="today">${escapeHtml(dLabel)}</h3><button class="btn btn-ghost" data-dsnav="1">›</button></div>
       <div class="ds-sum" style="text-align:center;font-size:12px;color:var(--ink-soft);">🕒 <b data-dsclock></b> · <span style="color:#2F9E5F;font-weight:700;">● идут</span> ярче, прошедшие бледнее<br>${dayEvs.length} мер. · 👥 ${guests}${showMoney ? ' · ' + escapeHtml(formatMoney(revenue)) : ''}${mgr ? ' · ' + escapeHtml(mgr) : ''}${noHost ? ' · <span style="color:var(--danger);">без вед.: ' + noHost + '</span>' : ''}</div>
       <div style="text-align:center;">${dayStaffLineHtml(ds)}</div>
@@ -11273,7 +11344,7 @@
       }).join('');
       const freeHtml = free.map(w=> `<div class="ds-free" data-dsfree="${s.id}|${w[0]}|${w[1]-w[0]}" style="top:${pct(w[0])}%;height:${(w[1]-w[0])/span*100}%;" title="Создать мероприятие в это время">свободно ${ftMinToTime(w[0])}–${ftMinToTime(w[1])}</div>`).join('');
       return `<div class="ds-col"><div class="ds-colhead"><b>${escapeHtml(s.name)}</b> <span>до ${SPACE_CAPACITY[s.id] || '?'} · ${evs.length ? evs.length + ' мер.' : 'пусто'}</span></div>
-        <div class="ds-colbody">${hours.map(m=>`<div class="ds-hline" style="top:${pct(m)}%;"></div>`).join('')}${freeHtml}${evHtml}</div></div>`;
+        <div class="ds-colbody" data-t0="${t0}" data-span="${span}">${hours.map(m=>`<div class="ds-hline" style="top:${pct(m)}%;"></div>`).join('')}${freeHtml}${evHtml}</div></div>`;
     }).join('');
     return `<style>
       .day-screen{ background:var(--white); border-radius:var(--radius); width:100%; height:calc(100vh - 16px); display:flex; flex-direction:column; padding:10px 12px; box-sizing:border-box; }
@@ -11299,6 +11370,12 @@
       .ds-now{ box-shadow:0 0 0 2px #2F9E5F, 0 2px 10px rgba(47,158,95,.35) !important; background:#F3FBF6 !important; position:relative; }
       .ds-now::after{ content:'● идёт сейчас'; position:absolute; right:6px; bottom:3px; font-size:10px; font-weight:700; color:#2F9E5F; background:rgba(255,255,255,.85); border-radius:4px; padding:0 4px; pointer-events:none; }
       .ds-legend{ font-size:11.5px; color:var(--ink-soft); }
+      .ds-nowline{ position:absolute; left:0; right:0; height:0; border-top:2px solid #E5484D; z-index:6; pointer-events:none; }
+      .ds-nowline::before{ content:''; position:absolute; left:-1px; top:-5px; width:8px; height:8px; border-radius:50%; background:#E5484D; }
+      .ds-nowline span{ position:absolute; right:3px; top:-16px; font-size:10px; font-weight:700; color:#fff; background:#E5484D; border-radius:3px; padding:0 4px; font-family:var(--font-mono); }
+      .ds-nowmark{ flex:0 0 auto; position:relative; height:0; border-top:2px solid #E5484D; margin:5px 0; pointer-events:none; }
+      .ds-nowmark::before{ content:''; position:absolute; left:-1px; top:-5px; width:8px; height:8px; border-radius:50%; background:#E5484D; }
+      .ds-nowmark span{ position:absolute; right:3px; top:-9px; font-size:10px; font-weight:700; color:#fff; background:#E5484D; border-radius:3px; padding:0 4px; font-family:var(--font-mono); }
       .ds-hline{ position:absolute; left:0; right:0; border-top:1px solid var(--line); opacity:.7; pointer-events:none; }
       .ds-free{ position:absolute; left:3px; right:3px; border:1px dashed #3F8F6B; background:rgba(63,143,107,.10); color:#2d6b4f; border-radius:5px; font-size:11.5px; padding:3px 6px; cursor:pointer; box-sizing:border-box; overflow:hidden; }
       .ds-free:hover{ background:rgba(63,143,107,.28); }
@@ -11308,7 +11385,7 @@
       ${layout==='cards' ? `@media (max-width:700px){ .ds-grid{ overflow-x:auto; grid-template-columns:repeat(${Math.max(1,spaces.length)}, 230px) !important; } }` : ''}
       @media (max-width:700px){ .ds-evt{ font-size:10.5px; padding:2px 3px; } .ds-evt .ds-s{ display:none; } .ds-grid{ grid-template-columns:32px repeat(${Math.max(1,spaces.length)}, minmax(0,1fr)); gap:0 3px; } .ds-free{ font-size:10px; padding:2px; } }
     </style>
-    <div class="day-screen">
+    <div class="day-screen" data-dsdate="${ds}">
       <div class="ds-head">
         <button class="btn btn-primary modal-close" id="ds-close" style="width:auto;height:auto;padding:8px 14px;font-size:14px;color:#fff;" title="Закрыть">✕ Закрыть</button>
         <button class="btn btn-ghost" data-dsnav="-1" title="Предыдущий день">‹</button>
@@ -11359,6 +11436,33 @@
       el.classList.toggle('ds-past', past); el.classList.toggle('ds-now', cur);
     });
     root.querySelectorAll('[data-dsclock]').forEach(c=> c.textContent = now.label + ' Омск');
+    // красная линия «сейчас» (как в YCLIENTS): на шкале — по времени, в карточках — между прошедшим и будущим
+    const dsEl = root.querySelector('[data-dsdate]');
+    const isToday = !!dsEl && dsEl.dataset.dsdate === now.date && (state.currentRole === 'admin' || state.currentRole === 'hostess'); // только старший админ и админы
+    root.querySelectorAll('.ds-colbody[data-t0]').forEach(body=>{
+      let ln = body.querySelector('.ds-nowline');
+      const t0 = +body.dataset.t0, span = +body.dataset.span;
+      if(!isToday || now.min < t0 || now.min > t0 + span){ if(ln) ln.remove(); return; }
+      if(!ln){ ln = document.createElement('div'); ln.className = 'ds-nowline'; ln.innerHTML = '<span></span>'; body.appendChild(ln); }
+      ln.style.top = ((now.min - t0) / span * 100) + '%';
+      ln.firstChild.textContent = now.label;
+    });
+    root.querySelectorAll('.ds-cards').forEach(box=>{
+      let mk = box.querySelector('.ds-nowmark');
+      if(!isToday){ if(mk) mk.remove(); return; }
+      if(!mk){ mk = document.createElement('div'); mk.className = 'ds-nowmark'; mk.innerHTML = '<span></span>'; }
+      mk.firstChild.textContent = now.label;
+      let before = null;
+      for(const ch of box.children){
+        if(ch === mk) continue;
+        let st = null;
+        if(ch.dataset && ch.dataset.tst !== undefined && ch.dataset.tst !== '') st = +ch.dataset.tst;
+        else if(ch.dataset && ch.dataset.dsfree) st = +ch.dataset.dsfree.split('|')[1];
+        if(st !== null && st > now.min){ before = ch; break; }
+      }
+      if(before){ if(mk.nextSibling !== before || mk.parentNode !== box) box.insertBefore(mk, before); }
+      else if(mk.parentNode !== box || mk.nextSibling) box.appendChild(mk);
+    });
     return true;
   }
   function attachDayScreen(overlay, ds){
@@ -11366,6 +11470,11 @@
     dsApplyTime(overlay);
     const _dsTimer = setInterval(()=>{ if(!dsApplyTime(overlay)) clearInterval(_dsTimer); }, 30000);
     attachDayOffHandlers(overlay, ds);
+    overlay.querySelectorAll('[data-shedit]').forEach(b=> b.onclick = ()=>{
+      const [d, key] = b.dataset.shedit.split('|');
+      const raw = ((state.hostessShifts||{})[d] || {})[key];
+      state.modal = {type:'quick-shift', shiftDate: d, shiftKey: key, rawEntry: raw}; render();
+    });
     overlay.querySelectorAll('[data-msedit]').forEach(b=> b.onclick = ()=>{ state.modal = {type:'quick-master-shift', shiftDate: b.dataset.msedit}; render(); });
     overlay.querySelectorAll('[data-dsoff]').forEach(b=> b.onclick = ()=>{ state.dsOffOpen = !state.dsOffOpen; render(); });
     const openEv = (id)=>{ const e = state.events.find(x=>x.id === id); if(!e) return; requireUnlock(()=>{ state.modal = {type:'event', event:{...e}, isNew:false, keepAll: state.activeSpaceId === 'all'}; render(); }); };
@@ -11406,7 +11515,7 @@
           </div>
           ${(()=>{ const cp = leadContactParts(lead); return `
           <div class="row2">
-            <div class="field"><label>Имя <span style="font-weight:400;color:var(--ink-soft);">— необязательно</span></label>
+            <div class="field"><label>Имя <span style="font-weight:400;color:var(--ink-soft);">— нужно хотя бы одно: имя, телефон или соцсеть</span></label>
               <input type="text" id="l-name" value="${escapeHtml(cp.name)}" placeholder="Как зовут"></div>
             <div class="field"><label>Телефон <span style="font-weight:400;color:var(--ink-soft);">— необязательно</span></label>
               <input type="tel" id="l-phone" value="${escapeHtml(cp.phone)}" placeholder="+7 999 123-45-67"></div>
@@ -11819,7 +11928,7 @@
       }
       const crmChatUrl = lc.res.url || '';
       if(!dateVal) markInvalid('l-date');
-      if(!lc0.phone && !lc0.socialRaw){ markInvalid('l-phone'); markInvalid('l-social'); }
+      if(!lc0.name && !lc0.phone && !lc0.socialRaw){ markInvalid('l-name'); markInvalid('l-phone'); markInvalid('l-social'); }
       if(!sourceVal) markInvalid('l-source');
       if(!kindVal) markInvalid('l-kind');
       if(!productVal) markInvalid('l-product');
@@ -11847,7 +11956,7 @@
       if(leadEventMissing) markInvalid('l-event-search');
       // заказ не выбран — не блокируем, а создаём его автоматически после сохранения заявки и просим дозаполнить
       const leadOrderMissing = false;
-      if(!dateVal || (!lc0.phone && !lc0.socialRaw) || !sourceVal || !kindVal || !productVal || revenueRaw==='' || !commentVal || saleDateMissing || leadEventMissing || leadOrderMissing){
+      if(!dateVal || (!lc0.name && !lc0.phone && !lc0.socialRaw) || !sourceVal || !kindVal || !productVal || revenueRaw==='' || !commentVal || saleDateMissing || leadEventMissing || leadOrderMissing){
         showGapWarningBanner(leadEventMissing ? 'Заявка отмечена как «Продано» — выберите мероприятие, которое из неё создано.' : leadOrderMissing ? 'Заявка отмечена как «Продано» — выберите заказ, который из неё создан.' : saleDateMissing ? 'Заявка отмечена как «Продано» — укажите дату продажи.' : 'Заполните все поля перед сохранением заявки — включая номер/ник гостя и комментарий.');
         if(firstInvalid && firstInvalid.scrollIntoView) firstInvalid.scrollIntoView({block:'center', behavior:'smooth'});
         return;
@@ -16286,9 +16395,9 @@
       let eventMissing = false, guestMissing = false;
       let linkedGuestIdForCheck = '';
       if(manualMode){
-        if(!manualLabelVal){ eventMissing = true; markInvalid('r-manual-label'); }
+        // подпись не обязательна: после возврата запись клиента удаляется в приложении и YCLIENTS
       } else if(typeVal === 'event'){
-        if(!linkedEventIdForCheck){ eventMissing = true; markInvalid('r-event-search'); }
+        // привязка к мероприятию не обязательна (запись клиента после возврата удаляется)
         linkedGuestIdForCheck = refundGuestSelect.value || '';
         if(linkedEventIdForCheck && !linkedGuestIdForCheck){ guestMissing = true; markInvalid('r-guest'); }
       }
@@ -16818,6 +16927,8 @@
       overlay.innerHTML = renderQuickReportModal(state.modal.event);
     } else if(state.modal.type === 'quick-shift'){
       overlay.innerHTML = renderQuickShiftModal(state.modal.shiftDate, state.modal.shiftKey, state.modal.rawEntry);
+    } else if(state.modal.type === 'close-month'){
+      overlay.innerHTML = renderCloseMonthModal(state.modal.ym);
     } else if(state.modal.type === 'quick-master-shift'){
       overlay.innerHTML = renderQuickMasterShiftModal(state.modal.shiftDate);
     } else if(state.modal.type === 'quick-manager-shift'){
@@ -16939,6 +17050,7 @@
     else if(state.modal.type === 'quick-shift'){ attachQuickShiftModalEvents(overlay); }
     else if(state.modal.type === 'quick-manager-shift'){ attachQuickManagerShiftModalEvents(overlay); }
     else if(state.modal.type === 'quick-master-shift'){ attachQuickMasterShiftModalEvents(overlay); }
+    else if(state.modal.type === 'close-month'){ attachCloseMonthModalEvents(overlay); }
     else if(state.modal.type === 'quick-add-slot'){ attachQuickAddSlotModalEvents(overlay); }
     else if(state.modal.type === 'export'){ attachExportModalEvents(overlay); }
     else if(state.modal.type === 'event-catalog'){ attachEventCatalogModalEvents(overlay); }
@@ -17175,8 +17287,10 @@
     const errorEl = overlay.querySelector('#role-code-error');
     const submit = ()=>{
       const val = input.value.trim();
+      { const _left = loginLockLeft(); if(_left > 0){ errorEl.textContent = loginLockMsg(_left); errorEl.style.display = 'block'; input.value = ''; return; } }
       const matchedRole = CODE_LOGIN_ROLES.find(r => val && val === state.roleCodes[r]);
       if(matchedRole){
+        recordLogin(true, matchedRole, '', 'общий пароль должности'); loginNoteOk();
         state.currentRole = matchedRole;
         state.unlocked = true;
         state.unlockedAdmin = ['assistant','admin','owner'].includes(matchedRole);
@@ -17193,6 +17307,7 @@
       }
       const matchedMasterName = val ? Object.keys(state.masterPersonalPasswords).find(name => state.masterPersonalPasswords[name] && state.masterPersonalPasswords[name] === val) : null;
       if(matchedMasterName){
+        recordLogin(true, 'master', matchedMasterName, 'личный пароль'); loginNoteOk();
         state.currentRole = 'master';
         state.unlocked = true;
         state.unlockedAdmin = false;
@@ -17209,6 +17324,7 @@
       }
       const matchedHostessName = val ? Object.keys(state.hostessPersonalPasswords).find(name => state.hostessPersonalPasswords[name] && state.hostessPersonalPasswords[name] === val) : null;
       if(matchedHostessName){
+        recordLogin(true, 'hostess', matchedHostessName, 'личный пароль'); loginNoteOk();
         state.currentRole = 'hostess';
         state.unlocked = true;
         state.unlockedAdmin = false;
@@ -17225,6 +17341,7 @@
       }
       const matchedManagerName = val ? Object.keys(state.managerPersonalPasswords).find(name => state.managerPersonalPasswords[name] && state.managerPersonalPasswords[name] === val) : null;
       if(matchedManagerName){
+        recordLogin(true, 'manager', matchedManagerName, 'личный пароль'); loginNoteOk();
         state.currentRole = 'manager';
         state.unlocked = true;
         state.unlockedAdmin = false;
@@ -17239,7 +17356,8 @@
         if(action) action(); else render();
         return;
       }
-      errorEl.textContent = 'Неверный пароль, попробуйте ещё раз';
+      recordLogin(false, '', '', 'неверный пароль'); loginNoteFail();
+      { const _l2 = loginLockLeft(); errorEl.textContent = _l2 > 0 ? loginLockMsg(_l2) : 'Неверный пароль, попробуйте ещё раз'; }
       errorEl.style.display = 'block';
       input.style.borderColor = 'var(--danger)';
     };
@@ -17247,6 +17365,162 @@
     input.onkeydown = (e)=>{ if(e.key==='Enter') submit(); };
   }
 
+  // ----- закрытие месяца: проверки перед закрытием -----
+  function computeMonthCloseChecks(ym){
+    const today = todayStr();
+    const evs = state.events.filter(e=> e.date && e.date.startsWith(ym) && e.status !== 'cancelled');
+    const past = evs.filter(e=> e.date <= today);
+    const ev = e=> ({ label: `${formatDateText(e.date)} ${e.time||''} · ${e.title||'без названия'}`, eid: e.id });
+    const checks = [];
+    const [y, mo] = ym.split('-').map(Number);
+    const monthEnd = fmtDate(new Date(y, mo, 0));
+    checks.push({ title: 'Месяц закончился', items: today <= monthEnd ? [{ label: 'Месяц ещё не закончился — после закрытия внести в него правки будет нельзя' }] : [] });
+    const noRev = past.filter(e=> e.status === 'confirmed' && !(Number(eventRevenueForecast(e)) > 0));
+    checks.push({ title: 'Прошедшие мероприятия без выручки', items: noRev.map(ev) });
+    const noHost = past.filter(e=> !(e.host||'').trim() && !hostOptionalFor(e.status, e.product));
+    checks.push({ title: 'Прошедшие мероприятия без ведущего', items: noHost.map(ev) });
+    const withRem = past.filter(e=> e.status === 'confirmed' && eventRemainderTotal(e) > 0);
+    checks.push({ title: 'Остался неоплаченный остаток по прошедшим мероприятиям', items: withRem.map(e=> ({...ev(e), label: ev(e).label + ' · ' + formatMoney(eventRemainderTotal(e))})) });
+    const refs = (state.refunds||[]).filter(r=> (r.requestDate||'').startsWith(ym) && r.status !== 'refunded');
+    checks.push({ title: 'Возвраты, которые ещё не выплачены', items: refs.map(r=>({ label: `${formatDateText(r.requestDate)} · ${formatMoney(r.amount||0)}${r.fullName ? ' · ' + r.fullName : ''}` })) });
+    const gaps = [];
+    if(ym >= FULLDAY_FROM.slice(0,7)){
+      const dim = new Date(y, mo, 0).getDate();
+      for(let d=1; d<=dim; d++){ const ds = ym + '-' + pad(d); if(ds <= today && hostessCoverageGap(ds)) gaps.push({ label: formatDateText(ds) + ' · админов: ' + hostessCoverageCount(ds) + ' из 2' }); }
+    }
+    checks.push({ title: 'Дни, где в графике админов меньше двух человек', items: gaps });
+
+    // --- деньги ---
+    const noPay = past.filter(e=> e.status !== 'marketing' && e.product !== 'Аренда' && !/аренд/i.test(e.title||'') && (e.host||'').trim() && !(eventTotalMasterPay(e) > 0));
+    checks.push({ title: 'Ведущий указан, а оплата мастеру 0 ₽', items: noPay.map(ev) });
+    const incIds = new Set((state.incomes||[]).map(i=>i.id));
+    const certsM = (state.certificates||[]).filter(c=> c.saleDate && c.saleDate.startsWith(ym) && c.purpose !== 'marketing' && c.status !== 'refunded');
+    const certNoPay = certsM.filter(c=> !c.incomeId || !incIds.has(c.incomeId));
+    checks.push({ title: 'Сертификаты проданы, а записи об оплате в Книге нет', items: certNoPay.map(c=>({ label: `№${c.number||'—'} · ${formatDateText(c.saleDate)} · ${formatMoney(c.amount||0)}` })) });
+    const certUsedNoLink = (state.certificates||[]).filter(c=> c.status === 'used' && c.useDate && c.useDate.startsWith(ym) && !c.eventId && !(c.redemptions && c.redemptions.length));
+    checks.push({ title: 'Сертификаты использованы, но не привязаны к мероприятию или продаже', items: certUsedNoLink.map(c=>({ label: `№${c.number||'—'} · ${formatDateText(c.useDate)} · ${formatMoney(c.amount||0)}` })) });
+    const evIds = new Set(state.events.map(e=>e.id));
+    const incM = (state.incomes||[]).filter(i=> i.date && i.date.startsWith(ym));
+    const incNoAcc = incM.filter(i=> !(i.account||'').trim());
+    checks.push({ title: 'Оплаты без указанного счёта', items: incNoAcc.map(i=>({ label: `${formatDateText(i.date)} · ${formatMoney(i.amount||0)} · ${i.product||i.comment||''}` })) });
+    const incOrph = incM.filter(i=> i.eventId && !evIds.has(i.eventId));
+    checks.push({ title: 'Оплаты привязаны к мероприятию, которого уже нет', items: incOrph.map(i=>({ label: `${formatDateText(i.date)} · ${formatMoney(i.amount||0)} · ${i.comment||''}` })) });
+    const expM = (state.expenses||[]).filter(x=> x.date && x.date.startsWith(ym));
+    const expReal = expM.filter(x=> !x.safeTransfer);
+    const expBad = expReal.filter(x=> !(Number(x.amount) > 0) || !(x.category||'').trim() || !(x.source||'').trim());
+    const expItems = expBad.map(x=>({ label: `${formatDateText(x.date)} · ${formatMoney(x.amount||0)} · ${x.category||'без категории'}${x.source ? '' : ' · без источника'}` }));
+    if(expReal.length === 0 && ym <= todayStr().slice(0,7) && today > monthEnd) expItems.unshift({ label: 'За месяц нет ни одного расхода — проверьте, что их внесли' });
+    checks.push({ title: 'Расходы: пусто или записи без суммы, категории, источника', items: expItems });
+
+    // --- люди ---
+    const shiftItems = [];
+    if(ym >= FULLDAY_FROM.slice(0,7)){
+      const dim2 = new Date(y, mo, 0).getDate();
+      let seniorH1 = false, seniorH2 = false;
+      for(let d=1; d<=dim2; d++){
+        const ds = ym + '-' + pad(d); const day = (state.hostessShifts||{})[ds] || {};
+        SHIFT_DEFS_FULL.forEach(def=>{
+          const en = normalizeShiftEntry(day[def.key], def);
+          if(!en || !en.name || !en.name.trim()) return;
+          if(def.senior){ if(d<=15) seniorH1 = true; else seniorH2 = true; }
+          if(timeToMinutes(en.end) <= timeToMinutes(en.start)) shiftItems.push({ label: `${formatDateText(ds)} · ${en.name}: время смены ${en.start}–${en.end} указано неверно` });
+        });
+      }
+      if(today > monthEnd){
+        if(!seniorH1) shiftItems.push({ label: 'Нет смен старшего админа в 1–15 числах — оклад за половину не начислится' });
+        if(!seniorH2) shiftItems.push({ label: 'Нет смен старшего админа в 16–конце месяца — оклад за половину не начислится' });
+      }
+    }
+    checks.push({ title: 'График админов: время смен и оклад старшего', items: shiftItems });
+
+    // --- данные ---
+    const seen = {}; const dups = [];
+    evs.forEach(e=>{ const k = [e.date, e.time||'', (e.title||'').trim().toLowerCase(), e.space||e.spaceId||''].join('|'); if(seen[k]){ dups.push(e); } else seen[k] = e; });
+    checks.push({ title: 'Возможные дубли мероприятий (одна дата, время, название, зал)', items: dups.map(ev) });
+    const openLeads = (state.leads||[]).filter(l=> l.requestDate && l.requestDate.startsWith(ym) && ['new','needs','brief','kp'].includes(leadStatus(l)));
+    checks.push({ title: 'Заявки месяца без итога (не «продано» и не «потеряно»)', items: today > monthEnd ? openLeads.map(l=>({ label: `${formatDateText(l.requestDate)} · ${l.name||l.contact||'без имени'} · ${leadStatusLabel(leadStatus(l))}` })) : [] });
+    return checks;
+  }
+  function buildMonthCloseReportHtml(ym, checks){
+    const [y, mo] = ym.split('-').map(Number);
+    let snap = null, pay = {masters:[], hostess:[]};
+    try{ snap = computeNetProfitSnapshot(ym); }catch(e){}
+    try{ pay = computeStaffPayBreakdownForMonth(ym); }catch(e){}
+    const esc = escapeHtml;
+    const incM = (state.incomes||[]).filter(i=> i.date && i.date.startsWith(ym));
+    const byAcc = {}; incM.forEach(i=>{ const a = (i.account||'без счёта'); byAcc[a] = (byAcc[a]||0) + (Number(i.amount)||0); });
+    const expM = (state.expenses||[]).filter(x=> x.date && x.date.startsWith(ym) && !x.safeTransfer);
+    const byCat = {}; expM.forEach(x=>{ const c = x.category||'без категории'; byCat[c] = (byCat[c]||0) + (Number(x.amount)||0); });
+    const refs = (state.refunds||[]).filter(r=> (r.requestDate||'').startsWith(ym));
+    const row = (a,b)=> `<tr><td>${esc(String(a))}</td><td style="text-align:right;">${esc(String(b))}</td></tr>`;
+    const tbl = (rows)=> `<table>${rows.join('') || row('—','')}</table>`;
+    const notes = checks.filter(c=>c.items.length).map(c=> `<p><b>${esc(c.title)} (${c.items.length}):</b><br>${c.items.slice(0,40).map(i=>esc(i.label)).join('<br>')}</p>`).join('');
+    const revRows = snap ? [row('Мероприятия', formatMoney(snap.npEventsRevenue)), row('Продажи изделий', formatMoney(snap.npItemSalesRevenue)), row('Сертификаты', formatMoney(snap.npCertSalesRevenue)), row('Заказы', formatMoney(snap.npOrdersRevenue)), row('<b>Всего</b>'.replace(/<[^>]+>/g,''), formatMoney(snap.npTotalRevenue))] : [];
+    return `<!doctype html><html lang="ru"><head><meta charset="utf-8"><title>Отчёт за ${esc(MONTHS[mo-1]||'')} ${y}</title>
+      <style>body{font-family:Arial,sans-serif;max-width:760px;margin:24px auto;padding:0 16px;color:#222}h1{font-size:22px}h2{font-size:16px;margin-top:22px;border-bottom:1px solid #ddd;padding-bottom:4px}table{width:100%;border-collapse:collapse;font-size:14px}td{padding:4px 6px;border-bottom:1px solid #eee}p{font-size:13px;line-height:1.5}</style></head><body>
+      <h1>Закрытие месяца · ${esc(MONTHS[mo-1]||'')} ${y}</h1>
+      <div style="font-size:13px;color:#666;">Закрыто: ${esc(new Date().toLocaleString('ru-RU'))} · роль: ${esc(ROLE_LABELS[state.currentRole]||state.currentRole||'')}</div>
+      <h2>Выручка (по данным приложения)</h2>${tbl(revRows)}
+      <h2>Поступления в Книгу по счетам</h2>${tbl(Object.entries(byAcc).map(([k,v])=>row(k, formatMoney(v))))}
+      <h2>Расходы по категориям</h2>${tbl(Object.entries(byCat).sort((a,b)=>b[1]-a[1]).map(([k,v])=>row(k, formatMoney(v))))}
+      <h2>Зарплаты: мастера (начислено)</h2>${tbl(pay.masters.map(x=>row(x.name, formatMoney(x.amount))))}
+      <h2>Зарплаты: администраторы (начислено)</h2>${tbl(pay.hostess.map(x=>row(x.name, formatMoney(x.amount))))}
+      <h2>Возвраты</h2>${tbl([row('Заявок на возврат', refs.length), row('На сумму', formatMoney(refs.reduce((s,r)=>s+(Number(r.amount)||0),0)))])}
+      <h2>Замечания на момент закрытия</h2>${notes || '<p>Замечаний нет.</p>'}
+      </body></html>`;
+  }
+  function renderCloseMonthModal(ym){
+    const checks = computeMonthCloseChecks(ym);
+    const total = checks.reduce((s,c)=> s + c.items.length, 0);
+    const [y, mo] = ym.split('-').map(Number);
+    return `
+      <div class="modal" style="max-width:560px;">
+        <div class="modal-head"><h3>Закрытие месяца · ${escapeHtml(MONTHS[mo-1] || '')} ${y}</h3><button class="modal-close">×</button></div>
+        <div class="modal-body">
+          <div style="font-size:12.5px;color:var(--ink-soft);margin-top:-6px;">Перед закрытием проверила месяц. После закрытия данные за него нельзя править (открыть обратно может только руководитель).</div>
+          ${checks.map(c=> c.items.length === 0
+            ? `<div style="padding:6px 0;font-size:13px;color:var(--status-green);">✅ ${escapeHtml(c.title)}</div>`
+            : `<details style="padding:6px 0;" ${c.items.length <= 3 ? 'open' : ''}><summary style="cursor:pointer;font-size:13px;color:var(--danger);font-weight:600;">⚠ ${escapeHtml(c.title)}: ${c.items.length}</summary>
+                <div style="margin:4px 0 0 18px;font-size:12.5px;">${c.items.slice(0, 15).map(i=> i.eid ? `<div><a href="#" class="sal-evt-open" data-eid="${escapeHtml(i.eid)}" style="color:inherit;text-decoration:underline dotted;">${escapeHtml(i.label)}</a></div>` : `<div>${escapeHtml(i.label)}</div>`).join('')}${c.items.length > 15 ? `<div style="color:var(--ink-soft);">…и ещё ${c.items.length - 15}</div>` : ''}</div></details>`).join('')}
+          <label style="display:flex;gap:8px;align-items:center;margin-top:12px;font-size:13px;"><input type="checkbox" id="cm-dl" checked> Скачать отчёт за месяц и копию всех данных на момент закрытия</label>
+          <div style="margin-top:10px;font-size:13px;font-weight:600;">${total ? `Замечаний: ${total}. Можно исправить и вернуться, или закрыть как есть.` : 'Замечаний нет — месяц можно закрывать.'}</div>
+          <div class="modal-actions"><span></span><div style="display:flex;gap:8px;">
+            <button class="btn btn-ghost" id="cm-cancel">Отмена</button>
+            <button class="btn ${total ? 'btn-danger' : 'btn-primary'}" id="cm-confirm" style="${total ? '' : ''}">${total ? 'Всё равно закрыть' : '🔒 Закрыть месяц'}</button>
+          </div></div>
+        </div>
+      </div>`;
+  }
+  function attachCloseMonthModalEvents(overlay){
+    const ym = state.modal.ym;
+    const back = ()=>{ overlay.remove(); state.modal = null; render(); };
+    overlay.querySelector('#cm-cancel').onclick = back;
+    overlay.querySelector('#cm-confirm').onclick = async ()=>{
+      if(state.currentRole !== 'owner'){ back(); return; }
+      const checksNow = computeMonthCloseChecks(ym);
+      const n = checksNow.reduce((s,c)=> s + c.items.length, 0);
+      const wantDl = !!(overlay.querySelector('#cm-dl') && overlay.querySelector('#cm-dl').checked);
+      try{ if(wantDl){ downloadFile('otchet-' + ym + '.html', buildMonthCloseReportHtml(ym, checksNow), 'text/html;charset=utf-8'); setTimeout(()=>{ try{ downloadFile('kopiya-dannyh-pri-zakrytii-' + ym + '.json', buildJsonExport(), 'application/json'); }catch(e){} }, 700); } }catch(e){}
+      if(!state.closedMonths) state.closedMonths = [];
+      if(!state.closedMonths.includes(ym)) state.closedMonths.push(ym);
+      await saveClosedMonths();
+      recordAction('Месяц закрыт для редактирования', ym + (n ? ' (с замечаниями: ' + n + ')' : ' (без замечаний)'));
+      back();
+    };
+  }
+  function renderLoginLogHtml(){
+    const all = (state.loginLog || []).slice().reverse();
+    const failsRecent = all.filter(x=> !x.ok && (Date.now() - new Date(x.ts).getTime()) < 24*3600*1000).length;
+    const rows = all.slice(0, 60).map(x=>{
+      const d = new Date(x.ts);
+      const dl = isNaN(d.getTime()) ? x.ts : d.toLocaleString('ru-RU', {day:'2-digit', month:'2-digit', hour:'2-digit', minute:'2-digit'});
+      const who = x.ok ? ((x.name ? x.name + ' · ' : '') + (ROLE_LABELS[x.role] || x.role)) : 'неудачная попытка';
+      return `<div class="stat-row" style="align-items:flex-start;${x.ok ? '' : 'color:var(--danger);'}"><div style="width:110px;flex-shrink:0;font-family:var(--font-mono);font-size:11.5px;">${escapeHtml(dl)}</div><div style="flex:1;font-size:12.5px;">${x.ok ? '✅' : '⚠'} ${escapeHtml(who)} <span style="color:var(--ink-soft);font-size:11px;">· ${escapeHtml(x.how || '')} · ${escapeHtml(x.device || '')}</span></div></div>`;
+    }).join('');
+    return `<details style="margin-bottom:14px;" ${failsRecent ? 'open' : ''}><summary style="cursor:pointer;font-size:13px;font-weight:600;">🔐 Журнал входов${failsRecent ? ` <span style="color:var(--danger);">· неудачных попыток за сутки: ${failsRecent}</span>` : ''}</summary>
+      <div style="font-size:12px;color:var(--ink-soft);margin:6px 0;">Кто и когда входил, с какого устройства. Введённые пароли не записываются. После 5 неверных попыток подряд вход на этом устройстве блокируется на 5 минут.</div>
+      ${rows || '<div style="color:var(--ink-soft);font-size:13px;">Пока пусто.</div>'}</details>`;
+  }
   function renderCodeModal(){
     return `
       <div class="modal" style="max-width:360px;">
@@ -17282,9 +17556,11 @@
     const submit = ()=>{
       const val = input.value.trim();
       let ok = false;
+      { const _left = loginLockLeft(); if(_left > 0){ errorEl.textContent = loginLockMsg(_left); errorEl.style.display = 'block'; input.value = ''; return; } }
       if(val && val === state.roleCodes.owner){
         state.unlockedOwner = true;
         ok = true;
+        recordLogin(true, 'owner', '', 'код руководителя'); loginNoteOk();
       }
       if(ok){
         const action = state.pendingAction;
@@ -17293,7 +17569,8 @@
         overlay.remove();
         if(action) action(); else render();
       } else {
-        errorEl.textContent = 'Неверный код, попробуйте ещё раз';
+        recordLogin(false, '', '', 'неверный код руководителя'); loginNoteFail();
+        { const _l2 = loginLockLeft(); errorEl.textContent = _l2 > 0 ? loginLockMsg(_l2) : 'Неверный код, попробуйте ещё раз'; }
         errorEl.style.display = 'block';
         input.style.borderColor = 'var(--danger)';
       }
@@ -17318,7 +17595,7 @@
           ${editableRoles.map(r=>`
             <div class="field">
               <label>${ROLE_LABELS[r]}</label>
-              <input type="text" class="role-code-input" data-role="${r}" placeholder="${escapeHtml(state.roleCodes[r])}" value="${escapeHtml(state.roleCodes[r])}">
+              <input type="password" autocomplete="new-password" class="role-code-input" data-role="${r}" placeholder="${escapeHtml(state.roleCodes[r])}" value="${escapeHtml(state.roleCodes[r])}">
             </div>
           `).join('')}
           ${isOwnerRole ? `
@@ -17328,38 +17605,7 @@
             </div>
           ` : ''}
           ${state.unlockedAdmin ? `
-            <div style="border-top:1px solid var(--line);margin-top:8px;padding-top:14px;">
-              <div style="font-size:13px;font-weight:600;margin-bottom:4px;">Пароли мастеров</div>
-              <div style="font-size:12px;color:var(--ink-soft);margin-bottom:10px;">У «Мастера» больше нет общего пароля — вход только по личному, отдельно для каждого. Личный пароль открывает только собственную зарплату, остальные разделы недоступны. Оставьте поле пустым, если этот мастер пока не заходит в приложение сам.</div>
-              ${state.hostsList.map(h=>`
-                <div class="field">
-                  <label>${escapeHtml(h)}</label>
-                  <input type="text" class="master-password-input" data-master="${escapeHtml(h)}" placeholder="без личного пароля" value="${escapeHtml(state.masterPersonalPasswords[h]||'')}">
-                </div>
-              `).join('')}
-            </div>
-            <div style="border-top:1px solid var(--line);margin-top:8px;padding-top:14px;">
-              <div style="font-size:13px;font-weight:600;margin-bottom:4px;">Пароли администраторов</div>
-              <div style="font-size:12px;color:var(--ink-soft);margin-bottom:10px;">Личный пароль даёт полный доступ к мероприятиям (как у обычной роли «Администратор»), плюс собственную зарплату — без доступа к чужой.</div>
-              ${(()=>{
-                return getAllAdminNames().map(h=>`
-                  <div class="field">
-                    <label>${escapeHtml(h)}</label>
-                    <input type="text" class="hostess-password-input" data-hostess="${escapeHtml(h)}" placeholder="без личного пароля" value="${escapeHtml(state.hostessPersonalPasswords[h]||'')}">
-                  </div>
-                `).join('');
-              })()}
-            </div>
-            <div style="border-top:1px solid var(--line);margin-top:8px;padding-top:14px;">
-              <div style="font-size:13px;font-weight:600;margin-bottom:4px;">Пароли менеджеров</div>
-              <div style="font-size:12px;color:var(--ink-soft);margin-bottom:10px;">Личный пароль даёт полный доступ роли «Менеджер», как и общий пароль — но в шапке будет видно имя вошедшего. Оставьте поле пустым, если менеджер пока входит по общему паролю.</div>
-              ${MANAGER_LIST.map(m=>`
-                <div class="field">
-                  <label>${escapeHtml(m)}</label>
-                  <input type="text" class="manager-password-input" data-manager="${escapeHtml(m)}" placeholder="без личного пароля" value="${escapeHtml(state.managerPersonalPasswords[m]||'')}">
-                </div>
-              `).join('')}
-            </div>
+            ${renderStaffPasswordsBlock(isOwnerRole)}
           ` : ''}
           <div class="modal-actions">
             <button class="btn-danger" id="btn-relock">Выйти</button>
@@ -17370,9 +17616,110 @@
     `;
   }
 
+  // единый список сотрудников: имя + личный пароль (должность — мелким серым текстом), уволенные — отдельно
+  function staffRolesOf(name){
+    const k = (name||'').trim().toLowerCase();
+    const has = arr=> (arr||[]).some(n=>(n||'').trim().toLowerCase()===k);
+    return { master: has(state.hostsList), hostess: has(getAllAdminNames()), manager: has(MANAGER_LIST) };
+  }
+  function staffRolesLabel(r){
+    const l = []; if(r.master) l.push('мастер'); if(r.hostess) l.push('админ'); if(r.manager) l.push('менеджер');
+    return l.join(' · ');
+  }
+  function renderStaffPasswordsBlock(isOwnerRole){
+    const draft = (state._pwDraft && Date.now() - (state._pwDraftTs||0) < 120000) ? state._pwDraft : null;
+    const saved = n=> state.masterPersonalPasswords[n] || state.hostessPersonalPasswords[n] || state.managerPersonalPasswords[n] || '';
+    const people = staffEditPeople().slice().sort((a,b)=>a.localeCompare(b,'ru'));
+    const arch = (state.staffArchive||[]);
+    return `
+      <div style="border-top:1px solid var(--line);margin-top:8px;padding-top:14px;">
+        <div style="display:flex;align-items:center;gap:8px;margin-bottom:4px;"><div style="font-size:13px;font-weight:600;flex:1;">Сотрудники и личные пароли</div><button type="button" class="btn btn-ghost" id="btn-pw-toggle-all" style="padding:3px 10px;font-size:12px;">👁 Показать пароли</button></div>
+        <div style="font-size:12px;color:var(--ink-soft);margin-bottom:10px;">Один пароль на человека — по нему он входит в своё. Пароль не должен повторяться у разных людей. ${isOwnerRole ? 'Кнопка «Уволить» закрывает доступ и убирает человека из списков и будущих графиков; вся прошлая история (мероприятия, зарплата) остаётся.' : ''}</div>
+        ${people.map(n=>{
+          const dv = draft && draft[n] !== undefined ? draft[n] : saved(n);
+          return `<div class="field" style="margin-bottom:8px;">
+            <label>${escapeHtml(n)} <span style="font-weight:400;color:var(--ink-soft);font-size:11px;">${escapeHtml(staffRolesLabel(staffRolesOf(n)))}</span></label>
+            <div style="display:flex;gap:6px;"><input type="password" autocomplete="new-password" class="staff-pw-input" data-name="${escapeHtml(n)}" placeholder="без личного пароля" value="${escapeHtml(dv)}" style="flex:1;"><button type="button" class="btn btn-ghost staff-pw-gen" data-name="${escapeHtml(n)}" title="Сгенерировать новый пароль" style="padding:4px 8px;font-size:13px;">🎲</button>
+            ${isOwnerRole ? `<button type="button" class="btn btn-ghost staff-fire-btn" data-name="${escapeHtml(n)}" title="Сотрудник уволился" style="padding:4px 10px;font-size:12px;color:var(--danger);">Уволить</button>` : ''}</div>
+          </div>`;
+        }).join('')}
+        ${arch.length ? `<details style="margin-top:10px;"><summary style="cursor:pointer;font-size:12.5px;font-weight:600;">Уволенные (${arch.length})</summary>
+          <div style="margin-top:6px;">${arch.map((x,i)=>`<div style="display:flex;align-items:center;gap:8px;font-size:12.5px;padding:3px 0;"><span style="flex:1;">${escapeHtml(x.name)} <span style="color:var(--ink-soft);font-size:11px;">· ${escapeHtml(staffRolesLabel(x.roles||{}))} · с ${escapeHtml(formatDateText(x.date))}</span></span>${isOwnerRole ? `<button type="button" class="btn btn-ghost staff-restore-btn" data-idx="${i}" style="padding:2px 8px;font-size:12px;">Вернуть</button>` : ''}</div>`).join('')}</div></details>` : ''}
+      </div>`;
+  }
+  function staffAllRows(overrides){
+    return staffEditPeople().map(n=>({ orig:n, name:n, roles: (overrides && overrides[n.toLowerCase()]) || staffRolesOf(n) }));
+  }
+  async function fireStaffMember(name){
+    const k = name.trim().toLowerCase();
+    const roles = staffRolesOf(name);
+    await applyStaffEdit(staffAllRows({ [k]: {master:false, hostess:false, manager:false} }));
+    // будущие смены этого человека (с сегодняшнего дня) снимаем; прошлые не трогаем
+    const today = todayStr();
+    let ch = false;
+    Object.keys(state.hostessShifts||{}).forEach(d=>{
+      if(d < today) return;
+      const day = state.hostessShifts[d];
+      Object.keys(day||{}).forEach(key=>{
+        const en = day[key]; const n = typeof en === 'string' ? en : (en && en.name);
+        if(n && n.trim().toLowerCase() === k){ delete day[key]; ch = true; }
+      });
+      if(day && Object.keys(day).length === 0){ delete state.hostessShifts[d]; }
+    });
+    if(ch) await saveHostessShifts();
+    ch = false;
+    Object.keys(state.managerShifts||{}).forEach(d=>{ if(d >= today && (state.managerShifts[d]||'').trim().toLowerCase() === k){ delete state.managerShifts[d]; ch = true; } });
+    if(ch) await saveManagerShifts();
+    ch = false;
+    Object.keys(state.masterShifts||{}).forEach(d=>{
+      if(d < today || !Array.isArray(state.masterShifts[d])) return;
+      const nl = state.masterShifts[d].filter(n=>(n||'').trim().toLowerCase() !== k);
+      if(nl.length !== state.masterShifts[d].length){ if(nl.length) state.masterShifts[d] = nl; else delete state.masterShifts[d]; ch = true; }
+    });
+    if(ch) await saveMasterShifts();
+    state.staffArchive = [...(state.staffArchive||[]).filter(x=>(x.name||'').toLowerCase() !== k), { name, roles, date: today }];
+    await storageSetWithRetry('staff-archive', JSON.stringify(state.staffArchive));
+    recordAction('Сотрудник уволен', name);
+  }
+  async function restoreStaffMember(idx){
+    const x = (state.staffArchive||[])[idx]; if(!x) return;
+    const rows = staffAllRows();
+    rows.push({ orig:'', name:x.name, roles: x.roles && (x.roles.master||x.roles.hostess||x.roles.manager) ? x.roles : {master:true, hostess:false, manager:false} });
+    await applyStaffEdit(rows);
+    state.staffArchive = state.staffArchive.filter((_,i)=>i!==idx);
+    await storageSetWithRetry('staff-archive', JSON.stringify(state.staffArchive));
+    recordAction('Сотрудник возвращён', x.name);
+  }
+
   function attachCodeSettingsModalEvents(overlay){
+    const stashPw = ()=>{ state._pwDraft = {}; state._pwDraftTs = Date.now(); overlay.querySelectorAll('.staff-pw-input').forEach(i=>{ state._pwDraft[i.dataset.name] = i.value; }); };
+    overlay.querySelectorAll('.staff-fire-btn').forEach(btn=> btn.onclick = async ()=>{
+      const n = btn.dataset.name;
+      if(!window.confirm('Уволить «' + n + '»?\n\n• личный пароль перестанет работать\n• человек уберётся из списков и будущих графиков\n• вся прошлая история (мероприятия, зарплата, графики) сохранится\n\nЕго можно будет вернуть из списка «Уволенные».')) return;
+      stashPw(); if(state._pwDraft) delete state._pwDraft[n];
+      btn.disabled = true;
+      try{ await fireStaffMember(n); }catch(e){ console.error(e); showToast('Не удалось, попробуйте ещё раз', 'error'); btn.disabled = false; return; }
+      overlay.remove(); state.modal = {type:'code-settings'}; render();
+      showToast('«' + n + '» уволен(а): доступ закрыт');
+    });
+    overlay.querySelectorAll('.staff-restore-btn').forEach(btn=> btn.onclick = async ()=>{
+      stashPw(); btn.disabled = true;
+      try{ await restoreStaffMember(Number(btn.dataset.idx)); }catch(e){ console.error(e); showToast('Не удалось, попробуйте ещё раз', 'error'); btn.disabled = false; return; }
+      overlay.remove(); state.modal = {type:'code-settings'}; render();
+      showToast('Сотрудник возвращён — задайте ему пароль');
+    });
+    const pwToggle = overlay.querySelector('#btn-pw-toggle-all');
+    const setPwVisible = (v)=>{ overlay.querySelectorAll('.staff-pw-input, .role-code-input').forEach(i=>{ i.type = v ? 'text' : 'password'; }); if(pwToggle) pwToggle.textContent = v ? '🙈 Скрыть пароли' : '👁 Показать пароли'; };
+    if(pwToggle){ let vis = false; pwToggle.onclick = ()=>{ vis = !vis; setPwVisible(vis); }; }
+    overlay.querySelectorAll('.staff-pw-gen').forEach(btn=> btn.onclick = ()=>{
+      const used = new Set([...overlay.querySelectorAll('.staff-pw-input, .role-code-input')].map(i=>i.value.trim()).filter(Boolean));
+      let pw = ''; for(let k=0;k<50;k++){ const c = String(Math.floor(100000 + Math.random()*900000)); if(!used.has(c)){ pw = c; break; } }
+      const inp = overlay.querySelector('.staff-pw-input[data-name="' + btn.dataset.name.replace(/"/g,'\\"') + '"]');
+      if(inp){ inp.value = pw; inp.type = 'text'; inp.focus(); inp.select(); }
+      showToast('Новый пароль: ' + pw + ' — нажмите «Сохранить» внизу');
+    });
     const staffBtn = overlay.querySelector('#btn-staff-edit');
-    if(staffBtn) staffBtn.onclick = ()=>{ overlay.remove(); state.modal = {type:'staff-edit'}; render(); };
+    if(staffBtn) staffBtn.onclick = ()=>{ stashPw(); overlay.remove(); state.modal = {type:'staff-edit'}; render(); };
     overlay.querySelector('#btn-relock').onclick = ()=>{
       state.currentRole = null;
       state.unlocked = false;
@@ -17394,61 +17741,39 @@
       });
       if(anyEmpty) return;
 
-      const masterPwInputs = [...overlay.querySelectorAll('.master-password-input')];
-      const newMasterPasswords = {};
+      const pwInputs = [...overlay.querySelectorAll('.staff-pw-input')];
       const usedValues = new Set(Object.values(newCodes));
       let duplicateFound = '';
-      masterPwInputs.forEach(inp=>{
+      const pwByName = {};
+      pwInputs.forEach(inp=>{
         const val = inp.value.trim();
         if(!val) return;
-        if(usedValues.has(val)) duplicateFound = inp.dataset.master;
+        if(usedValues.has(val)) duplicateFound = inp.dataset.name;
         usedValues.add(val);
-        newMasterPasswords[inp.dataset.master] = val;
+        pwByName[inp.dataset.name] = val;
       });
       if(duplicateFound){
         showToast(`Пароль у «${duplicateFound}» совпадает с другим паролем — исправьте, чтобы вход не путался.`, 'error');
         return;
       }
-
-      const hostessPwInputs = [...overlay.querySelectorAll('.hostess-password-input')];
-      const newHostessPasswords = {};
-      hostessPwInputs.forEach(inp=>{
-        const val = inp.value.trim();
-        if(!val) return;
-        if(usedValues.has(val)) duplicateFound = inp.dataset.hostess;
-        usedValues.add(val);
-        newHostessPasswords[inp.dataset.hostess] = val;
+      const shown = new Set(pwInputs.map(i=>i.dataset.name.toLowerCase()));
+      const keepOld = obj=> Object.fromEntries(Object.entries(obj||{}).filter(([n])=>!shown.has(n.toLowerCase())));
+      const newMasterPasswords = keepOld(state.masterPersonalPasswords), newHostessPasswords = keepOld(state.hostessPersonalPasswords), newManagerPasswords = keepOld(state.managerPersonalPasswords);
+      Object.entries(pwByName).forEach(([n,v])=>{
+        const r = staffRolesOf(n);
+        if(r.master) newMasterPasswords[n] = v;
+        if(r.hostess) newHostessPasswords[n] = v;
+        if(r.manager) newManagerPasswords[n] = v;
       });
-      if(duplicateFound){
-        showToast(`Пароль у «${duplicateFound}» совпадает с другим паролем — исправьте, чтобы вход не путался.`, 'error');
-        return;
-      }
-
-      const managerPwInputs = [...overlay.querySelectorAll('.manager-password-input')];
-      const newManagerPasswords = {};
-      managerPwInputs.forEach(inp=>{
-        const val = inp.value.trim();
-        if(!val) return;
-        if(usedValues.has(val)) duplicateFound = inp.dataset.manager;
-        usedValues.add(val);
-        newManagerPasswords[inp.dataset.manager] = val;
-      });
-      if(duplicateFound){
-        showToast(`Пароль у «${duplicateFound}» совпадает с другим паролем — исправьте, чтобы вход не путался.`, 'error');
-        return;
-      }
 
       state.roleCodes = newCodes;
       await storageSetWithRetry('role-codes', JSON.stringify(state.roleCodes));
-      if(masterPwInputs.length > 0){
+      state._pwDraft = null;
+      if(pwInputs.length > 0){
         state.masterPersonalPasswords = newMasterPasswords;
         await storageSetWithRetry('master-passwords', JSON.stringify(state.masterPersonalPasswords));
-      }
-      if(hostessPwInputs.length > 0){
         state.hostessPersonalPasswords = newHostessPasswords;
         await storageSetWithRetry('hostess-passwords', JSON.stringify(state.hostessPersonalPasswords));
-      }
-      if(managerPwInputs.length > 0){
         state.managerPersonalPasswords = newManagerPasswords;
         await storageSetWithRetry('manager-passwords', JSON.stringify(state.managerPersonalPasswords));
       }
@@ -19481,6 +19806,7 @@
     const auditLogSorted = (state.auditLog || []).slice().reverse().slice(0, 300);
     const analyticsPanel_auditlog = `
       <div class="analytics-section">
+        ${state.currentRole === 'owner' ? renderLoginLogHtml() : ''}
         <div style="font-size:12px;color:var(--ink-soft);margin-bottom:10px;">Кто и что сохранял или удалял в приложении — последние ${auditLogSorted.length} записей, самые новые сверху.</div>
         ${auditLogSorted.length === 0 ? '<div style="color:var(--ink-soft);font-size:13px;">Пока пусто.</div>' : auditLogSorted.map(entry=>{
           const d = new Date(entry.ts);
@@ -20821,7 +21147,7 @@
         <div class="stat-row"><div class="stat-label" style="color:var(--ink-soft);">Сертификаты — погашено в этом месяце</div><div style="flex:1;font-family:var(--font-mono);font-size:13px;color:var(--ink-soft);">${formatMoney(certUsedThisMonth)} <span style="font-size:11px;">— не входит в итог, деньги уже учтены при продаже</span></div></div>
         <div class="stat-row"><div class="stat-label" style="color:var(--status-red);">Непогашено по проданным сертификатам</div><div style="flex:1;font-family:var(--font-mono);font-size:13px;color:var(--status-red);">${formatMoney(certOutstandingSale)} <span style="font-size:11px;">— ${certOutstandingSaleCount} шт., это студия ещё должна отдать услугами</span></div></div>
         ${certOutstandingMarketingCount>0?`<div class="stat-row"><div class="stat-label" style="color:var(--ink-soft);">Непогашено по маркетинговым сертификатам</div><div style="flex:1;font-family:var(--font-mono);font-size:13px;color:var(--ink-soft);">${formatMoney(certOutstandingMarketing)} <span style="font-size:11px;">— ${certOutstandingMarketingCount} шт., деньги не платились, но услуга ещё не оказана</span></div></div>`:''}
-        <div class="stat-row"><div class="stat-label" style="color:${refundsUnlinkedAmount>0?'var(--status-red)':'var(--ink-soft)'};">Возвраты за месяц</div><div style="flex:1;font-family:var(--font-mono);font-size:13px;color:${refundsUnlinkedAmount>0?'var(--status-red)':'var(--ink-soft)'};">−${formatMoney(refundsTotalAmount)} <span style="font-size:11px;">${refundsLinkedAmount>0?'(из них '+formatMoney(refundsLinkedAmount)+' уже учтено в выручке мероприятий)':''}${refundsCertLinkedAmount>0?' (из них '+formatMoney(refundsCertLinkedAmount)+' уже учтено в выручке сертификатов)':''}${refundsUnlinkedAmount>0?' ⚠ '+formatMoney(refundsUnlinkedAmount)+' — без привязки к мероприятию или сертификату, нигде больше не вычтено':''}</span></div></div>
+        <div class="stat-row"><div class="stat-label" style="color:var(--ink-soft);">Возвраты за месяц</div><div style="flex:1;font-family:var(--font-mono);font-size:13px;color:var(--ink-soft);">−${formatMoney(refundsTotalAmount)} <span style="font-size:11px;">${refundsLinkedAmount>0?'(из них '+formatMoney(refundsLinkedAmount)+' уже учтено в выручке мероприятий)':''}${refundsCertLinkedAmount>0?' (из них '+formatMoney(refundsCertLinkedAmount)+' уже учтено в выручке сертификатов)':''}${refundsUnlinkedAmount>0?' · из них '+formatMoney(refundsUnlinkedAmount)+' без привязки (запись клиента удалена после возврата, в выручке этой суммы уже нет)':''}</span></div></div>
       </div>
       ` : ''}
 
@@ -21447,6 +21773,7 @@
       const ym = state.analyticsCursor.getFullYear()+'-'+pad(state.analyticsCursor.getMonth()+1);
       if(!state.closedMonths) state.closedMonths = [];
       const idx = state.closedMonths.indexOf(ym);
+      if(idx < 0){ state.modal = {type:'close-month', ym}; render(); return; }
       if(idx>=0){
         state.closedMonths.splice(idx,1);
         await saveClosedMonths();
@@ -22493,10 +22820,15 @@
 
   // ===== «📚 Мероприятия и ведущие»: правка утверждённого справочника (руководитель, ассистент, менеджер) =====
   function eventCatalogRowHtml(c, isNew){
-    const all = officialHostsAll();
+    // варианты ведущих: официальные + все мастера из общего списка «Мастера» (кроме старых дублей вида «Ира Керамика»)
     const hosts = c.hosts || [];
-    const extras = hosts.filter(h=>!all.includes(h));
-    const names = [...all, ...extras];
+    const legacy = new Set(Object.values(HOST_PAY_ALIASES).flat().map(n=>n.toLowerCase()));
+    const byLc = new Map();
+    (state.hostsList||[]).forEach(h=>{ const n = String(h||'').trim(); const k = n.toLowerCase(); if(n && n!=='--' && !legacy.has(k) && !byLc.has(k)) byLc.set(k, n); });
+    officialHostsAll().forEach(h=>{ const k = h.toLowerCase(); if(!byLc.has(k)) byLc.set(k, h); });
+    hosts.forEach(h=>{ const k = String(h||'').trim().toLowerCase(); if(k && !byLc.has(k)) byLc.set(k, h); });
+    const names = Array.from(byLc.values()).sort((a,b)=>a.localeCompare(b,'ru'));
+    const hostsLc = new Set(hosts.map(h=>String(h||'').trim().toLowerCase()));
     return `
       <div class="ec-row" data-new="${isNew?'1':'0'}" data-title-lc="${escapeHtml((c.title||'').toLowerCase())}" style="border-bottom:1px solid var(--line);padding-bottom:10px;margin-bottom:10px;">
         <div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center;">
@@ -22510,7 +22842,7 @@
           <button type="button" class="ec-del" title="Убрать из списка" style="border:1px solid var(--line-strong);background:var(--white);border-radius:var(--radius);padding:4px 10px;color:var(--danger);cursor:pointer;">✕</button>
         </div>
         <div class="ec-hosts" style="display:flex;flex-wrap:wrap;gap:4px 12px;margin-top:8px;">
-          ${names.map(h=>`<label style="font-size:12.5px;display:inline-flex;gap:4px;align-items:center;cursor:pointer;"><input type="checkbox" class="ec-host" value="${escapeHtml(h)}" ${hosts.includes(h)?'checked':''}>${escapeHtml(h)}</label>`).join('')}
+          ${names.map(h=>`<label style="font-size:12.5px;display:inline-flex;gap:4px;align-items:center;cursor:pointer;"><input type="checkbox" class="ec-host" value="${escapeHtml(h)}" ${hostsLc.has(h.toLowerCase())?'checked':''}>${escapeHtml(h)}</label>`).join('')}
         </div>
         <input type="text" class="ec-extra" placeholder="Другой ведущий, если нет в списке (можно несколько через запятую)" style="margin-top:8px;font-size:12.5px;">
       </div>`;
@@ -22578,7 +22910,7 @@
         if(!title){ bad = 'Укажите название у новой строки или уберите её.'; return; }
         const k = title.toLowerCase();
         if(seen.has(k)){ bad = 'Название «'+title+'» повторяется.'; return; }
-        if(r.dataset.new==='1' && SERVICE_EVENT_TITLES.some(x=>x.toLowerCase()===k)){ bad = 'Название «'+title+'» уже есть среди служебных.'; return; }
+        if(r.dataset.new==='1' && SERVICE_EVENT_TITLES.some(x=>x.toLowerCase()===k) && !/^(марафон|роспись тыкв)/i.test(title)){ bad = 'Название «'+title+'» уже есть среди служебных.'; return; }
         if(duration < 15 || duration > 720){ bad = 'У «'+title+'» укажите продолжительность от 15 до 720 минут.'; return; }
         if(!hosts.length){ bad = 'У «'+title+'» отметьте хотя бы одного ведущего.'; return; }
         const cRaw = (r.querySelector('.ec-cost').value||'').trim(), pRaw = (r.querySelector('.ec-price').value||'').trim();
@@ -25765,7 +26097,7 @@
             <label>Название</label>
             <select id="f-title">
               <option value="" ${(!ev.title || ev.title==='Слот')?'selected':''}>— выберите вид —</option>
-              ${Array.from(new Set([...((ev.title && ev.title!=='Слот')?[ev.title]:[]), ...eventCatalogList().map(x=>x.title), ...SERVICE_EVENT_TITLES.filter(x=>x!=='Слот')])).sort((a,b)=>a.localeCompare(b,'ru')).map(t=>`<option value="${escapeHtml(t)}" ${ev.title===t?'selected':''}>${escapeHtml(t)}</option>`).join('')}
+              ${Array.from(new Map([...((ev.title && ev.title!=='Слот')?[ev.title]:[]), ...eventCatalogList().map(x=>x.title), ...SERVICE_EVENT_TITLES.filter(x=>x!=='Слот')].reverse().map(t=>[String(t).toLowerCase(), t])).values()).sort((a,b)=>a.localeCompare(b,'ru')).map(t=>`<option value="${escapeHtml(t)}" ${ev.title===t?'selected':''}>${escapeHtml(t)}</option>`).join('')}
             </select>
             <div style="font-size:11px;color:var(--ink-soft);margin-top:4px;">Названия берутся только из утверждённой таблицы «Мероприятия и ведущие». ${roleCanEditEventCatalog(state.currentRole) ? 'Нужного нет?' : 'Нужного нет — напишите Карине или менеджеру, список обновим.'}</div>
             ${roleCanEditEventCatalog(state.currentRole) ? `<button type="button" class="btn btn-ghost" id="f-add-to-catalog" style="margin-top:6px;font-size:12.5px;padding:4px 10px;">➕ Нет в списке? Добавить в справочник</button>` : ''}
