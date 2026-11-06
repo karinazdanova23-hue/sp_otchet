@@ -2291,6 +2291,9 @@
     hostessShifts: null,
     managerShifts: null,
     masterShifts: null,
+    closedDays: null,
+    dayCloseDate: null,
+    bankStatement: null,
     syncToken: null,
     syncWarningShown: false,
     hostsList: null,
@@ -3068,6 +3071,10 @@
       const mss = await window.storage.get('master-shifts', true);
       state.masterShifts = mss ? JSON.parse(mss.value) : {};
     }catch(e){ state.masterShifts = {}; }
+    try{
+      const cdr = await window.storage.get('closed-days', true);
+      state.closedDays = cdr ? JSON.parse(cdr.value) : {};
+    }catch(e){ state.closedDays = {}; }
 
     // отправные точки для безопасного слияния при сохранении (см. saveCollectionMerged/saveMapMerged/
     // saveSetMerged) — снимок того, что было получено с сервера при открытии, ДО каких-либо локальных
@@ -3112,6 +3119,7 @@
     state._salaryChecksBaseline = JSON.parse(JSON.stringify(state.salaryChecks));
     state._cashAdjustmentsBaseline = JSON.parse(JSON.stringify(state.cashAdjustments));
     state._incomesBaseline = JSON.parse(JSON.stringify(state.incomes));
+    setTimeout(()=>{ healMirrorDuplicates(); }, 3000);
     state._expensesBaseline = JSON.parse(JSON.stringify(state.expenses));
     state._leadsBaseline = JSON.parse(JSON.stringify(state.leads));
     state._kpOffersBaseline = JSON.parse(JSON.stringify(state.kpOffers || []));
@@ -3122,6 +3130,7 @@
     state._hostessShiftsBaseline = JSON.parse(JSON.stringify(state.hostessShifts));
     state._managerShiftsBaseline = JSON.parse(JSON.stringify(state.managerShifts));
     state._masterShiftsBaseline = JSON.parse(JSON.stringify(state.masterShifts||{}));
+    state._closedDaysBaseline = JSON.parse(JSON.stringify(state.closedDays||{}));
 
     // демо-данные для тестирования отключены — реальный запуск начинается с чистой базы
     // await seedDemo30Once();
@@ -3389,6 +3398,10 @@
       incomesChanged = true;
     }
 
+    // страховка от дублей: если по одному и тому же платежу в «Книге» оказалось несколько зеркальных записей — оставляем одну
+    { const seenPid = new Set(); const extra = new Set();
+      state.incomes.forEach(i=>{ if(i.eventId===event.id && i.autoFromPayment && i.paymentId){ if(seenPid.has(i.paymentId)) extra.add(i.id); else seenPid.add(i.paymentId); } });
+      if(extra.size){ state.incomes = state.incomes.filter(i=>!extra.has(i.id)); incomesChanged = true; } }
     realPayments.forEach(p=>{
       const date = (p.date && p.date.trim()) ? p.date.trim() : (p.ts ? fmtDate(new Date(p.ts)) : event.date);
       const existing = state.incomes.find(i=> i.eventId===event.id && i.autoFromPayment && i.paymentId===p.id);
@@ -3397,11 +3410,11 @@
       const guestForPayment = p.guestId && Array.isArray(event.guestList) ? event.guestList.find(g=>g.id===p.guestId) : null;
       const guestSuffix = guestForPayment && guestForPayment.name ? ` — ${guestForPayment.name}` : '';
       const entry = {
-        id: existing ? existing.id : uid(),
+        id: existing ? existing.id : ('pm_' + p.id), // id зависит от платежа: если два устройства создадут запись одновременно, они совпадут, а не задвоятся
         date, operation: 'Оплата', product: event.product || 'Мастер-класс',
         account: p.source || '', eventId: event.id, paymentId: p.id, amount: Number(p.amount)||0,
         masterName: '', itemSaleId: '', orderId: '',
-        comment: `Оплата по журналу: ${event.title || 'без названия'}${guestSuffix}`, autoFromPayment: true,
+        comment: `Оплата по журналу: ${event.title || 'без названия'}${guestSuffix}${p.note ? ' · ' + p.note : ''}`, autoFromPayment: true,
       };
       if(!existing || existing.date!==entry.date || existing.amount!==entry.amount || existing.account!==entry.account || existing.comment!==entry.comment){
         const idx = state.incomes.findIndex(i=>i.id===entry.id);
@@ -3696,6 +3709,7 @@
       hostessShifts: state.hostessShifts,
       managerShifts: state.managerShifts,
       masterShifts: state.masterShifts,
+      closedDays: state.closedDays,
       netProfitManual: state.netProfitManual,
       hostessBonuses: state.hostessBonuses,
       yearSummaryManual: state.yearSummaryManual,
@@ -3889,7 +3903,8 @@
     'journal-sync': ()=>saveJournalSync(),
     'hostess-shifts': ()=>saveHostessShifts(),
     'manager-shifts': ()=>saveManagerShifts(),
-    'master-shifts': ()=>saveMasterShifts()
+    'master-shifts': ()=>saveMasterShifts(),
+    'closed-days': ()=>saveClosedDays()
   };
   const failedSaveKeys = new Set();
   let saveRetryInFlight = false;
@@ -4159,11 +4174,28 @@
     if(!extra.length) return localEv;
     return Object.assign({}, localEv, { payments: (localEv.payments || []).concat(extra) });
   }
+  // защита от «старой формы»: пока у человека была открыта карточка/список, кто-то другой мог изменить мероприятие
+  // (например, мастер сдал отчёт). Поле, которое ЭТОТ человек не менял (равно исходному), берём с сервера,
+  // а не затираем своей устаревшей копией. Поля, которые он менял сам, остаются его. Оплаты — отдельно (mergeEventPayments)
+  function mergeEventItem(serverEv, localEv, baseEv){
+    let out = localEv;
+    if(baseEv && serverEv){
+      const j = v=> JSON.stringify(v === undefined ? null : v);
+      out = Object.assign({}, localEv);
+      new Set([...Object.keys(serverEv), ...Object.keys(localEv)]).forEach(k=>{
+        if(k === 'payments') return;
+        if(j(localEv[k]) === j(baseEv[k]) && j(serverEv[k]) !== j(baseEv[k])){
+          if(serverEv[k] === undefined) delete out[k]; else out[k] = serverEv[k];
+        }
+      });
+    }
+    return mergeEventPayments(serverEv, out, baseEv);
+  }
   async function saveEvents(){
     return await saveCollectionMerged('events', state.events, state._eventsBaseline, (finalArr)=>{
       state.events = finalArr;
       state._eventsBaseline = JSON.parse(JSON.stringify(finalArr));
-    }, undefined, mergeEventPayments);
+    }, undefined, mergeEventItem);
   }
   function normName(s){ return (s||'').trim().toLowerCase(); }
   // заказ на изготовление теперь может вести несколько мастеров одновременно с разной оплатой —
@@ -4764,7 +4796,7 @@
   // записывает/удаляет фото по решению пользователя; возвращает итоговое значение hasPhoto
   async function applyReportPhoto(eventId, pending, hadPhoto){
     if(pending === 'REMOVE'){ await deleteAttachedPhoto(reportPhotoKey(eventId)); return false; }
-    if(pending){ await saveAttachedPhoto(reportPhotoKey(eventId), pending); return true; }
+    if(pending){ const okPh = await saveAttachedPhoto(reportPhotoKey(eventId), pending); return okPh !== false; }
     return !!hadPhoto;
   }
 
@@ -4998,6 +5030,12 @@
     return await saveMapMerged('hostess-shifts', state.hostessShifts, state._hostessShiftsBaseline, (finalMap)=>{
       state.hostessShifts = finalMap;
       state._hostessShiftsBaseline = JSON.parse(JSON.stringify(finalMap));
+    });
+  }
+  async function saveClosedDays(){
+    return await saveMapMerged('closed-days', state.closedDays, state._closedDaysBaseline, (finalMap)=>{
+      state.closedDays = finalMap;
+      state._closedDaysBaseline = JSON.parse(JSON.stringify(finalMap));
     });
   }
   async function saveMasterShifts(){
@@ -8432,12 +8470,12 @@
       state.certView = 'certificates';
     }
     if(state.certView==='salary-adj' && !['owner','admin'].includes(state.currentRole)) state.certView='certificates';
-    if(state.certView==='manager-salary' && state.currentRole!=='owner') state.certView='certificates';
+    if(state.certView==='manager-salary' && !['owner','manager'].includes(state.currentRole)) state.certView='certificates';
     const subTabsHtml = `
       <div class="cert-subtabs">
         <button data-certview="certificates" class="${state.certView==='certificates'?'active':''}">Сертификаты</button>
         ${(!isHostessLimited && ['owner','admin'].includes(state.currentRole)) ? `<button data-certview="salary-adj" class="${state.certView==='salary-adj'?'active':''}">Корректировки ЗП</button>` : ''}
-        ${(!isHostessLimited && state.currentRole==='owner') ? `<button data-certview="manager-salary" class="${state.certView==='manager-salary'?'active':''}">ЗП менеджеров</button>` : ''}
+        ${(!isHostessLimited && ['owner','manager'].includes(state.currentRole)) ? `<button data-certview="manager-salary" class="${state.certView==='manager-salary'?'active':''}">${state.currentRole==='owner' ? 'ЗП менеджеров' : '💰 Моя ЗП'}</button>` : ''}
         ${!hideRefundsConversion ? `<button data-certview="refunds" class="${state.certView==='refunds'?'active':''}">Возвраты</button>` : ''}
         ${!hideRefundsConversion ? `<button data-certview="conversion" class="${state.certView==='conversion'?'active':''}">Конверсия</button>` : ''}
         <button data-certview="item-sales" class="${state.certView==='item-sales'?'active':''}">Изделия</button>
@@ -10486,9 +10524,17 @@
     const ym = y+'-'+pad(m+1);
     const label = MONTHS[m] + ' ' + y;
     const calc = computeManagerSalaryForMonth(ym);
-    if(!state.dc.loaded && !state.dc._loading){ state.dc._loading = true; dcLoad().then(()=>{ if(state.view==='certificates' && state.certView==='manager-salary') render(); }); }
+    const isOwnerSal = state.currentRole === 'owner';
+    // менеджеру — только его сумма: если владелица вписала сумму вручную (netProfitManual → managers), показываем её
+    let mySalTotal = calc.total, mySalEdited = false;
+    if(!isOwnerSal){
+      const mn = (state.loggedInManagerName||'').trim();
+      const row = computeManagersPayForMonth(ym).rows.find(r=> r.name.toLowerCase() === mn.toLowerCase());
+      if(row && row.edited){ mySalTotal = row.amount; mySalEdited = true; }
+    }
+    if(isOwnerSal && !state.dc.loaded && !state.dc._loading){ state.dc._loading = true; dcLoad().then(()=>{ if(state.view==='certificates' && state.certView==='manager-salary') render(); }); }
     let dedRows = [], dedSum = 0;
-    if(state.dc.from){ dedRows = dcCompute().sel.filter(r=>r.date.startsWith(ym)); dedSum = dedRows.reduce((t,r)=>t+r.amount,0); }
+    if(isOwnerSal && state.dc.from){ dedRows = dcCompute().sel.filter(r=>r.date.startsWith(ym)); dedSum = dedRows.reduce((t,r)=>t+r.amount,0); }
     const dedHtml = dedSum > 0 ? `
       <div class="analytics-summary" style="margin-bottom:20px;">
         <div class="summary-card"><div class="num" style="font-size:18px;">− ${formatMoney(dedSum)}</div><div class="label">ПРОЦЕНТЫ УВОЛЕННОЙ ЗА ПРОДАЖИ ДО ${escapeHtml(state.dc.from.split('-').reverse().join('.'))} (${dedRows.length} ШТ.)</div></div>
@@ -10503,10 +10549,10 @@
           <button class="nav-btn" id="ms-sal-next">›</button>
         </div>
       </div>
-      <div style="font-size:11.5px;color:var(--ink-soft);font-family:var(--font-mono);margin-bottom:16px;">Общая ЗП менеджеров за месяц — оклад + проценты от выручки студии. Не привязана к конкретному сотруднику.</div>
+      <div style="font-size:11.5px;color:var(--ink-soft);font-family:var(--font-mono);margin-bottom:16px;">${isOwnerSal ? 'Общая ЗП менеджеров за месяц — оклад + проценты от выручки студии. Не привязана к конкретному сотруднику.' : 'Ваша зарплата за месяц: оклад + проценты от продаж студии. Сумма предварительная, считается по текущим данным.'}</div>
 
       <div class="analytics-summary" style="margin-bottom:20px;">
-        <div class="summary-card"><div class="num" style="font-size:22px;">${formatMoney(calc.total)}</div><div class="label">ИТОГО ЗА МЕСЯЦ — НА ОДНОГО МЕНЕДЖЕРА</div></div>
+        <div class="summary-card"><div class="num" style="font-size:22px;">${formatMoney(isOwnerSal ? calc.total : mySalTotal)}</div><div class="label">${isOwnerSal ? 'ИТОГО ЗА МЕСЯЦ — НА ОДНОГО МЕНЕДЖЕРА' : 'МОЯ ЗП ЗА МЕСЯЦ' + (mySalEdited ? ' (СУММА УТОЧНЕНА РУКОВОДИТЕЛЕМ)' : '')}</div></div>
       </div>
       ${dedHtml}
 
@@ -10539,10 +10585,10 @@
         <div class="stat-row" style="border-top:1px solid var(--line-strong);margin-top:4px;padding-top:10px;">
           <div class="stat-label" style="width:200px;font-weight:600;">Итого</div>
           <div style="flex:1;"></div>
-          <div style="width:110px;text-align:right;font-family:var(--font-mono);font-size:15px;font-weight:700;">${formatMoney(calc.total)}</div>
+          <div style="width:110px;text-align:right;font-family:var(--font-mono);font-size:15px;font-weight:700;">${formatMoney(isOwnerSal ? calc.total : mySalTotal)}</div>
         </div>
       </div>
-      ${dcBoxHtml()}
+      ${isOwnerSal ? dcBoxHtml() : ''}
     `;
   }
 
@@ -11080,10 +11126,15 @@
     if(!sp.length) return '';
     return sp.slice().sort((a,b)=> (SPACE_CAPACITY[a.id]||99) - (SPACE_CAPACITY[b.id]||99))[0].id;
   }
+  // карточка мероприятия открыта с экрана дня — после закрытия/сохранения/удаления возвращаемся в этот же день
+  function modalAfterEventClose(){
+    const m = state.modal;
+    return (m && m.type === 'event' && m.returnDay && dayScreenOn()) ? {type:'day', date:m.returnDay} : null;
+  }
   function ftCreateEvent(o){
     const keepAll = state.activeSpaceId === 'all';
     requireUnlock(()=>{
-      state.modal = {type:'event', isNew:true, keepAll, event:{
+      state.modal = {type:'event', isNew:true, keepAll, returnDay:o.returnDay||null, event:{
         id: uid(), spaceId: o.spaceId, date: o.date, time: ftMinToTime(o.start), duration: o.duration, guests: o.guests || null, itemsCount:null, itemsCountAuto:true, masterPay:null, masterPayAuto:true, additionalHosts:[], guestName:'', price:null, agreedPrice:null, materialsItems:[], pickupItems:[], payments:[], title:'', product:'', host:'', dishes:'', dishesWasher:'', rentalBefore:o.before||0, rentalAfter:o.after||0, payerType:'individual', companyName:'', documents:{contract:false,paymentOrder:false,act:false}, masterReport:null, notes:'', availableMasters:[]
       }};
       render();
@@ -11477,14 +11528,14 @@
     });
     overlay.querySelectorAll('[data-msedit]').forEach(b=> b.onclick = ()=>{ state.modal = {type:'quick-master-shift', shiftDate: b.dataset.msedit}; render(); });
     overlay.querySelectorAll('[data-dsoff]').forEach(b=> b.onclick = ()=>{ state.dsOffOpen = !state.dsOffOpen; render(); });
-    const openEv = (id)=>{ const e = state.events.find(x=>x.id === id); if(!e) return; requireUnlock(()=>{ state.modal = {type:'event', event:{...e}, isNew:false, keepAll: state.activeSpaceId === 'all'}; render(); }); };
+    const openEv = (id)=>{ const e = state.events.find(x=>x.id === id); if(!e) return; requireUnlock(()=>{ state.modal = {type:'event', event:{...e}, isNew:false, keepAll: state.activeSpaceId === 'all', returnDay: ds}; render(); }); };
     overlay.querySelectorAll('.ds-evt, .ds-off, .ds-card').forEach(b=> b.onclick = (ev)=>{ if(ev.target.closest('button') && !b.classList.contains('ds-off')) return; openEv(b.dataset.eid); });
     overlay.querySelectorAll('[data-dslayout]').forEach(b=> b.onclick = ()=>{ setDayLayout(b.dataset.dslayout); render(); });
     overlay.querySelectorAll('.quick-host-btn').forEach(btn=> btn.onclick = (ev)=>{ ev.stopPropagation(); const e = state.events.find(x=>x.id===btn.dataset.eid); if(!e) return; overlay.remove(); state.modal = {type:'quick-host', event:{...e}, keepAll: state.activeSpaceId==='all'}; render(); });
     overlay.querySelectorAll('.quick-report-btn').forEach(btn=> btn.onclick = (ev)=>{ ev.stopPropagation(); const e = state.events.find(x=>x.id===btn.dataset.eid); if(!e || !isMyEventForReport(e)) return; overlay.remove(); state.modal = {type:'quick-report', event:{...e}, keepAll: state.activeSpaceId==='all'}; render(); });
     overlay.querySelectorAll('[data-dsfree]').forEach(b=> b.onclick = ()=>{
       if(state.currentRole === 'hostess') return;
-      const [sp, st, len] = b.dataset.dsfree.split('|'); ftCreateEvent({ date: ds, spaceId: sp, start: +st, duration: Math.min(+len, 120) });
+      const [sp, st, len] = b.dataset.dsfree.split('|'); ftCreateEvent({ date: ds, spaceId: sp, start: +st, duration: Math.min(+len, 120), returnDay: ds });
     });
     overlay.querySelectorAll('[data-dsnav]').forEach(b=> b.onclick = ()=>{
       const v = b.dataset.dsnav; const nd = v === 'today' ? todayStr() : loadAddDays(ds, +v);
@@ -11493,7 +11544,7 @@
     overlay.querySelectorAll('[data-dsm]').forEach(b=> b.onclick = ()=>{ state.dsMobSpace = b.dataset.dsm; render(); });
     const f = overlay.querySelector('#ds-find'); if(f) f.onclick = ()=> openFreeTimePopup();
     const l = overlay.querySelector('#ds-list'); if(l) l.onclick = ()=>{ setDayMode('list'); render(); };
-    const a = overlay.querySelector('#ds-add'); if(a) a.onclick = ()=> ftCreateEvent({ date: ds, spaceId: state.activeSpaceId === 'all' ? ftSpaces()[0].id : state.activeSpaceId, start: 10*60, duration: 60 });
+    const a = overlay.querySelector('#ds-add'); if(a) a.onclick = ()=> ftCreateEvent({ date: ds, spaceId: state.activeSpaceId === 'all' ? ftSpaces()[0].id : state.activeSpaceId, start: 10*60, duration: 60, returnDay: ds });
   }
 
   function crmLeadState(lead){
@@ -13080,6 +13131,7 @@
 
     // --- проверки ---
     const evPaidMap = new Map(); state.incomes.forEach(i=>{ if(i.eventId) evPaidMap.set(i.eventId, (evPaidMap.get(i.eventId)||0) + num(i.amount)); });
+    const mirrorDups = findMirrorDuplicateIncomes();
     const overpaid = evMonth.map(e=>{ const base = Math.max(num(e.price), num(e.agreedPrice)); const paid = evPaidMap.get(e.id)||0; return { e, base, paid }; }).filter(x=> x.paid > x.base + 1);
     const certIds = new Set(state.incomes.map(i=>i.id));
     const brokenCert = state.certificates.filter(c=> c.saleDate && c.saleDate.startsWith(ym) && c.incomeId && !certIds.has(c.incomeId));
@@ -13128,7 +13180,8 @@
       <div style="font-weight:700;margin:16px 0 6px;">3. Проверки доходов</div>
       ${block('Записи без привязки — идут в выручку как «Прочее»', otherInc.length, otherInc.map(i=> incLine(i, flagBtn(i))).join('') + (otherInc.length ? '<div style="font-size:11.5px;color:var(--ink-soft);">Если это оплата мероприятия, заказа или сертификата, которая уже есть в другом месте — нажмите «не считать в выручку» (кнопка только у владельца).</div>' : ''), true)}
       ${block('Отмечены «не в выручке»', notRevenue.length, notRevenue.map(i=> incLine(i, unflagBtn(i))).join(''), false)}
-      ${block('Оплачено больше, чем стоит в мероприятии', overpaid.length, overpaid.map(x=> `<div class="stat-row" style="font-size:12.5px;cursor:pointer;" data-rc-ev="${escapeHtml(x.e.id)}"><div style="flex:1;">${escapeHtml(formatDateText(x.e.date))} · ${escapeHtml(x.e.title||'')}${x.e.guestName?' · '+escapeHtml(x.e.guestName):''}</div><div style="font-family:var(--font-mono);">в карточке ${escapeHtml(mon(x.base))} → оплачено ${escapeHtml(mon(x.paid))}</div></div>`).join('') + (overpaid.length ? '<div style="font-size:11.5px;color:var(--ink-soft);">С октября 2026 выручка берётся по большему из двух чисел. Проверьте карточку: либо обновить сумму, либо оплата привязана не к тому мероприятию.</div>' : ''), true)}
+      ${block('Оплачено больше, чем стоит в мероприятии', overpaid.length, overpaid.map(x=> `<div class="stat-row" style="font-size:12.5px;cursor:pointer;" data-rc-ev="${escapeHtml(x.e.id)}"><div style="flex:1;">${escapeHtml(formatDateText(x.e.date))} · ${escapeHtml(x.e.title||'')}${x.e.guestName?' · '+escapeHtml(x.e.guestName):''}</div><div style="font-family:var(--font-mono);">в карточке ${escapeHtml(mon(x.base))} → оплачено ${escapeHtml(mon(x.paid))}</div></div><div style="margin:0 0 8px 16px;border-left:2px solid var(--line);padding-left:8px;">${state.incomes.filter(i=>i.eventId===x.e.id).sort((a,b)=>(a.date||'').localeCompare(b.date||'')).map(i=> incLine(i, i.autoFromPayment ? '<span style="font-size:11px;color:var(--ink-soft);">из журнала</span>' : '<span style="font-size:11px;color:var(--danger);">вручную</span>')).join('')}</div>`).join('') + (overpaid.length ? '<div style="font-size:11.5px;color:var(--ink-soft);">С октября 2026 выручка берётся по большему из двух чисел. Проверьте карточку: либо обновить сумму, либо оплата привязана не к тому мероприятию.</div>' : ''), true)}
+      ${block('Один платёж из журнала записан в Книгу дважды', mirrorDups.length, mirrorDups.map(i=> incLine(i, '')).join('') + (mirrorDups.length ? `<div style="font-size:11.5px;color:var(--ink-soft);margin:6px 0;">Это лишние копии одной и той же оплаты (у них одинаковый номер платежа). Сумма за все месяцы: ${escapeHtml(mon(mirrorDups.reduce((t,i)=>t+num(i.amount),0)))}. Выручка мероприятий из-за них завышена.</div>` + (owner ? '<button class="btn btn-primary" id="rc-dedupe" style="margin-top:4px;">Удалить лишние копии</button>' : '') : ''), true)}
       ${block('Возможные дубли в доходах (одна дата, сумма, счёт, комментарий)', dups.length, dups.map(g=> g.map(i=> incLine(i, flagBtn(i))).join('') + '<hr style="border:none;border-top:1px dashed var(--line);margin:6px 0;">').join(''), false)}
       ${block('Сертификаты с битой ссылкой на запись в Книге', brokenCert.length, brokenCert.map(c=> `<div class="stat-row" style="font-size:12.5px;"><div style="flex:1;">№${escapeHtml(String(c.number))} · ${escapeHtml(c.ownerName||'')} · ${escapeHtml(formatDateText(c.saleDate))} · ${escapeHtml(mon(num(c.amount)))}</div></div>`).join(''), false)}
       ${block('Оплаты у отменённых мероприятий', cancelledPaid.length, cancelledPaid.map(e=> `<div class="stat-row" style="font-size:12.5px;cursor:pointer;" data-rc-ev="${escapeHtml(e.id)}"><div style="flex:1;">${escapeHtml(formatDateText(e.date))} · ${escapeHtml(e.title||'')}</div><div style="font-family:var(--font-mono);">${escapeHtml(mon(evPaidMap.get(e.id)))}</div></div>`).join(''), false)}
@@ -13146,6 +13199,242 @@
       ${block('Возможные дубли в расходах (одна дата, сумма, категория, комментарий)', expDups.length, expDups.map(g=> g.map(e=> `<div class="stat-row" style="font-size:12.5px;"><div style="flex:1;">${escapeHtml(formatDateText(e.date))} · ${escapeHtml(mon(num(e.amount)))} · ${escapeHtml(e.category||'')} · ${escapeHtml(e.source||'')}<div style="color:var(--ink-soft);font-size:11.5px;">${escapeHtml((e.comment||'').slice(0,90))}</div></div></div>`).join('') + '<hr style="border:none;border-top:1px dashed var(--line);margin:6px 0;">').join(''), false)}
     `;
   }
+  // ==================== «Закрытие дня» ====================
+  const DAYCLOSE_FROM = '2026-11-01';
+  const DAYCLOSE_ROLES = ['owner','admin','assistant','manager'];
+  function dayHasActivity(ds){
+    return (state.events||[]).some(e=> e.date === ds && e.status !== 'cancelled') || (state.incomes||[]).some(i=> i.date === ds && !i.safeTransfer);
+  }
+  function unclosedDays(){
+    const out = []; const today = todayStr();
+    const actDates = new Set();
+    (state.events||[]).forEach(e=>{ if(e.date && e.status !== 'cancelled') actDates.add(e.date); });
+    (state.incomes||[]).forEach(i=>{ if(i.date && !i.safeTransfer) actDates.add(i.date); });
+    for(let d = parseDate(DAYCLOSE_FROM); fmtDate(d) < today; d.setDate(d.getDate()+1)){
+      const ds = fmtDate(d);
+      if(actDates.has(ds) && !(state.closedDays||{})[ds]) out.push(ds);
+    }
+    return out;
+  }
+  function daySignature(ds){
+    const inc = (state.incomes||[]).filter(i=> i.date === ds && !i.safeTransfer);
+    const byAcc = {}; inc.forEach(i=>{ const a = i.account||'—'; byAcc[a] = (byAcc[a]||0) + (Number(i.amount)||0); });
+    const evs = (state.events||[]).filter(e=> e.date === ds && e.status !== 'cancelled');
+    return JSON.stringify([ Object.keys(byAcc).sort().map(k=>[k, Math.round(byAcc[k]*100)]), inc.length, evs.length, evs.reduce((t,e)=> t + (Number(e.price)||0) + (Number(e.agreedPrice)||0), 0) ]);
+  }
+
+  // --- чтение выписки Точки (xlsx) без внешних библиотек ---
+  async function dcInflateRaw(u8){
+    const ds = new DecompressionStream('deflate-raw'); const w = ds.writable.getWriter(); w.write(u8); w.close();
+    return new Uint8Array(await new Response(ds.readable).arrayBuffer());
+  }
+  async function dcUnzip(buf){
+    const u8 = new Uint8Array(buf), dv = new DataView(buf); const td = new TextDecoder();
+    let eocd = -1; for(let i = u8.length - 22; i >= Math.max(0, u8.length - 66000); i--){ if(dv.getUint32(i, true) === 0x06054b50){ eocd = i; break; } }
+    if(eocd < 0) throw new Error('Это не файл xlsx');
+    const n = dv.getUint16(eocd+10, true); let p = dv.getUint32(eocd+16, true); const out = {};
+    for(let k=0; k<n; k++){
+      if(dv.getUint32(p, true) !== 0x02014b50) break;
+      const method = dv.getUint16(p+10, true), csize = dv.getUint32(p+20, true), nl = dv.getUint16(p+28, true), el = dv.getUint16(p+30, true), cl = dv.getUint16(p+32, true), lho = dv.getUint32(p+42, true);
+      const name = td.decode(u8.subarray(p+46, p+46+nl)); p += 46 + nl + el + cl;
+      if(!/^xl\/(sharedStrings\.xml|worksheets\/sheet\d+\.xml|workbook\.xml|_rels\/workbook\.xml\.rels)$/.test(name)) continue;
+      const lnl = dv.getUint16(lho+26, true), lel = dv.getUint16(lho+28, true); const st = lho + 30 + lnl + lel;
+      const raw = u8.subarray(st, st + csize);
+      out[name] = method === 0 ? raw : await dcInflateRaw(raw);
+    }
+    return out;
+  }
+  async function dcReadXlsxRows(buf){
+    const files = await dcUnzip(buf); const td = new TextDecoder(); const dp = new DOMParser();
+    const xml = name=> files[name] ? dp.parseFromString(td.decode(files[name]), 'application/xml') : null;
+    let sheetName = 'xl/worksheets/sheet1.xml';
+    try{
+      const wb = xml('xl/workbook.xml'), rels = xml('xl/_rels/workbook.xml.rels');
+      const rid = wb.getElementsByTagName('sheet')[0].getAttribute('r:id');
+      const rel = [...rels.getElementsByTagName('Relationship')].find(r=> r.getAttribute('Id') === rid);
+      if(rel){ const t = rel.getAttribute('Target').replace(/^\//, ''); sheetName = t.startsWith('xl/') ? t : 'xl/' + t; }
+    }catch(e){}
+    if(!files[sheetName]){ const any = Object.keys(files).find(k=>/worksheets\/sheet\d+\.xml$/.test(k)); if(any) sheetName = any; }
+    const ss = []; const sx = xml('xl/sharedStrings.xml');
+    if(sx) [...sx.getElementsByTagName('si')].forEach(si=> ss.push([...si.getElementsByTagName('t')].map(t=>t.textContent).join('')));
+    const sh = xml(sheetName); if(!sh) throw new Error('В файле нет листа с операциями');
+    const colIdx = ref=>{ const m = /^([A-Z]+)/.exec(ref || ''); if(!m) return 0; let n = 0; for(const ch of m[1]) n = n*26 + (ch.charCodeAt(0) - 64); return n - 1; };
+    const rows = [];
+    [...sh.getElementsByTagName('row')].forEach(r=>{
+      const arr = [];
+      [...r.getElementsByTagName('c')].forEach(c=>{
+        const t = c.getAttribute('t'); const v = c.getElementsByTagName('v')[0]; let val = null;
+        if(t === 's' && v) val = ss[parseInt(v.textContent)];
+        else if(t === 'inlineStr') val = [...c.getElementsByTagName('t')].map(x=>x.textContent).join('');
+        else if(t === 'str' || t === 'e') val = v ? v.textContent : null;
+        else if(v) val = Number(v.textContent);
+        arr[colIdx(c.getAttribute('r'))] = val;
+      });
+      rows.push(arr);
+    });
+    return rows;
+  }
+  function dcToIsoDate(v){
+    if(typeof v === 'number' && v > 20000){ return new Date(Math.round((v - 25569) * 86400000)).toISOString().slice(0,10); }
+    const m = /^(\d{2})\.(\d{2})\.(\d{4})/.exec(String(v||'')); if(m) return m[3] + '-' + m[2] + '-' + m[1];
+    const m2 = /^(\d{4}-\d{2}-\d{2})/.exec(String(v||'')); return m2 ? m2[1] : '';
+  }
+  function dcParseStatement(rows){
+    const hi = rows.findIndex(r=> r && r.some(c=> String(c||'').trim() === 'Номер документа') && r.some(c=> String(c||'').trim() === 'Зачисление'));
+    if(hi < 0) throw new Error('Не нашла таблицу операций. Нужна выписка Точки в xlsx (лист «Операции»).');
+    const H = rows[hi].map(c=> String(c||'').trim());
+    const col = nm=> H.indexOf(nm);
+    const cDate = col('Дата операции') >= 0 ? col('Дата операции') : col('Дата документа'), cCp = col('Контрагент'), cDeb = col('Списание'), cCred = col('Зачисление'), cDesc = col('Назначение платежа');
+    const num = v=> { if(typeof v === 'number') return v; const n = parseFloat(String(v||'').replace(/\s/g,'').replace(',', '.')); return isNaN(n) ? 0 : n; };
+    const ops = [];
+    rows.slice(hi+1).forEach(r=>{
+      if(!r) return; const date = dcToIsoDate(r[cDate]); if(!date) return;
+      ops.push({ date, cp: String(r[cCp]||'').trim(), deb: num(r[cDeb]), cred: num(r[cCred]), desc: String(r[cDesc]||'').replace(/\s+/g,' ').trim() });
+    });
+    if(!ops.length) throw new Error('В выписке нет операций.');
+    const dates = ops.map(o=>o.date).sort();
+    return { ops, min: dates[0], max: dates[dates.length-1] };
+  }
+  function dcDayDiff(a, b){ return Math.abs(Math.round((parseDate(a) - parseDate(b)) / 86400000)); }
+  // сопоставление «поступление в банке» ↔ «запись Книги по Точке/ЮрСчёту» по сумме и близкой дате
+  function dcMatchBank(st){
+    const bank = st.ops.filter(o=> o.cred > 0 && !/Возврат средств/i.test(o.desc) && !/Реестр/i.test(o.desc));
+    const lo = fmtDate(new Date(parseDate(st.min).getTime() - 15*86400000)), hi = fmtDate(new Date(parseDate(st.max).getTime() + 15*86400000));
+    const book = (state.incomes||[]).filter(i=> ['Точка','ЮрСчет'].includes(i.account) && Number(i.amount) > 0 && i.date >= lo && i.date <= hi && !i.safeTransfer && !/^\s*(юклиент|юкл|yclients)/i.test(i.comment||'') && i.operation !== 'Перемещение');
+    const usedB = new Set(), matched = new Set();
+    [0,1,3,7,15].forEach(win=>{
+      book.slice().sort((a,b)=> a.date.localeCompare(b.date)).forEach(i=>{
+        if(matched.has(i.id)) return;
+        let best = null;
+        bank.forEach((o,k)=>{
+          if(usedB.has(k) || Math.abs(o.cred - Number(i.amount)) > 0.01) return;
+          const dd = dcDayDiff(o.date, i.date); if(dd <= win && (best === null || dd < best.dd)) best = { dd, k };
+        });
+        if(best){ usedB.add(best.k); matched.add(i.id); }
+      });
+    });
+    return { unmatchedBank: bank.filter((o,k)=> !usedB.has(k)), unmatchedBook: book.filter(i=> !matched.has(i.id) && i.date >= st.min && i.date <= st.max), yclientsPayouts: st.ops.filter(o=> o.cred > 0 && /Реестр/i.test(o.desc)) };
+  }
+  function computeDayCloseChecks(ds){
+    const today = todayStr(); const now = new Date(); const nowMin = now.getHours()*60 + now.getMinutes();
+    const evAll = (state.events||[]).filter(e=> e.date === ds && e.status !== 'cancelled');
+    const ended = e=> ds < today || (ds === today && timeToMinutes(e.time||'00:00') + (Number(e.duration)||60) <= nowMin);
+    const evL = e=> ({ label: `${e.time||''} · ${e.title||'без названия'}${e.guestName ? ' · ' + e.guestName : ''}`, eid: e.id });
+    const real = evAll.filter(e=> e.status !== 'marketing' && ended(e));
+    const checks = [];
+    checks.push({ title: 'Нет ни цены, ни оплат', items: real.filter(e=> eventTotalExpected(e) <= 0 && eventReceivedTotal(e) <= 0).map(evL) });
+    checks.push({ title: 'Не закрыт остаток к оплате', items: real.filter(e=> eventRemainderTotal(e) > 0).map(e=> ({...evL(e), label: evL(e).label + ' · осталось ' + formatMoney(eventRemainderTotal(e))})) });
+    checks.push({ title: 'Не указан ведущий', items: real.filter(e=> !(e.host||'').trim() && !hostOptionalFor(e.status, e.product)).map(evL) });
+    const paidMap = new Map(); (state.incomes||[]).forEach(i=>{ if(i.eventId) paidMap.set(i.eventId, (paidMap.get(i.eventId)||0) + (Number(i.amount)||0)); });
+    checks.push({ title: 'В Книге оплачено больше, чем стоит мероприятие (возможен дубль)', items: evAll.map(e=>({e, base: Math.max(Number(e.price)||0, Number(e.agreedPrice)||0), paid: paidMap.get(e.id)||0})).filter(x=> x.base > 0 && x.paid > x.base + 1).map(x=> ({ label: `${x.e.time||''} · ${x.e.title||''} · цена ${formatMoney(x.base)}, оплачено ${formatMoney(x.paid)}`, eid: x.e.id })) });
+    const incD = (state.incomes||[]).filter(i=> i.date === ds && !i.safeTransfer);
+    const incL = i=> ({ label: `${formatMoney(i.amount||0)} · ${i.account||'без счёта'} · ${i.product||''}${i.comment ? ' · ' + String(i.comment).replace(/\n/g,' ').slice(0,50) : ''}`, iid: i.id });
+    checks.push({ title: 'Оплаты без указанного счёта', items: incD.filter(i=> !(i.account||'').trim()).map(incL) });
+    const evIds = new Set((state.events||[]).map(e=>e.id));
+    checks.push({ title: 'Оплаты привязаны к мероприятию, которого нет', items: incD.filter(i=> i.eventId && !evIds.has(i.eventId)).map(incL) });
+    checks.push({ title: 'Один платёж записан в Книгу дважды', items: findMirrorDuplicateIncomes().filter(i=> i.date === ds).map(incL) });
+    checks.push({ title: 'Оплата внесена в Книгу вручную — перенесите в журнал мероприятия (кнопка «В журнал мероприятия» в записи)', items: incD.filter(i=> incomeBridgeable(i)).map(incL) });
+    checks.push({ title: 'Возвраты за день не выплачены', items: (state.refunds||[]).filter(r=> r.requestDate === ds && r.status !== 'refunded').map(r=>({ label: `${formatMoney(r.amount||0)}${r.fullName ? ' · ' + r.fullName : ''}`, rid: r.id })) });
+    const incIds = new Set((state.incomes||[]).map(i=>i.id));
+    checks.push({ title: 'Сертификаты проданы, а оплаты в Книге нет', items: (state.certificates||[]).filter(c=> c.saleDate === ds && c.purpose !== 'marketing' && c.status !== 'refunded' && (!c.incomeId || !incIds.has(c.incomeId))).map(c=>({ label: `№${c.number||'—'} · ${formatMoney(c.amount||0)}` })) });
+    checks.push({ title: 'Расходы без суммы, категории или источника', items: (state.expenses||[]).filter(x=> x.date === ds && !x.safeTransfer && (!(Number(x.amount) > 0) || !(x.category||'').trim() || !(x.source||'').trim())).map(x=>({ label: `${formatMoney(x.amount||0)} · ${x.category||'без категории'}${x.source ? '' : ' · без источника'}`, xid: x.id })) });
+    // выписка
+    const st = state.bankStatement; let bank = null;
+    if(st && ds >= st.min && ds <= st.max){
+      const m = dcMatchBank(st);
+      const lastReliable = fmtDate(new Date(parseDate(st.max).getTime() - 86400000));
+      bank = { m, reliable: ds <= lastReliable };
+      checks.push({ title: 'Банк: деньги поступили на Точку, а в Книге этой оплаты нет', items: m.unmatchedBank.filter(o=> o.date === ds).map(o=>({ label: `${formatMoney(o.cred)} · ${o.cp ? o.cp.slice(0,30) + ' · ' : ''}${/QR/i.test(o.desc) ? 'СБП по QR' : o.desc.slice(0,70)}` })) });
+      checks.push({ title: 'Банк: в Книге оплата по Точке, а в выписке такой суммы нет (проверьте счёт: может, наличные)', items: bank.reliable ? m.unmatchedBook.filter(i=> i.date === ds).map(incL) : [] });
+    }
+    return { checks, bank, incD, evAll };
+  }
+  function renderDayCloseView(){
+    const today = todayStr();
+    const ds = state.dayCloseDate || (state.dayCloseDate = today);
+    const { checks, bank, incD, evAll } = computeDayCloseChecks(ds);
+    const total = checks.reduce((t,c)=> t + c.items.length, 0);
+    const cd = (state.closedDays||{})[ds];
+    const changed = !!(cd && cd.sig && cd.sig !== daySignature(ds));
+    const accSum = {}; incD.forEach(i=>{ const a = i.account||'без счёта'; accSum[a] = (accSum[a]||0) + (Number(i.amount)||0); });
+    const unc = unclosedDays();
+    const st = state.bankStatement;
+    const shift = n=> fmtDate(new Date(parseDate(ds).getTime() + n*86400000));
+    const itemHtml = i=> i.eid ? `<div><a href="#" class="dc-open-ev" data-eid="${escapeHtml(i.eid)}" style="color:inherit;text-decoration:underline dotted;">${escapeHtml(i.label)}</a></div>`
+      : i.iid ? `<div><a href="#" class="dc-open-inc" data-iid="${escapeHtml(i.iid)}" style="color:inherit;text-decoration:underline dotted;">${escapeHtml(i.label)}</a></div>`
+      : i.xid ? `<div><a href="#" class="dc-open-exp" data-xid="${escapeHtml(i.xid)}" style="color:inherit;text-decoration:underline dotted;">${escapeHtml(i.label)}</a></div>`
+      : `<div>${escapeHtml(i.label)}</div>`;
+    return `
+      <div class="cal-nav" style="margin-bottom:12px;">
+        <div class="month-label" style="font-size:20px;">${escapeHtml(formatDateText(ds))}${ds === today ? ' · сегодня' : ''}</div>
+        <div class="cal-nav-btns">
+          <button class="today-btn" id="dc-today">сегодня</button>
+          <button class="nav-btn" id="dc-prev" data-d="${shift(-1)}">‹</button>
+          <button class="nav-btn" id="dc-next" data-d="${shift(1)}">›</button>
+        </div>
+      </div>
+      ${cd ? `<div class="analytics-section" style="border-left:4px solid ${changed ? 'var(--danger)' : 'var(--status-green)'};">
+        <div style="font-weight:700;">${changed ? '⚠ День был закрыт, но после этого данные изменились' : '✅ День закрыт'}</div>
+        <div style="font-size:12.5px;color:var(--ink-soft);">${escapeHtml(new Date(cd.ts).toLocaleString('ru-RU'))} · ${escapeHtml(cd.by||'')}${cd.n ? ' · замечаний при закрытии: ' + cd.n : ' · без замечаний'}${changed ? '. Проверьте список ниже и закройте день заново.' : ''}</div>
+      </div>` : ''}
+      <div class="analytics-section">
+        <div style="font-weight:700;margin-bottom:6px;">Итоги дня</div>
+        <div style="font-size:13px;">Мероприятий: <b>${evAll.length}</b> · записей в Книге: <b>${incD.length}</b>${Object.keys(accSum).length ? ' · ' + Object.keys(accSum).map(a=> escapeHtml(a) + ' <b>' + escapeHtml(formatMoney(accSum[a])) + '</b>').join(' · ') : ''}</div>
+      </div>
+      <div class="analytics-section">
+        <div style="font-weight:700;margin-bottom:6px;">Выписка Точки (по желанию)</div>
+        <div style="font-size:12.5px;color:var(--ink-soft);margin-bottom:8px;">Загрузите выписку из личного кабинета Точки в формате xlsx — приложение сверит поступления с Книгой за этот день. Файл нигде не сохраняется, при следующем входе его нужно загрузить снова.</div>
+        <input type="file" id="dc-file" accept=".xlsx" style="font-size:13px;">
+        <div id="dc-file-msg" style="font-size:12.5px;margin-top:6px;color:${st ? 'var(--status-green)' : 'var(--ink-soft)'};">${st ? 'Загружена выписка: ' + escapeHtml(formatDateText(st.min)) + ' — ' + escapeHtml(formatDateText(st.max)) + ' (' + st.ops.length + ' операций)' + (ds < st.min || ds > st.max ? '. Этот день вне периода выписки.' : (bank && !bank.reliable ? '. Последний день выписки сверить нельзя — банк мог провести платежи следующим днём.' : '')) : 'Выписка не загружена — сверка с банком пропущена.'}</div>
+      </div>
+      <div style="font-weight:700;margin:14px 0 6px;">Что не сходится</div>
+      ${checks.map(c=> c.items.length === 0
+        ? `<div style="padding:5px 0;font-size:13px;color:var(--status-green);">✅ ${escapeHtml(c.title)}</div>`
+        : `<details open style="padding:6px 0;"><summary style="cursor:pointer;font-size:13px;color:var(--danger);font-weight:600;">⚠ ${escapeHtml(c.title)}: ${c.items.length}</summary><div style="margin:4px 0 0 18px;font-size:12.5px;">${c.items.slice(0, 40).map(itemHtml).join('')}${c.items.length > 40 ? `<div style="color:var(--ink-soft);">…и ещё ${c.items.length - 40}</div>` : ''}</div></details>`).join('')}
+      <div style="display:flex;gap:10px;align-items:center;margin:16px 0;flex-wrap:wrap;">
+        <button class="btn ${total ? 'btn-ghost' : 'btn-primary'}" id="dc-close" style="${total ? 'border:1px solid var(--danger);color:var(--danger);' : ''}">${cd ? (changed ? '🔁 Закрыть заново' : '🔁 Обновить закрытие') : (total ? 'Закрыть день (замечаний: ' + total + ')' : '✅ Закрыть день')}</button>
+        ${cd ? '<button class="btn btn-ghost" id="dc-reopen">Открыть день заново</button>' : ''}
+        <span style="font-size:12px;color:var(--ink-soft);">Закрытие дня — отметка «проверено». Правки после неё не запрещены, но приложение покажет, что данные изменились.</span>
+      </div>
+      ${unc.length ? `<div class="analytics-section"><div style="font-weight:700;margin-bottom:6px;">Дни без закрытия (${unc.length})</div><div style="display:flex;flex-wrap:wrap;gap:6px;">${unc.slice(-20).map(d=> `<button class="btn btn-ghost dc-jump" data-d="${d}" style="padding:2px 10px;font-size:12.5px;">${escapeHtml(formatDateText(d).replace(/ 20\d\d$/, ''))}</button>`).join('')}</div></div>` : ''}
+    `;
+  }
+  function attachDayCloseEvents(){
+    const go = d=>{ state.dayCloseDate = d; render(); };
+    const tb = document.getElementById('dc-today'); if(tb) tb.onclick = ()=> go(todayStr());
+    ['dc-prev','dc-next'].forEach(id=>{ const b = document.getElementById(id); if(b) b.onclick = ()=> go(b.dataset.d); });
+    document.querySelectorAll('.dc-jump').forEach(b=> b.onclick = ()=> go(b.dataset.d));
+    document.querySelectorAll('.dc-open-ev').forEach(a=> a.onclick = e=>{ e.preventDefault(); const ev = state.events.find(x=>x.id===a.dataset.eid); if(ev){ state.modal = {type:'event', event:{...ev}, isNew:false, keepAll:true}; render(); } });
+    document.querySelectorAll('.dc-open-inc').forEach(a=> a.onclick = e=>{ e.preventDefault(); const i = state.incomes.find(x=>x.id===a.dataset.iid); if(i){ state.modal = {type:'income', isNew:false, income:{...i}}; render(); } });
+    document.querySelectorAll('.dc-open-exp').forEach(a=> a.onclick = e=>{ e.preventDefault(); const x = state.expenses.find(y=>y.id===a.dataset.xid); if(x){ state.modal = {type:'expense', isNew:false, expense:{...x}}; render(); } });
+    const fi = document.getElementById('dc-file');
+    if(fi) fi.onchange = async ()=>{
+      const f = fi.files && fi.files[0]; if(!f) return;
+      const msg = document.getElementById('dc-file-msg'); if(msg){ msg.style.color = 'var(--ink-soft)'; msg.textContent = 'Читаю выписку…'; }
+      try{
+        const rows = await dcReadXlsxRows(await f.arrayBuffer());
+        state.bankStatement = dcParseStatement(rows);
+        render();
+      }catch(e){ if(msg){ msg.style.color = 'var(--danger)'; msg.textContent = 'Не удалось прочитать файл: ' + (e && e.message ? e.message : e); } }
+    };
+    const ds = state.dayCloseDate || todayStr();
+    const cb = document.getElementById('dc-close');
+    if(cb) cb.onclick = async ()=>{
+      const total = computeDayCloseChecks(ds).checks.reduce((t,c)=> t + c.items.length, 0);
+      if(total && !confirm('Остались замечания: ' + total + '. Закрыть день всё равно?')) return;
+      if(!state.closedDays) state.closedDays = {};
+      state.closedDays[ds] = { ts: new Date().toISOString(), by: ROLE_LABELS[state.currentRole] || state.currentRole || '', n: total, sig: daySignature(ds) };
+      await saveClosedDays();
+      recordAction('День закрыт', ds + (total ? ' (замечаний: ' + total + ')' : ' (без замечаний)'));
+      render();
+    };
+    const rb = document.getElementById('dc-reopen');
+    if(rb) rb.onclick = async ()=>{
+      if(!confirm('Открыть день заново?')) return;
+      delete state.closedDays[ds]; await saveClosedDays(); recordAction('День открыт заново', ds); render();
+    };
+  }
+
   function attachReconcileEvents(){
     document.querySelectorAll('[data-rc-inc]').forEach(el=> el.onclick = ()=>{ const i = state.incomes.find(x=>x.id===el.dataset.rcInc); if(i){ state.modal = {type:'income', isNew:false, income:{...i}}; render(); } });
     document.querySelectorAll('[data-rc-ev]').forEach(el=> el.onclick = ()=>{ const e = state.events.find(x=>x.id===el.dataset.rcEv); if(e){ state.modal = {type:'event', event:{...e}, isNew:false, keepAll:true}; render(); } });
@@ -13157,6 +13446,16 @@
       try{ await saveIncomes(); }catch(e){ alert('Не удалось сохранить. Проверьте интернет и повторите.'); }
       render();
     };
+    const dd = document.getElementById('rc-dedupe');
+    if(dd) dd.onclick = async ()=>{
+      if(state.currentRole !== 'owner') return;
+      const dups = findMirrorDuplicateIncomes(); if(!dups.length) return;
+      if(!confirm('Удалить ' + dups.length + ' лишних копий оплат из Книги? Первая запись по каждому платежу останется.')) return;
+      const ids = new Set(dups.map(i=>i.id));
+      state.incomes = state.incomes.filter(i=>!ids.has(i.id));
+      try{ await saveIncomes(); recordAction('Удалены дубли оплат в Книге', dups.length + ' шт. на ' + dups.reduce((t,i)=>t+(Number(i.amount)||0),0) + ' ₽'); }catch(e){ alert('Не удалось сохранить. Проверьте интернет и повторите.'); }
+      render();
+    };
     document.querySelectorAll('[data-rc-flag]').forEach(el=> el.onclick = ()=> setFlag(el.dataset.rcFlag, true));
     document.querySelectorAll('[data-rc-unflag]').forEach(el=> el.onclick = ()=> setFlag(el.dataset.rcUnflag, false));
   }
@@ -13165,12 +13464,14 @@
     const hideTotals = bookTotalsHidden(state.currentRole);
     if(hideTotals && state.bookView === 'book-analytics') state.bookView = 'incomes';
     if(state.bookView === 'reconcile' && !['owner','admin','assistant'].includes(state.currentRole)) state.bookView = 'incomes';
+    if(state.bookView === 'dayclose' && !DAYCLOSE_ROLES.includes(state.currentRole)) state.bookView = 'incomes';
     const subTabsHtml = `
       <div class="cert-subtabs">
-        <button data-bookview="incomes" class="${state.bookView!=='expenses'&&state.bookView!=='book-analytics'&&state.bookView!=='reconcile'?'active':''}">Доходы</button>
+        <button data-bookview="incomes" class="${state.bookView!=='expenses'&&state.bookView!=='book-analytics'&&state.bookView!=='reconcile'&&state.bookView!=='dayclose'?'active':''}">Доходы</button>
         <button data-bookview="expenses" class="${state.bookView==='expenses'?'active':''}">Расходы</button>
         ${!hideTotals ? `<button data-bookview="book-analytics" class="${state.bookView==='book-analytics'?'active':''}">Аналитика</button>` : ''}
         ${['owner','admin','assistant'].includes(state.currentRole) ? `<button data-bookview="reconcile" class="${state.bookView==='reconcile'?'active':''}">🔎 Сверка</button>` : ''}
+        ${DAYCLOSE_ROLES.includes(state.currentRole) ? (()=>{ const n = unclosedDays().length; return `<button data-bookview="dayclose" class="${state.bookView==='dayclose'?'active':''}">✅ Закрытие дня${n ? ` <span style="background:var(--danger);color:#fff;border-radius:9px;padding:0 6px;font-size:11px;">${n}</span>` : ''}</button>`; })() : ''}
       </div>
     `;
     const mode = state.bookMode || 'month';
@@ -13198,6 +13499,9 @@
     }
     if(state.bookView === 'reconcile'){
       return subTabsHtml + navHtml + renderReconcileView();
+    }
+    if(state.bookView === 'dayclose'){
+      return subTabsHtml + renderDayCloseView();
     }
     if(state.bookView === 'book-analytics'){
       return subTabsHtml + navHtml + renderBookAnalyticsView(period);
@@ -14494,6 +14798,7 @@
       btn.onclick = ()=>{ state.bookView = btn.dataset.bookview; render(); };
     });
     if(state.bookView === 'reconcile') attachReconcileEvents();
+    if(state.bookView === 'dayclose') attachDayCloseEvents();
 
     const bookPrevBtn = document.getElementById('book-prev');
     if(bookPrevBtn) bookPrevBtn.onclick = ()=>{
@@ -14669,6 +14974,7 @@
           <div class="modal-actions">
             <div>${!isNew ? `<button class="btn-danger" id="btn-del-income">Удалить</button>` : '<span></span>'}</div>
             <div style="display:flex;gap:8px;">
+              ${(!isNew && incomeBridgeable(income)) ? '<button class="btn btn-ghost" id="btn-bridge-income" title="Добавит оплату в журнал платежей мероприятия, а ручную запись заменит автоматической">В журнал мероприятия</button>' : ''}
               <button class="btn btn-ghost" id="btn-cancel-income">Отмена</button>
               <button class="btn btn-primary" id="btn-save-income">Сохранить</button>
             </div>
@@ -14704,6 +15010,23 @@
     }
 
     attachMoneyCalc(overlay.querySelector('#i-amount'));
+    const bridgeBtn = overlay.querySelector('#btn-bridge-income');
+    if(bridgeBtn) bridgeBtn.onclick = async ()=>{
+      const inc = state.incomes.find(x=>x.id===state.modal.income.id);
+      if(!inc || !incomeBridgeable(inc)) return;
+      if(state.currentRole !== 'owner' && inc.date && state.closedMonths && state.closedMonths.includes(inc.date.slice(0,7))){ showGapWarningBanner('Месяц ' + inc.date.slice(0,7) + ' закрыт для редактирования. Обратитесь к руководителю.'); return; }
+      const ev = state.events.find(e=>e.id===inc.eventId);
+      const twin = (ev.payments||[]).find(x=> x.source === inc.account && Number(x.amount) === Number(inc.amount) && (x.date||'') === inc.date);
+      const msg = twin ? 'В журнале мероприятия уже есть такая же оплата. Удалить эту ручную запись из Книги (оплата останется в журнале)?'
+                       : 'Добавить эту оплату (' + formatMoney(inc.amount) + ', ' + inc.account + ') в журнал мероприятия «' + (ev.title||'') + '» и заменить запись в Книге автоматической? Сумма в Книге не изменится. Несохранённые правки в форме не учитываются.';
+      if(!confirm(msg)) return;
+      state.incomes = state.incomes.filter(x=>x.id !== inc.id);
+      try{
+        if(twin) await saveIncomes(); else await bridgeIncomeToEventJournal(inc);
+        recordAction('Оплата перенесена в журнал мероприятия');
+      }catch(e){ alert('Не удалось сохранить. Проверьте интернет и повторите.'); }
+      state.modal = null; overlay.remove(); render();
+    };
     const delBtn = overlay.querySelector('#btn-del-income');
     if(delBtn) delBtn.onclick = ()=>{
       if(state.currentRole !== 'owner'){
@@ -14812,6 +15135,21 @@
         orderId: state.modal.income.orderId || '',
         comment: commentVal,
       };
+      // защита от дублей: не даём молча записать оплату мероприятия второй раз
+      if(updated.eventId){
+        const twin = state.incomes.find(x=> x.id !== updated.id && x.eventId === updated.eventId && x.date === updated.date && x.account === updated.account && Number(x.amount) === Number(updated.amount));
+        const evG = state.events.find(x=>x.id===updated.eventId);
+        const baseG = evG ? Math.max(Number(evG.price)||0, Number(evG.agreedPrice)||0) : 0;
+        const paidOthers = state.incomes.filter(x=> x.id !== updated.id && x.eventId === updated.eventId).reduce((t,x)=> t + (Number(x.amount)||0), 0);
+        if(twin && !confirm('По этому мероприятию уже есть такая же оплата: ' + formatDateText(twin.date) + ', ' + twin.account + ', ' + formatMoney(twin.amount) + '. Это не дубль? Нажмите «ОК», только если это вторая такая же оплата.')) return;
+        if(!twin && baseG > 0 && updated.operation !== 'Возврат' && paidOthers + (Number(updated.amount)||0) > baseG + 1 && !confirm('С этой записью оплачено ' + formatMoney(paidOthers + (Number(updated.amount)||0)) + ', а по мероприятию в карточке ' + formatMoney(baseG) + '. Возможно, эта оплата уже записана в журнале платежей мероприятия. Сохранить всё равно?')) return;
+        // мост: новая оплата по мероприятию уходит в журнал мероприятия, а в Книге появляется её зеркальная запись
+        if(state.modal.isNew && incomeBridgeable(updated)){
+          let okB = false;
+          try{ okB = await bridgeIncomeToEventJournal(updated); }catch(e){ okB = false; }
+          if(okB){ recordAction('Оплата добавлена в журнал мероприятия и в Книгу'); state.modal = null; overlay.remove(); render(); return; }
+        }
+      }
 
       // синхронизация с "Для менеджеров → Изделия"
       if(productVal === 'Изделие'){
@@ -17031,7 +17369,7 @@
       // клик мимо окна (по тёмному фону) никогда не закрывает ни одно окно и не сбрасывает
       // несохранённые правки; закрыть можно только явно — крестиком или кнопкой «Отмена»/«Закрыть».
       const closeBtn = overlay.querySelector('.modal-close');
-      if(closeBtn) closeBtn.onclick = ()=>{ state.modal = null; state.pendingAction = null; draftEventTypes = null; draftHostsList = null; draftPayRates = null; draftMaterialsCatalog = null; overlay.remove(); };
+      if(closeBtn) closeBtn.onclick = ()=>{ const nm = modalAfterEventClose(); state.modal = nm; state.pendingAction = null; draftEventTypes = null; draftHostsList = null; draftPayRates = null; draftMaterialsCatalog = null; overlay.remove(); if(nm) render(); };
     }
 
     if(state.modal.type === 'day'){ attachDayModalEvents(overlay, state.modal.date); }
@@ -17405,6 +17743,14 @@
     checks.push({ title: 'Оплаты без указанного счёта', items: incNoAcc.map(i=>({ label: `${formatDateText(i.date)} · ${formatMoney(i.amount||0)} · ${i.product||i.comment||''}` })) });
     const incOrph = incM.filter(i=> i.eventId && !evIds.has(i.eventId));
     checks.push({ title: 'Оплаты привязаны к мероприятию, которого уже нет', items: incOrph.map(i=>({ label: `${formatDateText(i.date)} · ${formatMoney(i.amount||0)} · ${i.comment||''}` })) });
+    // --- сверка Книги с выручкой ---
+    const paidMap = new Map(); (state.incomes||[]).forEach(i=>{ if(i.eventId) paidMap.set(i.eventId, (paidMap.get(i.eventId)||0) + (Number(i.amount)||0)); });
+    const overp = evs.map(e=>{ const base = Math.max(Number(e.price)||0, Number(e.agreedPrice)||0); return {e, base, paid: paidMap.get(e.id)||0}; }).filter(x=> x.base > 0 && x.paid > x.base + 1);
+    checks.push({ title: 'Оплачено в Книге больше, чем стоит мероприятие (возможен дубль оплаты)', items: overp.map(x=>({ label: `${formatDateText(x.e.date)} ${x.e.time||''} · ${x.e.title||'без названия'} · цена ${formatMoney(x.base)}, оплачено ${formatMoney(x.paid)}`, eid: x.e.id })) });
+    const mirrorD = findMirrorDuplicateIncomes().filter(i=> i.date && i.date.startsWith(ym));
+    checks.push({ title: 'Один платёж из журнала записан в Книгу дважды', items: mirrorD.map(i=>({ label: `${formatDateText(i.date)} · ${formatMoney(i.amount||0)} · ${i.comment||''}`, eid: i.eventId })) });
+    const noBookOrders = (state.orders||[]).filter(o=> o.date && o.date.startsWith(ym) && (Number(o.received)||0) > 0 && !(state.incomes||[]).some(i=> i.orderId === o.id));
+    checks.push({ title: 'По заказам указана полученная предоплата, а оплаты в Книге нет', items: noBookOrders.map(o=>({ label: `${formatDateText(o.date)} · получено ${formatMoney(o.received)} из ${formatMoney(o.revenue||0)} · ${(o.comment||'').split('\n')[0].slice(0,50)}` })) });
     const expM = (state.expenses||[]).filter(x=> x.date && x.date.startsWith(ym));
     const expReal = expM.filter(x=> !x.safeTransfer);
     const expBad = expReal.filter(x=> !(Number(x.amount) > 0) || !(x.category||'').trim() || !(x.source||'').trim());
@@ -17433,6 +17779,12 @@
     }
     checks.push({ title: 'График админов: время смен и оклад старшего', items: shiftItems });
 
+    // --- закрытие дней ---
+    if(ym >= DAYCLOSE_FROM.slice(0,7)){
+      const dim3 = new Date(y, mo, 0).getDate(); const openDays = [];
+      for(let d=1; d<=dim3; d++){ const ds = ym + '-' + pad(d); if(ds >= DAYCLOSE_FROM && ds < today && dayHasActivity(ds) && !(state.closedDays||{})[ds]) openDays.push({ label: formatDateText(ds) + ' — день не закрыт' }); }
+      checks.push({ title: 'Дни месяца без «Закрытия дня»', items: openDays });
+    }
     // --- данные ---
     const seen = {}; const dups = [];
     evs.forEach(e=>{ const k = [e.date, e.time||'', (e.title||'').trim().toLowerCase(), e.space||e.spaceId||''].join('|'); if(seen[k]){ dups.push(e); } else seen[k] = e; });
@@ -18632,6 +18984,57 @@
   //  • записи, привязанные к сертификату (certificate.incomeId);
   //  • записи про сертификат, которые не привязаны, но совпадают с сертификатом по номеру, дате и сумме (битая/пустая ссылка, ручной дубль);
   //  • переводы от YCLIENTS на счёт (notRevenue:true, либо комментарий ровно «Юклиент»/«Юкл»): это выплата уже учтённых в мероприятиях онлайн-оплат.
+  // ----- мост «Книга → журнал мероприятия»: оплата, внесённая в Книгу с привязкой к мероприятию, становится оплатой в журнале -----
+  const BRIDGE_ACCOUNTS = ['Точка','Наличные'];
+  function incomeBridgeable(inc){
+    if(!inc || !inc.eventId || inc.autoFromPayment || inc.autoFromEvent) return false;
+    if(!BRIDGE_ACCOUNTS.includes(inc.account)) return false;
+    if(!['Оплата','Предоплата','Остаток оплаты'].includes(inc.operation)) return false;
+    if(['Изделие','Заказ','Сертификат'].includes(inc.product)) return false;
+    if(inc.notRevenue === true || inc.itemSaleId || inc.orderId || inc.safeTransfer) return false;
+    const a = Number(inc.amount);
+    if(!(a > 0) || !Number.isInteger(a)) return false;
+    return !!(state.events||[]).find(e=>e.id===inc.eventId);
+  }
+  async function bridgeIncomeToEventJournal(inc){
+    const idx = state.events.findIndex(e=>e.id===inc.eventId); if(idx < 0) return false;
+    const ev = state.events[idx];
+    if(!Array.isArray(ev.payments)) ev.payments = [];
+    const amount = Number(inc.amount);
+    const hasCash = ev.payments.some(x=> x.source !== 'Сертификат' && x.type !== 'refund' && !x.refundRef && !x.certRedemptionRef);
+    const type = inc.operation === 'Предоплата' ? 'advance' : (inc.operation === 'Остаток оплаты' ? 'balance' : (hasCash ? 'balance' : 'advance'));
+    ev.payments.push({ id: uid(), amount, source: inc.account, type, date: inc.date || todayStr(), ts: new Date().toISOString(), note: (inc.comment||'').trim(), fromBook: true });
+    // «Выручка» в карточке = деньги, реально полученные по журналу (без сертификатов); не уменьшаем, если её уже вписали вручную
+    const cashSum = ev.payments.filter(x=> x.source !== 'Сертификат' && !x.certRedemptionRef).reduce((t,x)=> t + (Number(x.amount)||0), 0);
+    ev.price = Math.max(Number(ev.price)||0, cashSum);
+    state.events[idx] = ev;
+    await saveEvents();
+    await syncEventPaymentsToBook(ev);
+    return true;
+  }
+  // зеркальные записи «Оплата по журналу», которых по одному платежу больше одной (оставляем первую, лишние — дубли)
+  function findMirrorDuplicateIncomes(){
+    const byKey = new Map(), dups = [];
+    (state.incomes||[]).forEach(i=>{
+      if(!i.autoFromPayment || !i.paymentId) return;
+      const k = (i.eventId||'') + '|' + i.paymentId;
+      const cur = byKey.get(k);
+      if(!cur){ byKey.set(k, i); return; }
+      // оставляем запись с меньшим id — на всех устройствах выбор одинаковый
+      if(String(i.id) < String(cur.id)){ dups.push(cur); byKey.set(k, i); } else dups.push(i);
+    });
+    return dups;
+  }
+  // тихо убирает лишние зеркальные копии оплат (производные записи — оригинал остаётся в журнале платежей мероприятия)
+  async function healMirrorDuplicates(){
+    try{
+      const dups = findMirrorDuplicateIncomes(); if(!dups.length) return 0;
+      const ids = new Set(dups.map(i=>i.id));
+      state.incomes = state.incomes.filter(i=>!ids.has(i.id));
+      await saveIncomes();
+      return dups.length;
+    }catch(e){ return 0; }
+  }
   function isYclientsPayoutIncome(i){
     if(i.notRevenue === true) return true;
     if(i.notRevenue === false) return false;
@@ -19371,7 +19774,6 @@
     const incomesMonthTotal = state.incomes
       .filter(i=> i.date && i.date.startsWith(monthYm))
       .reduce((s,i)=> s + ((i.amount!==undefined&&i.amount!==null&&!isNaN(i.amount))?Number(i.amount):0), 0);
-    const grandTotalRevenue = totalRevenue + certMonthSales + incomesMonthTotal;
     // возвраты за месяц — по фактической дате возврата (paymentDate), иначе по дате заявки на возврат
     const monthRefunds = state.refunds.filter(r=>{
       const d = r.paymentDate || r.requestDate;
@@ -19402,6 +19804,8 @@
     const npOtherIncomeRevenue = otherIncomesForMonth(monthYm)
       .reduce((s,i)=> s + ((i.amount!==undefined&&i.amount!==null&&!isNaN(i.amount))?Number(i.amount):0), 0);
     const npTotalRevenue = npEventsRevenue + npItemSalesRevenue + npCertSalesRevenue + npOrdersRevenue + npOtherIncomeRevenue;
+    // единая выручка = та же сумма, что в «Чистой прибыли» и отчёте дня (раньше к ней добавлялась вся «Книга», где уже лежат оплаты мероприятий и сертификатов — получалось двойное счёт)
+    const grandTotalRevenue = npTotalRevenue;
 
     // Расходы = материалы + маркетинг + зп мастеров + зп хостес + зп менеджеров (вручную) + аренда (вручную)
     //          + прочие сотрудники (вручную) + свои статьи расходов (вручную)
@@ -21140,10 +21544,12 @@
       ${!isAdminFinRestricted ? `
       <div class="analytics-section">
         <h4>Общая выручка бизнеса за месяц: ${formatMoney(grandTotalRevenue)}</h4>
-        <div style="font-size:11.5px;color:var(--ink-soft);font-family:var(--font-mono);margin-bottom:8px;">Сумма из трёх независимых источников. «Мероприятия» — прогнозная сумма (включает ещё не внесённую доплату), а «Сертификаты» и «Книга» — уже реально поступившие деньги. Источники не сверяются автоматически между собой — если одна и та же оплата попала в несколько мест, сумма задвоится. Для сверки мероприятий с «Книгой» см. вкладку «Выручка» ниже.</div>
+        <div style="font-size:11.5px;color:var(--ink-soft);font-family:var(--font-mono);margin-bottom:8px;">Те же потоки, что в «Чистой прибыли» и в отчёте дня. «Мероприятия» — прогнозная сумма (включает ещё не внесённую доплату и предварительные брони), остальное — уже поступившие деньги. Оплаты мероприятий и сертификатов из «Книги» отдельно не прибавляются — они уже внутри этих строк.</div>
         <div class="stat-row"><div class="stat-label">Мероприятия (календарь, прогноз)</div><div style="flex:1;font-family:var(--font-mono);font-size:13px;">${formatMoney(totalRevenue)}</div></div>
         <div class="stat-row"><div class="stat-label">Сертификаты (продажа, факт)</div><div style="flex:1;font-family:var(--font-mono);font-size:13px;">${formatMoney(certMonthSales)}</div></div>
-        <div class="stat-row"><div class="stat-label">Книга (Доходы, факт)</div><div style="flex:1;font-family:var(--font-mono);font-size:13px;">${formatMoney(incomesMonthTotal)}</div></div>
+        <div class="stat-row"><div class="stat-label">Продажа изделий</div><div style="flex:1;font-family:var(--font-mono);font-size:13px;">${formatMoney(npItemSalesRevenue)}</div></div>
+        <div class="stat-row"><div class="stat-label">Заказы</div><div style="flex:1;font-family:var(--font-mono);font-size:13px;">${formatMoney(npOrdersRevenue)}</div></div>
+        <div class="stat-row"><div class="stat-label">Прочие доходы из «Книги» (не привязанные к другим потокам)</div><div style="flex:1;font-family:var(--font-mono);font-size:13px;">${formatMoney(npOtherIncomeRevenue)}</div></div>
         <div class="stat-row"><div class="stat-label" style="color:var(--ink-soft);">Сертификаты — погашено в этом месяце</div><div style="flex:1;font-family:var(--font-mono);font-size:13px;color:var(--ink-soft);">${formatMoney(certUsedThisMonth)} <span style="font-size:11px;">— не входит в итог, деньги уже учтены при продаже</span></div></div>
         <div class="stat-row"><div class="stat-label" style="color:var(--status-red);">Непогашено по проданным сертификатам</div><div style="flex:1;font-family:var(--font-mono);font-size:13px;color:var(--status-red);">${formatMoney(certOutstandingSale)} <span style="font-size:11px;">— ${certOutstandingSaleCount} шт., это студия ещё должна отдать услугами</span></div></div>
         ${certOutstandingMarketingCount>0?`<div class="stat-row"><div class="stat-label" style="color:var(--ink-soft);">Непогашено по маркетинговым сертификатам</div><div style="flex:1;font-family:var(--font-mono);font-size:13px;color:var(--ink-soft);">${formatMoney(certOutstandingMarketing)} <span style="font-size:11px;">— ${certOutstandingMarketingCount} шт., деньги не платились, но услуга ещё не оказана</span></div></div>`:''}
@@ -22658,7 +23064,12 @@
       const idx = state.events.findIndex(x=>x.id===state.modal.event.id);
       if(idx>=0){
         state.events[idx] = {...state.events[idx], masterReport: report};
-        await saveEvents();
+        const okSave = await saveEvents();
+        if(okSave === false){
+          // сервер отчёт не принял — окно НЕ закрываем, чтобы текст не пропал; повторное нажатие отправит снова
+          showGapWarningBanner('Отчёт пока НЕ сохранён — нет связи с сервером. Не закрывайте окно: проверьте интернет и нажмите «Сохранить» ещё раз.');
+          return;
+        }
       }
       recordAction("Отчёт мастера сохранён");
       state.modal = null; overlay.remove(); render();
@@ -25963,10 +26374,11 @@
               <input type="time" id="f-time" value="${ev.time}">
             </div>
             <div class="field">
-              <label>Длительность (мин)</label>
+              <label>Длительность МК (мин) <span style="font-weight:400;color:var(--ink-soft);">— сама подставляется по виду мероприятия</span></label>
               <input type="number" id="f-duration" value="${ev.duration||60}" min="0" step="15">
             </div>
           </div>
+          <div id="f-total-hint" style="margin:-4px 0 12px;padding:8px 10px;border:1px dashed var(--line,#c9b99a);border-radius:6px;font-size:12.5px;line-height:1.5;background:rgba(255,255,255,.35);"></div>
           ${(()=>{
             const evStatus = ev.status || 'confirmed';
             // у нового мероприятия «По расписанию» продукта нет — служебное значение подставляется само
@@ -26038,7 +26450,7 @@
             <input type="hidden" id="f-dishes-payment" value="${ev.dishesPayment||''}">
           </div>
           <div class="field" id="rental-field" style="display:${showsDishesAndRental(ev.status)?'block':'none'};">
-            <label>Доп. аренда пространства (для частников и маркетинга) <span style="font-weight:400;color:var(--ink-soft);">— по умолчанию 0, меняйте только если аренда правда была</span></label>
+            <label>Аренда до и после МК (для частников и маркетинга) <span style="font-weight:400;color:var(--ink-soft);">— вручную, по умолчанию 0; общая длительность считается сама</span></label>
             <div class="row2">
               <div>
                 <label style="font-size:11px;color:var(--ink-soft);margin-bottom:4px;display:block;">До мероприятия (мин)</label>
@@ -26464,7 +26876,7 @@
 
   function attachEventModalEvents(overlay){
     const cancelBtn = overlay.querySelector('#btn-cancel');
-    if(cancelBtn) cancelBtn.onclick = ()=>{ state.modal = null; overlay.remove(); };
+    if(cancelBtn) cancelBtn.onclick = ()=>{ const nm = modalAfterEventClose(); state.modal = nm; overlay.remove(); if(nm) render(); };
 
     const titleInput = overlay.querySelector('#f-title');
     const durationInput = overlay.querySelector('#f-duration');
@@ -26517,6 +26929,35 @@
       titleInput.addEventListener('change', recalcPayOnTitle);
     }
     if(durationInput){ durationInput.addEventListener('input', ()=>{ durationInput.dataset.manual = '1'; }); }
+    // «Общая длительность» считается сама: аренда до + МК + аренда после (аренда учитывается, только если поле аренды показано)
+    (function(){
+      const hintEl = overlay.querySelector('#f-total-hint');
+      if(!hintEl) return;
+      const tIn = overlay.querySelector('#f-time'), rbIn = overlay.querySelector('#f-rental-before'), raIn = overlay.querySelector('#f-rental-after'), rf = overlay.querySelector('#rental-field');
+      const upd = ()=>{
+        const mk = parseInt(durationInput && durationInput.value) || 0;
+        const rentalOn = rf && rf.style.display !== 'none';
+        const rb = rentalOn ? (parseInt(rbIn && rbIn.value) || 0) : 0, ra = rentalOn ? (parseInt(raIn && raIn.value) || 0) : 0;
+        const total = rb + mk + ra;
+        const t0 = tIn && tIn.value ? timeToMinutes(tIn.value) : null;
+        const parts = [];
+        if(rb) parts.push('аренда до ' + formatDuration(rb));
+        parts.push('МК ' + formatDuration(mk));
+        if(ra) parts.push('аренда после ' + formatDuration(ra));
+        let line = '<b>Общая длительность: ' + escapeHtml(formatDuration(total)) + '</b>';
+        if(t0 !== null){
+          const row = (x,y,label,col)=> '<div style="display:flex;gap:8px;"><span style="font-family:var(--font-mono);min-width:106px;">' + ftMinToTime(x) + '–' + ftMinToTime(y) + '</span><span style="color:' + col + ';">' + label + ' · ' + escapeHtml(formatDuration(y - x)) + '</span></div>';
+          if(rb) line += row(t0 - rb, t0, 'аренда', '#9A6B00');
+          line += row(t0, t0 + mk, 'мастер-класс', '#2F7A57');
+          if(ra) line += row(t0 + mk, t0 + mk + ra, 'аренда', '#9A6B00');
+        } else {
+          line += ' <span style="color:var(--ink-soft);">(' + escapeHtml(parts.join(' + ')) + ')</span>';
+        }
+        hintEl.innerHTML = line;
+      };
+      ['input','change'].forEach(ev=>{ [durationInput,tIn,rbIn,raIn,overlay.querySelector('#f-status'),overlay.querySelector('#f-title')].forEach(el=>{ if(el) el.addEventListener(ev, ()=> setTimeout(upd, 0)); }); });
+      upd();
+    })();
     if(titleInput && durationInput){
       titleInput.addEventListener('input', ()=>{
         const match = state.eventTypes.find(t=>t.name.toLowerCase() === titleInput.value.trim().toLowerCase());
@@ -27876,7 +28317,7 @@
       // сертификаты, которыми оплачивали это мероприятие, получают сумму обратно
       if(restoreCertsAfterEventDelete(eventToDelete.id)) await saveCertificates();
       await saveEvents();
-      state.modal = null; overlay.remove(); render();
+      state.modal = modalAfterEventClose(); overlay.remove(); render();
       });
     };
 
@@ -28341,7 +28782,7 @@
       await syncEventPaymentsToBook(updated);
       const dayEvts = state.events.filter(e=>e.date===updated.date && e.spaceId===updated.spaceId);
       const warns = computeGapWarnings(dayEvts);
-      state.modal = null; overlay.remove(); render();
+      state.modal = modalAfterEventClose(); overlay.remove(); render();
       if(warns[updated.id]){
         const w = warns[updated.id];
         showGapWarningBanner(w.gap < 0
