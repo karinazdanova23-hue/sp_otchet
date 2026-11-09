@@ -1147,6 +1147,37 @@
     }
     const DEVICE_ID = getDeviceId();
     const API_BASE = new URL('/api/storage', window.location.origin).toString();
+    let NO_GZIP_UPLOAD = false; try{ NO_GZIP_UPLOAD = localStorage.getItem('sp-no-gzip-upload') === '1'; }catch(e){}
+    async function gzipBody(str){
+      if(NO_GZIP_UPLOAD || typeof CompressionStream === 'undefined' || str.length < 16000) return null;
+      try{
+        const stream = new Blob([str]).stream().pipeThrough(new CompressionStream('gzip'));
+        return await new Response(stream).arrayBuffer();
+      }catch(e){ return null; }
+    }
+    // индикатор «Сохраняю…» / «✓ Сохранено» — чтобы после нажатия было видно, что запись идёт
+    let _savingN = 0, _savingTimer = null;
+    function _savingPill(){
+      let el = document.getElementById('save-pill');
+      if(!el){
+        el = document.createElement('div'); el.id = 'save-pill'; el.className = 'no-print';
+        el.style.cssText = 'position:fixed;left:50%;top:10px;transform:translateX(-50%);z-index:30000;padding:7px 14px;border-radius:999px;font:600 13px/1.2 system-ui,-apple-system,sans-serif;box-shadow:0 4px 14px rgba(0,0,0,.18);pointer-events:none;transition:opacity .25s;opacity:0;';
+        (document.body || document.documentElement).appendChild(el);
+      }
+      return el;
+    }
+    function _savingStart(){
+      _savingN++; clearTimeout(_savingTimer);
+      _savingTimer = setTimeout(()=>{ if(_savingN > 0){ const el = _savingPill(); el.style.background = '#171512'; el.style.color = '#F2ECDD'; el.textContent = '⏳ Сохраняю…'; el.style.opacity = '1'; } }, 350);
+    }
+    function _savingDone(ok){
+      _savingN = Math.max(0, _savingN - 1);
+      if(_savingN > 0) return;
+      clearTimeout(_savingTimer);
+      const el = document.getElementById('save-pill'); if(!el || el.style.opacity !== '1'){ return; }
+      if(ok){ el.style.background = '#75804F'; el.style.color = '#fff'; el.textContent = '✓ Сохранено'; }
+      _savingTimer = setTimeout(()=>{ el.style.opacity = '0'; }, ok ? 900 : 0);
+    }
     window.storage = {
       async get(key, shared){
         const res = await fetch(`${API_BASE}/${encodeURIComponent(key)}?shared=${!!shared}`, { headers: { 'X-Device-Id': DEVICE_ID } });
@@ -1155,9 +1186,26 @@
         return res.json();
       },
       async set(key, value, shared){
-        const res = await fetch(`${API_BASE}/${encodeURIComponent(key)}`, { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Device-Id': DEVICE_ID }, body: JSON.stringify({ value, shared: !!shared }) });
-        if(!res.ok) throw new Error('storage.set failed: ' + res.status);
-        return res.json();
+        const body = JSON.stringify({ value, shared: !!shared });
+        _savingStart();
+        try{
+          // большие списки (мероприятия, доходы, заявки) отправляем сжатыми — в 8–12 раз меньше трафика,
+          // поэтому сохранение не висит по полминуты на мобильном интернете. Сервер распаковывает сам.
+          const gz = await gzipBody(body);
+          let res = null;
+          if(gz){
+            try{
+              res = await fetch(`${API_BASE}/${encodeURIComponent(key)}`, { method: 'POST', headers: { 'Content-Type': 'application/json', 'Content-Encoding': 'gzip', 'X-Device-Id': DEVICE_ID }, body: gz });
+              if(res.status === 400 || res.status === 415){ NO_GZIP_UPLOAD = true; try{ localStorage.setItem('sp-no-gzip-upload','1'); }catch(e){} res = null; }
+            }catch(e){ res = null; }
+          }
+          if(!res) res = await fetch(`${API_BASE}/${encodeURIComponent(key)}`, { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Device-Id': DEVICE_ID }, body });
+          if(!res.ok) throw new Error('storage.set failed: ' + res.status);
+          // сервер раньше возвращал в ответ всё сохранённое значение целиком — читаем только факт успеха
+          try{ await res.text(); }catch(e){}
+          _savingDone(true);
+          return { key, shared: !!shared, ok: true };
+        }catch(e){ _savingDone(false); throw e; }
       },
       async delete(key, shared){
         const res = await fetch(`${API_BASE}/${encodeURIComponent(key)}?shared=${!!shared}`, { method: 'DELETE', headers: { 'X-Device-Id': DEVICE_ID } });
@@ -6157,6 +6205,7 @@
     }
     autoCaptureForecastSnapshot();
 
+    try{ qlEnsureFab(); }catch(e){}
     if(state.view === 'today'){
       app.innerHTML = renderTodayView();
       attachTodayViewEvents();
@@ -10162,6 +10211,175 @@
       const e = wrap.querySelector('#js-pstatus'); if(e) e.innerHTML = jsStatusHtml();
     };
   }
+  // ===================== «⚡ Быстрая заявка» — чтобы в аврал не потерять клиента =====================
+  // Плавающая кнопка на любом экране: имя, телефон (необязательно), где пишет + ник/ссылка, пара слов — и всё.
+  // Заявка встаёт в «Новые заявки» с пометкой «⚡ дозаполнить» и задачей на сегодня; остальное менеджер
+  // вносит потом в обычной карточке заявки (после полного сохранения пометка и задача снимаются сами).
+  const QL_NETS = [
+    { src:'ТГ', label:'Telegram', icon:'✈️', bg:'#2AABEE' },
+    { src:'Инста', label:'Instagram', icon:'📷', bg:'#D6336C' },
+    { src:'ВК', label:'ВКонтакте', icon:'💬', bg:'#0077FF' },
+    { src:'Макс', label:'Макс', icon:'🟣', bg:'#7B5CFF' },
+    { src:'Звонок', label:'Звонок', icon:'📞', bg:'#75804F' },
+    { src:'Лично', label:'Лично', icon:'🙋', bg:'#8C8C8C' },
+  ];
+  const QL_FILL_TASK = 'Дозаполнить заявку: продукт, дата, гости, бюджет';
+  function qlRoleAllowed(role){ return roleCanAccessManagersTab(role) || role === 'hostess'; }
+  function qlDigits(s){ const d = String(s||'').replace(/\D/g,''); return d.length >= 10 ? d.slice(-10) : ''; }
+  function qlFindDupes(phone, social){
+    const pd = qlDigits(phone);
+    const nick = String(social||'').trim().replace(/^https?:\/\/(www\.)?/i,'').replace(/^(t\.me|vk\.com|vk\.ru|instagram\.com|max\.ru)\//i,'').replace(/^@/,'').replace(/\/$/,'').toLowerCase();
+    if(!pd && nick.length < 3) return [];
+    return state.leads.filter(l=>{
+      const hay = [l.contact, l.phone, l.socialUrl].join(' ');
+      if(pd && qlDigits(hay.match(/\+?\d[\d\s\-()]{8,}\d/g) ? hay.match(/\+?\d[\d\s\-()]{8,}\d/g).join(' ') : '') === pd) return true;
+      if(pd && (hay.match(/\+?\d[\d\s\-()]{8,}\d/g)||[]).some(x=> qlDigits(x) === pd)) return true;
+      if(nick.length >= 3 && hay.toLowerCase().split(/[\s·\/@]+/).some(t=> t === nick)) return true;
+      return false;
+    }).sort((a,b)=> (b.requestDate||'').localeCompare(a.requestDate||'')).slice(0,3);
+  }
+  function qlEnsureFab(){
+    let fab = document.getElementById('ql-fab');
+    const show = state.currentRole && qlRoleAllowed(state.currentRole) && state.view !== 'login';
+    if(!show){ if(fab) fab.remove(); return; }
+    if(!fab){
+      fab = document.createElement('button');
+      fab.id = 'ql-fab'; fab.type = 'button'; fab.className = 'no-print';
+      fab.title = 'Быстро записать заявку (имя + контакт), остальное — потом';
+      fab.innerHTML = '<span style="font-size:20px;line-height:1;">⚡</span><span>Заявка</span>';
+      fab.style.cssText = 'position:fixed;right:18px;bottom:18px;z-index:900;display:flex;align-items:center;gap:8px;padding:13px 18px;border:none;border-radius:999px;background:#E8B84B;color:#171512;font-weight:800;font-size:15px;font-family:inherit;cursor:pointer;box-shadow:0 6px 18px rgba(23,21,18,.28);';
+      fab.onclick = ()=> openQuickLead();
+      document.body.appendChild(fab);
+    }
+  }
+  function openQuickLead(){
+    if(document.getElementById('ql-pop')) return;
+    const pop = document.createElement('div');
+    pop.id = 'ql-pop';
+    pop.style.cssText = 'position:fixed;inset:0;z-index:12500;background:rgba(23,21,18,.55);display:flex;align-items:flex-end;justify-content:center;';
+    document.body.appendChild(pop);
+    let src = 'Инста', kind = 'b2c', savedCount = 0, lastSaved = null;
+    const close = ()=>{ pop.remove(); document.removeEventListener('keydown', onKey); if(savedCount) render(); };
+    const onKey = (e)=>{ if(e.key === 'Escape') close(); };
+    document.addEventListener('keydown', onKey);
+    pop.addEventListener('click', e=>{ if(e.target === pop) close(); });
+    const inputCss = 'width:100%;box-sizing:border-box;border:2px solid #D9D0BC;border-radius:12px;padding:11px 12px;font-size:16px;font-family:inherit;background:#fff;color:#171512;outline:none;';
+    const lbl = (t, opt)=> `<div style="font-size:11px;font-weight:700;letter-spacing:.6px;color:#8C8C8C;text-transform:uppercase;margin:12px 0 5px;">${t}${opt?' <span style="text-transform:none;letter-spacing:0;font-weight:500;">— необязательно</span>':''}</div>`;
+    function draw(){
+      const net = QL_NETS.find(n=> n.src === src);
+      const nickPh = src === 'Звонок' || src === 'Лично' ? 'не нужно' : (src === 'Макс' ? 'ссылка на профиль в Макс' : 'ник или ссылка, напр. @anna_art');
+      pop.innerHTML = `
+        <div style="width:100%;max-width:520px;background:#F2ECDD;border-radius:20px 20px 0 0;padding:16px 16px 20px;box-shadow:0 -8px 30px rgba(0,0,0,.25);max-height:94vh;overflow:auto;">
+          <div style="display:flex;align-items:center;gap:10px;">
+            <div style="flex:1;"><div style="font-weight:800;font-size:19px;color:#171512;">⚡ Быстрая заявка</div>
+              <div style="font-size:12px;color:#8C8C8C;">Только чтобы не потерять. Остальное — потом в карточке.</div></div>
+            <button type="button" class="ql-x" style="border:none;background:#fff;border-radius:50%;width:34px;height:34px;font-size:18px;cursor:pointer;color:#171512;">×</button>
+          </div>
+          ${lastSaved ? `<div style="background:#75804F;color:#fff;border-radius:14px;padding:10px 12px;margin-top:12px;display:flex;align-items:center;gap:10px;">
+              <span style="font-size:20px;">✓</span><div style="flex:1;min-width:0;"><div style="font-weight:800;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${escapeHtml(lastSaved.contact||'Заявка')}</div>
+              <div style="font-size:12px;opacity:.9;">в «Новых заявках» · задача «дозаполнить» на сегодня${savedCount>1?' · записано за раз: '+savedCount:''}</div></div>
+              ${roleCanAccessManagersTab(state.currentRole) ? '' : '<!--'}<button type="button" class="ql-open-last" style="border:1px solid rgba(255,255,255,.6);background:transparent;color:#fff;border-radius:10px;padding:6px 10px;cursor:pointer;font-family:inherit;font-size:12px;white-space:nowrap;">Открыть</button>${roleCanAccessManagersTab(state.currentRole) ? '' : '-->'}</div>` : ''}
+          ${lbl('Имя')}
+          <input id="ql-name" type="text" autocomplete="off" placeholder="Как зовут клиента" style="${inputCss}">
+          ${lbl('Где пишет')}
+          <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:6px;">
+            ${QL_NETS.map(n=> `<button type="button" class="ql-net" data-src="${n.src}" style="cursor:pointer;border-radius:12px;padding:9px 6px;font-family:inherit;font-weight:700;font-size:13.5px;
+              border:2px solid ${n.src===src?n.bg:'#D9D0BC'};background:${n.src===src?n.bg:'#fff'};color:${n.src===src?'#fff':'#171512'};">${n.icon} ${n.label}</button>`).join('')}
+          </div>
+          <div style="display:flex;gap:6px;align-items:center;margin-top:6px;">
+            <select id="ql-src-other" style="flex:1;border:1px solid #D9D0BC;border-radius:10px;padding:6px 8px;font-size:12.5px;background:${net?'#fff':'#171512'};color:${net?'#8C8C8C':'#F2ECDD'};font-family:inherit;">
+              <option value="">${net ? 'другой источник…' : ''}</option>
+              ${LEAD_SOURCES.filter(s=> !QL_NETS.some(n=> n.src === s)).map(s=> `<option value="${escapeHtml(s)}" ${s===src?'selected':''}>${escapeHtml(s)}</option>`).join('')}
+            </select>
+          </div>
+          ${src === 'Звонок' || src === 'Лично' ? '' : `${lbl('Ник или ссылка', true)}<input id="ql-social" type="text" autocomplete="off" placeholder="${nickPh}" style="${inputCss}"><div id="ql-social-hint" style="font-size:11.5px;color:#8C8C8C;margin-top:4px;"></div>`}
+          ${lbl('Телефон', true)}
+          <input id="ql-phone" type="tel" autocomplete="off" placeholder="+7 …" style="${inputCss}">
+          ${lbl('Что хочет — пара слов', true)}
+          <input id="ql-note" type="text" autocomplete="off" placeholder="напр. ДР 8 чел, керамика, конец декабря" style="${inputCss}">
+          <div style="display:flex;gap:6px;margin-top:10px;">
+            ${[['b2c','Частный гость'],['b2b','Компания (B2B)']].map(k=> `<button type="button" class="ql-kind" data-kind="${k[0]}" style="flex:1;cursor:pointer;border-radius:10px;padding:7px;font-family:inherit;font-size:12.5px;font-weight:700;border:2px solid ${kind===k[0]?'#171512':'#D9D0BC'};background:${kind===k[0]?'#171512':'#fff'};color:${kind===k[0]?'#F2ECDD':'#171512'};">${k[1]}</button>`).join('')}
+          </div>
+          <div id="ql-dupes" style="margin-top:10px;"></div>
+          <div id="ql-err" style="display:none;color:#A3402F;font-size:12.5px;margin-top:8px;"></div>
+          <div style="display:grid;grid-template-columns:1fr auto;gap:8px;margin-top:14px;">
+            <button type="button" id="ql-save" style="cursor:pointer;border:none;border-radius:14px;padding:14px;background:#E8B84B;color:#171512;font-weight:800;font-size:16px;font-family:inherit;box-shadow:0 3px 0 rgba(23,21,18,.18);">⚡ Сохранить заявку</button>
+            <button type="button" id="ql-save-more" title="Сохранить и сразу записать следующую" style="cursor:pointer;border:2px solid #171512;border-radius:14px;padding:12px 12px;background:#fff;color:#171512;font-weight:700;font-size:13px;font-family:inherit;">+ ещё одну</button>
+          </div>
+          <div style="font-size:11.5px;color:#8C8C8C;text-align:center;margin-top:8px;">Нужно хотя бы имя, телефон или ник. Enter — сохранить.</div>
+        </div>`;
+      const $ = s=> pop.querySelector(s);
+      $('.ql-x').onclick = close;
+      const ol = $('.ql-open-last'); if(ol) ol.onclick = ()=>{ const l = state.leads.find(x=> x.id === lastSaved.id); close(); if(l) requireUnlock(()=>{ state.modal = {type:'lead', isNew:false, lead:{...l}}; render(); }); };
+      const keep = ()=> ({ name: $('#ql-name').value, phone: $('#ql-phone').value, social: $('#ql-social') ? $('#ql-social').value : '', note: $('#ql-note').value });
+      const restore = (v)=>{ $('#ql-name').value = v.name||''; $('#ql-phone').value = v.phone||''; if($('#ql-social')) $('#ql-social').value = v.social||''; $('#ql-note').value = v.note||''; };
+      pop.querySelectorAll('.ql-net').forEach(b=> b.onclick = ()=>{ const v = keep(); src = b.dataset.src; draw(); restore(v); checkAll(); ($('#ql-social') || $('#ql-phone')).focus(); });
+      $('#ql-src-other').onchange = (e)=>{ if(!e.target.value) return; const v = keep(); src = e.target.value; draw(); restore(v); checkAll(); };
+      pop.querySelectorAll('.ql-kind').forEach(b=> b.onclick = ()=>{ const v = keep(); kind = b.dataset.kind; draw(); restore(v); checkAll(); });
+      ['#ql-name','#ql-phone','#ql-social','#ql-note'].forEach(s=>{ const el = $(s); if(!el) return;
+        el.addEventListener('input', checkAll);
+        el.addEventListener('focus', ()=> el.style.borderColor = '#171512'); el.addEventListener('blur', ()=> el.style.borderColor = '#D9D0BC');
+        el.addEventListener('keydown', e=>{ if(e.key === 'Enter'){ e.preventDefault(); save(false); } });
+      });
+      $('#ql-save').onclick = ()=> save(false);
+      $('#ql-save-more').onclick = ()=> save(true);
+      setTimeout(()=>{ try{ $('#ql-name').focus(); }catch(_){} }, 60);
+    }
+    function checkAll(){
+      const $ = s=> pop.querySelector(s);
+      const soc = $('#ql-social') ? $('#ql-social').value.trim() : '';
+      const hint = $('#ql-social-hint');
+      if(hint){
+        if(!soc) hint.innerHTML = '';
+        else { const r = socialResolve(src, soc); hint.innerHTML = r.url ? `<span style="color:#5E6A3B;">✓ ${escapeHtml(r.url.replace(/^https?:\/\//,''))}</span>` : `<span style="color:#A3402F;">${escapeHtml(r.error||'')} Можно сохранить как есть — запишу в комментарий.</span>`; }
+      }
+      const d = qlFindDupes($('#ql-phone').value, soc);
+      $('#ql-dupes').innerHTML = d.length ? `<div style="background:#FFF4D6;border:1px solid #E8B84B;border-radius:12px;padding:8px 10px;">
+          <div style="font-size:12px;font-weight:700;color:#171512;margin-bottom:4px;">Похоже, этот клиент уже писал:</div>
+          ${d.map(l=> `<div style="display:flex;align-items:center;gap:8px;font-size:12.5px;padding:3px 0;">
+              <span style="flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${escapeHtml(l.contact||'без контакта')} <span style="color:#8C8C8C;">· ${escapeHtml(leadStatusLabel(leadStatus(l)))} · ${escapeHtml(l.requestDate ? formatDateText(l.requestDate) : '')}${l.owner?' · '+escapeHtml(l.owner):''}</span></span>
+              ${roleCanAccessManagersTab(state.currentRole) ? '' : '<!--'}<button type="button" class="ql-dupe-open" data-lid="${escapeHtml(l.id)}" style="border:none;background:#171512;color:#F2ECDD;border-radius:8px;padding:4px 9px;font-size:11.5px;cursor:pointer;font-family:inherit;">Открыть</button>${roleCanAccessManagersTab(state.currentRole) ? '' : '-->'}</div>`).join('')}
+          <div style="font-size:11.5px;color:#8C8C8C;margin-top:3px;">Если это новый запрос — всё равно сохраняйте.</div></div>` : '';
+      pop.querySelectorAll('.ql-dupe-open').forEach(b=> b.onclick = ()=>{ const l = state.leads.find(x=> x.id === b.dataset.lid); close(); if(l) requireUnlock(()=>{ state.modal = {type:'lead', isNew:false, lead:{...l}}; render(); }); });
+    }
+    async function save(more){
+      const $ = s=> pop.querySelector(s);
+      const name = $('#ql-name').value.trim(), phone = $('#ql-phone').value.trim(), note = $('#ql-note').value.trim();
+      const socRaw = $('#ql-social') ? $('#ql-social').value.trim() : '';
+      const err = $('#ql-err');
+      if(!name && !phone && !socRaw){ err.textContent = 'Впишите хотя бы имя, телефон или ник — иначе клиента не найти.'; err.style.display = 'block'; $('#ql-name').focus(); return; }
+      const r = socRaw ? socialResolve(src, socRaw) : { url:'' };
+      const socialUrl = r.url || '';
+      const comment = [note, (socRaw && !socialUrl) ? 'контакт: ' + socRaw : ''].filter(Boolean).join(' · ');
+      pop.querySelectorAll('button').forEach(b=> b.disabled = true);
+      const now = new Date().toISOString();
+      const lead = {
+        id: uid(), requestDate: todayStr(),
+        contact: leadComposeContact(name, phone, socialUrl ? '' : socRaw, socialUrl),
+        name, phone, socialUrl, eventDate: '', eventMonth: LEAD_MONTH_OPTIONS[0], source: src,
+        product: '', location: 'in_studio', revenue: null, sold: false, saleDate: '', saleKind: '', eventId: '', orderId: '',
+        comment, hasPhoto: false, status: 'new', lostReason: '', kpId: '', owner: leadOwnerNow(), kind, jStage: '', statusAt: now,
+        quick: true, quickBy: (()=>{ try{ return feedWho(); }catch(_){ return ''; } })(), quickAt: now,
+      };
+      try{ const cl = crmUpsertForLead(lead, { chatUrl: socialUrl }, ''); if(cl) lead.clientId = cl.id; await saveClients(); }catch(e){ console.warn('quick lead crm', e); }
+      state.leads.push(lead);
+      if(!Array.isArray(state.leadTasks)) state.leadTasks = [];
+      const due = todayStr();
+      try{
+        await saveLeads();
+        await leadStageTasks(lead, null);   // обычная автозадача этапа «Новая заявка»
+        // своя задача «дозаполнить» — не auto, чтобы смена этапа её не закрыла; снимается при полном сохранении заявки
+        state.leadTasks.push({ id: uid(), leadId: lead.id, title: QL_FILL_TASK, due, done:false, doneAt:'', assignee: lead.owner || leadAssigneeFor(due, lead), createdBy: lead.quickBy || leadWho(), createdAt: now, auto:false, followN:0, fillTask:true });
+        await saveLeadTasks();
+      }catch(e){ console.warn('quick lead save', e); }
+      recordAction('Быстрая заявка: ' + (lead.contact || 'без контакта'), `${src}${kind==='b2b'?' · B2B':''}${note?' · '+note:''}`, { cat:'lead', obj: lead.contact||'', verb:'записал(а) заявку' });
+      savedCount++; lastSaved = { id: lead.id, contact: lead.contact };
+      if(more){ draw(); }
+      else { close(); showToast('⚡ Заявка записана — дозаполните её позже'); }
+    }
+    draw();
+  }
+
   function leadOpenTasks(leadId){ return (state.leadTasks||[]).filter(t=>t.leadId === leadId && !t.done).sort((a,b)=>(a.due||'9999').localeCompare(b.due||'9999')); }
   // при смене этапа: закрываем автозадачи прошлого этапа и ставим новую; при «Сделка/Отказ» закрываем все
   // серия «Добивки» отменена: колонка «Отправленные КП» сразу ставит две задачи (через 1 и 2 дня), см. leadStageTasks
@@ -10505,7 +10723,7 @@
       const cl = crmClientOfLead(l, crmIdx);
       return `<div class="lb-card" draggable="${st==='sold'?'false':'true'}" data-lid="${escapeHtml(l.id)}">
         <div class="lb-meta"><span style="font-weight:700;color:${isB2b?'#7E57A8':'#2F8F9D'};">${isB2b?'B2B':'B2C'}</span> · ${escapeHtml(l.owner||'не назначен')} · ${escapeHtml(l.product||'')}${l.location==='offsite'?' · выезд':''}</div>
-        <div class="lb-title"><b>${escapeHtml(l.contact||'без контакта')}</b></div>
+        <div class="lb-title"><b>${escapeHtml(l.contact||'без контакта')}</b>${l.quick ? ' <span title="Записана быстро — дозаполните продукт, дату, сумму" style="display:inline-block;background:#E8B84B;color:#171512;border-radius:6px;padding:1px 6px;font-size:10.5px;font-weight:800;white-space:nowrap;">⚡ дозаполнить</span>' : ''}</div>
         ${leadChatLinksHtml(l, cl, true) ? '<div class="lb-meta">' + leadChatLinksHtml(l, cl, true) + '</div>' : ''}
         ${cl && (cl.segmentId || (cl.tagIds||[]).length) ? '<div>' + crmChipsHtml(cl, true) + '</div>' : ''}
         <div class="lb-meta">${escapeHtml(l.eventDate ? 'мер-е ' + formatDateText(l.eventDate) + ' · ' : (l.eventMonth && l.eventMonth !== LEAD_MONTH_OPTIONS[0] ? l.eventMonth + ' · ' : ''))}${escapeHtml(l.source||'')} · ${days} дн. в работе</div>
@@ -11963,7 +12181,7 @@
         <div class="cert-list">
           ${leads.map(l=>`
             <div class="lead-row" data-lid="${l.id}">
-              <div class="cell">${l.requestDate ? formatDateText(l.requestDate) : '—'}${l.hasPhoto?' <span title="Есть фото" style="font-size:12px;">📎</span>':''}${l.contact?'<br><span style="color:var(--ink-soft);font-size:11px;">'+escapeHtml(l.contact)+'</span>':''}</div>
+              <div class="cell">${l.requestDate ? formatDateText(l.requestDate) : '—'}${l.quick?' <span title="Быстрая заявка — дозаполнить" style="background:#E8B84B;border-radius:5px;padding:0 5px;font-size:10.5px;font-weight:800;">⚡</span>':''}${l.hasPhoto?' <span title="Есть фото" style="font-size:12px;">📎</span>':''}${l.contact?'<br><span style="color:var(--ink-soft);font-size:11px;">'+escapeHtml(l.contact)+'</span>':''}</div>
               <div class="cell" style="text-transform:capitalize;">${escapeHtml(weekdayFromDate(l.requestDate))}</div>
               <div class="cell">${escapeHtml(l.eventDate ? formatDateText(l.eventDate) : (l.eventMonth||''))}</div>
               <div class="cell">${escapeHtml(l.source||'')}</div>
@@ -13668,6 +13886,7 @@
           <button class="modal-close">×</button>
         </div>
         <div class="modal-body">
+          ${lead.quick ? `<div style="background:#FFF4D6;border:1px solid #E8B84B;border-radius:12px;padding:9px 12px;margin-bottom:12px;font-size:13px;color:#171512;">⚡ <b>Быстрая заявка</b>${lead.quickBy ? ' · записал(а) ' + escapeHtml(lead.quickBy) : ''}. Дозаполните продукт, дату, сумму и комментарий — после сохранения пометка и задача «дозаполнить» снимутся сами.</div>` : ''}
           <div class="field">
             <label>Дата заявки</label>
             <input type="date" id="l-date" value="${lead.requestDate||''}">
@@ -14171,6 +14390,12 @@
         updated.clientId = _cl.id;
       }catch(e){ console.error('crm upsert', e); }
       if(!_prevLead || leadStatus(updated) !== _prevSt) updated.statusAt = new Date().toISOString();
+      // быстрая заявка дозаполнена полностью → снимаем «⚡ дозаполнить» и закрываем её задачу
+      if(_prevLead && _prevLead.quick){
+        const _nowF = new Date().toISOString(); let _fx = 0;
+        (state.leadTasks||[]).forEach(t=>{ if(t.leadId === updated.id && !t.done && (t.fillTask || t.title === QL_FILL_TASK)){ t.done = true; t.doneAt = _nowF; _fx++; } });
+        if(_fx) saveLeadTasks();
+      }
 
       // фото заявки — сохраняем/удаляем отдельным ключом, только если что-то поменяли в этой сессии модалки
       if(pendingLeadPhoto === 'REMOVE'){
@@ -14183,8 +14408,9 @@
 
       const idx = state.leads.findIndex(x=>x.id===updated.id);
       if(idx >= 0) state.leads[idx] = updated; else state.leads.push(updated);
-      try{ await saveClients(); }catch(e){ console.error('saveClients', e); }
-      await saveLeads();
+      { const _lb = overlay.querySelector('#btn-save-lead'); if(_lb){ _lb.disabled = true; _lb.textContent = '⏳ Сохраняю…'; } }
+      // клиенты и заявки — разные ключи, сохраняем одновременно, а не по очереди
+      await Promise.all([ saveClients().catch(e=> console.error('saveClients', e)), saveLeads() ]);
       if(tasksApply) await tasksApply();
       await leadStageTasks(updated, _prevSt);
       { const pl = idx >= 0 ? null : null; const stNow = leadStatusLabel(leadStatus(updated));
@@ -31479,7 +31705,9 @@
         sendPushNotification('Закончился материал', justRanOutNames.join(', '), ['admin','owner']);
       }
 
+      const _sbText = saveBtn.textContent; saveBtn.disabled = true; saveBtn.textContent = '⏳ Сохраняю…';
       const eventsSavedOk = await saveEvents();
+      if(eventsSavedOk === false){ saveBtn.disabled = false; saveBtn.textContent = _sbText; }
       if(eventsSavedOk === false){
         // сервер не принял — окно НЕ закрываем, чтобы менеджер не решил, что всё сохранилось
         showPersistentSaveFailBanner('Мероприятие НЕ сохранено: нет связи с сервером. Не закрывайте окно — проверьте интернет и нажмите «Сохранить» ещё раз.');
@@ -31487,6 +31715,9 @@
       }
       { const pb = document.getElementById('persistent-save-fail'); if(pb) pb.remove(); }
 
+      // само мероприятие уже сохранено — окно закрываем сразу, а связанные записи (заявка, «Книга»)
+      // дописываем в фоне: раньше человек ждал ещё две полные перезаписи списков, прежде чем окно закроется
+      const _bgAfterSave = async ()=>{
       // привязка заявки к новому мероприятию (см. блок валидации выше) — создаём новую заявку или
       // дописываем eventId в выбранную существующую, сразу помечая её проданной этим мероприятием
       if(EVENT_STATUSES_NEEDING_LEAD.includes(statusVal)){
@@ -31519,9 +31750,11 @@
 
       await syncEventIncomeIfNeeded(updated);
       await syncEventPaymentsToBook(updated);
+      };
       const dayEvts = state.events.filter(e=>e.date===updated.date && e.spaceId===updated.spaceId);
       const warns = computeGapWarnings(dayEvts);
       state.modal = modalAfterEventClose(); overlay.remove(); render();
+      _bgAfterSave().then(()=>{ if(!state.modal) render(); }).catch(e=> console.error('event after-save', e));
       if(warns[updated.id]){
         const w = warns[updated.id];
         showGapWarningBanner(w.gap < 0
