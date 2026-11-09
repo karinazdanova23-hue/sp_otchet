@@ -11307,7 +11307,7 @@
     return s.charAt(0).toUpperCase() + s.slice(1);
   }
   function lgMoney(n){ return (Number(n)||0).toLocaleString('ru-RU', {minimumFractionDigits:2, maximumFractionDigits:2}).replace(/ /g,' '); }
-  function lgRub(n){ n = Math.round(Number(n)||0); return `${n} (${lgNumWords(n)}) ${lgPlural(n,'рубль','рубля','рублей')} 00 копеек`; }
+  function lgRub(n){ n = Math.round(Number(n)||0); return `${String(n).replace(/\B(?=(\d{3})+(?!\d))/g, '\u00a0')} (${lgNumWords(n)}) ${lgPlural(n,'рубль','рубля','рублей')} 00 копеек`; }
   function lgDateDots(iso){ return iso ? iso.slice(8,10) + '.' + iso.slice(5,7) + '.' + iso.slice(0,4) : ''; }
   function lgDateLong(iso){ return iso ? `«${iso.slice(8,10)}» ${LEGAL_MONTHS_GEN[+iso.slice(5,7)-1]} ${iso.slice(0,4)} г.` : ''; }
   // ФИО в родительный падеж (для «в лице директора …») — простые правила, поле всегда можно поправить руками
@@ -11348,6 +11348,50 @@
     state.legalCompanies = await get('legal-companies', []);
     state.legalDocs = await get('legal-docs', []);
     state.legalExecutor = await get('legal-executor', {});
+    try{ const r = await window.storage.get('legal-signature', true); const v = r ? JSON.parse(r.value) : null; state.legalSignature = (v && v.dataUrl) ? v : null; }catch(e){ state.legalSignature = null; }
+  }
+  // подпись ИП (PNG) — загружается один раз в «Реквизиты исполнителя», хранится отдельным ключом
+  // и сама встаёт над линией «Исполнитель / Предприниматель» в договоре, счёте и акте
+  function lgSigImg(){
+    const sg = state.legalSignature;
+    if(!sg || !sg.dataUrl || sg.off) return '';
+    return `<img class="lg-sig-img" src="${sg.dataUrl}" alt="подпись">`;
+  }
+  function lgSigLine(){ const im = lgSigImg(); return im ? `<span class="lg-sigwrap">______________________${im}</span>` : '______________________'; }
+  // делаем фон подписи прозрачным (если сканировали на белой бумаге), обрезаем поля и уменьшаем до разумного размера
+  function lgPrepareSignature(file){
+    return new Promise((resolve, reject)=>{
+      const fr = new FileReader();
+      fr.onerror = ()=> reject(new Error('read'));
+      fr.onload = ()=>{
+        const img = new Image();
+        img.onerror = ()=> reject(new Error('image'));
+        img.onload = ()=>{
+          const W = img.naturalWidth, H = img.naturalHeight;
+          const c = document.createElement('canvas'); c.width = W; c.height = H;
+          const x = c.getContext('2d'); x.drawImage(img, 0, 0);
+          const d = x.getImageData(0, 0, W, H), p = d.data;
+          let minX = W, minY = H, maxX = -1, maxY = -1;
+          for(let i = 0; i < p.length; i += 4){
+            const r = p[i], g = p[i+1], b = p[i+2];
+            const light = (r + g + b) / 3;
+            if(light > 225) p[i+3] = 0;                                   // белая бумага → прозрачно
+            else if(light > 180) p[i+3] = Math.min(p[i+3], Math.round((225 - light) / 45 * 255)); // мягкий край
+            if(p[i+3] > 20){ const k = i / 4, px = k % W, py = (k - px) / W; if(px < minX) minX = px; if(px > maxX) maxX = px; if(py < minY) minY = py; if(py > maxY) maxY = py; }
+          }
+          if(maxX < 0) return reject(new Error('empty'));
+          x.putImageData(d, 0, 0);
+          const pad = 6; minX = Math.max(0, minX - pad); minY = Math.max(0, minY - pad); maxX = Math.min(W - 1, maxX + pad); maxY = Math.min(H - 1, maxY + pad);
+          const cw = maxX - minX + 1, ch = maxY - minY + 1;
+          const scale = Math.min(1, 600 / cw, 240 / ch);
+          const o = document.createElement('canvas'); o.width = Math.max(1, Math.round(cw * scale)); o.height = Math.max(1, Math.round(ch * scale));
+          o.getContext('2d').drawImage(c, minX, minY, cw, ch, 0, 0, o.width, o.height);
+          resolve(o.toDataURL('image/png'));
+        };
+        img.src = fr.result;
+      };
+      fr.readAsDataURL(file);
+    });
   }
   async function lgSave(key){ const map = { 'legal-companies': state.legalCompanies, 'legal-docs': state.legalDocs, 'legal-executor': state.legalExecutor }; await storageSetWithRetry(key, JSON.stringify(map[key] || [])); }
   function lgNextNum(type){
@@ -11381,11 +11425,20 @@
   }
   function lgPayClauses(d){
     lgPayNorm(d); const ex = lgExecutor(); const sc = lgScheme(d);
-    if(sc === 'advance') return `<p class="pt">3.1. Цена аванса составляет ${lgRub(d.advance)}. Заказчик вносит авансовый платеж на расчетный счет исполнителя ${lgDeadline(d.advMode, d.advDays, d.advDate)}.</p>
-         <p class="pt">3.2. Сумма остатка составляет ${lgRub(d.total - d.advance)}. Заказчик оплачивает ${d.restMode === 'after' ? 'оказанные услуги' : 'остаток'} по расчетному счету исполнителя ${lgDeadline(d.restMode, d.restDays, d.restDate)}.</p>
+    if(sc === 'advance') return `<p class="pt">3.1. Сумма аванса составляет ${lgRub(d.advance)}. Заказчик вносит авансовый платёж на расчётный счёт Исполнителя ${lgDeadline(d.advMode, d.advDays, d.advDate)}.</p>
+         <p class="pt">3.2. Сумма остатка составляет ${lgRub(d.total - d.advance)}. Заказчик оплачивает ${d.restMode === 'after' ? 'оказанные услуги' : 'остаток'} на расчётный счёт Исполнителя ${lgDeadline(d.restMode, d.restDays, d.restDate)}.</p>
          <p class="pt">3.3. Общая стоимость услуг составляет ${lgRub(d.total)}. ${escapeHtml(ex.vat)}.</p>`;
-    if(sc === 'prepay100') return `<p class="pt">3.1. Стоимость услуг составляет ${lgRub(d.total)}. ${escapeHtml(ex.vat)}.</p><p class="pt">3.2. Заказчик вносит 100% оплату на расчетный счет исполнителя ${lgDeadline(d.advMode, d.advDays, d.advDate)}.</p>`;
-    return `<p class="pt">3.1. Стоимость услуг составляет ${lgRub(d.total)}. ${escapeHtml(ex.vat)}.</p><p class="pt">3.2. Заказчик оплачивает оказанные услуги по расчетному счету исполнителя ${lgDeadline(d.restMode, d.restDays, d.restDate)}.</p>`;
+    if(sc === 'prepay100') return `<p class="pt">3.1. Стоимость услуг составляет ${lgRub(d.total)}. ${escapeHtml(ex.vat)}.</p><p class="pt">3.2. Заказчик вносит 100% оплату на расчётный счёт Исполнителя ${lgDeadline(d.advMode, d.advDays, d.advDate)}.</p>`;
+    return `<p class="pt">3.1. Стоимость услуг составляет ${lgRub(d.total)}. ${escapeHtml(ex.vat)}.</p><p class="pt">3.2. Заказчик оплачивает оказанные услуги на расчётный счёт Исполнителя ${lgDeadline(d.restMode, d.restDays, d.restDate)}.</p>`;
+  }
+  // конкретная дата, до которой оплатить счёт (если её можно посчитать): за N раб. дней до мероприятия / N раб. дней после договора
+  function lgInvoiceDueDate(d){
+    lgPayNorm(d); const sc = lgScheme(d);
+    const useAdv = (sc === 'advance' && d.invoiceWhat === 'advance') || sc === 'prepay100';
+    const mode = useAdv ? d.advMode : d.restMode, n = useAdv ? d.advDays : d.restDays;
+    if(mode === 'before' && d.date) return lgShiftWorkdays(d.date, n, -1);
+    if(mode === 'sign' && d.contractDate) return lgShiftWorkdays(d.contractDate, n, +1);
+    return '';
   }
   // срок оплаты конкретного счёта (строка в счёте)
   function lgInvoiceDeadline(d){
@@ -11394,8 +11447,17 @@
     if(sc === 'prepay100') return lgDeadline(d.advMode, d.advDays, d.advDate);
     return lgDeadline(d.restMode, d.restDays, d.restDate);
   }
+  // женское ли ФИО (по отчеству) — для «именуемая / действующая» в договоре
+  function lgFem(fio){ const w = String(fio||'').trim().split(/\s+/); const p = (w[2] || w[w.length-1] || '').toLowerCase(); return /(вна|чна|кызы)$/.test(p); }
+  // сдвиг на N рабочих дней (сб/вс пропускаем) — чтобы в счёте стояла конкретная дата оплаты
+  function lgShiftWorkdays(dateStr, n, dir){
+    if(!dateStr) return ''; const dt = parseDate(dateStr); let left = parseInt(n) || 0;
+    while(left > 0){ dt.setDate(dt.getDate() + dir); const wd = dt.getDay(); if(wd !== 0 && wd !== 6) left--; }
+    return dt.getFullYear() + '-' + String(dt.getMonth()+1).padStart(2,'0') + '-' + String(dt.getDate()).padStart(2,'0');
+  }
   function lgCustomerIntro(c){
-    if(c.kind === 'ip') return `<b>Индивидуальный предприниматель ${escapeHtml(c.signerName || c.name.replace(/^ИП\s+/,''))}</b>, именуемый в дальнейшем «Заказчик», в лице собственном, действующий на основании ОГРНИП ${escapeHtml(c.ogrn||'')}, с одной стороны,`;
+    if(c.kind === 'ip'){ const fio = c.signerName || c.name.replace(/^ИП\s+/,''); const f = lgFem(fio);
+      return `<b>Индивидуальный предприниматель ${escapeHtml(fio)}</b>${c.ogrn ? ' (ОГРНИП ' + escapeHtml(c.ogrn) + ')' : ''}, ${f ? 'именуемая' : 'именуемый'} в дальнейшем «Заказчик», ${f ? 'действующая' : 'действующий'} от своего имени, с одной стороны,`; }
     return `<b>${escapeHtml(c.fullName || c.name)}</b>, именуемое в дальнейшем «Заказчик», в лице ${escapeHtml(c.signerPost || 'директора')} ${escapeHtml(c.signerNameGen || lgFioGen(c.signerName))}, действующего на основании ${escapeHtml(c.basis || 'Устава')}, с одной стороны,`;
   }
   function lgReqBlock(c, isExec){
@@ -11412,13 +11474,13 @@
   }
   function lgContractHtml(d){
     const ex = lgExecutor(), c = d.company, subj = LEGAL_SUBJECTS.find(s=>s.key === d.subject) || LEGAL_SUBJECTS[0];
-    const where = [d.date ? lgDateDots(d.date) : '', d.time || '', d.address ? 'по адресу ' + d.address : ''].filter(Boolean).join(', ');
+    const where = [d.date ? lgDateDots(d.date) + (d.time ? ' в ' + d.time : '') : (d.time || ''), d.address ? 'по адресу ' + d.address : ''].filter(Boolean).join(', ');
     const pay = lgPayClauses(d);
     return `<div class="doc">
       <h1>ДОГОВОР${d.contractNo ? ' № ' + escapeHtml(d.contractNo) : ''}</h1>
       <table class="hdr"><tr><td>${escapeHtml(ex.city)}</td><td style="text-align:right;">${lgDateLong(d.contractDate)}</td></tr></table>
       <p class="ind">${lgCustomerIntro(c)}</p>
-      <p class="ind">и <b>${escapeHtml(ex.fullName)}</b>, именуемый в дальнейшем «<b><i>Исполнитель</i></b>», в лице собственном, с другой стороны, именуемые в дальнейшем «Стороны», заключили настоящий договор возмездного оказания услуг, в дальнейшем «Договор», о нижеследующем:</p>
+      <p class="ind">и <b>${escapeHtml(ex.fullName)}</b>${ex.ogrn ? ' (ОГРНИП ' + escapeHtml(ex.ogrn) + ')' : ''}, ${lgFem(ex.signerFull) ? 'именуемая' : 'именуемый'} в дальнейшем «<b><i>Исполнитель</i></b>», ${lgFem(ex.signerFull) ? 'действующая' : 'действующий'} от своего имени, с другой стороны, именуемые в дальнейшем «Стороны», заключили настоящий договор возмездного оказания услуг, в дальнейшем «Договор», о нижеследующем:</p>
       <h2>1. ПРЕДМЕТ ДОГОВОРА</h2>
       <p class="pt">1.1. По настоящему Договору Исполнитель обязан оказать ${escapeHtml(subj.text(d))}${where ? ', ' + escapeHtml(where) : ''} (далее - Услуги).</p>
       <h2>2. ПРАВА И ОБЯЗАННОСТИ СТОРОН</h2>
@@ -11442,14 +11504,14 @@
       <p class="pt">5.5. Все споры и разногласия, вытекающие из настоящего договора, должны по возможности решаться путем переговоров. В случае невозможности разрешения споров путем переговоров стороны передают их на рассмотрение в Арбитражный суд Омской области.</p>
       <h2>6. ЗАКЛЮЧИТЕЛЬНЫЕ ПОЛОЖЕНИЯ</h2>
       <p class="pt">6.1. Настоящий Договор вступает в силу с даты подписания и действует до подписания между Заказчиком и Исполнителем Акта оказанных услуг.</p>
-      <p class="pt">6.2. Все изменения и дополнения к настоящему Договору будут считаться действительными, если они совершены в письменной форме, подписаны и скреплены печатями сторон.</p>
+      <p class="pt">6.2. Все изменения и дополнения к настоящему Договору будут считаться действительными, если они совершены в письменной форме, подписаны обеими Сторонами.</p>
       <p class="pt">6.3. Договор считается расторгнутым с момента получения другой стороной письменного уведомления о расторжении Договора.</p>
       <p class="pt">6.4. Вопросы, не урегулированные настоящим Договором, разрешаются Исполнителем и Заказчиком в соответствии с действующим законодательством.</p>
       <p class="pt">6.5. Договор составлен в двух подлинных экземплярах, имеющих одинаковую юридическую силу, по одному для каждой стороны.</p>
       <div class="keep"><h2>7. АДРЕСА, РЕКВИЗИТЫ И ПОДПИСИ СТОРОН</h2>
       <table class="req"><tr><th>Заказчик:</th><th>Исполнитель:</th></tr><tr><td>${lgReqBlock(c, false)}</td><td>${lgReqBlock(Object.assign({kind:'ip'}, ex), true)}</td></tr></table>
       <h2>8. ПОДПИСИ СТОРОН</h2>
-      <table class="sig"><tr><td>От Заказчика:<br><br>______________________ ${escapeHtml(c.signerShort || lgInitials(c.signerName))}</td><td>От Исполнителя:<br><br>______________________ ${escapeHtml(ex.signer)}</td></tr></table></div>
+      <table class="sig"><tr><td>От Заказчика:<br><br>______________________ ${escapeHtml(c.signerShort || lgInitials(c.signerName))}</td><td>От Исполнителя:<br><br>${lgSigLine()} ${escapeHtml(ex.signer)}</td></tr></table></div>
     </div>`;
   }
   function lgPartyLine(c, isExec){
@@ -11481,9 +11543,9 @@
       ${lgItemsTable([ln])}
       <table class="tot"><tr><td>Итого:</td><td>${lgMoney(ln.sum)} ₽</td></tr><tr><td>${escapeHtml(ex.vat)}</td><td>—</td></tr><tr><td><b>Всего к оплате:</b></td><td><b>${lgMoney(ln.sum)} ₽</b></td></tr></table>
       <p>Всего наименований 1, на сумму ${lgMoney(ln.sum)} руб.<br><b>${lgNumWords(ln.sum)} ${lgPlural(Math.round(ln.sum),'рубль','рубля','рублей')} 00 копеек</b></p>
-      <p><b>Срок оплаты:</b> ${escapeHtml(lgInvoiceDeadline(d))}.</p>
+      <p><b>Срок оплаты:</b> ${escapeHtml(lgInvoiceDeadline(d))}${(()=>{ const dl = lgInvoiceDueDate(d); return dl ? ' — <b>до ' + escapeHtml(lgDateDots(dl)) + '</b>' : ''; })()}.</p>
       <p class="sm">Оплата данного счёта означает согласие с условиями оказания услуг.</p>
-      <table class="sig"><tr><td>Предприниматель ______________________ ${escapeHtml(ex.signer)}</td><td></td></tr></table>
+      <table class="sig"><tr><td>Индивидуальный предприниматель ${lgSigLine()} ${escapeHtml(ex.signer)}</td><td></td></tr></table>
     </div>`;
   }
   function lgActHtml(d){
@@ -11494,10 +11556,10 @@
         <tr><td class="k">Заказчик:</td><td>${lgPartyLine(c, false)}</td></tr>
         <tr><td class="k">Основание:</td><td>${d.contractNo ? 'Договор № ' + escapeHtml(d.contractNo) + ' от ' + lgDateDots(d.contractDate) : 'Договор от ' + lgDateDots(d.contractDate)}</td></tr></table>
       ${lgItemsTable([ln])}
-      <table class="tot"><tr><td>Итого к оплате:</td><td><b>${lgMoney(ln.sum)} ₽</b></td></tr><tr><td>${escapeHtml(ex.vat)}</td><td></td></tr></table>
+      <table class="tot"><tr><td>Итого:</td><td><b>${lgMoney(ln.sum)} ₽</b></td></tr><tr><td>${escapeHtml(ex.vat)}</td><td></td></tr></table>
       <p>Всего оказано услуг 1, на сумму ${lgMoney(ln.sum)} руб.: <b>${lgNumWords(ln.sum)} ${lgPlural(Math.round(ln.sum),'рубль','рубля','рублей')} 00 копеек</b>.</p>
       <p>Исполнитель выполнил все обязательства в полном объеме в срок и в надлежащем качестве. Заказчик претензий к исполнителю не имеет.</p>
-      <table class="sig"><tr><td>Исполнитель: ______________________<br>${escapeHtml(ex.signerFull)}</td><td>Заказчик: ______________________<br>${escapeHtml(c.kind === 'ip' ? (c.signerName || c.name) : ((c.signerPostNom || 'Директор') + ' ' + (c.signerName || '')))}</td></tr></table>
+      <table class="sig"><tr><td>Исполнитель: ${lgSigLine()}<br>${escapeHtml(ex.signerFull)}</td><td>Заказчик: ______________________<br>${escapeHtml(c.kind === 'ip' ? (c.signerName || c.name) : ((c.signerPostNom || 'Директор') + ' ' + (c.signerName || '')))}</td></tr></table>
     </div>`;
   }
   const LG_DOC_CSS = `@page{ size:A4; margin:18mm 16mm 18mm 22mm; }
@@ -11510,6 +11572,8 @@
     table{ border-collapse:collapse; width:100%; } table.hdr td{ padding:0 0 12px; }
     table.req td, table.req th{ border:1px solid #000; vertical-align:top; padding:6px 8px; width:50%; font-size:11pt; text-align:left; } table.req th{ border:none; text-align:center; }
     table.sig td{ padding:18px 6px 6px 0; vertical-align:bottom; width:50%; }
+    .lg-sigwrap{ position:relative; display:inline-block; }
+    .lg-sig-img{ position:absolute; left:50%; bottom:-14px; transform:translateX(-50%); height:58px; max-width:190px; object-fit:contain; pointer-events:none; }
     table.bank td{ border:1px solid #000; padding:3px 6px; font-family:Arial, sans-serif; font-size:9.5pt; }
     table.parties td{ padding:3px 6px 6px 0; vertical-align:top; font-family:Arial, sans-serif; font-size:9.5pt; } table.parties td.k{ width:140px; color:#333; }
     table.items{ margin:10px 0 6px; } table.items th, table.items td{ border-bottom:1px solid #000; padding:5px 4px; font-family:Arial, sans-serif; font-size:9.5pt; text-align:left; } table.items th{ border-top:2px solid #000; font-weight:normal; color:#333; }
@@ -11530,6 +11594,8 @@
     w.document.open(); w.document.write(html.replace('</body>', '<script>setTimeout(function(){ window.print(); }, 400);<\/script></body>')); w.document.close();
   }
   function lgDownloadWord(html, name){
+    // Word не умеет «подпись поверх линии» — ставим картинку подписи прямо перед линией
+    html = html.replace(/<span class="lg-sigwrap">(_+)<img class="lg-sig-img" src="([^"]+)" alt="подпись"><\/span>/g, '<img src="$2" height="56" style="height:56px;vertical-align:bottom;" alt="подпись">$1');
     const doc = html.replace('<html>', '<html xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:w="urn:schemas-microsoft-com:office:word" xmlns="http://www.w3.org/TR/REC-html40">');
     downloadFile(name + '.doc', '﻿' + doc, 'application/msword;charset=utf-8');
   }
@@ -11740,6 +11806,15 @@
       const miss = validate();
       const msg = wrap.querySelector('#lg-msg');
       if(miss.length){ msg.textContent = 'Заполните: ' + miss.join(', '); msg.style.color = 'var(--danger)'; return; }
+      { // проверка дат: договор не позже мероприятия, акт не раньше мероприятия и договора
+        const warn = [];
+        if(d.kinds.includes('contract') && d.contractDate && d.date && d.subject !== 'items' && d.contractDate > d.date) warn.push('дата договора (' + lgDateDots(d.contractDate) + ') позже даты мероприятия (' + lgDateDots(d.date) + ')');
+        if(d.kinds.includes('act') && d.actDate && d.date && d.subject !== 'items' && d.actDate < d.date) warn.push('дата акта раньше даты мероприятия');
+        if(d.kinds.includes('act') && d.actDate && d.contractDate && d.actDate < d.contractDate) warn.push('дата акта (' + lgDateDots(d.actDate) + ') раньше даты договора (' + lgDateDots(d.contractDate) + ')');
+        const dl = d.kinds.includes('invoice') ? lgInvoiceDueDate(d) : '';
+        if(dl && d.invoiceDate && dl < d.invoiceDate) warn.push('срок оплаты по счёту (' + lgDateDots(dl) + ') уже прошёл на дату счёта — проверьте условия оплаты');
+        if(warn.length && !confirm('Проверьте даты:\n• ' + warn.join('\n• ') + '\n\nВсё равно сформировать?')) return;
+      }
       const c = d.company; if(!c.signerShort && c.signerName) c.signerShort = lgInitials(c.signerName);
       const html = lgBuildDocHtml(d, d.kinds);
       if(mode === 'print') lgOpenPrint(html); else lgDownloadWord(html, (d.kinds.length === 3 ? 'Документы' : d.kinds.map(k=>({contract:'Договор', invoice:'Счёт', act:'Акт'})[k]).join('_')) + '_' + (c.name||'').replace(/[«»"\s]+/g,'_') + '_' + (d.date || today));
@@ -11796,9 +11871,50 @@
     wrap.innerHTML = `<div class="ts-modal" style="max-width:560px;"><div class="ts-head"><div><div class="ts-kicker">Работа с юрлицами</div><h3>Реквизиты исполнителя</h3></div><button class="ts-x" data-x>×</button></div>
       <div style="display:grid;gap:8px;margin-top:10px;">${F.map(([k,l])=>`<label class="lg-exl">${l}<input type="text" data-ek="${k}" value="${escapeHtml(ex[k]||'')}"></label>`).join('')}
       <label class="lg-exl">С какого номера начать в этом году — договоры / счета / акты<span style="display:flex;gap:6px;">${['contract','invoice','act'].map(t=>`<input type="number" data-sn="${t}" value="${escapeHtml(String((ex.startNums||{})[t]||''))}" placeholder="1">`).join('')}</span></label></div>
+      <div id="lg-sig-box" style="margin-top:14px;"></div>
       <div class="ts-foot"><span style="flex:1;"></span><button class="btn btn-ghost" data-x>Отмена</button><button class="btn ts-done" data-save>💾 Сохранить</button></div></div>`;
     document.body.appendChild(wrap);
     const close = ()=> wrap.remove();
+    const sigBox = wrap.querySelector('#lg-sig-box');
+    const drawSig = (msg)=>{
+      const sg = state.legalSignature;
+      sigBox.innerHTML = `<div style="border:2px dashed ${sg?'#75804F':'#D9D0BC'};border-radius:14px;padding:12px;background:#fff;">
+        <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px;"><b style="flex:1;font-size:14px;">✍️ Ваша подпись</b>
+          ${sg ? `<span style="font-size:11.5px;color:#5E6A3B;">загружена${sg.at ? ' ' + escapeHtml(lgDateDots(String(sg.at).slice(0,10))) : ''}</span>` : ''}</div>
+        ${sg ? `<div style="display:flex;align-items:flex-end;gap:10px;padding:10px 12px;background:#F2ECDD;border-radius:10px;font:13px 'Times New Roman',serif;color:#171512;">
+            <span>Индивидуальный предприниматель</span><span class="lg-sigwrap" style="position:relative;display:inline-block;">______________________<img src="${sg.dataUrl}" style="position:absolute;left:50%;bottom:-14px;transform:translateX(-50%);height:58px;max-width:190px;object-fit:contain;${sg.off?'opacity:.25;':''}"></span><span>${escapeHtml(lgExecutor().signer||'')}</span></div>
+          <label style="display:flex;gap:8px;align-items:center;font-size:12.5px;margin-top:10px;cursor:pointer;"><input type="checkbox" id="lg-sig-on" ${sg.off?'':'checked'}> Ставить подпись в договор, счёт и акт</label>` :
+          `<div style="font-size:12.5px;color:#8C8C8C;line-height:1.5;">Загрузите один раз картинку с подписью (PNG, можно фото или скан на белой бумаге — белый фон уберётся сам). Подпись будет стоять над линией «Исполнитель» во всех документах.</div>`}
+        <div style="display:flex;gap:8px;margin-top:10px;flex-wrap:wrap;">
+          <label class="btn ${sg?'btn-ghost':'ts-done'}" style="cursor:pointer;">${sg ? '🔄 Заменить подпись' : '⬆️ Загрузить подпись (PNG)'}<input type="file" id="lg-sig-file" accept="image/png,image/jpeg,image/webp" style="display:none;"></label>
+          ${sg ? '<button type="button" class="btn btn-ghost" id="lg-sig-del" style="color:var(--danger);">Удалить</button>' : ''}
+        </div>
+        ${msg ? `<div style="font-size:12px;margin-top:8px;color:${msg.err?'#A3402F':'#5E6A3B'};">${escapeHtml(msg.t)}</div>` : ''}
+      </div>`;
+      const fi = sigBox.querySelector('#lg-sig-file');
+      fi.onchange = async ()=>{
+        const f = fi.files && fi.files[0]; if(!f) return;
+        if(f.size > 8*1024*1024){ drawSig({ t:'Файл больше 8 МБ — сохраните подпись поменьше.', err:true }); return; }
+        try{
+          const dataUrl = await lgPrepareSignature(f);
+          const rec = { dataUrl, at: new Date().toISOString(), by: (()=>{ try{ return feedWho(); }catch(_){ return ''; } })(), off: false };
+          const ok = await storageSetWithRetry('legal-signature', JSON.stringify(rec));
+          if(!ok){ drawSig({ t:'Не удалось сохранить — проверьте интернет и попробуйте ещё раз.', err:true }); return; }
+          state.legalSignature = rec;
+          recordAction('Юрлица: загружена подпись ИП', '', { cat:'legal', verb:'загрузил(а) подпись' });
+          drawSig({ t:'✓ Подпись сохранена — теперь она будет во всех новых документах.' });
+        }catch(e){ drawSig({ t: e && e.message === 'empty' ? 'На картинке не нашлось подписи — проверьте файл.' : 'Не получилось прочитать картинку — нужен PNG или JPG.', err:true }); }
+      };
+      const del = sigBox.querySelector('#lg-sig-del');
+      if(del) del.onclick = async ()=>{
+        if(!confirm('Удалить подпись из приложения? В документах снова будет пустая линия.')) return;
+        try{ await window.storage.delete('legal-signature', true); }catch(e){}
+        state.legalSignature = null; recordAction('Юрлица: подпись ИП удалена', '', { cat:'legal', verb:'удалил(а) подпись' }); drawSig({ t:'Подпись удалена.' });
+      };
+      const on = sigBox.querySelector('#lg-sig-on');
+      if(on) on.onchange = async ()=>{ const rec = { ...state.legalSignature, off: !on.checked }; state.legalSignature = rec; await storageSetWithRetry('legal-signature', JSON.stringify(rec)); drawSig(); };
+    };
+    drawSig();
     wrap.querySelectorAll('[data-x]').forEach(b=> b.onclick = close);
     wrap.querySelector('[data-save]').onclick = async ()=>{
       const o = {}; wrap.querySelectorAll('[data-ek]').forEach(i=>{ if(i.value.trim() !== (LEGAL_EXECUTOR_DEFAULT[i.dataset.ek]||'')) o[i.dataset.ek] = i.value.trim(); });
