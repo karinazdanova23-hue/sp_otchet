@@ -122,6 +122,172 @@
   .summary-card .label{ font-size: 11px; color: var(--ink-soft); font-family: var(--font-mono); margin-top: 6px; letter-spacing:0.02em; }
   .summary-card.green .num{ color: var(--status-green); }
   .summary-card.red .num{ color: var(--status-red); }
+  .lt-strip-wrap{ border:1px solid var(--line-strong); border-radius:var(--radius); background:var(--white); padding:10px 12px; margin-bottom:12px; }
+  .lt-strip-h{ display:flex; align-items:center; gap:12px; flex-wrap:wrap; font-size:12.5px; color:var(--ink-soft); margin-bottom:8px; }
+  .lt-strip-h > b{ color:var(--ink); font-size:13.5px; }
+  .lt-strip{ display:grid; grid-template-columns: repeat(14, minmax(52px,1fr)); gap:4px; overflow-x:auto; }
+  .lt-sd{ border:1px solid var(--line); border-radius:var(--radius); padding:5px 4px 6px; cursor:pointer; display:flex; flex-direction:column; align-items:center; gap:1px; font-family:var(--font-body); }
+  .lt-sd:hover{ border-color:var(--ink); }
+  .lt-sd.now{ border:2px solid #B8863A; }
+  .lt-sd.sel{ outline:2px solid var(--ink); outline-offset:-2px; }
+  .lt-sd .w{ font-family:var(--font-mono); font-size:10.5px; }
+  .lt-sd .d{ font-size:11px; }
+  .lt-sd .n{ font-family:var(--font-display); font-size:20px; font-weight:600; line-height:1.1; }
+  .lt-month{ border:1px solid var(--line-strong); border-radius:var(--radius); background:var(--white); padding:10px 12px; margin-bottom:12px; }
+  .lt-cal{ display:grid; grid-template-columns: repeat(7, minmax(0,1fr)); gap:3px; }
+  .lt-cal-h{ font-family: var(--font-mono); font-size:11px; color: var(--ink-soft); text-align:center; }
+  .lt-cal-day{ border:1px solid var(--line); border-radius: var(--radius); min-height:44px; padding:3px 6px; cursor:pointer; display:flex; justify-content:space-between; align-items:flex-start; font-family: var(--font-body); }
+  .lt-cal-day:hover{ border-color: var(--ink); }
+  .lt-cal-d{ font-size:11px; font-family: var(--font-mono); color: var(--ink-soft); }
+  .lt-cal-n{ font-family: var(--font-display); font-size:18px; font-weight:600; line-height:1; align-self:flex-end; }
+  .lt-board{ display:grid; grid-template-columns: repeat(4, minmax(0,1fr)); gap:10px; align-items:start; }
+  .lt-col{ background:rgba(0,0,0,0.035); border-radius:var(--radius); border-top:3px solid var(--c); display:flex; flex-direction:column; min-width:0; }
+  .lt-col.sel{ box-shadow: 0 0 0 2px var(--ink); }
+  .lt-col-h{ display:flex; align-items:center; gap:8px; padding:8px 10px; font-family:var(--font-mono); font-size:12px; text-transform:uppercase; letter-spacing:.03em; }
+  .lt-col-h b{ margin-left:auto; background:var(--c); color:#fff; border-radius:10px; padding:1px 9px; font-size:12px; }
+  .lt-x{ border:none; background:none; cursor:pointer; font-size:11px; color:var(--ink-soft); text-transform:none; padding:0; }
+  .lt-col-b{ max-height:520px; overflow-y:auto; padding:0 6px 8px; display:flex; flex-direction:column; gap:5px; }
+  .lt-empty{ font-size:12px; color:var(--ink-soft); text-align:center; padding:14px 0; }
+  .lt-daygrp{ display:flex; justify-content:space-between; font-family:var(--font-mono); font-size:11px; color:var(--ink-soft); padding:6px 4px 1px; border-bottom:1px dashed var(--line); position:sticky; top:0; background:#ECE6D6; z-index:1; }
+  .lt-card{ background:var(--white); border:1px solid var(--line); border-left:3px solid var(--c, var(--line-strong)); border-radius:var(--radius); padding:6px 8px; display:flex; gap:7px; align-items:flex-start; position:relative; }
+  .lt-card.od{ border-left-color: var(--danger); }
+  .lt-card.done .lt-card-title{ text-decoration:line-through; color:var(--ink-soft); }
+  .lt-card input{ margin-top:2px; flex:none; }
+  .lt-card-body{ flex:1; min-width:0; }
+  .lt-card-title{ font-size:13px; font-weight:500; line-height:1.3; display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; overflow:hidden; }
+  .lt-card-meta{ font-size:11.5px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; margin-top:1px; }
+  .lt-card-meta a{ color:var(--status-blue); text-decoration:none; }
+  .lt-card-meta a:hover{ text-decoration:underline; }
+  .lt-card-foot{ display:flex; gap:8px; align-items:center; font-size:11px; color:var(--ink-soft); margin-top:3px; flex-wrap:wrap; }
+  .lt-who{ background:rgba(0,0,0,0.06); border-radius:8px; padding:0 7px; }
+  .lt-card-del{ border:none; background:none; cursor:pointer; color:var(--ink-soft); font-size:14px; line-height:1; padding:0 2px; opacity:0; }
+  .lt-card:hover .lt-card-del{ opacity:1; }
+  .lt-gbar{ display:flex; align-items:center; gap:4px; flex-wrap:wrap; margin:0 0 10px; font-size:12.5px; color:var(--ink-soft); }
+  .lt-gbar > span:first-child{ margin-right:4px; }
+  .lt-gbar button{ border:1px solid var(--line-strong); background:var(--white); border-radius:14px; padding:3px 12px; cursor:pointer; font-size:12.5px; font-family:var(--font-body); color:var(--ink); }
+  .lt-gbar button.on{ background:var(--ink); color:#fff; border-color:var(--ink); }
+  .lt-gbar .hint{ margin-left:auto; font-size:11.5px; }
+  .lt-grp{ background:rgba(255,255,255,0.55); border:1px solid var(--line); border-radius:var(--radius); }
+  .lt-grp-h{ display:flex; align-items:flex-start; flex-wrap:wrap; gap:4px 6px; padding:6px 8px; cursor:pointer; user-select:none; font-size:12.5px; font-weight:600; }
+  .lt-grp-h:hover{ background:rgba(0,0,0,0.03); }
+  .lt-grp-h .arr{ width:10px; color:var(--ink-soft); font-size:11px; }
+  .lt-grp-h .t{ flex:1; min-width:0; line-height:1.3; display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; overflow:hidden; }
+  .lt-grp-h .arr{ padding-top:2px; }
+  .lt-grp-h b{ background:var(--c); color:#fff; border-radius:9px; padding:0 7px; font-size:11px; }
+  .lt-grp-h .t + b + .lt-queue{ margin-left:0; }
+  .lt-queue{ margin-left:16px; border:1px solid var(--c); background:var(--white); color:var(--ink); border-radius:12px; padding:1px 9px; font-size:11px; cursor:pointer; white-space:nowrap; font-family:var(--font-body); }
+  .lt-queue:hover{ background:var(--c); color:#fff; }
+  .lt-grp-b{ display:flex; flex-direction:column; gap:4px; padding:0 5px 6px; }
+  .lt-card.ing{ padding:5px 8px; }
+  .lt-card-meta.main{ font-size:12.5px; font-weight:500; }
+  .lt-card-script{ border:1px solid var(--line); background:var(--white); border-radius:12px; cursor:pointer; font-size:12px; line-height:1; padding:3px 6px; flex:none; }
+  .lt-card-script:hover{ border-color:var(--ink); background:#F7F3EA; }
+  .ts-overlay{ position:fixed; inset:0; background:rgba(23,21,18,.45); z-index:5000; display:flex; align-items:center; justify-content:center; padding:14px; }
+  .ts-modal{ background:var(--white); border-radius:8px; width:100%; max-width:600px; max-height:94vh; overflow:auto; padding:18px 20px; box-shadow:0 18px 50px rgba(0,0,0,.25); }
+  .ts-head{ display:flex; align-items:flex-start; gap:10px; }
+  .ts-head h3{ margin:2px 0 0; font-family:var(--font-display); font-size:20px; line-height:1.2; }
+  .ts-kicker{ font-family:var(--font-mono); font-size:11px; color:var(--ink-soft); text-transform:uppercase; letter-spacing:.04em; }
+  .ts-x{ margin-left:auto; border:none; background:none; font-size:22px; cursor:pointer; color:var(--ink-soft); line-height:1; }
+  .ts-dots{ display:flex; gap:4px; margin:10px 0 2px; flex-wrap:wrap; }
+  .ts-dots span{ flex:1; min-width:14px; height:5px; border-radius:3px; background:var(--line); cursor:pointer; }
+  .ts-dots span.ok{ background:var(--accent); }
+  .ts-dots span.cur{ background:var(--ink); }
+  .ts-client{ display:flex; gap:10px; align-items:center; background:#F7F3EA; border-radius:6px; padding:10px 12px; margin:12px 0; }
+  .ts-av{ width:36px; height:36px; border-radius:50%; background:var(--accent); color:#fff; display:flex; align-items:center; justify-content:center; font-family:var(--font-display); font-size:17px; flex:none; }
+  .ts-meta{ font-size:12px; color:var(--ink-soft); margin-top:1px; }
+  .ts-link{ font-size:12px; color:var(--status-blue); white-space:nowrap; }
+  .ts-label{ font-size:12.5px; font-weight:600; margin-bottom:4px; }
+  .ts-label span{ font-weight:400; color:var(--ink-soft); }
+  .ts-text{ width:100%; box-sizing:border-box; border:1px solid var(--line-strong); border-radius:6px; padding:10px 12px; font-family:var(--font-body); font-size:14px; line-height:1.45; resize:vertical; background:#FFFDF8; }
+  .ts-text.tpl{ background:#F4F6EE; font-family:var(--font-mono); font-size:12.5px; }
+  .ts-actions{ display:flex; gap:6px; flex-wrap:wrap; margin-top:10px; align-items:center; }
+  .ts-actions .btn.ok, .ts-go.ok{ background:var(--accent) !important; border-color:var(--accent) !important; color:#fff !important; }
+  .ts-go.tg{ background:#2A9FD8; border-color:#2A9FD8; color:#fff; }
+  .ts-go.wa{ background:#1FA855; border-color:#1FA855; color:#fff; }
+  .ts-go.tg:hover, .ts-go.wa:hover{ filter:brightness(.93); }
+  .ts-done{ background:var(--accent); border-color:var(--accent); color:#fff; }
+  .ts-done:hover{ filter:brightness(.93); }
+  .lt-scripts-btn{ border:1px solid var(--line-strong) !important; background:var(--white) !important; color:var(--ink) !important; border-radius:14px; padding:3px 12px; }
+  .tss-modal{ max-width:720px; }
+  .tss-sec{ font-family:var(--font-mono); font-size:11.5px; text-transform:uppercase; letter-spacing:.05em; color:var(--ink-soft); margin:16px 0 8px; border-bottom:1px solid var(--line); padding-bottom:4px; }
+  .tss-row{ border:1px solid var(--line); border-left:3px solid var(--accent); border-radius:6px; padding:10px 12px; margin-bottom:10px; background:#FDFBF6; }
+  .tss-row.manual{ border-left-color:var(--status-blue); }
+  .tss-row-h{ display:flex; gap:8px; align-items:center; flex-wrap:wrap; margin-bottom:4px; }
+  .tss-stage{ background:var(--accent); color:#fff; border-radius:10px; padding:1px 9px; font-size:11px; }
+  .tss-stage.manual{ background:var(--status-blue); }
+  .tss-when{ font-size:11.5px; color:var(--ink-soft); }
+  .tss-state{ margin-left:auto; font-size:11px; color:var(--ink-soft); border:1px solid var(--line); border-radius:10px; padding:0 8px; }
+  .tss-state.own{ color:var(--accent); border-color:var(--accent); }
+  .tss-title{ font-weight:600; font-size:13.5px; display:flex; gap:6px; align-items:center; flex-wrap:wrap; }
+  .tss-name{ flex:1; min-width:200px; font-weight:400; }
+  .tss-sub{ font-size:12px; color:var(--ink-soft); margin:4px 0 3px; }
+  .tss-tools{ display:flex; gap:4px; align-items:center; flex-wrap:wrap; margin-top:5px; }
+  .tss-chip{ border:1px dashed var(--line-strong); background:var(--white); border-radius:10px; padding:1px 8px; font-size:11.5px; font-family:var(--font-mono); cursor:pointer; }
+  .tss-chip:hover{ border-style:solid; border-color:var(--ink); }
+  .tss-prev{ font-size:12px; color:var(--ink-soft); margin-top:6px; white-space:pre-wrap; background:#F4F6EE; border-radius:4px; padding:6px 8px; }
+  .tss-prev > span:first-child{ font-weight:600; color:var(--accent); }
+  .ts-nolink{ font-size:11.5px; color:var(--ink-soft); flex-basis:100%; }
+  .ts-foot{ display:flex; gap:6px; align-items:center; flex-wrap:wrap; border-top:1px solid var(--line); margin-top:14px; padding-top:12px; }
+  .ts-mini{ border:none; background:none; cursor:pointer; color:var(--ink-soft); font-size:12px; padding:0; text-decoration:underline; }
+  .ts-donemark{ color:var(--accent); font-weight:600; font-size:13px; }
+  @media (max-width: 640px){ .ts-modal{ padding:14px; } .ts-actions .btn{ flex:1 1 100%; } .lt-gbar .hint{ display:none; } }
+  .ms-cards{ display:grid; grid-template-columns: repeat(auto-fill, minmax(min(100%,430px),1fr)); gap:10px; }
+  .ms-card{ background:var(--white); border:1px solid var(--line-strong); border-radius:6px; padding:12px 14px; }
+  .ms-head{ display:flex; align-items:center; gap:10px; margin-bottom:6px; flex-wrap:wrap; }
+  .ms-av{ width:34px; height:34px; border-radius:50%; background:var(--status-blue); color:#fff; display:flex; align-items:center; justify-content:center; font-family:var(--font-display); font-size:16px; flex:none; }
+  .ms-sub{ font-size:11.5px; color:var(--ink-soft); }
+  .ms-badge{ margin-left:auto; font-size:11px; background:#F4EBD3; border-radius:10px; padding:1px 8px; }
+  .ms-grp{ font-family:var(--font-mono); font-size:10.5px; text-transform:uppercase; letter-spacing:.05em; color:var(--ink-soft); margin:8px 0 4px; }
+  .ms-grid{ display:grid; grid-template-columns: repeat(4, 1fr); gap:4px; }
+  .ms-kpi{ background:#F7F3EA; border-radius:4px; padding:5px 6px; min-width:0; }
+  .ms-kpi .v{ font-family:var(--font-display); font-size:17px; font-weight:600; line-height:1.1; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .ms-kpi .l{ font-size:10.5px; color:var(--ink-soft); }
+  .ms-kpi .s{ font-size:10.5px; color:var(--ink); margin-top:1px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .ms-kpi.good .v{ color:var(--status-green); }
+  .ms-kpi.bad .v{ color:var(--danger); }
+  .ms-bar{ height:5px; background:var(--line); border-radius:3px; margin-top:8px; overflow:hidden; }
+  .ms-bar span{ display:block; height:100%; }
+  .ms-note{ font-size:11px; color:var(--ink-soft); margin-top:5px; }
+  .ms-table{ border-collapse:collapse; font-size:12.5px; width:100%; background:var(--white); }
+  .ms-table th, .ms-table td{ border:1px solid var(--line); padding:4px 8px; text-align:right; white-space:nowrap; }
+  .ms-table th{ font-family:var(--font-mono); font-size:11px; color:var(--ink-soft); font-weight:400; }
+  .ms-table td:first-child, .ms-table th:first-child{ text-align:left; }
+  .lr-row{ border-bottom:1px solid var(--line); }
+  .lr-row summary{ display:flex; align-items:center; gap:10px; padding:6px 0; cursor:pointer; list-style:none; }
+  .lr-row summary::-webkit-details-marker{ display:none; }
+  .lr-row summary::before{ content:'▸'; color:var(--ink-soft); font-size:11px; }
+  .lr-row[open] summary::before{ content:'▾'; }
+  .lr-bar{ flex:1; height:10px; background:rgba(0,0,0,0.07); border-radius:5px; overflow:hidden; min-width:40px; }
+  .lr-bar span{ display:block; height:100%; border-radius:5px; }
+  .lr-name{ width:230px; flex:none; font-size:13px; }
+  .lr-num{ font-size:12px; white-space:nowrap; min-width:140px; text-align:right; }
+  .lr-body{ padding:2px 0 10px 20px; font-size:12px; }
+  .lr-cross{ margin-bottom:3px; color:var(--ink-soft); }
+  .lr-cross b{ color:var(--ink); font-weight:600; }
+  .lr-leads{ display:flex; flex-wrap:wrap; gap:4px; margin-top:6px; }
+  .lr-leads a{ background:#F7F3EA; border-radius:10px; padding:1px 9px; color:var(--status-blue); text-decoration:none; font-size:11.5px; }
+  @media (max-width: 640px){ .ms-grid{ grid-template-columns: repeat(2, 1fr); } .lr-name{ width:120px; } .lr-num{ min-width:0; } }
+  .lt-card.lg{ border-left-color:#7E57A8; background:#FBF8FD; }
+  .lg-chip{ border:1px solid #CDB8E3; background:#F3ECFA; color:#5E3E86; border-radius:8px; padding:0 7px; font-size:11px; cursor:pointer; font-family:var(--font-body); max-width:100%; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .lg-doc{ font-size:12px; border:1px solid var(--line-strong); border-radius:10px; padding:1px 9px; color:var(--danger); }
+  .lg-doc.ok{ color:var(--accent); border-color:var(--accent); }
+  .lg-table td{ vertical-align:top; }
+  .lg-table th{ text-align:center; }
+  .lg-table th:nth-child(1), .lg-table th:nth-child(2), .lg-table th:nth-child(3){ text-align:left; }
+  .lg-table td:nth-child(2), .lg-table td:nth-child(3){ text-align:left; white-space:normal; }
+  .lg-c{ text-align:center !important; font-size:12px; }
+  .lg-c.ok{ color:var(--accent); font-weight:700; font-size:15px; }
+  .lg-c.late{ color:#fff; background:var(--danger); font-weight:600; }
+  .lg-c.due{ color:#8A6420; background:#FBF1DC; }
+  .lg-c.wait{ color:var(--ink-soft); }
+  .lg-c.na{ color:var(--ink-soft); }
+  .lt-done-list{ display:grid; grid-template-columns: repeat(auto-fill, minmax(260px,1fr)); gap:5px; margin-top:8px; }
+  @media (max-width: 900px){
+    .lt-board{ display:flex; overflow-x:auto; scroll-snap-type:x mandatory; padding-bottom:6px; }
+    .lt-col{ flex:0 0 82%; scroll-snap-align:start; }
+    .lt-col-b{ max-height:60vh; }
+    .lt-card-del{ opacity:1; }
+  }
 
   /* ---------- режим приватности: скрывает экран от случайного взгляда ---------- */
   #app.privacy-blur{ filter: blur(9px); transition: filter .12s ease; pointer-events: none; user-select: none; }
@@ -1216,7 +1382,7 @@
   const LEAD_STATUSES = [['new','Новая заявка'],['needs','Отправленные брифы'],['brief','КП в разработке'],['kp','Отправленные КП'],['sold','Продажи'],['lost','Отказы']];
   const LEAD_LOST_REASONS = ['Дорого','Не подошла дата','Выбрали другую студию','Передумали / отложили','Пропал, не отвечает','Не подошёл формат / программа','Нет свободного зала','Другое'];
   function leadStatus(l){ if(!l) return 'new'; if(l.sold) return 'sold'; const st = (l.status && l.status !== 'sold') ? l.status : 'new'; return (st === 'thinking' || st === 'follow') ? 'kp' : st; } // старые «Добивка»/«Думает» теперь в «Отправленные КП»
-  // вид заявки: B2C — частные гости (ведём здесь), B2B — компании (работа идёт в Едином журнале, здесь — продажа и конверсия)
+  // вид заявки: B2C — частные гости, B2B — компании. Обе ведутся только здесь (связка с Единым журналом отключена в ноябре 2026)
   function leadKind(l){ return l && l.kind === 'b2b' ? 'b2b' : 'b2c'; }
   function leadStatusLabel(s){ const f = LEAD_STATUSES.find(x=>x[0]===s); return f ? f[1] : s; }
   function leadBadgeHtml(l){
@@ -3124,6 +3290,8 @@
     state._leadsBaseline = JSON.parse(JSON.stringify(state.leads));
     state._kpOffersBaseline = JSON.parse(JSON.stringify(state.kpOffers || []));
     state._leadTasksBaseline = JSON.parse(JSON.stringify(state.leadTasks || []));
+    setTimeout(()=>{ legalDocsSweep(); }, 2500);
+    setTimeout(()=>{ migrateB2bTasksOnce(); }, 3500);
     state._clientsBaseline = JSON.parse(JSON.stringify(state.clients || []));
     state._crmSettingsBaseline = JSON.parse(JSON.stringify(state.crmSettings || {}));
     state._journalSyncBaseline = JSON.parse(JSON.stringify(state.journalSync || {}));
@@ -4192,10 +4360,12 @@
     return mergeEventPayments(serverEv, out, baseEv);
   }
   async function saveEvents(){
-    return await saveCollectionMerged('events', state.events, state._eventsBaseline, (finalArr)=>{
+    const r = await saveCollectionMerged('events', state.events, state._eventsBaseline, (finalArr)=>{
       state.events = finalArr;
       state._eventsBaseline = JSON.parse(JSON.stringify(finalArr));
     }, undefined, mergeEventItem);
+    try{ legalDocsSweepSoon(); }catch(e){} // прикрепили договор/акт или поменяли плательщика — пересчитать задачи по документам
+    return r;
   }
   function normName(s){ return (s||'').trim().toLowerCase(); }
   // заказ на изготовление теперь может вести несколько мастеров одновременно с разной оплатой —
@@ -5000,6 +5170,7 @@
       state._leadsBaseline = JSON.parse(JSON.stringify(finalArr));
     });
     try{ journalSyncSoon(); }catch(e){}
+    try{ legalDocsSweepSoon(); }catch(e){}
   }
   async function saveKpOffers(){
     if(!Array.isArray(state.kpOffers)) state.kpOffers = [];
@@ -5169,6 +5340,27 @@
   }
   // Фактическое время занятости пространства с учётом доп. аренды до/после (актуально для частников)
   function effectiveStart(e){ return timeToMinutes(e.time) - (Number(e.rentalBefore)||0); }
+  // начало мероприятия = начало аренды (если она есть до МК); мастеру показываем время самого МК
+  function eventStartLabel(e){
+    if(!e.time) return '';
+    if(state.currentRole === 'master') return e.time;
+    return (Number(e.rentalBefore)||0) > 0 ? ftMinToTime(effectiveStart(e)) : e.time;
+  }
+  // весь тайминг одной строкой: «17:30–18:00 аренда · 18:00–20:30 МК · 20:30–21:00 аренда»; пусто, если аренды нет
+  function eventTimingText(e){
+    const rb = Number(e.rentalBefore)||0, ra = Number(e.rentalAfter)||0;
+    if(!(rb > 0 || ra > 0) || !e.time) return '';
+    const st = timeToMinutes(e.time), en = st + (Number(e.duration)||0);
+    const parts = [];
+    if(rb > 0) parts.push(ftMinToTime(st - rb) + '–' + ftMinToTime(st) + ' аренда');
+    parts.push(ftMinToTime(st) + '–' + ftMinToTime(en) + ' МК');
+    if(ra > 0) parts.push(ftMinToTime(en) + '–' + ftMinToTime(en + ra) + ' аренда');
+    return parts.join(' · ');
+  }
+  function eventTimingLineHtml(e){
+    const t = eventTimingText(e);
+    return t ? `<div style="font-size:11.5px;color:#9A6B00;font-family:var(--font-mono);margin-top:2px;">⏱ ${escapeHtml(t)}</div>` : '';
+  }
   function effectiveEnd(e){ return timeToMinutes(e.time) + (Number(e.duration)||0) + (Number(e.rentalAfter)||0); }
 
   // Возвращает { eventId: gapMinutes } для событий, у которых перерыв с предыдущим
@@ -5554,7 +5746,7 @@
             <div class="today-card">
               <div class="today-card-head">
                 <div class="today-status-dot" style="background:${statusColor(e.status)};"></div>
-                <div class="today-time">${e.time}</div>
+                <div class="today-time">${eventStartLabel(e)}</div>
                 <div class="today-info">
                   <div class="title">${escapeHtml(e.title)}${prodTag(e.product)?` <span class="today-tag">${escapeHtml(prodTag(e.product))}</span>`:''}</div>
                   <div class="meta">
@@ -5618,7 +5810,7 @@
       // заявки, по которым гость ждёт ответа/КП уже несколько дней
       const lf = addDays(today, -14), lt = addDays(today, -3);
       state.leads.forEach(l=>{
-        if(leadKind(l) === 'b2b' || !l.requestDate || l.requestDate < lf || l.requestDate > lt) return;
+        if(!l.requestDate || l.requestDate < lf || l.requestDate > lt) return;
         if(leadStatus(l) === 'sold' || leadStatus(l) === 'lost') return;
         out.leads.push(l);
       });
@@ -5760,7 +5952,7 @@
       });
       state.orders.forEach(o=>{
         if(hit([o.masterName, o.comment, dateText(o.date)])){
-          res.push({ type:'order', id:o.id, grp:3, key:'', label: `📦 Заказ: ${(o.comment||'').split('\n')[0].slice(0,60) || o.masterName || ''}`,
+          res.push({ type:'order', id:o.id, grp:3, key:'', label: `📦 Заказ: ${(o.comment||'').split('\n')[0].slice(0,160) || o.masterName || ''}`,
             sub: `${o.date?formatDateText(o.date):''} · ${o.masterName||''} · ${formatMoney(o.revenue||0)}` });
         }
       });
@@ -5776,7 +5968,7 @@
         if(i.autoFromPayment) return;
         if(hit([i.comment, i.product, i.account, i.amount, dateText(i.date)])){
           res.push({ type:'income', id:i.id, grp:5, key:'', label: `💰 Доход ${formatMoney(i.amount||0)} · ${i.product||''}`,
-            sub: `${i.date?formatDateText(i.date):''} · ${i.account||''} · ${(i.comment||'').replace(/\n/g,' ').slice(0,70)}` });
+            sub: `${i.date?formatDateText(i.date):''} · ${i.account||''} · ${(i.comment||'').replace(/\n/g,' ').slice(0,160)}` });
         }
       });
     }
@@ -6080,7 +6272,7 @@
           ${managerLine ? `<div class="cal-manager" title="Менеджер: ${escapeHtml(managerLine)}">👔 ${escapeHtml(managerLine)}</div>` : ''}
           ${dayOffEntries.length ? `<div class="cal-dayoff-line" title="Выходной: ${escapeHtml(dayOffEntries.map(x=>ROLE_LABELS[x.role] ? `${x.name} (${ROLE_LABELS[x.role]})` : x.name).join(', '))}">🚫 ${escapeHtml(dayOffEntries.map(x=>x.name).join(', '))}</div>` : ''}
           <div class="cal-events">
-            ${shown.map(e=>`<div class="cal-evt-chip" style="background:${statusColor(e.status)}">${isAll?spaceBadge(getSpace(e.spaceId),'xs'):''}<span class="t">${e.time}</span><span class="evt-title">${escapeHtml(e.title)}</span>${scheduleFillText(e)?`<span class="evt-fill" style="margin-left:4px;font-family:var(--font-mono);font-size:10.5px;opacity:0.95;white-space:nowrap;">${scheduleFillText(e)}</span>`:''}</div>`).join('')}
+            ${shown.map(e=>`<div class="cal-evt-chip" style="background:${statusColor(e.status)}" title="${escapeHtml(eventStartLabel(e) + ' ' + (e.title||'') + (e.host ? ' · ' + e.host : '') + (eventTimingText(e) && state.currentRole!=='master' ? '\n' + eventTimingText(e) : ''))}">${isAll?spaceBadge(getSpace(e.spaceId),'xs'):''}<span class="t">${eventStartLabel(e)}</span><span class="evt-title">${escapeHtml(e.title)}</span>${scheduleFillText(e)?`<span class="evt-fill" style="margin-left:4px;font-family:var(--font-mono);font-size:10.5px;opacity:0.95;white-space:nowrap;">${scheduleFillText(e)}</span>`:''}</div>`).join('')}
             ${extra>0?`<div class="cal-more">+${extra} ещё</div>`:''}
           </div>
         </div>
@@ -8511,6 +8703,44 @@
     return subTabsHtml + renderCertificatesListView();
   }
 
+  // ---- поиск по сертификатам ----
+  // слова через пробел — все должны найтись (в любом поле); ищем по номеру («65», «№65»), имени, контакту (телефон — в любом написании),
+  // сумме, статусу, виду, каналу, счёту, организации, комментарию и дате продажи (2026-11-03, 03.11.2026, 03.11)
+  const CERT_SEARCH_LIMIT = 200;
+  function certSearchNorm(v){ return String(v==null?'':v).toLowerCase().replace(/ё/g,'е'); }
+  function certSearchFilter(list, query){
+    const toks = certSearchNorm(query).split(/\s+/).map(t=>t.replace(/^№/,'')).filter(Boolean);
+    if(!toks.length) return list;
+    const phoneNorm = (d)=> d.length === 11 && d[0] === '8' ? '7' + d.slice(1) : d;
+    // запрос целиком похож на телефон («+7 (906) 990-61-98», «906 990 61 98») — ищем по цифрам контакта
+    const qDigits = phoneNorm(String(query).replace(/\D/g,''));
+    const looksLikeDate = /^\s*(\d{1,2}\.\d{1,2}(\.\d{2,4})?|\d{4}-\d{2}(-\d{2})?)\s*$/.test(query);
+    if(!looksLikeDate && qDigits.length >= 7 && /^[\d\s+()\-–.]+$/.test(query)){
+      return list.filter(c=>{ const cd = phoneNorm(String(c.ownerContact||'').replace(/\D/g,'')); return cd && cd.includes(qDigits); });
+    }
+    const hay = (c)=>{
+      const sd = c.saleDate || '';
+      const dm = sd ? sd.slice(8,10) + '.' + sd.slice(5,7) + '.' + sd.slice(0,4) : '';
+      return certSearchNorm([ c.number, '№' + c.number, c.ownerName, c.ownerContact, c.comment, c.channel, c.amount, CERT_STATUS_LABEL[c.status||'in_progress'], c.certType,
+        c.companyName, c.account, c.specificEventType, c.purpose === 'marketing' ? 'маркетинг' : '', sd, dm, sd ? formatDateText(sd) : '' ].join(' | '));
+    };
+    const exact = toks.length === 1 && /^\d+$/.test(toks[0]) ? toks[0] : null;
+    const res = list.filter(c=>{
+      const h = hay(c);
+      const cd = phoneNorm(String(c.ownerContact||'').replace(/\D/g,''));
+      return toks.every(t=>{
+        if(h.includes(t)) return true;
+        const td = phoneNorm(t.replace(/\D/g,''));
+        if(td.length >= 5 && cd && cd.includes(td)) return true;      // телефон: +7 (906) 990-61-98 = 89069906198
+        const tn = t.replace(/[\s ]/g,'');
+        if(/^[\d.,]+$/.test(tn) && String(c.amount==null?'':c.amount) === tn.replace(',','.')) return true;
+        return false;
+      });
+    });
+    // точное совпадение номера — первым
+    if(exact) res.sort((a,b)=> (String(a.number) === exact ? 0 : 1) - (String(b.number) === exact ? 0 : 1));
+    return res;
+  }
   function renderCertificatesListView(){
     // сводка по месяцам (на основе даты продажи) — продажи и маркетинг считаются раздельно
     const salesTotals = {};
@@ -8566,11 +8796,10 @@
 
     const query = (state.certSearchQuery||'').trim();
     let certs = [...state.certificates].sort((a,b)=> (Number(b.number)||0) - (Number(a.number)||0));
+    let certsFound = 0;
     if(query){
-      {
-        const qn = query.toLowerCase().replace(/ё/g,'е');
-        certs = certs.filter(c=> String(c.number).includes(query) || [c.ownerName, c.ownerContact, c.comment, c.channel, String(c.amount||'')].some(v=> String(v||'').toLowerCase().replace(/ё/g,'е').includes(qn)));
-      }
+      certs = certSearchFilter(certs, query);
+      certsFound = certs.length;
     }
 
     const printedCount = state.certificates.filter(c=>c.certType==='Печатный').length;
@@ -8595,7 +8824,7 @@
       // при поиске — плоский список, без группировки, чтобы результат было видно сразу
       listHtml = certs.length === 0
         ? `<div class="host-empty">Ничего не найдено по запросу «${escapeHtml(query)}»</div>`
-        : `<div class="cert-list">${certs.map(renderCertRow).join('')}</div>`;
+        : `<div style="font-size:12px;color:var(--ink-soft);margin-bottom:6px;font-family:var(--font-mono);">Найдено: ${certsFound}${certsFound > CERT_SEARCH_LIMIT ? ` · показаны первые ${CERT_SEARCH_LIMIT} — уточните запрос` : ''}</div><div class="cert-list">${certs.slice(0, CERT_SEARCH_LIMIT).map(renderCertRow).join('')}</div>`;
     } else if(certs.length === 0){
       listHtml = `<div class="host-empty">Сертификатов пока нет</div>`;
     } else {
@@ -8686,11 +8915,10 @@
         <button class="btn btn-primary" id="btn-add-deposit">+ Добавить депозит</button>
       </div>
       ${list.length === 0 ? `<div class="host-empty">${q?'Ничего не найдено':'Депозитов пока нет'}</div>` : `
-        <div class="cert-list">
-          ${list.map(d=>{
+        ${foldByStatus('dep', list, [{id:'o',title:'⏳ Ждут возврата',pred:d=>(d.status||'open')==='open',open:true},{id:'r',title:'✅ Возвращены',pred:d=>(d.status||'open')!=='open',open:false}], d=>{
             const open = (d.status||'open')==='open';
             return `
-            <div class="refund-row" data-depid="${d.id}" style="grid-template-columns: 90px 160px 130px 100px 1fr 110px;${open?'':'opacity:0.65;'}">
+            <div class="refund-row deposit-row" data-depid="${d.id}" style="${open?'':'opacity:0.65;'}">
               <div class="cell">${d.date ? formatDateText(d.date) : '—'}</div>
               <div class="cell" style="font-weight:600;">${escapeHtml(d.name||'—')}</div>
               <div class="cell">${escapeHtml(d.phone||'')}</div>
@@ -8698,8 +8926,7 @@
               <div class="reason" title="${escapeHtml(d.comment||'')}">${escapeHtml(d.comment||'')}${d.hasPhoto?' <span title="Есть чек">📎</span>':' <span title="Чек не приложен" style="color:var(--status-red);">· нет чека</span>'}</div>
               <div><span class="cert-badge ${open?'in_progress':'used'}">${open?'Ждёт возврата':'Возвращён'}</span></div>
             </div>`;
-          }).join('')}
-        </div>
+          }, d=>d.amount, false)}
       `}
     `;
   }
@@ -8866,8 +9093,7 @@
         <button class="btn btn-primary" id="btn-add-refund">+ Добавить возврат</button>
       </div>
       ${refunds.length === 0 ? `<div class="host-empty">Возвратов пока нет</div>` : `
-        <div class="cert-list">
-          ${refunds.map(r=>`
+        ${foldByStatus('ref', refunds, [{id:'p',title:'⏳ В процессе',pred:r=>r.status!=='refunded',open:true},{id:'d',title:'✅ Возвращено',pred:r=>r.status==='refunded',open:a=>false}], r=>`
             <div class="refund-row" data-rid="${r.id}">
               <div class="cell">${r.requestDate ? formatDateText(r.requestDate) : '—'}</div>
               <div class="amount">${r.amount!==undefined&&r.amount!==null ? formatMoney(r.amount) : ''}</div>
@@ -8876,8 +9102,7 @@
               <div><span class="cert-badge ${r.status==='refunded'?'used':'in_progress'}">${REFUND_STATUS_LABEL[r.status||'in_progress']}</span></div>
               <div class="reason">${escapeHtml(r.reason||'')}${r.source==='Точка'&&r.fullName?' · '+escapeHtml(r.fullName):''}${r.eventId?' <span style="color:var(--ink-soft);font-size:11px;">🔗 '+escapeHtml(linkedEventLabel(r.eventId))+(r.guestId?' — '+escapeHtml(linkedRefundGuestLabel(r.eventId, r.guestId)):'')+'</span>':''}${r.manualLabel?' <span style="color:var(--ink-soft);font-size:11px;">📝 '+escapeHtml(r.manualLabel)+'</span>':''}${r.certId?' <span style="color:var(--ink-soft);font-size:11px;">🎟 '+escapeHtml(linkedCertLabel(r.certId))+'</span>':''}</div>
             </div>
-          `).join('')}
-        </div>
+          `, r=>r.amount, false)}
       `}
     `;
   }
@@ -8967,10 +9192,15 @@
     const searchInput = document.getElementById('cert-search');
     if(searchInput){
       searchInput.oninput = ()=>{
+        // не перерисовываем на каждую букву (2800+ сертификатов) и не сбрасываем курсор в конец
+        const pos = searchInput.selectionStart;
         state.certSearchQuery = searchInput.value;
-        render();
-        const freshInput = document.getElementById('cert-search');
-        if(freshInput){ freshInput.focus(); const v = freshInput.value; freshInput.value=''; freshInput.value = v; }
+        clearTimeout(window.__certSearchT);
+        window.__certSearchT = setTimeout(()=>{
+          render();
+          const freshInput = document.getElementById('cert-search');
+          if(freshInput){ freshInput.focus(); try{ freshInput.setSelectionRange(pos, pos); }catch(e){} }
+        }, 150);
       };
     }
 
@@ -9269,6 +9499,7 @@
     return j;
   }
   async function journalSyncNow(force){
+    return; // связка отключена
     if(!jsRoleOk()) return;
     await jsLoadKey();
     const S = jsSettings(); if(!S.enabled || !S.url || !S.token) return;
@@ -9310,6 +9541,7 @@
     if(chL || chT) render();
   }
   function journalSyncSoon(ms){
+    return; // связка с Единым журналом отключена (ноябрь 2026): менеджеры работают только в этом приложении
     const S = jsSettings(); if(!jsRoleOk() || !S.enabled || !S.url) return;
     if(JS_STATE.timer) clearTimeout(JS_STATE.timer);
     JS_STATE.timer = setTimeout(()=>{ JS_STATE.timer = null; journalSyncNow(false); }, ms || 2500);
@@ -9372,23 +9604,45 @@
   // при смене этапа: закрываем автозадачи прошлого этапа и ставим новую; при «Сделка/Отказ» закрываем все
   // серия «Добивки» отменена: колонка «Отправленные КП» сразу ставит две задачи (через 1 и 2 дня), см. leadStageTasks
   async function leadFollowNext(task){ return false; }
+  // автозадачи по этапам воронки: [текст задачи, через сколько календарных дней]. Скрипты к ним — в «⚙ Скрипты к задачам»
+  const LEAD_AUTO_TASKS = {
+    new:   [['Связаться с клиентом, назначить разговор', 1]],
+    needs: [['Написать клиенту: получил ли бриф, ответить на вопросы', 1]],
+    brief: [['Подготовить и отправить КП', 2]],
+    kp:    [['Написать клиенту по КП: посмотрел ли, есть ли вопросы', 1], ['Написать клиенту ещё раз: узнать решение по КП', 2]]
+  };
+  // день отключения связки с Единым журналом: B2B-заявки с этого дня ведутся здесь же, с этапами и задачами
+  const JOURNAL_OFF_DATE = '2026-11-09';
+  // один раз после отключения: открытые B2B-заявки, у которых здесь нет ни одной задачи (раньше задачи жили в журнале),
+  // получают автозадачу текущего этапа — чтобы ни одна компания не потерялась при переезде
+  async function migrateB2bTasksOnce(){
+    try{
+      const f = await window.storage.get('b2b-local-tasks-v1', true); if(f) return;
+      if(!Array.isArray(state.leadTasks)) state.leadTasks = [];
+      const now = new Date().toISOString(); let n = 0;
+      state.leads.forEach(l=>{
+        if(leadKind(l) !== 'b2b') return; const st = leadStatus(l); if(st === 'sold' || st === 'lost') return;
+        if(state.leadTasks.some(t=>t.leadId === l.id && !t.done)) return;
+        const T = LEAD_AUTO_TASKS[st] || LEAD_AUTO_TASKS.new;
+        T.forEach(([title, days])=>{ const due = leadWorkDay(loadAddDays(todayStr(), Math.min(days,1)));
+          state.leadTasks.push({ id: uid(), leadId: l.id, title, due, done: false, doneAt: '', assignee: l.owner || leadAssigneeFor(due, l), createdBy: 'переезд из журнала', createdAt: now, auto: true, followN: 0 }); n++; });
+      });
+      if(n) await saveLeadTasks();
+      await storageSetWithRetry('b2b-local-tasks-v1', JSON.stringify({ at: now, tasks: n }));
+      if(n){ showToast('B2B-заявки теперь ведутся здесь: поставлено задач — ' + n); render(); }
+    }catch(e){ console.warn('migrateB2bTasksOnce', e); }
+  }
   async function leadStageTasks(lead, prevSt){
-    if(leadKind(lead) === 'b2b') return; // B2B-задачи ведутся в Едином журнале
     const st = leadStatus(lead);
     if(prevSt !== null && prevSt !== undefined && st === prevSt) return;
     if(!Array.isArray(state.leadTasks)) state.leadTasks = [];
     const now = new Date().toISOString();
-    const open = state.leadTasks.filter(t=>t.leadId === lead.id && !t.done);
+    const open = state.leadTasks.filter(t=>t.leadId === lead.id && !t.done && !t.docKind); // задачи по документам юрлиц закрываются только прикреплённым файлом
     if(st === 'sold' || st === 'lost'){ open.forEach(t=>{ t.done = true; t.doneAt = now; }); }
     else {
       open.filter(t=>t.auto).forEach(t=>{ t.done = true; t.doneAt = now; });
       // сроки — в календарных днях от момента, когда заявка попала в колонку
-      const T = {
-        new:   [['Связаться с клиентом, назначить разговор', 1]],
-        needs: [['Написать клиенту: получил ли бриф, ответить на вопросы', 1]],
-        brief: [['Подготовить и отправить КП', 2]],
-        kp:    [['Написать клиенту по КП: посмотрел ли, есть ли вопросы', 1], ['Написать клиенту ещё раз: узнать решение по КП', 2]]
-      }[st];
+      const T = LEAD_AUTO_TASKS[st];
       (T || []).forEach(([title, days])=>{
         const due = leadWorkDay(loadAddDays(todayStr(), days));
         state.leadTasks.push({ id: uid(), leadId: lead.id, title, due, done: false, doneAt: '', assignee: leadAssigneeFor(due, lead), createdBy: leadWho(), createdAt: now, auto: true, followN: 0 });
@@ -9423,6 +9677,237 @@
     };
     setTimeout(()=>{ const t = wrap.querySelector('#lt-title'); if(t) t.focus(); }, 30);
   }
+
+  // ===================== Скрипты к задачам: копируем текст и сразу идём в диалог с клиентом =====================
+  // шаблоны хранятся в 'task-scripts' (общие для всех): ключ — текст задачи в нижнем регистре.
+  // Если своего шаблона нет — подбирается стандартный по ключевым словам. Подстановки: {имя} {продукт} {дата} {менеджер}
+  const TASK_SCRIPT_DEFAULTS = [
+    [['договор:'], '{имя}, добрый день! Это {менеджер}, «Свободное Пространство». Для оформления мероприятия {дата} пришлите, пожалуйста, реквизиты компании (карточку организации) — подготовим договор и счёт.'],
+    [['счёт:','счет:'], '{имя}, добрый день! Направляю счёт на оплату мероприятия {дата}. Если нужен другой плательщик или отдельные реквизиты — напишите, переоформим.'],
+    [['акт:'], '{имя}, спасибо, что были у нас! 🙌 Направляю акт выполненных работ по мероприятию {дата} — подпишите, пожалуйста, и пришлите скан или фото.'],
+    [['плательщик'], '{имя}, уточните, пожалуйста: оплачивать мероприятие будет компания? Если да — пришлите название и реквизиты, оформим договор и счёт.'],
+    [['предоплат','реквизит','оплат'], '{имя}, отлично, бронируем! 🎉\nЧтобы закрепить за вами {дата}, нужна предоплата. Реквизиты: …\nПосле оплаты пришлите, пожалуйста, чек — и время за вами.'],
+    [['гост','список'], '{имя}, добрый день! Готовимся к вашему празднику 🙂\nПодскажите, пожалуйста, сколько будет гостей? И если можно — пришлите список имён одним сообщением, мы подготовим всё заранее.'],
+    [['выбор','мастер-класс','мк'], '{имя}, здравствуйте! Удалось выбрать мастер-класс?\nЕсли сомневаетесь — напишите, какое настроение хочется (спокойно, весело, что-то забрать домой), и я предложу 2–3 варианта под вашу компанию.'],
+    [['дат','время','день'], '{имя}, здравствуйте! Подскажите, какая дата и время вам удобны?\nСейчас есть свободные окна: … — могу придержать любое из них для вас до завтра.'],
+    [['бриф'], '{имя}, добрый день! Отправляли вам бриф по {продукт}. Удалось посмотреть?\nЕсли какие-то вопросы вызывают сомнения — пишите, помогу заполнить за пару минут 🙂'],
+    [['решени','добивк','напомн','ещё раз','еще раз'], '{имя}, здравствуйте! Хотела уточнить — получилось определиться с {продукт}?\nДаты быстро разбирают, поэтому могу придержать для вас время до завтра. Если что-то смущает — расскажите, подберём вариант.'],
+    [['по кп','посмотрел','вопрос'], '{имя}, добрый день! Удалось посмотреть наше предложение?\nЕсли есть вопросы по программе, мастер-классу или стоимости — с радостью отвечу, а если что-то хочется поменять — подстроим.'],
+    [['кп','предложени'], '{имя}, здравствуйте! Подготовили для вас предложение по {продукт} — отправляю 🙌\nПосмотрите, пожалуйста, и напишите, что откликается — доработаем под ваши пожелания.'],
+    [['перезвон','позвон','звонок'], '{имя}, здравствуйте! Это {менеджер}, студия «Свободное Пространство». Не смогла до вас дозвониться по заявке на {продукт}.\nКогда вам удобно поговорить — или продолжим здесь, в переписке?'],
+    [['связаться','разговор','заявк'], '{имя}, здравствуйте! Это {менеджер}, студия «Свободное Пространство» 🙂\nПолучили вашу заявку на {продукт} — спасибо! Подскажите, когда удобно коротко созвониться или продолжим в переписке? Подберём формат под вас.']
+  ];
+  const TASK_SCRIPT_FALLBACK = '{имя}, здравствуйте! Это {менеджер}, студия «Свободное Пространство».\nПишу по вашей заявке на {продукт}: …';
+  function taskScriptKey(title){ return String(title||'').trim().toLowerCase().replace(/\s+/g,' '); }
+  async function loadTaskScripts(){
+    if(state.taskScripts) return state.taskScripts;
+    try{ const r = await window.storage.get('task-scripts', true); state.taskScripts = r ? (JSON.parse(r.value) || {}) : {}; }catch(e){ state.taskScripts = {}; }
+    return state.taskScripts;
+  }
+  function taskScriptDefault(title){
+    const k = taskScriptKey(title); const d = TASK_SCRIPT_DEFAULTS.find(([keys])=> keys.some(w=> k.includes(w)));
+    return d ? d[1] : TASK_SCRIPT_FALLBACK;
+  }
+  function taskScriptTemplate(title){
+    const k = taskScriptKey(title); const saved = (state.taskScripts || {})[k];
+    if(saved) return { text: saved, saved: true };
+    const d = TASK_SCRIPT_DEFAULTS.find(([keys])=> keys.some(w=> k.includes(w)));
+    return { text: d ? d[1] : TASK_SCRIPT_FALLBACK, saved: false };
+  }
+  function taskScriptFill(tpl, t, l){
+    const nm = (leadContactParts(l).name || '').split(/\s+/)[0] || '';
+    const dt = l.eventDate ? formatDateText(l.eventDate) : (l.eventMonth && l.eventMonth !== LEAD_MONTH_OPTIONS[0] ? l.eventMonth : 'вашу дату');
+    let out = String(tpl)
+      .replace(/\{продукт\}/g, (l.product || 'мероприятие').toLowerCase())
+      .replace(/\{дата\}/g, dt)
+      .replace(/\{менеджер\}/g, t.assignee || state.loggedInManagerName || 'менеджер');
+    if(nm) out = out.replace(/\{имя\}/g, nm);
+    else { out = out.replace(/\{имя\},?\s*/g, ''); out = out.charAt(0).toUpperCase() + out.slice(1); }
+    return out;
+  }
+  function leadChatTargets(l){
+    const res = []; const parsed = leadContactParts(l);
+    let url = l.socialUrl || '';
+    if(!url && parsed.social){ const r = socialResolve(l.source, parsed.social); url = r.url; }
+    if(!url){ try{ const cl = crmClientOfLead(l); if(cl && crmSafeUrl(cl.chatUrl)) url = cl.chatUrl; }catch(e){} }
+    if(url && crmSafeUrl(url)) res.push({ label: socialLabelOfUrl(url) || 'чат', url: crmSafeUrl(url) });
+    const wa = leadWaUrl(parsed.phone || l.phone); if(wa) res.push({ label: 'WhatsApp', url: wa });
+    return res;
+  }
+  function copyTextSafe(text){
+    const fallback = ()=>{ const ta = document.createElement('textarea'); ta.value = text; ta.style.cssText = 'position:fixed;opacity:0;'; document.body.appendChild(ta); ta.select(); try{ document.execCommand('copy'); }catch(e){} ta.remove(); };
+    try{ if(navigator.clipboard && navigator.clipboard.writeText) return navigator.clipboard.writeText(text).catch(fallback); }catch(e){}
+    fallback(); return Promise.resolve();
+  }
+  async function openTaskScriptPopup(ids, idx){
+    await loadTaskScripts();
+    const queue = ids.map(id=> (state.leadTasks||[]).find(t=>t.id === id)).filter(Boolean);
+    if(!queue.length) return;
+    let i = Math.max(0, Math.min(idx||0, queue.length-1)); let editTpl = false; const doneIds = new Set();
+    const old = document.getElementById('task-script-popup'); if(old) old.remove();
+    const wrap = document.createElement('div'); wrap.id = 'task-script-popup'; wrap.className = 'ts-overlay';
+    document.body.appendChild(wrap);
+    const close = ()=>{ wrap.remove(); document.removeEventListener('keydown', onKey); render(); };
+    const onKey = (e)=>{ if(e.key === 'Escape') close(); };
+    document.addEventListener('keydown', onKey);
+    wrap.onclick = (e)=>{ if(e.target === wrap) close(); };
+    const draw = ()=>{
+      const t = queue[i]; const l = state.leads.find(x=>x.id === t.leadId) || {};
+      const tpl = taskScriptTemplate(t.title); const text = editTpl ? tpl.text : taskScriptFill(tpl.text, t, l);
+      const targets = leadChatTargets(l); const n = queue.length; const left = queue.filter(x=>!doneIds.has(x.id) && !x.done).length;
+      const nm = leadContactParts(l).name || l.contact || 'Клиент';
+      const isDone = t.done || doneIds.has(t.id);
+      wrap.innerHTML = `<div class="ts-modal" role="dialog">
+        <div class="ts-head">
+          <div style="min-width:0;"><div class="ts-kicker">${n > 1 ? 'Клиент ' + (i+1) + ' из ' + n + ' · осталось ' + left : 'Задача'}</div><h3>${escapeHtml(t.title)}</h3></div>
+          <button class="ts-x" data-ts="close" title="Закрыть (Esc)">×</button>
+        </div>
+        ${n > 1 ? `<div class="ts-dots">${queue.map((q,j)=>`<span class="${j===i?'cur':''}${(q.done||doneIds.has(q.id))?' ok':''}" data-tsgo="${j}" title="${escapeHtml((state.leads.find(x=>x.id===q.leadId)||{}).contact||'')}"></span>`).join('')}</div>` : ''}
+        <div class="ts-client">
+          <div class="ts-av">${escapeHtml((nm.trim()[0] || '?').toUpperCase())}</div>
+          <div style="flex:1;min-width:0;"><b>${escapeHtml(l.contact || 'без контакта')}</b>
+            <div class="ts-meta">${escapeHtml(l.product || '')}${l.eventDate ? ' · ' + escapeHtml(formatDateText(l.eventDate)) : ''} · ${escapeHtml(leadStatusLabel(leadStatus(l)))} · ⏰ ${escapeHtml(t.due ? formatDateText(t.due) : 'без срока')} · ${escapeHtml(t.assignee || '—')}</div></div>
+          <a href="#" class="ts-link" data-ts="lead">Открыть заявку</a>
+        </div>
+        <div class="ts-label">${editTpl ? `Шаблон для всех задач «${escapeHtml(t.title)}» <span>подстановки: {имя} {продукт} {дата} {менеджер}</span>` : `Скрипт <span>${tpl.saved ? 'свой шаблон' : 'стандартный шаблон'} · можно поправить перед отправкой</span>`}</div>
+        <textarea class="ts-text${editTpl ? ' tpl' : ''}" id="ts-text" rows="6">${escapeHtml(text)}</textarea>
+        ${editTpl ? `<div class="ts-actions"><button class="btn btn-ghost" data-ts="tplcancel">Отмена</button>${tpl.saved ? '<button class="btn btn-ghost" data-ts="tplreset">Вернуть стандартный</button>' : ''}<button class="btn btn-primary" data-ts="tplsave">💾 Сохранить шаблон</button></div>`
+        : `<div class="ts-actions">
+            ${targets.map((g,j)=>`<a class="btn ts-go ${/whatsapp/i.test(g.label) ? 'wa' : (/telegram/i.test(g.label) ? 'tg' : 'btn-primary')}" data-tsopen="${j}" href="${escapeHtml(g.url)}" target="_blank" rel="noopener" style="text-decoration:none;">📋 Скопировать и открыть ${escapeHtml(g.label)}</a>`).join('')}
+            <button class="btn ${targets.length ? 'btn-ghost' : 'btn-primary'}" data-ts="copy">📋 Скопировать</button>
+            ${targets.length ? '' : '<span class="ts-nolink">У заявки нет ссылки на соцсеть или телефона — добавьте их в заявке, чтобы открывать диалог в один клик</span>'}
+          </div>
+          <div class="ts-foot">
+            <button class="ts-mini" data-ts="tpl">✎ Изменить шаблон</button>
+            <button class="ts-mini" data-ts="all">⚙ все скрипты</button>
+            <span style="flex:1;"></span>
+            ${n > 1 ? `<button class="btn btn-ghost" data-ts="prev" ${i===0?'disabled':''}>←</button><button class="btn btn-ghost" data-ts="skip">Пропустить →</button>` : ''}
+            ${isDone ? '<span class="ts-donemark">✓ Выполнено</span>' : `<button class="btn ts-done" data-ts="done">✓ Выполнено${n > 1 && i < n-1 ? ' → следующий' : ''}</button>`}
+          </div>`}
+      </div>`;
+      const ta = wrap.querySelector('#ts-text');
+      const flash = (b, txt)=>{ if(!b) return; const o = b.innerHTML; b.innerHTML = txt; b.classList.add('ok'); setTimeout(()=>{ b.innerHTML = o; b.classList.remove('ok'); }, 1400); };
+      const q = (sel)=> wrap.querySelector(sel);
+      q('[data-ts="close"]').onclick = close;
+      q('[data-ts="lead"]').onclick = (e)=>{ e.preventDefault(); const lid = t.leadId; close(); const ld = state.leads.find(x=>x.id === lid); if(ld) requireUnlock(()=>{ state.modal = {type:'lead', isNew:false, lead:{...ld}}; render(); }); };
+      wrap.querySelectorAll('[data-tsgo]').forEach(d=> d.onclick = ()=>{ i = +d.dataset.tsgo; editTpl = false; draw(); });
+      if(editTpl){
+        q('[data-ts="tplcancel"]').onclick = ()=>{ editTpl = false; draw(); };
+        const saveTpl = async (val)=>{
+          const k = taskScriptKey(t.title); const m = Object.assign({}, state.taskScripts || {});
+          if(val === null) delete m[k]; else m[k] = val;
+          state.taskScripts = m;
+          try{ await storageSetWithRetry('task-scripts', JSON.stringify(m)); showToast(val === null ? 'Вернули стандартный шаблон' : 'Шаблон сохранён — он будет у всех задач «' + t.title + '»'); }
+          catch(e){ showToast('Не удалось сохранить шаблон', 'error'); }
+          editTpl = false; draw();
+        };
+        q('[data-ts="tplsave"]').onclick = ()=>{ const v = ta.value.trim(); if(!v){ ta.style.borderColor = 'var(--danger)'; return; } saveTpl(v); };
+        const rs = q('[data-ts="tplreset"]'); if(rs) rs.onclick = ()=> saveTpl(null);
+        return;
+      }
+      q('[data-ts="copy"]').onclick = async (e)=>{ await copyTextSafe(ta.value); flash(e.currentTarget, '✓ Скопировано'); };
+      // ссылка открывается сама (обычный переход в новой вкладке), а текст копируется в момент клика
+      wrap.querySelectorAll('[data-tsopen]').forEach(b=> b.onclick = ()=>{ copyTextSafe(ta.value); flash(b, '✓ Скопировано — вставьте в диалог'); });
+      q('[data-ts="tpl"]').onclick = ()=>{ editTpl = true; draw(); };
+      q('[data-ts="all"]').onclick = ()=>{ wrap.remove(); document.removeEventListener('keydown', onKey); openTaskScriptsSettings(); };
+      const pv = q('[data-ts="prev"]'); if(pv) pv.onclick = ()=>{ if(i > 0){ i--; draw(); } };
+      const sk = q('[data-ts="skip"]'); if(sk) sk.onclick = ()=>{ if(i < n-1){ i++; draw(); } else close(); };
+      const dn = q('[data-ts="done"]'); if(dn) dn.onclick = async ()=>{
+        if(!legalTaskGuard(t)) return;
+        t.done = true; t.doneAt = new Date().toISOString(); doneIds.add(t.id);
+        await saveLeadTasks(); try{ await leadFollowNext(t); }catch(e){}
+        const nextIdx = queue.findIndex((x,j)=> j > i && !x.done && !doneIds.has(x.id));
+        if(nextIdx >= 0){ i = nextIdx; draw(); }
+        else { showToast(n > 1 ? 'Очередь пройдена: ' + doneIds.size + ' из ' + n : 'Задача выполнена'); close(); }
+      };
+    };
+    draw();
+  }
+
+  // ===================== Настройка: какая задача → какой скрипт =====================
+  // автозадачи воронки (LEAD_AUTO_TASKS) показаны всегда; ниже — свои скрипты для задач, которые ставят вручную.
+  // Сохраняется в тот же 'task-scripts': ключ — текст задачи. Если текст совпадает со стандартным — ключ убирается.
+  async function openTaskScriptsSettings(){
+    await loadTaskScripts();
+    const autoKeys = new Set();
+    Object.keys(LEAD_AUTO_TASKS).forEach(st=> LEAD_AUTO_TASKS[st].forEach(([title])=> autoKeys.add(taskScriptKey(title))));
+    const saved = Object.assign({}, state.taskScripts || {});
+    // строки редактора: {title, auto, stage, days, text}
+    const rows = [];
+    Object.keys(LEAD_AUTO_TASKS).forEach(st=> LEAD_AUTO_TASKS[st].forEach(([title, days])=>{
+      const k = taskScriptKey(title); rows.push({ title, auto: true, stage: st, days, text: saved[k] || taskScriptDefault(title), custom: !!saved[k] });
+    }));
+    Object.keys(saved).filter(k=> !autoKeys.has(k)).sort().forEach(k=> rows.push({ title: k.charAt(0).toUpperCase() + k.slice(1), auto: false, text: saved[k], custom: true }));
+    const old = document.getElementById('task-scripts-settings'); if(old) old.remove();
+    const wrap = document.createElement('div'); wrap.id = 'task-scripts-settings'; wrap.className = 'ts-overlay';
+    document.body.appendChild(wrap);
+    const close = ()=>{ wrap.remove(); render(); };
+    wrap.onclick = (e)=>{ if(e.target === wrap) close(); };
+    const sample = { name: 'Анна', product: 'девичник', date: '14 ноября', who: state.loggedInManagerName || 'Соня' };
+    const preview = (txt)=> String(txt||'').replace(/\{имя\}/g, sample.name).replace(/\{продукт\}/g, sample.product).replace(/\{дата\}/g, sample.date).replace(/\{менеджер\}/g, sample.who);
+    const chips = (j)=> ['{имя}','{продукт}','{дата}','{менеджер}'].map(c=>`<button type="button" class="tss-chip" data-ins="${j}" data-val="${c}">${c}</button>`).join('');
+    const rowHtml = (r, j)=> `<div class="tss-row${r.auto ? '' : ' manual'}" data-row="${j}">
+        <div class="tss-row-h">
+          ${r.auto ? `<span class="tss-stage">${escapeHtml(leadStatusLabel(r.stage))}</span><span class="tss-when">ставится через ${r.days} дн.</span>` : '<span class="tss-stage manual">ручная задача</span>'}
+          <span class="tss-state ${r.custom ? 'own' : ''}">${r.custom ? 'свой скрипт' : 'стандартный'}</span>
+        </div>
+        ${r.auto ? `<div class="tss-title">Если ставится задача «${escapeHtml(r.title)}»</div>`
+          : `<div class="tss-title">Если задача называется <input type="text" class="tss-name" data-name="${j}" value="${escapeHtml(r.title)}" placeholder="Например: Уточнить список гостей"></div>`}
+        <div class="tss-sub">→ скрипт:</div>
+        <textarea class="ts-text" data-txt="${j}" rows="4">${escapeHtml(r.text)}</textarea>
+        <div class="tss-tools">${chips(j)}<span style="flex:1;"></span>
+          ${r.auto && r.custom ? `<button type="button" class="ts-mini" data-reset="${j}">вернуть стандартный</button>` : ''}
+          ${!r.auto ? `<button type="button" class="ts-mini" data-del="${j}" style="color:var(--danger);">удалить</button>` : ''}
+        </div>
+        <div class="tss-prev"><span>Клиент увидит:</span> <span data-prev="${j}">${escapeHtml(preview(r.text))}</span></div>
+      </div>`;
+    const draw = ()=>{
+      const autoRows = rows.map((r,j)=>[r,j]).filter(([r])=>r.auto), manRows = rows.map((r,j)=>[r,j]).filter(([r])=>!r.auto && !r.deleted);
+      wrap.innerHTML = `<div class="ts-modal tss-modal" role="dialog">
+        <div class="ts-head"><div><div class="ts-kicker">Настройка</div><h3>Скрипты к задачам</h3>
+          <div class="ts-meta" style="margin-top:4px;">Какая задача ставится — такой текст выходит в окне «💬» и «▶ По очереди». Имя, продукт, дата и менеджер подставляются сами.</div></div>
+          <button class="ts-x" data-x title="Закрыть">×</button></div>
+        <div class="tss-sec">Автозадачи воронки</div>
+        ${autoRows.map(([r,j])=>rowHtml(r,j)).join('')}
+        <div class="tss-sec">Задачи, которые ставят вручную</div>
+        ${manRows.length ? manRows.map(([r,j])=>rowHtml(r,j)).join('') : '<div class="ts-meta" style="margin-bottom:8px;">Пока нет. Для ручных задач без своего скрипта текст подбирается по словам в названии (гости, дата, выбор МК, предоплата…).</div>'}
+        <button type="button" class="btn btn-ghost" data-add style="margin-top:4px;">+ Добавить скрипт для задачи</button>
+        <div class="ts-foot" style="position:sticky;bottom:-18px;background:var(--white);padding-bottom:6px;">
+          <span class="ts-meta" id="tss-msg"></span><span style="flex:1;"></span>
+          <button class="btn btn-ghost" data-x>Отмена</button><button class="btn ts-done" data-save>💾 Сохранить</button>
+        </div>
+      </div>`;
+      const sync = ()=>{ wrap.querySelectorAll('[data-txt]').forEach(ta=>{ rows[+ta.dataset.txt].text = ta.value; }); wrap.querySelectorAll('[data-name]').forEach(inp=>{ rows[+inp.dataset.name].title = inp.value; }); };
+      wrap.querySelectorAll('[data-x]').forEach(b=> b.onclick = close);
+      wrap.querySelectorAll('[data-txt]').forEach(ta=> ta.oninput = ()=>{ const j = +ta.dataset.txt; rows[j].text = ta.value; const pv = wrap.querySelector('[data-prev="'+j+'"]'); if(pv) pv.textContent = preview(ta.value); });
+      wrap.querySelectorAll('[data-ins]').forEach(b=> b.onclick = ()=>{
+        const ta = wrap.querySelector('[data-txt="'+b.dataset.ins+'"]'); const v = b.dataset.val;
+        const a = ta.selectionStart ?? ta.value.length, z = ta.selectionEnd ?? a;
+        ta.value = ta.value.slice(0,a) + v + ta.value.slice(z); ta.focus(); ta.selectionStart = ta.selectionEnd = a + v.length; ta.oninput();
+      });
+      wrap.querySelectorAll('[data-reset]').forEach(b=> b.onclick = ()=>{ sync(); const r = rows[+b.dataset.reset]; r.text = taskScriptDefault(r.title); r.custom = false; draw(); });
+      wrap.querySelectorAll('[data-del]').forEach(b=> b.onclick = ()=>{ sync(); rows[+b.dataset.del].deleted = true; draw(); });
+      wrap.querySelector('[data-add]').onclick = ()=>{ sync(); rows.push({ title: '', auto: false, text: '{имя}, здравствуйте! ', custom: true }); draw();
+        const inp = wrap.querySelector('[data-name="'+(rows.length-1)+'"]'); if(inp){ inp.focus(); inp.scrollIntoView({block:'center'}); } };
+      wrap.querySelector('[data-save]').onclick = async ()=>{
+        sync();
+        const m = {}; let bad = false;
+        rows.forEach(r=>{
+          if(r.deleted) return;
+          const k = taskScriptKey(r.title); const txt = String(r.text||'').trim();
+          if(!r.auto && !k){ if(txt && txt !== '{имя}, здравствуйте!') bad = true; return; }
+          if(!txt) return;
+          if(r.auto && txt === taskScriptDefault(r.title).trim()) return; // совпадает со стандартным — не храним
+          m[k] = txt;
+        });
+        if(bad){ const el = wrap.querySelector('#tss-msg'); el.textContent = 'У ручной задачи не указано название'; el.style.color = 'var(--danger)'; return; }
+        state.taskScripts = m;
+        try{ await storageSetWithRetry('task-scripts', JSON.stringify(m)); showToast('Скрипты сохранены'); close(); }
+        catch(e){ showToast('Не удалось сохранить скрипты', 'error'); }
+      };
+    };
+    draw();
+  }
   function leadDueHtml(due){
     if(!due) return '';
     const t = todayStr(); const col = due < t ? 'var(--danger)' : (due === t ? '#B8863A' : 'var(--ink-soft)');
@@ -9451,7 +9936,7 @@
     const card = (l, st)=>{
       const tasks = leadOpenTasks(l.id);
       const isB2b = leadKind(l) === 'b2b';
-      const nxtList = isB2b ? (st === 'sold' || st === 'lost' ? [] : [['sold','Продажа ✓']]) : (LEAD_NEXT[st] || []);
+      const nxtList = LEAD_NEXT[st] || [];
       const days = l.requestDate ? Math.max(0, Math.round((parseDate(today) - parseDate(l.requestDate))/864e5)) : 0;
       const cl = crmClientOfLead(l, crmIdx);
       return `<div class="lb-card" draggable="${st==='sold'?'false':'true'}" data-lid="${escapeHtml(l.id)}">
@@ -9462,14 +9947,14 @@
         <div class="lb-meta">${escapeHtml(l.eventDate ? 'мер-е ' + formatDateText(l.eventDate) + ' · ' : (l.eventMonth && l.eventMonth !== LEAD_MONTH_OPTIONS[0] ? l.eventMonth + ' · ' : ''))}${escapeHtml(l.source||'')} · ${days} дн. в работе</div>
         ${l.comment ? `<div class="lb-comment">${escapeHtml(l.comment)}</div>` : ''}
         <div class="lb-sum">${l.revenue ? escapeHtml(formatMoney(l.revenue)) : '<span style="color:var(--ink-soft);">сумма не указана</span>'}${l.kpId ? ' <span title="Есть КП">📝 КП</span>' : ''}${st==='lost' && l.lostReason ? ' <span style="color:var(--danger);">· '+escapeHtml(l.lostReason)+'</span>' : ''}</div>
-        ${isB2b && st !== 'sold' && st !== 'lost' ? '<div class="lb-meta" style="color:#7E57A8;">🔗 В журнале: <b>' + escapeHtml(l.jStage || 'Новая заявка') + '</b> · работа и задачи там</div>' : ''}
+        ${l.jStage && st !== 'sold' && st !== 'lost' && (!l.statusAt || isoLocalDate(l.statusAt) < JOURNAL_OFF_DATE) ? '<div class="lb-meta" style="color:#7E57A8;" title="Этап, на котором заявка была в Едином журнале до отключения связки">📌 в журнале был этап: <b>' + escapeHtml(l.jStage) + '</b> — перенесите карточку в нужную колонку</div>' : ''}
         ${tasks.slice(0,3).map(t=>`<label class="lb-task"><input type="checkbox" data-tid="${escapeHtml(t.id)}"> <span>${escapeHtml(t.title)}<br>${leadDueHtml(t.due)}</span></label>`).join('')}
-        ${isB2b && st !== 'sold' && st !== 'lost' && /Сделка|Отказ/.test(l.jStage || '') ? '<div class="lb-meta" style="color:var(--danger);font-weight:600;">⚠ В журнале заявка закрыта («' + escapeHtml(l.jStage) + '») — отметьте результат здесь, иначе он не попадёт в конверсию</div>' : ''}
-        ${!isB2b && tasks.length && jsSettings().enabled ? '<div class="lb-meta" style="color:#2F8F9D;">📲 задачи видны менеджеру в журнале</div>' : ''}
+
+
         ${tasks.length > 3 ? `<div class="lb-meta">…ещё задач: ${tasks.length-3}</div>` : ''}
-        ${(st !== 'sold' && st !== 'lost' && !tasks.length && !isB2b) ? '<div class="lb-meta" style="color:var(--danger);">⚠ нет задачи — клиент может потеряться</div>' : ''}
+        ${(st !== 'sold' && st !== 'lost' && !tasks.length) ? '<div class="lb-meta" style="color:var(--danger);">⚠ нет задачи — клиент может потеряться</div>' : ''}
         <div class="lb-actions">
-          ${(st !== 'sold' && !isB2b) ? `<button class="btn btn-ghost" data-addtask="${escapeHtml(l.id)}">+ задача</button>` : ''}
+          ${(st !== 'sold') ? `<button class="btn btn-ghost" data-addtask="${escapeHtml(l.id)}">+ задача</button>` : ''}
           ${nxtList.map((n,i)=>`<button class="btn ${i===0?'btn-primary':'btn-ghost'}" data-next="${escapeHtml(l.id)}:${n[0]}">${n[1]}</button>`).join('')}
           ${(st !== 'lost' && st !== 'sold') ? `<button class="btn btn-ghost" data-lost="${escapeHtml(l.id)}" title="Отказ">✕</button>` : ''}
         </div>
@@ -9485,7 +9970,7 @@
       .lb-card{ background:var(--white); border:1px solid var(--line); border-radius:6px; margin:6px; padding:8px 9px; cursor:pointer; font-size:12.5px; overflow-wrap:anywhere; }
       .lb-card.dragging{ opacity:.45; }
       .lb-meta{ font-size:11.5px; color:var(--ink-soft); margin:2px 0; }
-      .lb-comment{ font-size:12.5px; margin:4px 0; display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; overflow:hidden; }
+      .lb-comment{ font-size:12.5px; margin:4px 0; white-space:pre-wrap; overflow-wrap:anywhere; }
       .lb-sum{ font-family:var(--font-mono); font-size:12.5px; margin:4px 0; }
       .lb-task{ display:flex; gap:6px; align-items:flex-start; font-size:12px; margin:4px 0; padding:4px 6px; background:var(--paper); border-radius:4px; cursor:default; }
       .lb-actions{ display:flex; gap:6px; flex-wrap:wrap; margin-top:6px; }
@@ -9499,42 +9984,164 @@
       <select id="lb-seg" title="Сегмент клиента"><option value="">Все сегменты</option>${crmCfgNow.segments.map(s=>`<option value="${escapeHtml(s.id)}" ${segF===s.id?'selected':''}>${escapeHtml(s.name)}</option>`).join('')}</select>
       <select id="lb-tag" title="Тег клиента"><option value="">Все теги</option>${crmCfgNow.tags.map(s=>`<option value="${escapeHtml(s.id)}" ${tagF===s.id?'selected':''}>${escapeHtml(s.name)}</option>`).join('')}</select>
       <select id="lb-owner"><option value="">Все менеджеры</option>${owners.map(o=>`<option value="${escapeHtml(o)}" ${ownerF===o?'selected':''}>${escapeHtml(o)}</option>`).join('')}</select>
-      <button class="btn btn-ghost" id="btn-js-open" title="Связка с Единым журналом">🔗 Журнал</button><span id="js-status" style="font-size:12px;">${jsStatusHtml()}</span>
+      
       ${managerForDate(today) ? `<span style="font-size:12.5px;">👤 Сегодня на смене: <b>${escapeHtml(managerForDate(today))}</b></span>` : ''}
       <span style="font-size:12.5px;color:var(--ink-soft);">В работе: <b>${cols.filter(c=>!['sold','lost'].includes(c.st)).reduce((s,c)=>s+c.list.length,0)}</b> · открытых задач: <b>${openTasksAll.length}</b>${openTasksAll.filter(t=>t.due && t.due < today).length ? ` · <span style="color:var(--danger);">просрочено ${openTasksAll.filter(t=>t.due && t.due < today).length}</span>` : ''}</span>
     </div>
-    <div class="lb-wrap">${cols.map(c=>`<div class="lb-col" data-stage="${c.st}" style="border-top-color:${LEAD_STAGE_COLORS[c.st]};">
-      <div class="lb-head"><span>${escapeHtml(leadStatusLabel(c.st))}</span><span>${c.list.length}</span></div>
+    <div class="lb-wrap">${cols.map(c=>{ const foldable = (c.st==='sold'||c.st==='lost'); const folded = foldable && !(state.lbOpen && state.lbOpen[c.st]); return `<div class="lb-col" data-stage="${c.st}" style="border-top-color:${LEAD_STAGE_COLORS[c.st]};">
+      <div class="lb-head"${foldable ? ` data-lbfold="${c.st}" style="cursor:pointer;" title="Показать / скрыть карточки"` : ''}><span>${foldable ? (folded ? '▸ ' : '▾ ') : ''}${escapeHtml(leadStatusLabel(c.st))}</span><span>${c.list.length}</span></div>
       <div class="lb-sub">${c.st==='lost' ? 'потеряно ' : ''}${escapeHtml(formatMoney(c.sum))}${(c.st==='sold'||c.st==='lost') ? ' · 30 дн.' : ''}</div>
-      ${c.list.length ? c.list.map(l=>card(l, c.st)).join('') : `<div class="lb-empty">${c.st==='sold' ? 'Продажи появятся здесь — карточку нельзя просто перетащить, нужны мероприятие/заказ и выручка.' : 'Перетащите заявку сюда'}</div>`}
-    </div>`).join('')}</div>
+      ${folded ? (c.list.length ? `<div class="lb-empty" data-lbfold="${c.st}" style="cursor:pointer;">Нажмите, чтобы показать (${c.list.length})</div>` : '') : ''}
+      ${folded ? '' : c.list.length ? c.list.map(l=>card(l, c.st)).join('') : `<div class="lb-empty">${c.st==='sold' ? 'Продажи появятся здесь — карточку нельзя просто перетащить, нужны мероприятие/заказ и выручка.' : 'Перетащите заявку сюда'}</div>`}
+    </div>`; }).join('')}</div>
     <div style="font-size:11.5px;color:var(--ink-soft);margin-top:4px;">Карточки можно перетаскивать между этапами. «Сделка» и «Отказ» откроют заявку: для сделки нужны мероприятие/заказ и выручка, для отказа — причина. Сделки и отказы показаны за последние 30 дней; всё остальное — вкладка «Статистика и список».</div>`;
   }
   function renderLeadTasksView(){
+    // вид «как в amoCRM»: колонки по срокам (Просрочено / Сегодня / Завтра / Дальше) с компактными карточками
+    // и собственной прокруткой, сверху — полоса нагрузки на 14 дней, месячный календарь — по кнопке
     const today = todayStr();
     const showDone = !!state.leadTasksDone; const who = state.leadTasksWho || '';
     let list = (state.leadTasks||[]).filter(t=> state.leads.some(l=>l.id === t.leadId));
     const names = Array.from(new Set(list.map(t=>t.assignee).concat(managerForDate(today)).filter(Boolean))).sort((a,b)=>a.localeCompare(b,'ru'));
     if(who) list = list.filter(t=> (t.assignee||'') === who);
     const open = list.filter(t=>!t.done), done = list.filter(t=>t.done).sort((a,b)=>(b.doneAt||'').localeCompare(a.doneAt||'')).slice(0,30);
-    const groups = [['Просрочено', open.filter(t=>t.due && t.due < today)], ['Сегодня', open.filter(t=>t.due === today)], ['Дальше', open.filter(t=>t.due && t.due > today)], ['Без срока', open.filter(t=>!t.due)]];
-    const row = (t)=>{
-      const l = state.leads.find(x=>x.id === t.leadId);
-      return `<div class="stat-row" style="align-items:flex-start;gap:8px;">
-        <input type="checkbox" data-tdone="${escapeHtml(t.id)}" ${t.done?'checked':''} style="margin-top:3px;">
-        <div style="flex:1;min-width:0;"><div style="${t.done?'text-decoration:line-through;color:var(--ink-soft);':''}">${escapeHtml(t.title)}</div>
-          <div style="font-size:12px;color:var(--ink-soft);"><a href="#" data-openlead="${escapeHtml(t.leadId)}">${escapeHtml(l.contact||'заявка')} · ${escapeHtml(l.product||'')}</a> · ${escapeHtml(t.assignee||'—')} · ${escapeHtml(leadStatusLabel(leadStatus(l)))} ${t.done ? '' : leadDueHtml(t.due)}</div></div>
-        <button class="btn btn-ghost" data-tdel="${escapeHtml(t.id)}" style="padding:2px 8px;" title="Удалить">×</button></div>`;
+    const tomorrow = loadAddDays(today, 1);
+    const byDue = (a,b)=> (a.due||'').localeCompare(b.due||'');
+    const overdue = open.filter(t=>t.due && t.due < today).sort(byDue), tToday = open.filter(t=>t.due === today), tTomorrow = open.filter(t=>t.due === tomorrow);
+    const later = open.filter(t=>t.due && t.due > tomorrow).sort(byDue), noDue = open.filter(t=>!t.due);
+    const byDay = {}; open.forEach(t=>{ if(t.due) byDay[t.due] = (byDay[t.due]||0) + 1; });
+    const selDay = state.leadTasksDay || '';
+    const dowOf = (k)=> (new Date(+k.slice(0,4), +k.slice(5,7)-1, +k.slice(8)).getDay() + 6) % 7;
+    const shortD = (k)=> DOW[dowOf(k)] + ', ' + (+k.slice(8)) + '.' + k.slice(5,7);
+    const daysAgo = (k)=> Math.round((new Date(today) - new Date(k)) / 86400000);
+    const heat = (n, max)=> n ? 'rgba(117,128,79,' + (0.14 + 0.62 * Math.min(1, n / max)).toFixed(2) + ')' : 'var(--white)';
+    const heatInk = (n, max)=> (n / max > 0.75) ? '#fff' : 'var(--ink)';
+
+    // карточка задачи — компактная, клик по клиенту открывает заявку
+    const card = (t, showDate, inGroup)=>{
+      const l = state.leads.find(x=>x.id === t.leadId) || {};
+      const od = t.due && t.due < today && !t.done;
+      const lg = t.docKind ? legalLeadEvent(l) : null;
+      return `<div class="lt-card${od ? ' od' : ''}${t.done ? ' done' : ''}${inGroup ? ' ing' : ''}${t.docKind ? ' lg' : ''}">
+        <input type="checkbox" data-tdone="${escapeHtml(t.id)}" ${t.done?'checked':''} title="Выполнено">
+        <div class="lt-card-body">
+          ${inGroup ? '' : `<div class="lt-card-title">${escapeHtml(t.title)}</div>`}
+          <div class="lt-card-meta${inGroup ? ' main' : ''}"><a href="#" data-openlead="${escapeHtml(t.leadId)}">${escapeHtml(l.contact||'заявка')}${l.product ? ' · ' + escapeHtml(l.product) : ''}</a></div>
+          <div class="lt-card-foot">
+            <span class="lt-who">${escapeHtml(t.assignee||'—')}</span>
+            ${t.docKind ? `<button class="lg-chip" data-lgtask="${escapeHtml(t.id)}" title="Документы юрлица: что прикреплено">🏢 ${escapeHtml(lg && lg.companyName ? lg.companyName : 'юрлицо')}${t.reopened ? ' · открыта снова' : ''}</button>` : ''}
+            ${od ? `<span style="color:var(--danger);">⏰ ${shortD(t.due)} · ${daysAgo(t.due)} дн.</span>` : (showDate && t.due ? `<span>⏰ ${shortD(t.due)}</span>` : '')}
+          </div>
+        </div>
+        ${t.done ? '' : `<button class="lt-card-script" data-ltscript="${escapeHtml(t.id)}" title="Скрипт и диалог с клиентом">💬</button>`}
+        ${t.docKind ? '' : `<button class="lt-card-del" data-tdel="${escapeHtml(t.id)}" title="Удалить">×</button>`}
+      </div>`;
     };
+    // группировка внутри колонки: одинаковые задачи (или задачи одного ответственного) — в сворачиваемую группу
+    // с кнопкой «По очереди»: проходим клиентов один за другим со скриптом
+    const grpMode = state.leadTasksGroup || 'type';
+    if(!state.leadTasksCollapsed) state.leadTasksCollapsed = {};
+    const collapsed = state.leadTasksCollapsed;
+    const typeKey = (t)=> String(t.title||'').trim().toLowerCase().replace(/\s+/g,' ');
+    const grpBlock = (ck, label, arr, showDate, isC, inGroup, oneLine)=> `<div class="lt-grp${isC ? ' closed' : ''}">
+        <div class="lt-grp-h" data-ltgrp="${escapeHtml(ck)}" title="${isC ? 'Развернуть' : 'Свернуть'}">
+          <span class="arr">${isC ? '▸' : '▾'}</span><span class="t">${escapeHtml(label)}</span><b>${arr.length}</b>${oneLine ? '' : '<span style="flex-basis:100%;height:0;"></span>'}
+          <button class="lt-queue" data-ltqueue="${escapeHtml(arr.map(t=>t.id).join(','))}" title="Пройти клиентов по очереди со скриптом">▶ По очереди</button>
+        </div>
+        ${isC ? '' : `<div class="lt-grp-b">${arr.map(t=>card(t, showDate, inGroup)).join('')}</div>`}
+      </div>`;
+    const grouped = (colKey, arr, showDate)=>{
+      if(grpMode === 'none' || arr.length < 2) return arr.map(t=>card(t, showDate)).join('');
+      const g = new Map();
+      arr.forEach(t=>{ const k = grpMode === 'who' ? (t.assignee || '—') : typeKey(t);
+        if(!g.has(k)) g.set(k, { label: grpMode === 'who' ? (t.assignee || 'Без ответственного') : t.title, list: [] }); g.get(k).list.push(t); });
+      return Array.from(g.entries()).sort((a,b)=> b[1].list.length - a[1].list.length).map(([k,v])=>{
+        if(v.list.length === 1 && grpMode === 'type') return card(v.list[0], showDate);
+        const ck = colKey + '|' + grpMode + '|' + k;
+        return grpBlock(ck, v.label, v.list, showDate, !!collapsed[ck], grpMode === 'type');
+      }).join('');
+    };
+    // «Дальше»: группы по дням с подзаголовком «Ср, 11.11 · 7»
+    const laterGroups = ()=>{
+      const src = (selDay && selDay > tomorrow) ? later.filter(t=>t.due === selDay) : later;
+      const g = {}; src.forEach(t=>{ (g[t.due] = g[t.due] || []).push(t); });
+      const oneDay = !!(selDay && selDay > tomorrow);
+      if(oneDay) return grouped('later', src, false);
+      const isOpen = (ck)=> collapsed[ck] === false; // дни в «Дальше» по умолчанию свёрнуты — видно только число задач
+      let html = Object.keys(g).sort().map(k=>{ const ck = 'later|' + k; return grpBlock(ck, shortD(k), g[k], false, !isOpen(ck), false, true); }).join('');
+      if(noDue.length) html += grpBlock('later|nodue', 'Без срока', noDue, false, !isOpen('later|nodue'), false, true);
+      return html;
+    };
+    const col = (key, title, color, n, body, extra)=> `<div class="lt-col${selDay && ((key==='today' && selDay===today) || (key==='tomorrow' && selDay===tomorrow) || (key==='later' && selDay>tomorrow)) ? ' sel' : ''}" style="--c:${color};">
+      <div class="lt-col-h"><span>${title}</span><b>${n}</b>${extra||''}</div>
+      <div class="lt-col-b">${body || '<div class="lt-empty">Пусто</div>'}</div>
+    </div>`;
+    const laterTitle = (selDay && selDay > tomorrow) ? shortD(selDay) : 'Дальше';
+    const laterN = (selDay && selDay > tomorrow) ? later.filter(t=>t.due === selDay).length : later.length + noDue.length;
+    const laterExtra = (selDay && selDay > tomorrow) ? `<button class="lt-x" data-ltday="" title="Показать все дни">× все дни</button>` : '';
+
+    // полоса нагрузки на 14 дней
+    const strip = Array.from({length:14}, (_,i)=> loadAddDays(today, i));
+    const stripMax = Math.max(4, ...strip.map(k=>byDay[k]||0));
+    const wkEnd = loadAddDays(today, 6 - dowOf(today));
+    const thisWeek = open.filter(t=>t.due && t.due >= today && t.due <= wkEnd).length;
+    const nextWeek = open.filter(t=>t.due && t.due > wkEnd && t.due <= loadAddDays(wkEnd, 7)).length;
+    const stripHtml = `<div class="lt-strip-wrap">
+      <div class="lt-strip-h">
+        <b>Нагрузка на 2 недели</b>
+        <span>до конца недели: <b>${thisWeek}</b> · следующая неделя: <b>${nextWeek}</b>${overdue.length ? ` · <span style="color:var(--danger);">просрочено: <b>${overdue.length}</b></span>` : ''}</span>
+        <button class="btn btn-ghost" data-ltcaltoggle style="margin-left:auto;padding:3px 10px;">📅 ${state.leadTasksCalOpen ? 'Скрыть месяц' : 'Весь месяц'}</button>
+      </div>
+      <div class="lt-strip">${strip.map(k=>{ const n = byDay[k]||0, we = dowOf(k) > 4;
+        return `<button type="button" class="lt-sd${k===selDay?' sel':''}${k===today?' now':''}" data-ltday="${k}" title="${shortD(k)}: задач ${n}" style="background:${heat(n,stripMax)};color:${heatInk(n,stripMax)};">
+          <span class="w" style="${we && n/stripMax <= 0.75 ? 'color:var(--danger);' : ''}">${k===today ? 'сег.' : (k===tomorrow ? 'завт.' : DOW[dowOf(k)])}</span><span class="d">${+k.slice(8)}.${k.slice(5,7)}</span><span class="n">${n || '–'}</span></button>`; }).join('')}</div>
+    </div>`;
+
+    // месячный календарь (свёрнут по умолчанию)
+    const calHtml = ()=>{
+      if(!state.leadTasksCalOpen) return '';
+      const calYm = state.leadTasksCal || today.slice(0,7);
+      const cy = +calYm.slice(0,4), cm = +calYm.slice(5,7);
+      const daysIn = new Date(cy, cm, 0).getDate(), lead0 = (new Date(cy, cm-1, 1).getDay() + 6) % 7;
+      const keys = Array.from({length:daysIn}, (_,i)=> calYm + '-' + pad(i+1));
+      const mMax = Math.max(4, ...keys.map(k=>byDay[k]||0));
+      const total = keys.filter(k=>k >= today).reduce((s,k)=>s+(byDay[k]||0),0);
+      return `<div class="lt-month">
+        <div style="display:flex;align-items:center;gap:6px;margin-bottom:6px;flex-wrap:wrap;">
+          <button class="btn btn-ghost" data-ltcal="-1" style="padding:2px 10px;">‹</button>
+          <b style="min-width:120px;text-align:center;text-transform:capitalize;">${MONTHS[cm-1]} ${cy}</b>
+          <button class="btn btn-ghost" data-ltcal="1" style="padding:2px 10px;">›</button>
+          ${calYm !== today.slice(0,7) ? '<button class="btn btn-ghost" data-ltcal="0" style="padding:2px 10px;">сегодня</button>' : ''}
+          <span style="font-size:12px;color:var(--ink-soft);margin-left:auto;">впереди в этом месяце: <b>${total}</b></span>
+        </div>
+        <div class="lt-cal">${DOW.map((w,i)=>`<div class="lt-cal-h" style="${i>4?'color:var(--danger);':''}">${w}</div>`).join('')}${'<div></div>'.repeat(lead0)}${keys.map(k=>{
+          const n = byDay[k]||0, past = k < today;
+          const bg = past ? (n ? 'rgba(163,64,47,0.12)' : 'transparent') : heat(n, mMax);
+          return `<button type="button" class="lt-cal-day" data-ltday="${k}" title="${shortD(k)}: задач ${n}" style="background:${bg};${k===selDay?'outline:2px solid var(--ink);outline-offset:-2px;':''}${k===today?'border:2px solid #B8863A;':''}${past&&!n?'opacity:.45;':''}">
+            <span class="lt-cal-d" style="${dowOf(k)>4?'color:var(--danger);':''}">${+k.slice(8)}</span>
+            <span class="lt-cal-n" style="color:${past ? 'var(--danger)' : heatInk(n,mMax)};">${n || ''}</span></button>`; }).join('')}</div>
+      </div>`;
+    };
+
     return `<div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:10px;">
       ${managerForDate(today) ? `<button class="btn ${who===managerForDate(today)?'btn-primary':'btn-ghost'}" id="lt-duty" data-duty="${escapeHtml(managerForDate(today))}">Сегодня на смене: ${escapeHtml(managerForDate(today))}</button>` : '<span style="font-size:12.5px;color:var(--ink-soft);">Менеджер на сегодня в календаре не назначен</span>'}
       <select id="lt-who-filter"><option value="">Все ответственные</option>${names.map(n=>`<option value="${escapeHtml(n)}" ${who===n?'selected':''}>${escapeHtml(n)}</option>`).join('')}</select>
       <label style="font-size:12.5px;cursor:pointer;display:flex;gap:6px;align-items:center;"><input type="checkbox" id="lt-show-done" ${showDone?'checked':''}> показывать выполненные</label>
       <span style="font-size:12.5px;color:var(--ink-soft);">Открытых: <b>${open.length}</b></span>
-      <span style="margin-left:auto;display:flex;gap:6px;"><button class="btn btn-ghost" id="lt-export-json" title="Файл для импорта в Единый журнал">⬇ Для журнала (JSON)</button><button class="btn btn-ghost" id="lt-export-csv" title="Таблица для Excel">⬇ CSV</button></span>
+      <span style="margin-left:auto;display:flex;gap:6px;"><button class="btn btn-ghost" id="lt-export-csv" title="Таблица для Excel">⬇ CSV</button></span>
     </div>
-    ${groups.map(g=> g[1].length ? `<div class="analytics-section"><h4 style="${g[0]==='Просрочено'?'color:var(--danger);':''}">${g[0]} (${g[1].length})</h4>${g[1].map(row).join('')}</div>` : '').join('') || '<div class="host-empty">Открытых задач нет. Задачи создаются автоматически при смене этапа заявки и вручную кнопкой «+ задача» на карточке.</div>'}
-    ${showDone && done.length ? `<div class="analytics-section"><h4>Выполнено (последние 30)</h4>${done.map(row).join('')}</div>` : ''}`;
+    ${stripHtml}
+    ${calHtml()}
+    <div class="lt-gbar"><span>Группировать:</span>${[['type','по задаче'],['who','по ответственному'],['none','без групп']].map(o=>`<button class="${grpMode===o[0]?'on':''}" data-ltgmode="${o[0]}">${o[1]}</button>`).join('')}
+      <span class="hint">▶ По очереди — скрипт для каждого клиента, копируете и сразу открываете диалог</span>
+      <button class="lt-scripts-btn" data-ltscripts>⚙ Скрипты к задачам</button></div>
+    ${open.length ? `<div class="lt-board">
+      ${col('overdue', 'Просрочено', 'var(--danger)', overdue.length, grouped('overdue', overdue, true))}
+      ${col('today', 'Сегодня', '#B8863A', tToday.length, grouped('today', tToday, false))}
+      ${col('tomorrow', 'Завтра', 'var(--accent)', tTomorrow.length, grouped('tomorrow', tTomorrow, false))}
+      ${col('later', laterTitle, 'var(--status-blue)', laterN, laterGroups(), laterExtra)}
+    </div>` : '<div class="host-empty">Открытых задач нет. Задачи создаются автоматически при смене этапа заявки и вручную кнопкой «+ задача» на карточке.</div>'}
+    ${showDone && done.length ? `<details class="analytics-section" style="margin-top:14px;"><summary style="cursor:pointer;font-weight:600;">Выполнено (последние ${done.length})</summary><div class="lt-done-list">${done.map(t=>card(t,true)).join('')}</div></details>` : ''}`;
   }
   // выгрузка задач для «Единого журнала»: у каждой задачи стабильный externalId — при повторном импорте
   // журнал обновит существующую задачу, а не создаст дубль
@@ -9587,8 +10194,12 @@
     document.querySelectorAll('[data-addtask]').forEach(b=> b.onclick = ()=> requireUnlock(()=> openLeadTaskPopup(b.dataset.addtask)));
     document.querySelectorAll('.lb-task input[data-tid], [data-tdone]').forEach(cb=> cb.onchange = async ()=>{
       const id = cb.dataset.tid || cb.dataset.tdone; const t = (state.leadTasks||[]).find(x=>x.id === id); if(!t) return;
+      if(cb.checked && !legalTaskGuard(t)){ cb.checked = false; return; }
+      if(!cb.checked && t.docKind && t.docClosed === 'auto'){ cb.checked = true; return; } // закрыта прикреплённым файлом
       t.done = cb.checked; t.doneAt = cb.checked ? new Date().toISOString() : ''; await saveLeadTasks(); await leadFollowNext(t); render();
     });
+    document.querySelectorAll('[data-lgev]').forEach(a=> a.onclick = (e)=>{ e.preventDefault(); const ev = state.events.find(x=>x.id === a.dataset.lgev); if(ev) requireUnlock(()=>{ state.modal = {type:'event', event:{...ev}, isNew:false, keepAll:true}; render(); }); });
+    document.querySelectorAll('[data-lgtask]').forEach(b=> b.onclick = ()=>{ const t = (state.leadTasks||[]).find(x=>x.id === b.dataset.lgtask); if(t) legalTaskGuard(t); });
     document.querySelectorAll('[data-tdel]').forEach(b=> b.onclick = async ()=>{
       if(!confirm('Удалить задачу?')) return;
       state.leadTasks = (state.leadTasks||[]).filter(t=>t.id !== b.dataset.tdel); await saveLeadTasks(); render();
@@ -9597,11 +10208,26 @@
     const duty = document.getElementById('lt-duty'); if(duty) duty.onclick = ()=>{ state.leadTasksWho = (state.leadTasksWho === duty.dataset.duty) ? '' : duty.dataset.duty; render(); };
     const wf = document.getElementById('lt-who-filter'); if(wf) wf.onchange = ()=>{ state.leadTasksWho = wf.value; render(); };
     const sd = document.getElementById('lt-show-done'); if(sd) sd.onchange = ()=>{ state.leadTasksDone = sd.checked; render(); };
+    document.querySelectorAll('[data-ltcal]').forEach(b=> b.onclick = ()=>{
+      const step = +b.dataset.ltcal; const t = todayStr();
+      if(!step){ state.leadTasksCal = t.slice(0,7); render(); return; }
+      const cur = state.leadTasksCal || t.slice(0,7); const d = new Date(+cur.slice(0,4), +cur.slice(5,7) - 1 + step, 1);
+      state.leadTasksCal = d.getFullYear() + '-' + pad(d.getMonth()+1); render();
+    });
+    document.querySelectorAll('[data-ltday]').forEach(b=> b.onclick = ()=>{ const k = b.dataset.ltday; state.leadTasksDay = (k && state.leadTasksDay !== k) ? k : ''; render(); });
+    document.querySelectorAll('[data-ltgmode]').forEach(b=> b.onclick = ()=>{ state.leadTasksGroup = b.dataset.ltgmode; render(); });
+    document.querySelectorAll('[data-ltgrp]').forEach(h=> h.onclick = (e)=>{ if(e.target.closest('[data-ltqueue]')) return; const k = h.dataset.ltgrp; const c = state.leadTasksCollapsed || (state.leadTasksCollapsed = {});
+      const closedNow = k.indexOf('later|') === 0 ? c[k] !== false : !!c[k]; c[k] = !closedNow; render(); });
+    document.querySelectorAll('[data-ltscripts]').forEach(b=> b.onclick = ()=> requireUnlock(()=> openTaskScriptsSettings()));
+    document.querySelectorAll('[data-ltqueue]').forEach(b=> b.onclick = (e)=>{ e.stopPropagation(); openTaskScriptPopup(b.dataset.ltqueue.split(','), 0); });
+    document.querySelectorAll('[data-ltscript]').forEach(b=> b.onclick = ()=> openTaskScriptPopup([b.dataset.ltscript], 0));
+    document.querySelectorAll('[data-ltcaltoggle]').forEach(b=> b.onclick = ()=>{ state.leadTasksCalOpen = !state.leadTasksCalOpen; render(); });
+    { const sc = document.querySelector('.lt-col.sel'); if(sc && sc.scrollIntoView && window.innerWidth < 900) sc.scrollIntoView({block:'nearest', inline:'start'}); }
   }
   function leadBoardMove(id, stage){
     const l = state.leads.find(x=>x.id === id); if(!l) return;
     const cur = leadStatus(l); if(cur === stage) return;
-    if(leadKind(l) === 'b2b' && stage !== 'sold' && stage !== 'lost'){ showGapWarningBanner('B2B-заявка ведётся в Едином журнале: этапы и задачи меняются там. Здесь отмечается только «Сделка» или «Отказ».'); return; }
+
     if(cur === 'sold'){ showGapWarningBanner('Проданную заявку отсюда не перенести: откройте её и снимите статус «Продано» вручную.'); return; }
     requireUnlock(async ()=>{
       if(stage === 'sold'){
@@ -9625,6 +10251,248 @@
     const nOpen = (state.leadTasks||[]).filter(t=>!t.done && t.due && t.due <= todayStr() && state.leads.some(l=>l.id===t.leadId)).length;
     const bar = `<div class="sub-tabs" style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:12px;">${tabs.map(t=>`<button class="btn ${tab===t[0]?'btn-primary':'btn-ghost'}" data-convtab="${t[0]}">${t[1]}${t[0]==='tasks' && nOpen ? ' <span style="color:'+(tab==='tasks'?'#fff':'var(--danger)')+';">('+nOpen+')</span>' : ''}</button>`).join('')}</div>`;
     return bar + (tab === 'tasks' ? renderLeadTasksView() : (tab === 'clients' ? renderClientsView() : tab === 'stats' ? renderConversionStatsView() : renderLeadBoard()));
+  }
+
+
+  // ===================== Юрлица (B2B): обязательные задачи по документам =====================
+  // Проданная заявка → мероприятие с плательщиком-юрлицом → менеджеру ставятся задачи:
+  //   «Договор» и «Счёт» — на следующий день после продажи, «Акт» — на следующий день после мероприятия.
+  // Задача закрывается ТОЛЬКО когда файл прикреплён к мероприятию (event.documents[вид]) — вручную галочкой её не закрыть.
+  // Если B2B-заявка привязана к мероприятию, где плательщик не отмечен как юрлицо, сначала ставится задача это исправить.
+  // Проверка идёт «прочёсыванием» всех заявок после сохранения заявок/мероприятий и при загрузке — поэтому
+  // не важно, через какое окно продали заявку или прикрепили документ.
+  const LEGAL_TASK_DEFS = {
+    payer:        { title: '🏢 Отметить в мероприятии: плательщик — юрлицо', short: 'Плательщик-юрлицо' },
+    contract:     { title: '📄 Договор: подготовить, подписать и прикрепить к мероприятию', short: 'Договор' },
+    paymentOrder: { title: '🧾 Счёт: выставить и прикрепить к мероприятию', short: 'Счёт' },
+    act:          { title: '✍️ Акт: сформировать после мероприятия, подписать и прикрепить', short: 'Акт' }
+  };
+  function legalLeadEvent(l){ return l && l.eventId ? state.events.find(e=>e.id === l.eventId) : null; }
+  function legalDocAttached(ev, kind){
+    if(!ev) return false;
+    if(kind === 'payer') return ev.payerType === 'legal';
+    return !!(ev.documents || {})[kind];
+  }
+  // заявка требует документов: продана, привязана к мероприятию (не отменённому), и это B2B или плательщик-юрлицо
+  function legalLeadNeedsDocs(l){
+    if(!l || !l.sold) return false;
+    const ev = legalLeadEvent(l); if(!ev || ev.status === 'cancelled') return false;
+    if(!ev.date || ev.date < LEGAL_DOCS_REQUIRED_FROM) return false;
+    return leadKind(l) === 'b2b' || ev.payerType === 'legal';
+  }
+  function legalDueFor(kind, l, ev){
+    const base = (kind === 'act') ? ev.date : (l.saleDate || todayStr());
+    return loadAddDays(base, 1);
+  }
+  let _legalSweepTimer = null, _legalSweepRunning = false;
+  function legalDocsSweepSoon(ms){ clearTimeout(_legalSweepTimer); _legalSweepTimer = setTimeout(()=>{ legalDocsSweep(); }, ms || 600); }
+  async function legalDocsSweep(){
+    if(_legalSweepRunning || !Array.isArray(state.leads) || !Array.isArray(state.events)) return;
+    _legalSweepRunning = true;
+    try{
+      if(!Array.isArray(state.leadTasks)) state.leadTasks = [];
+      const now = new Date().toISOString(); let ch = false;
+      state.leads.forEach(l=>{
+        const mine = state.leadTasks.filter(t=>t.leadId === l.id && t.docKind);
+        if(!legalLeadNeedsDocs(l)){
+          // продажу сняли / мероприятие отменили — открытые задачи по документам больше не нужны
+          mine.filter(t=>!t.done).forEach(t=>{ t.done = true; t.doneAt = now; t.docClosed = 'cancelled'; ch = true; });
+          return;
+        }
+        const ev = legalLeadEvent(l);
+        const kinds = ev.payerType === 'legal' ? ['contract','paymentOrder','act'] : ['payer'];
+        if(ev.payerType === 'legal') mine.filter(t=>t.docKind === 'payer' && !t.done).forEach(t=>{ t.done = true; t.doneAt = now; t.docClosed = 'auto'; ch = true; });
+        kinds.forEach(kind=>{
+          const has = legalDocAttached(ev, kind);
+          let t = mine.find(x=>x.docKind === kind);
+          if(has){
+            if(t && !t.done){ t.done = true; t.doneAt = now; t.docClosed = 'auto'; ch = true; }
+            return; // документ уже есть — задача не нужна
+          }
+          const due = legalDueFor(kind, l, ev);
+          if(!t){
+            t = { id: uid(), leadId: l.id, eventId: ev.id, docKind: kind, title: LEGAL_TASK_DEFS[kind].title, due, done: false, doneAt: '',
+              assignee: l.owner || leadAssigneeFor(due, l), createdBy: 'автозадача', createdAt: now, auto: true, followN: 0 };
+            state.leadTasks.push(t); ch = true;
+          } else {
+            if(t.done){ t.done = false; t.doneAt = ''; t.docClosed = ''; t.reopened = (t.reopened||0) + 1; ch = true; } // закрыли без файла — открываем снова
+            if(kind === 'act' && t.due !== due){ t.due = due; ch = true; } // дату мероприятия перенесли — переносим и акт
+            if(t.eventId !== ev.id){ t.eventId = ev.id; ch = true; }
+          }
+        });
+      });
+      if(ch){ await saveLeadTasks(); render(); }
+    }catch(e){ console.warn('legalDocsSweep', e); }
+    finally{ _legalSweepRunning = false; }
+  }
+  // попытка закрыть задачу по документам вручную: пропускаем, только если файл реально прикреплён
+  function legalTaskGuard(t){
+    if(!t || !t.docKind) return true;
+    const l = state.leads.find(x=>x.id === t.leadId); const ev = legalLeadEvent(l) || state.events.find(e=>e.id === t.eventId);
+    if(legalDocAttached(ev, t.docKind)) return true;
+    openLegalTaskInfo(t, ev);
+    return false;
+  }
+  function openLegalTaskInfo(t, ev){
+    const old = document.getElementById('legal-task-info'); if(old) old.remove();
+    const wrap = document.createElement('div'); wrap.id = 'legal-task-info'; wrap.className = 'ts-overlay';
+    const l = state.leads.find(x=>x.id === t.leadId) || {};
+    const docs = ev ? LEGAL_DOC_KINDS.map(k=>`<span class="lg-doc ${legalDocAttached(ev,k.key)?'ok':''}">${legalDocAttached(ev,k.key)?'✓':'○'} ${k.label}</span>`).join('') : '';
+    wrap.innerHTML = `<div class="ts-modal" style="max-width:480px;">
+      <div class="ts-head"><div><div class="ts-kicker">Документы юрлица</div><h3>${escapeHtml(LEGAL_TASK_DEFS[t.docKind].short)} ещё не прикреплён${t.docKind==='payer'?'о':''}</h3></div><button class="ts-x" data-x>×</button></div>
+      <div class="ts-meta" style="margin:8px 0 10px;">${t.docKind === 'payer'
+        ? 'Это B2B-продажа, а в мероприятии плательщик не отмечен как юрлицо. Откройте мероприятие, выберите «Плательщик — юрлицо» и укажите компанию — тогда появятся задачи на договор, счёт и акт.'
+        : 'Эта задача закрывается сама, как только документ прикреплён в карточке мероприятия (блок «Документы юрлица»). Галочкой её закрыть нельзя — так мы не теряем договоры и акты.'}</div>
+      ${ev ? `<div class="ts-client" style="margin:0 0 10px;"><div style="flex:1;min-width:0;"><b>${escapeHtml(ev.title || 'Мероприятие')}</b>
+        <div class="ts-meta">${escapeHtml(formatDateText(ev.date))}${ev.time ? ' ' + escapeHtml(ev.time) : ''}${ev.companyName ? ' · ' + escapeHtml(ev.companyName) : ''} · ${escapeHtml(l.contact || '')}</div>
+        ${docs ? `<div style="margin-top:6px;display:flex;gap:6px;flex-wrap:wrap;">${docs}</div>` : ''}</div></div>` : '<div class="ts-meta" style="color:var(--danger);">Заявка не привязана к мероприятию.</div>'}
+      <div class="ts-foot" style="margin-top:6px;"><span style="flex:1;"></span><button class="btn btn-ghost" data-x>Понятно</button>
+        ${ev ? '<button class="btn ts-done" data-openev>📎 Открыть мероприятие</button>' : ''}</div></div>`;
+    document.body.appendChild(wrap);
+    const close = ()=> wrap.remove();
+    wrap.onclick = (e)=>{ if(e.target === wrap) close(); };
+    wrap.querySelectorAll('[data-x]').forEach(b=> b.onclick = close);
+    const ob = wrap.querySelector('[data-openev]'); if(ob) ob.onclick = ()=>{ close(); const tp = document.getElementById('task-script-popup'); if(tp) tp.remove();
+      requireUnlock(()=>{ state.modal = {type:'event', event:{...ev}, isNew:false, keepAll:true}; render(); }); };
+  }
+  // контроль: все B2B-продажи периода и состояние их документов
+  function renderLegalDocsControlHtml(period){
+    const today = todayStr();
+    const rows = state.leads.filter(l=> legalLeadNeedsDocs(l)).map(l=>({ l, ev: legalLeadEvent(l) })).filter(r=> period.inPeriod(r.ev.date) || period.inPeriod(r.l.saleDate || ''))
+      .sort((a,b)=> a.ev.date.localeCompare(b.ev.date));
+    const tasks = (state.leadTasks||[]).filter(t=>t.docKind);
+    const cell = (r, kind)=>{
+      if(kind !== 'payer' && r.ev.payerType !== 'legal') return '<td class="lg-c na" title="Сначала отметьте плательщика-юрлицо">—</td>';
+      if(legalDocAttached(r.ev, kind)) return '<td class="lg-c ok" title="Прикреплён">✓</td>';
+      const t = tasks.find(x=>x.leadId === r.l.id && x.docKind === kind);
+      const due = t ? t.due : legalDueFor(kind, r.l, r.ev);
+      if(kind === 'act' && r.ev.date >= today) return `<td class="lg-c wait" title="Акт — после мероприятия">после ${escapeHtml(due.slice(8)+'.'+due.slice(5,7))}</td>`;
+      const late = due < today;
+      return `<td class="lg-c ${late ? 'late' : 'due'}" title="${late ? 'Просрочено' : 'Срок'}: ${escapeHtml(formatDateText(due))}${t && t.assignee ? ' · ' + escapeHtml(t.assignee) : ''}">${late ? '❗ ' + Math.round((new Date(today)-new Date(due))/864e5) + ' дн.' : '⏳ до ' + escapeHtml(due.slice(8)+'.'+due.slice(5,7))}</td>`;
+    };
+    const lateCount = rows.reduce((a,r)=> a + ['contract','paymentOrder','act'].filter(k=>{ if(r.ev.payerType !== 'legal' || legalDocAttached(r.ev,k)) return false; const t = tasks.find(x=>x.leadId===r.l.id && x.docKind===k); const d = t ? t.due : legalDueFor(k, r.l, r.ev); return d < today; }).length + (r.ev.payerType !== 'legal' ? 1 : 0), 0);
+    const full = rows.filter(r=> r.ev.payerType === 'legal' && ['contract','paymentOrder','act'].every(k=>legalDocAttached(r.ev,k))).length;
+    // по менеджерам: задачи по документам, закрытые в срок
+    const per = {}; tasks.filter(t=> t.due && period.inPeriod(t.due) && t.docKind !== 'payer').forEach(t=>{ const n = t.assignee || '—'; const o = per[n] = per[n] || {all:0, done:0, inTime:0, late:0};
+      o.all++; if(t.done && t.docClosed !== 'cancelled'){ o.done++; if(isoLocalDate(t.doneAt) <= t.due) o.inTime++; } else if(!t.done && t.due < today) o.late++; });
+    return `<div class="analytics-section">
+      <h4>🏢 Документы по юрлицам — ${escapeHtml(period.periodLabel)}</h4>
+      <div style="font-size:11.5px;color:var(--ink-soft);margin-bottom:10px;">Каждая проданная B2B-заявка → задачи менеджеру: договор и счёт — на следующий день после продажи, акт — на следующий день после мероприятия. Задача закрывается сама, когда файл прикреплён к мероприятию.</div>
+      <div class="analytics-summary" style="margin-bottom:12px;">
+        <div class="summary-card"><div class="num">${rows.length}</div><div class="label">B2B-продаж</div></div>
+        <div class="summary-card" style="border-left:4px solid var(--accent);"><div class="num" style="color:var(--accent);">${full}</div><div class="label">Все документы есть</div></div>
+        <div class="summary-card" style="border-left:4px solid var(--danger);"><div class="num" style="${lateCount?'color:var(--danger);':''}">${lateCount}</div><div class="label">Просрочено документов</div></div>
+        ${Object.keys(per).map(n=>{ const o = per[n]; const pct = o.done ? Math.round(o.inTime/o.done*100) : null; return `<div class="summary-card"><div class="num" style="font-size:20px;">${pct!==null ? pct + '%' : '—'}</div><div class="label">${escapeHtml(n)}: в срок · закрыто ${o.done}/${o.all}${o.late ? ' · <span style=\"color:var(--danger);\">просроч. ' + o.late + '</span>' : ''}</div></div>`; }).join('')}
+      </div>
+      ${rows.length ? `<div style="overflow-x:auto;"><table class="ms-table lg-table"><tr><th>Мероприятие</th><th>Компания / контакт</th><th>Менеджер</th><th>Договор</th><th>Счёт</th><th>Акт</th></tr>
+        ${rows.map(r=>`<tr>
+          <td><a href="#" data-lgev="${escapeHtml(r.ev.id)}">${escapeHtml(formatDateText(r.ev.date))} · ${escapeHtml(r.ev.title || 'мероприятие')}</a></td>
+          <td>${r.ev.payerType === 'legal' ? escapeHtml(r.ev.companyName || '—') : '<span style="color:var(--danger);">❗ плательщик не юрлицо</span>'}<div style="font-size:11px;color:var(--ink-soft);">${escapeHtml(r.l.contact || '')}</div></td>
+          <td>${escapeHtml(r.l.owner || '—')}</td>
+          ${cell(r,'contract')}${cell(r,'paymentOrder')}${cell(r,'act')}
+        </tr>`).join('')}</table></div>` : '<div style="font-size:12.5px;color:var(--ink-soft);">B2B-продаж с мероприятием в этом периоде нет.</div>'}
+    </div>`;
+  }
+  // ===================== Статистика: менеджеры и причины отказов =====================
+  // локальная дата (Омск) из ISO-отметки — doneAt хранится в UTC
+  function isoLocalDate(iso){ if(!iso) return ''; const d = new Date(iso); return isNaN(d) ? String(iso).slice(0,10) : fmtDate(d); }
+  function renderManagersStatsHtml(period, leadsP){
+    const today = todayStr();
+    const money = (l)=> (l.revenue>0 ? Number(l.revenue) : 0);
+    const shiftDays = {}; Object.keys(state.managerShifts||{}).forEach(d=>{ if(!period.inPeriod(d)) return; const n = managerForDate(d); if(n) (shiftDays[n] = shiftDays[n] || []).push(d); });
+    const tasksP = (state.leadTasks||[]).filter(t=> t.due && period.inPeriod(t.due) && state.leads.some(l=>l.id === t.leadId));
+    const names = new Set(Object.keys(shiftDays)); leadsP.forEach(l=>{ if(l.owner) names.add(l.owner); }); tasksP.forEach(t=>{ if(t.assignee) names.add(t.assignee); });
+    const rows = Array.from(names).map(name=>{
+      const L = leadsP.filter(l=> (l.owner||'') === name);
+      const sold = L.filter(l=>l.sold), lost = L.filter(l=> leadStatus(l) === 'lost');
+      const T = tasksP.filter(t=> (t.assignee||'') === name);
+      const done = T.filter(t=>t.done), onTime = done.filter(t=> isoLocalDate(t.doneAt) <= t.due);
+      const overdueNow = T.filter(t=> !t.done && t.due < today);
+      const days = (shiftDays[name] || []).length;
+      const daySet = new Set(shiftDays[name] || []);
+      const doneOnShift = done.filter(t=> daySet.has(isoLocalDate(t.doneAt))).length;
+      const rev = sold.reduce((a,l)=>a+money(l),0);
+      const rs = {}; lost.forEach(l=>{ const r = l.lostReason || 'причина не указана'; rs[r] = (rs[r]||0)+1; });
+      const topR = Object.keys(rs).sort((a,b)=>rs[b]-rs[a])[0];
+      return { name, days, leads: L.length, sold: sold.length, lost: lost.length, conv: L.length ? Math.round(sold.length/L.length*100) : null,
+        rev, avg: sold.length ? Math.round(rev/sold.length) : 0, tasks: T.length, done: done.length, onTimePct: done.length ? Math.round(onTime.length/done.length*100) : null,
+        overdue: overdueNow.length, perDay: days ? Math.round(done.length/days*10)/10 : null, leadsPerDay: days ? Math.round(L.length/days*10)/10 : null,
+        doneOffShift: done.length - doneOnShift, topR, topRN: topR ? rs[topR] : 0, rs };
+    }).filter(r=> r.leads || r.tasks || r.days).sort((a,b)=> b.leads - a.leads || b.tasks - a.tasks);
+    if(!rows.length) return '';
+    const best = (key)=>{ const v = rows.filter(r=>r[key]!==null && (key!=='conv' || r.leads>=3)).map(r=>r[key]); return v.length ? Math.max(...v) : null; };
+    const bConv = best('conv'), bRev = best('rev');
+    const kpi = (label, val, sub, cls)=> `<div class="ms-kpi ${cls||''}" title="${String(label)}: ${String(val).replace(/"/g,'')}${sub ? ' · ' + String(sub).replace(/"/g,'') : ''}"><div class="v">${val}</div><div class="l">${label}</div>${sub ? `<div class="s">${sub}</div>` : ''}</div>`;
+    const card = (r)=>{
+      const pctCol = r.onTimePct===null ? 'var(--line)' : (r.onTimePct >= 85 ? 'var(--accent)' : (r.onTimePct >= 60 ? '#B8863A' : 'var(--danger)'));
+      return `<div class="ms-card">
+        <div class="ms-head"><div class="ms-av">${escapeHtml((r.name.trim()[0]||'?').toUpperCase())}</div>
+          <div style="min-width:0;"><b>${escapeHtml(r.name)}</b><div class="ms-sub">${r.days ? 'рабочих дней по календарю: <b>' + r.days + '</b>' : 'нет смен в календаре за период'}</div></div>
+          ${r.conv!==null && r.conv===bConv && rows.length>1 && r.leads>=3 ? '<span class="ms-badge" title="Лучшая конверсия">🏆 конверсия</span>' : ''}
+          ${r.rev>0 && r.rev===bRev && rows.length>1 && r.conv!==bConv ? '<span class="ms-badge" title="Больше всех продал">🏆 выручка</span>' : ''}
+        </div>
+        <div class="ms-grp">Заявки</div>
+        <div class="ms-grid">
+          ${kpi('принято', r.leads, r.leadsPerDay!==null ? r.leadsPerDay + ' в смену' : '')}
+          ${kpi('продано', r.sold, r.conv!==null ? 'конверсия ' + r.conv + '%' : '', 'good')}
+          ${kpi('выручка', r.rev ? formatMoney(r.rev) : '—', r.avg ? 'чек ' + formatMoney(r.avg) : '')}
+          ${kpi('отказы', r.lost, r.topR ? escapeHtml(r.topR) + ' — ' + r.topRN : '', r.lost ? 'bad' : '')}
+        </div>
+        <div class="ms-grp">Задачи</div>
+        <div class="ms-grid">
+          ${kpi('поставлено', r.tasks, '')}
+          ${kpi('выполнено', r.done, r.perDay!==null ? r.perDay + ' за смену' : '')}
+          ${kpi('в срок', r.onTimePct!==null ? r.onTimePct + '%' : '—', '')}
+          ${kpi('просрочено сейчас', r.overdue, '', r.overdue ? 'bad' : '')}
+        </div>
+        <div class="ms-bar" title="Доля задач, выполненных в срок"><span style="width:${r.onTimePct||0}%;background:${pctCol};"></span></div>
+        ${r.doneOffShift > 0 && r.days ? `<div class="ms-note">${r.doneOffShift} задач закрыто не в свою смену</div>` : ''}
+      </div>`;
+    };
+    // сравнительная таблица
+    const th = ['Менеджер','Смен','Заявок','Продано','Конв.','Выручка','Отказы','Задач','Вып.','В срок','Просроч.'];
+    const td = (r)=> [escapeHtml(r.name), r.days||'—', r.leads, r.sold, r.conv!==null ? r.conv+'%' : '—', r.rev ? formatMoney(r.rev) : '—', r.lost, r.tasks, r.done, r.onTimePct!==null ? r.onTimePct+'%' : '—', r.overdue ? `<span style="color:var(--danger);font-weight:600;">${r.overdue}</span>` : '0'];
+    return `<div class="analytics-section">
+      <h4>👤 Менеджеры — ${escapeHtml(period.periodLabel)}</h4>
+      <div style="font-size:11.5px;color:var(--ink-soft);margin-bottom:10px;">Смены — из календаря менеджеров. Заявки — по дате заявки и владельцу заявки. Задачи — по сроку задачи и ответственному; «в срок» — закрыта не позже срока.</div>
+      <div class="ms-cards">${rows.map(card).join('')}</div>
+      ${rows.length > 1 ? `<details style="margin-top:10px;"><summary style="cursor:pointer;font-size:12.5px;font-weight:600;">Сравнить в таблице</summary>
+        <div style="overflow-x:auto;margin-top:6px;"><table class="ms-table"><tr>${th.map(h=>`<th>${h}</th>`).join('')}</tr>${rows.map(r=>`<tr>${td(r).map(c=>`<td>${c}</td>`).join('')}</tr>`).join('')}</table></div></details>` : ''}
+    </div>`;
+  }
+  function renderLostReasonsHtml(period, leadsP){
+    const lost = leadsP.filter(l=> leadStatus(l) === 'lost');
+    const total = leadsP.length;
+    const money = (l)=> (l.revenue>0 ? Number(l.revenue) : 0);
+    if(!lost.length) return `<div class="analytics-section"><h4>❌ Причины отказов — ${escapeHtml(period.periodLabel)}</h4><div style="font-size:12.5px;color:var(--ink-soft);">Отказов за период нет.</div></div>`;
+    const g = {}; lost.forEach(l=>{ const r = l.lostReason || 'Причина не указана'; (g[r] = g[r] || []).push(l); });
+    const keys = Object.keys(g).sort((a,b)=> g[b].length - g[a].length);
+    const max = Math.max(...keys.map(k=>g[k].length));
+    const lostSum = lost.reduce((a,l)=>a+money(l),0);
+    const noReason = (g['Причина не указана']||[]).length;
+    const top = keys.find(k=>k !== 'Причина не указана');
+    const cross = (list, keyFn)=>{ const m = {}; list.forEach(l=>{ const k = keyFn(l) || '—'; m[k] = (m[k]||0)+1; }); return Object.keys(m).sort((a,b)=>m[b]-m[a]).map(k=> escapeHtml(k) + ' — ' + m[k]).join(' · '); };
+    return `<div class="analytics-section">
+      <h4>❌ Причины отказов — ${escapeHtml(period.periodLabel)}</h4>
+      <div class="analytics-summary" style="margin-bottom:12px;">
+        <div class="summary-card" style="border-left:4px solid var(--danger);"><div class="num" style="color:var(--danger);">${lost.length}</div><div class="label">Отказов · ${total ? Math.round(lost.length/total*100) : 0}% заявок</div></div>
+        <div class="summary-card" style="border-left:4px solid var(--danger);"><div class="num" style="font-size:20px;">${lostSum ? formatMoney(lostSum) : '—'}</div><div class="label">Потеряно по сумме заявок</div></div>
+        ${top ? `<div class="summary-card"><div class="num" style="font-size:17px;">${escapeHtml(top)}</div><div class="label">Главная причина · ${Math.round(g[top].length/lost.length*100)}%</div></div>` : ''}
+      </div>
+      ${noReason ? `<div style="font-size:12.5px;color:var(--danger);margin-bottom:8px;">⚠ У ${noReason} отказов не указана причина — откройте заявку и выберите причину, иначе статистика неполная.</div>` : ''}
+      ${keys.map(k=>{ const L = g[k]; const sum = L.reduce((a,l)=>a+money(l),0);
+        return `<details class="lr-row">
+          <summary><span class="lr-name">${escapeHtml(k)}</span>
+            <span class="lr-bar"><span style="width:${Math.round(L.length/max*100)}%;background:${k==='Причина не указана'?'var(--ink-soft)':'var(--danger)'};"></span></span>
+            <span class="lr-num"><b>${L.length}</b> · ${Math.round(L.length/lost.length*100)}%${sum ? ' · ' + formatMoney(sum) : ''}</span></summary>
+          <div class="lr-body">
+            <div class="lr-cross"><b>По продуктам:</b> ${cross(L, l=>l.product)}</div>
+            <div class="lr-cross"><b>По источникам:</b> ${cross(L, l=>l.source)}</div>
+            <div class="lr-cross"><b>По менеджерам:</b> ${cross(L, l=>l.owner)}</div>
+            <div class="lr-leads">${L.slice(0,40).map(l=>`<a href="#" data-openlead="${escapeHtml(l.id)}">${escapeHtml(l.contact||'заявка')} · ${escapeHtml(l.product||'')}${l.revenue>0 ? ' · ' + formatMoney(l.revenue) : ''}</a>`).join('')}</div>
+          </div>
+        </details>`; }).join('')}
+    </div>`;
   }
   function renderConversionStatsView(){
     const { navHtml, period } = buildPeriodNav('conversionCursor', 'conversionMode', 'conv');
@@ -9750,6 +10618,9 @@
         </div>
       ` : ''}
 
+      ${renderLegalDocsControlHtml(period)}
+      ${renderManagersStatsHtml(period, allLeadsInPeriod)}
+      ${renderLostReasonsHtml(period, allLeadsInPeriod)}
       <div class="analytics-section">
         <h4>📤 Исходящие — Поздравления с ДР</h4>
         <div style="font-size:11.5px;color:var(--ink-soft);font-family:var(--font-mono);margin-bottom:8px;">${escapeHtml(period.periodLabel)} · менеджеры сами пишут гостям, не ждут заявку — отдельная воронка от обычных заявок выше.</div>
@@ -9916,17 +10787,15 @@
         <button class="btn btn-primary" id="btn-add-itemsale">+ Добавить продажу</button>
       </div>
       ${items.length === 0 ? `<div class="host-empty">Продаж пока нет</div>` : `
-        <div class="cert-list">
-          ${items.map(x=>`
-            <div class="refund-row" data-isid="${x.id}">
+        ${foldByDay('isl', items, x=>`
+            <div class="refund-row order-row" data-isid="${x.id}">
               <div class="cell">${x.date ? formatDateText(x.date) : '—'}</div>
               <div class="cell">${escapeHtml(x.masterName||'')}</div>
               <div class="amount">${x.revenue!==undefined&&x.revenue!==null ? formatMoney(x.revenue) : ''}</div>
               <div class="cell" style="color:var(--ink-soft);font-size:12px;">${x.revenue?`мастер: ${formatMoney(Math.round(x.revenue*ITEM_SALE_MASTER_PCT/100))}`:''}${x.source?` · ${escapeHtml(x.source)}`:''}${x.certAmount?` · 🎟 сертификатом ${formatMoney(x.certAmount)}`:''}</div>
               <div class="reason">${escapeHtml(x.comment||'')}</div>
             </div>
-          `).join('')}
-        </div>
+          `, x=>x.revenue, false)}
       `}
     `;
   }
@@ -9986,17 +10855,15 @@
         <button class="btn btn-primary" id="btn-add-order">+ Добавить заказ</button>
       </div>
       ${items.length === 0 ? `<div class="host-empty">Заказов пока нет</div>` : `
-        <div class="cert-list">
-          ${items.map(x=>`
-            <div class="refund-row" data-orderid="${x.id}">
+        ${foldByStatus('ord', items, [{id:'w',title:'⏳ Ждём оплату',pred:x=>orderRemainderTotal(x)>0,open:true},{id:'o',title:'Остальные заказы',pred:x=>!(orderRemainderTotal(x)>0),open:a=>a.length<=12}], x=>`
+            <div class="refund-row order-row" data-orderid="${x.id}">
               <div class="cell">${x.date ? formatDateText(x.date) : '—'}</div>
               <div class="cell">${escapeHtml(x.masterName||'')}${(x.additionalMasters||[]).filter(m=>(m.name||'').trim()).length ? ` +${(x.additionalMasters||[]).filter(m=>(m.name||'').trim()).length}` : ''}</div>
               <div class="amount">${x.revenue!==undefined&&x.revenue!==null ? formatMoney(x.revenue) : ''}</div>
               <div class="cell" style="color:var(--ink-soft);font-size:12px;">${orderMasterShareLabel(x)}${x.cost>0?` · себес ${formatMoney(Number(x.cost))} (${x.costSource==='master'?'мастер':'студия'})`:''}${orderRemainderTotal(x)>0?` · <span style="color:var(--status-red);">ждём: ${formatMoney(orderRemainderTotal(x))}</span>`:''}${orderDeadlineBadgeHtml(x)}</div>
               <div class="reason">${escapeHtml(x.comment||'')}</div>
             </div>
-          `).join('')}
-        </div>
+          `, x=>x.revenue, false)}
       `}
     `;
   }
@@ -10020,7 +10887,7 @@
       ${ordered.length === 0 ? `<div class="host-empty">Заказов пока нет</div>` : `
         <div class="cert-list">
           ${ordered.map(o=>`
-            <div class="refund-row">
+            <div class="refund-row myorder-row">
               <div class="cell">${o.date ? formatDateText(o.date) : '—'}</div>
               <div class="amount">ЗП: ${formatMoney(myShareFor(o))}</div>
               <div class="cell" style="color:var(--ink-soft);font-size:12px;">${o.deadline ? orderDeadlineBadgeHtml(o).replace(/^ · /,'') : 'без дедлайна'}</div>
@@ -10199,16 +11066,17 @@
       const groups = {};
       list.forEach(o=>{ (groups[o.writeDate] = groups[o.writeDate] || []).push(o); });
       const dates = Object.keys(groups).sort();
-      listHtml = dates.map(d=>{
+      listHtml = foldGroupsHtml('out' + (state.outreachViewMode === 'all' ? 'A' : 'D'), dates.map(d=>{
         const items = groups[d];
         const pending = items.filter(o=>(o.status||'in_progress')==='in_progress').length;
-        return `
-          <div class="analytics-section">
-            <h4 style="color:${d<today&&pending>0?'var(--status-red)':'inherit'};">${formatOutreachDate(d)}${d===today?' · сегодня':(d<today?' · просрочено':'')} <span style="font-size:12px;color:var(--ink-soft);font-weight:400;">(в процессе: ${pending} из ${items.length})${(d>=today&&pending>OUTREACH_DAILY_LIMIT)?` <span style="color:var(--status-red);font-weight:600;">· больше лимита ${OUTREACH_DAILY_LIMIT}</span>`:''}</span></h4>
-            <div class="cert-list">${items.map(row).join('')}</div>
-          </div>
-        `;
-      }).join('');
+        return {
+          id: d,
+          title: `<span style="color:${d<today&&pending>0?'var(--status-red)':'inherit'};">${formatOutreachDate(d)}${d===today?' · сегодня':(d<today?' · просрочено':'')}</span>`,
+          meta: `в процессе: ${pending} из ${items.length}${(d>=today&&pending>OUTREACH_DAILY_LIMIT)?` · <span style="color:var(--status-red);font-weight:600;">больше лимита ${OUTREACH_DAILY_LIMIT}</span>`:''}`,
+          html: items.map(row).join(''),
+          open: pending > 0 && d <= today
+        };
+      }));
     } else {
       listHtml = `<div class="cert-list">${list.map(row).join('')}</div>`;
     }
@@ -11259,7 +12127,9 @@
     const st = timeToMinutes(e.time), en = st + (Number(e.duration) || 0);
     const rent = (a,b)=> `<span style="background:#FFF1CC;border:1px solid #E8B84B;border-radius:4px;padding:0 4px;white-space:nowrap;">${ftMinToTime(a)}–${ftMinToTime(b)} аренда ${escapeHtml(formatDuration(b-a))}</span>`;
     const main = `<span style="background:#E4F1E8;border:1px solid #3F8F6B;border-radius:4px;padding:0 4px;white-space:nowrap;"><b>${ftMinToTime(st)}–${ftMinToTime(en)}</b> ${escapeHtml((e.product || 'мероприятие').toLowerCase())} ${escapeHtml(formatDuration(en-st))}</span>`;
-    return `<div style="display:flex;flex-direction:column;align-items:flex-start;gap:2px;margin:3px 0;font-size:.88em;">${rb > 0 ? rent(st-rb, st) : ''}${main}${ra > 0 ? rent(en, en+ra) : ''}</div>`;
+    const pills = `<div style="display:flex;flex-direction:column;align-items:flex-start;gap:2px;margin:3px 0;font-size:.88em;">${rb > 0 ? rent(st-rb, st) : ''}${main}${ra > 0 ? rent(en, en+ra) : ''}</div>`;
+    if(!dsIsMobile()) return pills;
+    return `<details style="margin:3px 0;font-size:.88em;" onclick="event.stopPropagation()"><summary style="cursor:pointer;color:#9A6B00;">⏱ аренда ${rb>0?'до ' + escapeHtml(formatDuration(rb)):''}${rb>0&&ra>0?' · ':''}${ra>0?'после ' + escapeHtml(formatDuration(ra)):''} — тайминг</summary>${pills}</details>`;
   }
   function dsCardHtml(e, warn, fs, spaceTag){
     const remainder = roleCanSeeGuestBalances(state.currentRole) ? eventRemainderTotal(e) : 0;
@@ -11272,16 +12142,16 @@
     const tip = [e.title, _gn ? 'Гости: ' + _gn : '', e.notes, e.foodInfo, e.ageCategory].filter(Boolean).join('\n');
     return `<div class="ds-card" data-eid="${escapeHtml(e.id)}" data-tdate="${escapeHtml(e.date||'')}" data-tst="${timeToMinutes(e.time)}" data-ten="${timeToMinutes(e.time) + (Number(e.duration)||0)}" title="${escapeHtml(tip)}" style="font-size:${fs}px;border-left:4px solid ${statusColor(e.status)};">
       <div class="ds-card-main">
-        <div class="ds-ct">${spaceTag || ''}<b>${escapeHtml(e.time || '')}${e.time && e.duration ? '–' + ftMinToTime(timeToMinutes(e.time) + (Number(e.duration)||0)) : ''}</b>${(e.time && ((Number(e.rentalBefore)||0) > 0 || (Number(e.rentalAfter)||0) > 0)) ? ` <span style="font-size:.9em;background:#FFF1CC;border:1px solid #E8B84B;border-radius:4px;padding:0 4px;white-space:nowrap;">с арендой ${ftMinToTime(effectiveStart(e))}–${ftMinToTime(effectiveEnd(e))}</span>` : ''}${escapeHtml(gTxt)}</div>
+        <div class="ds-ct">${spaceTag || ''}<b>${e.time ? ftMinToTime(effectiveStart(e)) + '–' + ftMinToTime(effectiveEnd(e)) : ''}</b>${escapeHtml(gTxt)}</div>
         <div class="ds-ctitle">${escapeHtml(e.title || '')}</div>
         <div class="ds-ch">${isPrivateWithoutHost(e) ? '<span style="color:var(--danger);">без ведущего</span>' : escapeHtml(hostLine)}${isPrivateWithoutHost(e) && (e.product || '') ? ' · ' + escapeHtml(e.product) : ''}${legalSuffix(e)}</div>
         ${dsRentalHtml(e)}
-        ${_gn ? `<div class="ds-cn" style="-webkit-line-clamp:3;font-weight:500;">👥 ${escapeHtml(_gn)}</div>` : ''}
+        ${_gn ? `<div class="ds-cn" style="font-weight:500;">👥 ${escapeHtml(_gn)}</div>` : ''}
         ${priv && e.ageCategory ? `<div class="ds-cn">🎂 ${escapeHtml(e.ageCategory)}</div>` : ''}
         ${priv && e.foodInfo ? `<div class="ds-cn">🍕 ${escapeHtml(e.foodInfo)}</div>` : ''}
         ${e.notes ? `<div style="font-size:.92em;white-space:pre-wrap;overflow-wrap:anywhere;">💬 ${escapeHtml(e.notes)}</div>` : ''}
         ${w ? `<div class="ds-cn" style="color:var(--danger);">⚠ ${w.gap < 0 ? 'наложение ' + Math.abs(w.gap) + ' мин' : 'перерыв ' + w.gap + ' мин'}</div>` : ''}
-        ${remainder > 0 ? `<div class="ds-cn" style="color:var(--status-red);-webkit-line-clamp:1;">💳 Остаток: ${escapeHtml(formatMoney(remainder))}</div>` : ''}
+        ${remainder > 0 ? `<div class="ds-cn" style="color:var(--status-red);">💳 Остаток: ${escapeHtml(formatMoney(remainder))}</div>` : ''}
       </div>
       <div class="ds-cbtn"><button class="quick-host-btn" data-eid="${escapeHtml(e.id)}" title="Сменить мастера (без кода)">✎ мастер</button>${isMyEventForReport(e) ? `<button class="quick-report-btn" data-eid="${escapeHtml(e.id)}">📝 ${hasMasterReport(e) ? 'отчёт ✓' : 'отчёт'}</button>` : ''}</div>
     </div>`;
@@ -11320,7 +12190,7 @@
       .dsm-chips{ display:flex; gap:6px; overflow-x:auto; padding:6px 0; flex-shrink:0; } .dsm-chips .btn{ white-space:nowrap; padding:5px 12px; flex-shrink:0; }
       .dsm-list{ flex:1; min-height:0; overflow-y:auto; display:flex; flex-direction:column; gap:6px; -webkit-overflow-scrolling:touch; }
       .ds-card{ flex:0 0 auto; background:var(--white); border:1px solid var(--line-strong); border-radius:8px; padding:8px 10px; display:flex; gap:8px; justify-content:space-between; align-items:flex-start; line-height:1.3; box-shadow:0 1px 2px rgba(0,0,0,.1); }
-      .ds-card-main{ min-width:0; flex:1; } .ds-ct{ font-family:var(--font-mono); } .ds-ctitle{ font-weight:700; } .ds-ch{ color:var(--ink-soft); font-size:.9em; } .ds-cn{ font-size:.9em; display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; overflow:hidden; }
+      .ds-card-main{ min-width:0; flex:1; } .ds-ct{ font-family:var(--font-mono); } .ds-ctitle{ font-weight:700; } .ds-ch{ color:var(--ink-soft); font-size:.9em; } .ds-cn{ font-size:.9em; white-space:pre-wrap; overflow-wrap:anywhere; }
       .ds-cbtn{ display:flex; flex-direction:column; gap:4px; flex-shrink:0; } .ds-cbtn button{ font-size:.85em; padding:5px 8px; border:1px solid var(--line-strong); background:var(--white); border-radius:6px; }
       .dsm-free{ flex-shrink:0; border-top:1px solid var(--line); padding-top:6px; margin-top:6px; max-height:34%; overflow-y:auto; }
     </style>
@@ -11333,7 +12203,7 @@
       ${state.dsOffOpen ? `<div style="max-height:40%;overflow:auto;margin-top:6px;">${renderDaysOffBlock(ds)}</div>` : ''}
       <div class="dsm-chips"><button class="btn ${sel==='all'?'btn-primary':'btn-ghost'}" data-dsm="all">Все</button>${spaces.map(s=>`<button class="btn ${sel===s.id?'btn-primary':'btn-ghost'}" data-dsm="${s.id}">${escapeHtml(s.name)}</button>`).join('')}</div>
       <div class="dsm-list">${list.length ? list.map(e=> dsCardHtml(e, warn, fs, tag(e))).join('') : '<div style="padding:16px;color:var(--ink-soft);text-align:center;">В этот день мероприятий нет</div>'}</div>
-      <div class="dsm-free"><div style="font-size:12px;color:var(--ink-soft);">🟢 Свободно — нажмите, чтобы создать мероприятие</div>${free}</div>
+      <details class="dsm-free" data-fold="dsfree" ${(state.groupOpen && state.groupOpen['dsfree']) ? 'open' : ''}><summary style="font-size:12px;color:var(--ink-soft);cursor:pointer;">🟢 Свободно — нажмите, чтобы создать мероприятие</summary>${free}</details>
     </div>`;
   }
   function renderDayScreen(ds){
@@ -11407,7 +12277,7 @@
       .ds-card{ flex:0 0 auto; min-height:0; overflow:visible; background:var(--white); border:1px solid var(--line-strong); border-radius:6px; padding:5px 7px; display:flex; gap:6px; justify-content:space-between; align-items:flex-start; cursor:pointer; line-height:1.28; box-shadow:0 1px 2px rgba(0,0,0,.1); }
       .ds-card:hover{ box-shadow:0 2px 8px rgba(0,0,0,.25); }
       .ds-card-main{ min-width:0; flex:1; } .ds-ct{ font-family:var(--font-mono); } .ds-ctitle{ font-weight:700; }
-      .ds-ch{ color:var(--ink-soft); font-size:.9em; } .ds-cn{ font-size:.9em; display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; overflow:hidden; }
+      .ds-ch{ color:var(--ink-soft); font-size:.9em; } .ds-cn{ font-size:.9em; white-space:pre-wrap; overflow-wrap:anywhere; }
       .ds-cbtn{ display:flex; flex-direction:column; gap:3px; flex-shrink:0; } .ds-cbtn button{ font-size:.85em; padding:2px 6px; border:1px solid var(--line-strong); background:var(--white); border-radius:5px; cursor:pointer; }
       .ds-free-strip{ flex:0 0 auto; border:1px dashed #3F8F6B; background:rgba(63,143,107,.10); color:#2d6b4f; border-radius:5px; font-size:12px; padding:3px 7px; cursor:pointer; }
       .ds-free-strip:hover{ background:rgba(63,143,107,.28); }
@@ -11586,7 +12456,7 @@
             <select id="l-kind">
               <option value="" ${!(lead.kind || !isNew) ? 'selected' : ''}>— выберите —</option>
               <option value="b2c" ${(lead.kind || (isNew ? '' : 'b2c')) === 'b2c' ? 'selected' : ''}>B2C — частный гость (ведём в расписании)</option>
-              <option value="b2b" ${lead.kind === 'b2b' ? 'selected' : ''}>B2B — компания (работа в Едином журнале)</option>
+              <option value="b2b" ${lead.kind === 'b2b' ? 'selected' : ''}>B2B — компания</option>
             </select>
           </div>
           <div class="row2">
@@ -14665,6 +15535,40 @@
     return Math.round((da - db) / 86400000);
   }
 
+  // ---- сворачиваемые группы (общий помощник) ----
+  // groups: [{id, title(html), meta(html), html, open}] — состояние раскрытия помним в state.groupOpen, чтобы оно не сбрасывалось при перерисовке
+  function foldGroupsHtml(listKey, groups, opts){
+    opts = opts || {};
+    if(!state.groupOpen) state.groupOpen = {};
+    const tools = (groups.length > 1 && !opts.noTools) ? `<div class="fold-tools"><button type="button" data-foldall="open" data-fold-prefix="${escapeHtml(listKey)}:">Развернуть всё</button><button type="button" data-foldall="close" data-fold-prefix="${escapeHtml(listKey)}:">Свернуть всё</button></div>` : '';
+    return tools + groups.map(g=>{
+      const k = listKey + ':' + g.id;
+      const open = (k in state.groupOpen) ? state.groupOpen[k] : !!g.open;
+      return `<details class="fold" data-fold="${escapeHtml(k)}" ${open?'open':''}><summary class="fold-sum"><span class="fold-t">${g.title}</span>${g.meta ? `<span class="fold-m">${g.meta}</span>` : ''}</summary><div class="cert-list" style="border-top:none;">${g.html}</div></details>`;
+    }).join('');
+  }
+  // записи списком по дням: «5 ноября · 7 записей · 41 200 ₽»; раскрыты три последних дня
+  function foldByDay(listKey, items, rowFn, amountFn, hideTotals, openCount){
+    const order = [], map = {};
+    items.forEach(it=>{ const d = it.date || 'без даты'; if(!map[d]){ map[d] = []; order.push(d); } map[d].push(it); });
+    const word = (n)=> n + (n%10===1 && n%100!==11 ? ' запись' : ([2,3,4].includes(n%10) && ![12,13,14].includes(n%100) ? ' записи' : ' записей'));
+    return foldGroupsHtml(listKey, order.map((d,i)=>{
+      const arr = map[d];
+      const sum = amountFn ? arr.reduce((a,x)=> a + (Number(amountFn(x))||0), 0) : 0;
+      return { id:d, title: escapeHtml(d==='без даты' ? 'Без даты' : formatDateText(d)), meta: escapeHtml(word(arr.length)) + (amountFn && !hideTotals ? ' · ' + escapeHtml(formatMoney(sum)) : ''), html: arr.map(rowFn).join(''), open: i < (openCount||3) };
+    }));
+  }
+  // записи списком по статусам: defs = [{id, title, pred, open}] — группы без записей не показываются
+  function foldByStatus(listKey, items, defs, rowFn, amountFn, hideTotals){
+    const groups = [];
+    defs.forEach(d=>{
+      const arr = items.filter(d.pred);
+      if(!arr.length) return;
+      const sum = amountFn ? arr.reduce((a,x)=> a + (Number(amountFn(x))||0), 0) : 0;
+      groups.push({ id:d.id, title:d.title, meta: escapeHtml(String(arr.length)) + (amountFn && !hideTotals ? ' · ' + escapeHtml(formatMoney(sum)) : ''), html: arr.map(rowFn).join(''), open: (typeof d.open === 'function') ? d.open(arr) : !!d.open });
+    });
+    return foldGroupsHtml(listKey, groups, {noTools: groups.length < 2});
+  }
   function renderIncomesView(period){
     const inPeriod = period ? period.inPeriod : (()=>true);
     const periodLabel = period ? period.periodLabel : '';
@@ -14680,8 +15584,7 @@
         </div>
       </div>
       ${items.length === 0 ? `<div class="host-empty">Записей пока нет</div>` : `
-        <div class="cert-list">
-          ${items.map(i=>`
+        ${foldByDay('inc', items, i=>`
             <div class="refund-row" data-iid="${i.id}">
               <div class="cell">${i.date ? formatDateText(i.date) : '—'}</div>
               <div class="cell">${escapeHtml(i.operation||'')}</div>
@@ -14690,8 +15593,7 @@
               <div class="amount">${i.amount!==undefined&&i.amount!==null ? formatMoney(i.amount) : ''}</div>
               <div class="reason">${i.eventId ? '🔗 '+escapeHtml(linkedEventLabel(i.eventId))+(i.comment?' · ':'') : ''}${escapeHtml(i.comment||'')}</div>
             </div>
-          `).join('')}
-        </div>
+          `, i=>i.amount, hideTotals)}
       `}
     `;
   }
@@ -14777,8 +15679,7 @@
         <button class="btn btn-primary" id="btn-add-expense">+ Добавить расход</button>
       </div>
       ${items.length === 0 ? `<div class="host-empty">Записей пока нет</div>` : `
-        <div class="cert-list">
-          ${items.map(e=>`
+        ${foldByDay('exp', items, e=>`
             <div class="expense-row" data-eid="${e.id}">
               <div class="cell">${e.date ? formatDateText(e.date) : '—'}${expenseShiftedToOtherMonth(e) ? `<div style="font-size:10.5px;color:var(--ink-soft);">за ${MONTHS[parseInt(expenseAccrualDate(e).slice(5,7),10)-1].toLowerCase()}</div>` : ''}</div>
               <div class="cell">${escapeHtml(e.category||'')}${(isOwner && e.category==='Зарплата') ? ` · ${escapeHtml(salaryWho(e))}` : ''}${(e.receiptIds&&e.receiptIds.length)?` <span title="Приложен чек">📎</span>`:''}${e.ownerOnly?' <span title="Из «Ручные расходы» — редактируется там, видно только владельцу" style="opacity:.55;">🔒</span>':''}${e.category==='Материалы'&&e.direction?'<br><span style="color:var(--ink-soft);font-size:11px;">'+escapeHtml(e.direction)+'</span>':''}${e.category==='Зарплата'&&e.master?'<br><span style="color:var(--ink-soft);font-size:11px;">'+escapeHtml(e.master)+'</span>':''}</div>
@@ -14787,12 +15688,23 @@
               <div class="cell">${escapeHtml(e.responsible||'')}</div>
               <div class="comment">${escapeHtml(e.comment||'')}</div>
             </div>
-          `).join('')}
-        </div>
+          `, e=> e.safeTransferType==='collection' ? 0 : e.amount, hideTotals)}
       `}
     `;
   }
 
+  // один раз на страницу: запоминаем, какие группы раскрыты, и кнопки «Развернуть/Свернуть всё»
+  if(!window.__foldInit){
+    window.__foldInit = true;
+    document.addEventListener('toggle', (ev)=>{ const d = ev.target; if(d && d.dataset && d.dataset.fold){ if(!state.groupOpen) state.groupOpen = {}; state.groupOpen[d.dataset.fold] = d.open; } }, true);
+    document.addEventListener('click', (ev)=>{
+      const lf = ev.target.closest && ev.target.closest('[data-lbfold]');
+      if(lf){ const st = lf.dataset.lbfold; if(!state.lbOpen) state.lbOpen = {}; state.lbOpen[st] = !state.lbOpen[st]; render(); return; }
+      const b = ev.target.closest && ev.target.closest('[data-foldall]'); if(!b) return;
+      const open = b.dataset.foldall === 'open', pre = b.dataset.foldPrefix || '';
+      document.querySelectorAll('details.fold[data-fold]').forEach(d=>{ if(d.dataset.fold.startsWith(pre)) d.open = open; });
+    });
+  }
   function attachBookEvents(){
     document.querySelectorAll('[data-bookview]').forEach(btn=>{
       btn.onclick = ()=>{ state.bookView = btn.dataset.bookview; render(); };
@@ -26137,7 +27049,8 @@
             ${warnHtml}
             <div class="day-evt${openSlot?' open-master-slot':''}" data-eid="${e.id}" ${masterRowNoClick?'style="cursor:default;"':''}>
               <div class="left">
-                <div class="time"><span class="chip-dot" style="background:${statusColor(e.status)};display:inline-block;margin-right:6px;"></span>${e.time}${e.duration?' · '+formatDuration(e.duration):''}${scheduleFillText(e) ? ' · 👤 '+scheduleFillText(e) : ((e.guests!==undefined&&e.guests!==null&&e.guests!=='')?' · 👤 '+e.guests:'')}</div>
+                <div class="time"><span class="chip-dot" style="background:${statusColor(e.status)};display:inline-block;margin-right:6px;"></span>${eventStartLabel(e)}${e.duration?' · '+formatDuration((Number(e.duration)||0) + (state.currentRole==='master' ? 0 : (Number(e.rentalBefore)||0) + (Number(e.rentalAfter)||0))):''}${scheduleFillText(e) ? ' · 👤 '+scheduleFillText(e) : ((e.guests!==undefined&&e.guests!==null&&e.guests!=='')?' · 👤 '+e.guests:'')}</div>
+                ${state.currentRole==='master' ? '' : eventTimingLineHtml(e)}
                 <div class="title">${openSlot?'🙋 ':''}${escapeHtml(e.title)}</div>
                 ${isAll ? `<div class="host" style="display:flex;align-items:center;gap:6px;">${spaceBadge(getSpace(e.spaceId),'sm')}${escapeHtml(getSpace(e.spaceId).name)} · ${escapeHtml(allHostNamesDisplay(e))}${e.product?' · '+escapeHtml(e.product):''}${showsDishesAndRental(e.status)&&e.dishes?' · 🍽 '+(e.dishes==='needed'?'нужна посуда':'без посуды'):''}${rentalSuffix(e)}${legalSuffix(e)}</div>` : `<div class="host">${escapeHtml(allHostNamesDisplay(e))}${e.product?' · '+escapeHtml(e.product):''}${showsDishesAndRental(e.status)&&e.dishes?' · 🍽 '+(e.dishes==='needed'?'нужна посуда':'без посуды'):''}${rentalSuffix(e)}${legalSuffix(e)}</div>`}
                 ${openSlot ? `<div class="notes" style="color:var(--status-cyan);">🙋 ${available.length ? 'Свободны: '+escapeHtml(available.join(', ')) : 'Пока никто не откликнулся'}</div>` : ''}
@@ -26370,8 +27283,8 @@
           </div>
           <div class="row2">
             <div class="field">
-              <label>Время</label>
-              <input type="time" id="f-time" value="${ev.time}">
+              <label>Начало <span style="font-weight:400;color:var(--ink-soft);">— с аренды, если она есть до МК</span></label>
+              <input type="time" id="f-time" value="${(()=>{ const rb0 = showsDishesAndRental(ev.status) ? (parseInt(ev.rentalBefore)||0) : 0; return ev.time && rb0 ? ftMinToTime(timeToMinutes(ev.time) - rb0) : (ev.time||''); })()}">
             </div>
             <div class="field">
               <label>Длительность МК (мин) <span style="font-weight:400;color:var(--ink-soft);">— сама подставляется по виду мероприятия</span></label>
@@ -26929,6 +27842,28 @@
       titleInput.addEventListener('change', recalcPayOnTitle);
     }
     if(durationInput){ durationInput.addEventListener('input', ()=>{ durationInput.dataset.manual = '1'; }); }
+    // второстепенные блоки формы сворачиваются: заполненные раскрыты, пустые свёрнуты; в заголовке — краткая сводка
+    (function(){
+      const q = (sel)=> overlay.querySelector(sel);
+      const val = (sel)=> { const el = q(sel); return el ? String(el.value||'').trim() : ''; };
+      const defs = [
+        { id:'rental-field',       sum: ()=>{ const a = parseInt(val('#f-rental-before'))||0, b = parseInt(val('#f-rental-after'))||0; return (a||b) ? ((a ? 'до МК ' + formatDuration(a) : '') + (a&&b ? ' · ' : '') + (b ? 'после МК ' + formatDuration(b) : '')) : ''; } },
+        { id:'age-category-field', sum: ()=> val('#f-age-category') },
+        { id:'food-info-field',    sum: ()=> val('#f-food-info') },
+        { id:'lead-link-field',    sum: ()=> (val('#f-lead-id') || val('#f-lead-search')) ? (val('#f-lead-search') || 'заявка выбрана') : '' }
+      ];
+      defs.forEach(d=>{
+        const f = q('#'+d.id); if(!f) return;
+        const lab = f.querySelector(':scope > label'); if(!lab) return;
+        f.classList.add('fold-field'); lab.classList.add('fold-lab');
+        const now = document.createElement('span'); now.className = 'fold-now'; lab.appendChild(now);
+        const refresh = ()=>{ const t = d.sum(); now.textContent = t || ''; };
+        refresh();
+        if(!d.sum()) f.classList.add('is-folded');
+        lab.addEventListener('click', (ev)=>{ if(ev.target.closest('input,button,select,textarea,a')) return; refresh(); f.classList.toggle('is-folded'); });
+        f.addEventListener('input', refresh); f.addEventListener('change', refresh);
+      });
+    })();
     // «Общая длительность» считается сама: аренда до + МК + аренда после (аренда учитывается, только если поле аренды показано)
     (function(){
       const hintEl = overlay.querySelector('#f-total-hint');
@@ -26947,9 +27882,9 @@
         let line = '<b>Общая длительность: ' + escapeHtml(formatDuration(total)) + '</b>';
         if(t0 !== null){
           const row = (x,y,label,col)=> '<div style="display:flex;gap:8px;"><span style="font-family:var(--font-mono);min-width:106px;">' + ftMinToTime(x) + '–' + ftMinToTime(y) + '</span><span style="color:' + col + ';">' + label + ' · ' + escapeHtml(formatDuration(y - x)) + '</span></div>';
-          if(rb) line += row(t0 - rb, t0, 'аренда', '#9A6B00');
-          line += row(t0, t0 + mk, 'мастер-класс', '#2F7A57');
-          if(ra) line += row(t0 + mk, t0 + mk + ra, 'аренда', '#9A6B00');
+          if(rb) line += row(t0, t0 + rb, 'аренда', '#9A6B00');
+          line += row(t0 + rb, t0 + rb + mk, 'мастер-класс', '#2F7A57');
+          if(ra) line += row(t0 + rb + mk, t0 + rb + mk + ra, 'аренда', '#9A6B00');
         } else {
           line += ' <span style="color:var(--ink-soft);">(' + escapeHtml(parts.join(' + ')) + ')</span>';
         }
@@ -26995,6 +27930,7 @@
         const map = {title:'f-title', product:'f-product', date:'f-date', time:'f-time', host:'f-host', notes:'f-notes'};
         Object.keys(map).forEach(k=>{ const el = overlay.querySelector('#'+map[k]); if(el && !el.disabled) ev0[k] = el.value; });
         ['duration','guests','price'].forEach(k=>{ const el = overlay.querySelector('#f-'+k); if(el && !el.disabled && el.value!=='') ev0[k] = Number(el.value); });
+        { const rbEl = overlay.querySelector('#f-rental-before'), rfEl = overlay.querySelector('#rental-field'); const rbN = (rbEl && rfEl && rfEl.style.display !== 'none') ? (parseInt(rbEl.value)||0) : 0; if(ev0.time) ev0.time = ftMinToTime(timeToMinutes(ev0.time) + rbN); }
         const returnTo = {...state.modal, event: ev0};
         state.modal = {type:'event-catalog', returnTo, addNew:true};
         overlay.remove(); render();
@@ -28396,7 +29332,7 @@
       const hostFieldLockedForMaster = state.currentRole === 'master' && state.modal.event && state.modal.event.host && state.modal.event.host !== state.loggedInMasterName;
       let hostVal = hostFieldLockedForMaster ? state.modal.event.host : overlay.querySelector('#f-host').value.trim();
       const dateVal = overlay.querySelector('#f-date').value;
-      const timeVal = overlay.querySelector('#f-time').value;
+      let timeVal = overlay.querySelector('#f-time').value; // начало (с арендой); время МК = начало + аренда до — пересчитывается ниже
       const durationVal = parseInt(overlay.querySelector('#f-duration').value) || 0;
       const guestsRaw = overlay.querySelector('#f-guests').value;
       // мастер не видит и не вводит денежные поля мероприятия — при сохранении сохраняем прежние суммы как есть
@@ -28444,6 +29380,7 @@
       const marketingOptional = statusVal === 'marketing';
       const materialsMissing = cleanedMaterialsItems.length === 0 && !scheduleWithoutGuests && !marketingOptional;
       const rentalBeforeVal = showsDishesAndRental(statusVal) ? (parseInt(rentalBeforeRaw) || 0) : 0;
+      if(timeVal) timeVal = ftMinToTime(timeToMinutes(timeVal) + rentalBeforeVal);
       const rentalAfterVal = showsDishesAndRental(statusVal) ? (parseInt(rentalAfterRaw) || 0) : 0;
 
       // для статуса "Слот" поля необязательны — во всех остальных случаях обязательны все графы
