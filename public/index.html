@@ -168,6 +168,13 @@
   .lt-gbar button.on{ background:var(--ink); color:#fff; border-color:var(--ink); }
   .lt-gbar .hint{ margin-left:auto; font-size:11.5px; }
   .lt-grp{ background:rgba(255,255,255,0.55); border:1px solid var(--line); border-radius:var(--radius); }
+  .pd-table td,.pd-table th{ text-align:right; white-space:nowrap; padding:6px 8px; font-size:13px; }
+  .pd-table .pd-sub,.pd-sub{ font-size:11px; color:var(--ink-soft); font-weight:400; }
+  .pd-kpi{ background:#F2ECDD; border-radius:12px; padding:9px 12px; }
+  .pd-kpi .pd-k{ font-size:11px; color:var(--ink-soft); text-transform:uppercase; letter-spacing:.4px; }
+  .pd-kpi .pd-v{ font-size:18px; font-weight:800; margin-top:2px; }
+  .lt-more{ display:block; width:calc(100% - 12px); margin:6px; padding:7px 10px; border:1px dashed #C9BFA6; border-radius:10px; background:#FBF8F0; color:#171512; font-weight:600; font-size:12.5px; font-family:inherit; cursor:pointer; text-align:center; }
+  .lt-more:hover{ background:#F2ECDD; border-color:#E8B84B; }
   .lt-grp-h{ display:flex; align-items:flex-start; flex-wrap:wrap; gap:4px 6px; padding:6px 8px; cursor:pointer; user-select:none; font-size:12.5px; font-weight:600; }
   .lt-grp-h:hover{ background:rgba(0,0,0,0.03); }
   .lt-grp-h .arr{ width:10px; color:var(--ink-soft); font-size:11px; }
@@ -1324,7 +1331,9 @@
     const body = overlay.querySelector('.modal-body'); if(!body || body.dataset.sectioned) return;
     const modal = overlay.querySelector('.modal'); if(modal) modal.classList.add('ev-modal');
     body.dataset.sectioned = '1'; body.classList.add('ev-body');
-    if(!state.evSecOpen) state.evSecOpen = {};
+    // каждое новое мероприятие открывается свёрнутым: видно только «Основное», остальные блоки — строкой-сводкой.
+    // Что раскрыли внутри этой карточки — остаётся раскрытым, пока работаете с ней (в т.ч. после перерисовки).
+    if(!state.evSecOpen || !state.modal || !state.modal._evSecInit){ state.evSecOpen = {}; if(state.modal) state.modal._evSecInit = true; }
     const topChild = (el)=>{ while(el && el.parentElement !== body) el = el.parentElement; return el; };
     const secs = [];
     const plan = EV_SECTIONS.map(def=>{
@@ -1362,7 +1371,7 @@
       return '';
     };
     const isPriv = ()=> isPrivateEventStatus(val('#f-status'));
-    const defOpen = (key)=> key === 'main' || key === 'host' || (key === 'guest' && isPriv());
+    const defOpen = (key)=> key === 'main';
     const isOpen = (sec)=> state.evSecOpen[sec.dataset.sec] !== undefined ? state.evSecOpen[sec.dataset.sec] : defOpen(sec.dataset.sec);
     const refresh = ()=>{
       secs.forEach(sec=>{
@@ -4807,6 +4816,17 @@
       out = Object.assign({}, localEv);
       new Set([...Object.keys(serverEv), ...Object.keys(localEv)]).forEach(k=>{
         if(k === 'payments') return;
+        if(k === 'availableMasters'){
+          // отклики мастеров на слот складываем, а не перезаписываем: если две мастерицы нажали «Могу провести»
+          // почти одновременно, должны остаться обе (убираем только тех, кого сняли в этом сохранении)
+          const nm = x=> String(x||'').trim().toLowerCase();
+          const base = (baseEv.availableMasters||[]).map(nm), loc = (localEv.availableMasters||[]).filter(Boolean), srv = (serverEv.availableMasters||[]).filter(Boolean);
+          const removedHere = new Set(base.filter(b=> !loc.some(l=> nm(l) === b)));
+          const outList = [...loc];
+          srv.forEach(x=>{ if(!removedHere.has(nm(x)) && !outList.some(l=> nm(l) === nm(x))) outList.push(x); });
+          if((localEv.host||'').trim()) out.availableMasters = []; else out.availableMasters = outList;
+          return;
+        }
         if(j(localEv[k]) === j(baseEv[k]) && j(serverEv[k]) !== j(baseEv[k])){
           if(serverEv[k] === undefined) delete out[k]; else out[k] = serverEv[k];
         }
@@ -5911,6 +5931,52 @@
       ${rows}
     </details>`;
   }
+  // мастеру сверху календаря — все свободные слоты на ближайшие недели одним списком с кнопкой «Могу провести»,
+  // чтобы не искать жёлтые плашки по дням
+  function renderMasterOpenSlotsPanel(){
+    if(state.currentRole !== 'master' || !state.loggedInMasterName) return '';
+    const today = todayStr();
+    const list = state.events.filter(e=> isOpenMasterSlot(e) && e.date >= today && (slotFitsMe(e) || iAmAvailableForSlot(e))).sort((a,b)=> (a.date + (a.time||'')).localeCompare(b.date + (b.time||'')));
+    if(!list.length) return '';
+    const mine = list.filter(e=> iAmAvailableForSlot(e)).length;
+    const rows = list.slice(0, 12).map(e=>{
+      const sp = getSpace(e.spaceId); const me = iAmAvailableForSlot(e);
+      const others = (e.availableMasters||[]).filter(n=> (n||'').trim() && n.trim().toLowerCase() !== state.loggedInMasterName.trim().toLowerCase());
+      return `<div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;padding:9px 12px;border-top:1px solid rgba(23,21,18,.12);background:${me?'#EEF0E4':'transparent'};">
+        <b style="min-width:110px;">${escapeHtml(formatDateText(e.date))}</b>
+        <span style="min-width:90px;font-family:var(--font-mono);">${escapeHtml(e.time||'')}${e.duration ? ' · ' + escapeHtml(formatDuration(e.duration)) : ''}</span>
+        <span style="flex:1;min-width:200px;">${escapeHtml(e.title||'Слот')} <span style="color:#6B655C;">· ${escapeHtml(sp && sp.name ? sp.name : '')}${others.length ? ' · откликнулись: ' + escapeHtml(others.join(', ')) : ''}</span></span>
+        <button type="button" class="slot-panel-btn" data-eid="${escapeHtml(e.id)}" style="cursor:pointer;border:none;border-radius:10px;padding:7px 12px;font-weight:700;font-family:inherit;font-size:13px;${me ? 'background:#75804F;color:#fff;' : 'background:#171512;color:#F2ECDD;'}">${me ? '✓ Вы откликнулись' : '🙋 Могу провести'}</button>
+      </div>`;
+    }).join('');
+    return `<details class="master-slots-panel" ${state.masterSlotsPanelClosed ? '' : 'open'} style="margin-bottom:12px;border-radius:var(--radius);background:#E8B84B;color:#171512;overflow:hidden;box-shadow:0 2px 10px rgba(232,184,75,.35);">
+      <summary style="padding:11px 12px;font-weight:800;font-size:14.5px;cursor:pointer;">🙋 Свободные слоты — нужен мастер: ${list.length}${mine ? ` <span style="font-weight:600;">· вы откликнулись на ${mine}</span>` : ''}</summary>
+      <div style="background:#FBF3DC;">${rows}${list.length > 12 ? `<div style="padding:8px 12px;font-size:12.5px;color:#6B655C;">…и ещё ${list.length - 12} — смотрите в календаре (жёлтые «Слот»)</div>` : ''}
+      <div style="padding:7px 12px;font-size:12px;color:#6B655C;border-top:1px solid rgba(23,21,18,.12);">Нажмите «Могу провести» — администратор увидит ваш отклик и назначит ведущего. Передумали — нажмите ещё раз.</div></div>
+    </details>`;
+  }
+  // может ли вошедший мастер вести этот слот (по таблице «Мероприятия и ведущие»); если для названия список пуст — может любой
+  function slotFitsMe(e){
+    const me = (state.loggedInMasterName||'').trim(); if(!me) return false;
+    const allowed = allowedHostsForTitle(e.title);
+    return !allowed.length || isHostAllowedForTitle(me, e.title);
+  }
+  async function masterToggleSlot(id){
+    const e = state.events.find(x=> x.id === id); if(!e) return;
+    const myName = (state.loggedInMasterName||'').trim(); if(!myName) return;
+    const norm = s=> (s||'').trim().toLowerCase();
+    const list = Array.isArray(e.availableMasters) ? e.availableMasters.filter(n=> (n||'').trim()) : [];
+    const i = list.findIndex(n=> norm(n) === norm(myName));
+    const when = `«${e.title||'Слот'}» ${formatDateText(e.date)} ${e.time||''}`;
+    if(i >= 0){ list.splice(i, 1); recordAction('Мастер отменил отклик на слот', `${myName} — ${when}`); }
+    else {
+      list.push(myName); recordAction('Мастер отметил себя свободным для слота', `${myName} — ${when}`);
+      sendPushNotification('🙋 Отклик на слот', `${myName} может провести ${when}`, ['owner','admin','assistant']);
+    }
+    const i2 = state.events.findIndex(x=> x.id === id);
+    if(i2 >= 0) state.events[i2] = { ...state.events[i2], availableMasters: list };
+    await saveEvents();
+  }
   function isOpenMasterSlot(e){
     return e.status === 'slot' && !!e.spaceId && !(e.host||'').trim();
   }
@@ -6205,6 +6271,7 @@
     }
     autoCaptureForecastSnapshot();
 
+    try{ managerLandingOnce(); }catch(e){}
     try{ qlEnsureFab(); }catch(e){}
     if(state.view === 'today'){
       app.innerHTML = renderTodayView();
@@ -6706,6 +6773,14 @@
   // собирает кнопки верхнего меню и переставляет их по приоритету роли (см. NAV_PRIORITY_BY_ROLE) —
   // на телефоне меню прокручивается горизонтально без видимой полосы прокрутки, поэтому важно, чтобы
   // "свой" раздел сотрудника оказался в начале списка, а не потерялся где-то за краем экрана
+  // менеджер после входа сразу попадает в «Для менеджеров → Конверсия» — там заявки, воронка и задачи
+  function managerLandingOnce(){
+    if(state.currentRole === 'manager' && state.unlocked && state._mgrLandedFor !== (state.loggedInManagerName || 'manager')){
+      state._mgrLandedFor = state.loggedInManagerName || 'manager';
+      state.view = 'certificates'; state.certView = 'conversion';
+    }
+    if(state.currentRole !== 'manager') state._mgrLandedFor = null;
+  }
   function renderNavButtonsOrdered(role){
     const buttons = [];
     buttons.push({key:'calendar', html: `<button data-view="calendar" class="${state.view==='calendar'?'active':''}">По пространствам</button>`});
@@ -6937,6 +7012,7 @@
       ${filters}
       ${legend}
       ${renderNoHostPanel()}
+      ${renderMasterOpenSlotsPanel()}
       ${renderWishesBar()}
       ${renderScheduleRecsPanel()}
       ${renderLoadAdvicePanel()}
@@ -9248,8 +9324,8 @@
       if(!['certificates','conversion'].includes(state.certView)) state.certView = 'certificates';
       const marketerSubTabsHtml = `
         <div class="cert-subtabs">
+          <button data-certview="conversion" class="${state.certView==='conversion'?'active':''}">📈 Конверсия</button>
           <button data-certview="certificates" class="${state.certView==='certificates'?'active':''}">Сертификаты</button>
-          <button data-certview="conversion" class="${state.certView==='conversion'?'active':''}">Конверсия</button>
         </div>
       `;
       return marketerSubTabsHtml + (state.certView==='conversion' ? renderConversionView() : renderCertificatesListView());
@@ -9271,11 +9347,11 @@
     if(state.certView==='manager-salary' && !['owner','manager'].includes(state.currentRole)) state.certView='certificates';
     const subTabsHtml = `
       <div class="cert-subtabs">
+        ${!hideRefundsConversion ? `<button data-certview="conversion" class="${state.certView==='conversion'?'active':''}" style="${state.currentRole==='manager'?'font-weight:700;':''}">📈 Конверсия</button>` : ''}
         <button data-certview="certificates" class="${state.certView==='certificates'?'active':''}">Сертификаты</button>
         ${(!isHostessLimited && ['owner','admin'].includes(state.currentRole)) ? `<button data-certview="salary-adj" class="${state.certView==='salary-adj'?'active':''}">Корректировки ЗП</button>` : ''}
         ${(!isHostessLimited && ['owner','manager'].includes(state.currentRole)) ? `<button data-certview="manager-salary" class="${state.certView==='manager-salary'?'active':''}">${state.currentRole==='owner' ? 'ЗП менеджеров' : '💰 Моя ЗП'}</button>` : ''}
         ${!hideRefundsConversion ? `<button data-certview="refunds" class="${state.certView==='refunds'?'active':''}">Возвраты</button>` : ''}
-        ${!hideRefundsConversion ? `<button data-certview="conversion" class="${state.certView==='conversion'?'active':''}">Конверсия</button>` : ''}
         ${!isHostessLimited ? `<button data-certview="legal" class="${state.certView==='legal'?'active':''}">🏢 Юрлица</button>` : ''}
         <button data-certview="item-sales" class="${state.certView==='item-sales'?'active':''}">Изделия</button>
         ${!isHostessLimited ? `<button data-certview="orders" class="${state.certView==='orders'?'active':''}">Заказ</button>` : ''}
@@ -10836,16 +10912,24 @@
         </div>
         ${isC ? '' : `<div class="lt-grp-b">${arr.map(t=>card(t, showDate, inGroup)).join('')}</div>`}
       </div>`;
-    const grouped = (colKey, arr, showDate)=>{
-      if(grpMode === 'none' || arr.length < 2) return arr.map(t=>card(t, showDate)).join('');
+    // длинная колонка: показываем первые 5 строк, остальное — по кнопке «Показать ещё N»
+    if(!state.ltShowAll) state.ltShowAll = {};
+    const capList = (colKey, items)=>{
+      const LIM = 5;
+      if(items.length <= LIM + 1 || state.ltShowAll[colKey]) return items.join('') + (items.length > LIM + 1 ? `<button class="lt-more" data-ltmore="${escapeHtml(colKey)}">▴ Свернуть</button>` : '');
+      return items.slice(0, LIM).join('') + `<button class="lt-more" data-ltmore="${escapeHtml(colKey)}">▾ Показать ещё ${items.length - LIM}</button>`;
+    };
+    const grouped = (colKey, arr, showDate)=> capList(colKey, groupedItems(colKey, arr, showDate));
+    const groupedItems = (colKey, arr, showDate)=>{
+      if(grpMode === 'none' || arr.length < 2) return arr.map(t=>card(t, showDate));
       const g = new Map();
       arr.forEach(t=>{ const k = grpMode === 'who' ? (t.assignee || '—') : typeKey(t);
         if(!g.has(k)) g.set(k, { label: grpMode === 'who' ? (t.assignee || 'Без ответственного') : t.title, list: [] }); g.get(k).list.push(t); });
       return Array.from(g.entries()).sort((a,b)=> b[1].list.length - a[1].list.length).map(([k,v])=>{
         if(v.list.length === 1 && grpMode === 'type') return card(v.list[0], showDate);
         const ck = colKey + '|' + grpMode + '|' + k;
-        return grpBlock(ck, v.label, v.list, showDate, !!collapsed[ck], grpMode === 'type');
-      }).join('');
+        return grpBlock(ck, v.label, v.list, showDate, collapsed[ck] !== false, grpMode === 'type'); // группы по умолчанию свёрнуты — видно название и число
+      });
     };
     // «Дальше»: группы по дням с подзаголовком «Ср, 11.11 · 7»
     const laterGroups = ()=>{
@@ -11009,7 +11093,8 @@
     document.querySelectorAll('[data-ltday]').forEach(b=> b.onclick = ()=>{ const k = b.dataset.ltday; state.leadTasksDay = (k && state.leadTasksDay !== k) ? k : ''; render(); });
     document.querySelectorAll('[data-ltgmode]').forEach(b=> b.onclick = ()=>{ state.leadTasksGroup = b.dataset.ltgmode; render(); });
     document.querySelectorAll('[data-ltgrp]').forEach(h=> h.onclick = (e)=>{ if(e.target.closest('[data-ltqueue]')) return; const k = h.dataset.ltgrp; const c = state.leadTasksCollapsed || (state.leadTasksCollapsed = {});
-      const closedNow = k.indexOf('later|') === 0 ? c[k] !== false : !!c[k]; c[k] = !closedNow; render(); });
+      const closedNow = c[k] !== false; c[k] = !closedNow; render(); }); // все группы по умолчанию свёрнуты
+    document.querySelectorAll('[data-ltmore]').forEach(b=> b.onclick = ()=>{ const k = b.dataset.ltmore; state.ltShowAll = state.ltShowAll || {}; state.ltShowAll[k] = !state.ltShowAll[k]; render(); });
     document.querySelectorAll('[data-ltscripts]').forEach(b=> b.onclick = ()=> requireUnlock(()=> openTaskScriptsSettings()));
     document.querySelectorAll('[data-ltqueue]').forEach(b=> b.onclick = (e)=>{ e.stopPropagation(); openTaskScriptPopup(b.dataset.ltqueue.split(','), 0); });
     document.querySelectorAll('[data-ltscript]').forEach(b=> b.onclick = ()=> openTaskScriptPopup([b.dataset.ltscript], 0));
@@ -11113,10 +11198,18 @@
   }
   let _legalSweepTimer = null, _legalSweepRunning = false;
   function legalDocsSweepSoon(ms){ clearTimeout(_legalSweepTimer); _legalSweepTimer = setTimeout(()=>{ legalDocsSweep(); }, ms || 600); }
+  // за юрлица всегда отвечает ассистент: все открытые задачи по документам (реквизиты, договор, счёт/платёжка, акт)
+  // ставятся на него. Имя ассистента руководитель вписывает во вкладке «🏢 Юрлица» (по умолчанию — «Ассистент»).
+  function legalResponsible(){ return (state.legalResponsibleName || '').trim() || 'Ассистент'; }
+  async function legalResponsibleLoad(){
+    if(state.legalResponsibleName !== undefined) return;
+    try{ const r = await window.storage.get('legal-responsible', true); state.legalResponsibleName = r ? (JSON.parse(r.value).name || '') : ''; }catch(e){ state.legalResponsibleName = ''; }
+  }
   async function legalDocsSweep(){
     if(_legalSweepRunning || !Array.isArray(state.leads) || !Array.isArray(state.events)) return;
     _legalSweepRunning = true;
     try{
+      await legalResponsibleLoad();
       if(!Array.isArray(state.leadTasks)) state.leadTasks = [];
       const now = new Date().toISOString(); let ch = false;
       const deals = legalDeals(); const refs = new Set(deals.map(d=> d.ref));
@@ -11147,6 +11240,7 @@
           }
         });
       });
+      { const R = legalResponsible(); state.leadTasks.forEach(t=>{ if(t.docKind && !t.done && t.assignee !== R){ t.assignee = R; ch = true; } }); }
       if(ch){ await saveLeadTasks(); render(); }
     }catch(e){ console.warn('legalDocsSweep', e); }
     finally{ _legalSweepRunning = false; }
@@ -11936,6 +12030,10 @@
           <div class="lg-hero-s">Выберите мероприятие и компанию — документы соберутся по шаблону студии, номера проставятся сами.</div></div>
         <div style="display:flex;gap:8px;flex-wrap:wrap;"><button class="btn lg-go" data-lgopen>📄 Сформировать документы</button>${state.currentRole === 'owner' ? '<button class="btn btn-ghost" data-lgexec>⚙ Реквизиты ИП</button>' : ''}</div>
       </div>
+      <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;background:#EEF0E4;border-radius:12px;padding:9px 12px;margin:0 0 12px;font-size:13.5px;">
+        <span>👤 Ответственный за юрлица: <b>${escapeHtml(legalResponsible())}</b> <span style="color:var(--ink-soft);font-size:12px;">— все задачи по реквизитам, договорам, счетам и актам ставятся на него</span></span>
+        ${state.currentRole === 'owner' ? '<button class="btn btn-ghost" id="lg-resp-edit" style="margin-left:auto;padding:4px 10px;font-size:12.5px;">✎ Указать имя</button>' : ''}
+      </div>
       ${navHtml}
       ${renderLegalDocsControlHtml(period)}
       <div class="analytics-section">
@@ -11956,6 +12054,14 @@
       </div>`;
   }
   function attachLegalViewEvents(){
+    { const b = document.getElementById('lg-resp-edit'); if(b) b.onclick = async ()=>{
+        const v = prompt('Имя ассистента — ответственного за юрлица (как в списке ответственных в задачах):', state.legalResponsibleName || '');
+        if(v === null) return;
+        state.legalResponsibleName = v.trim();
+        await storageSetWithRetry('legal-responsible', JSON.stringify({ name: state.legalResponsibleName }));
+        recordAction('Юрлица: ответственный — ' + legalResponsible(), '', { cat:'legal', verb:'назначил(а) ответственного за юрлица' });
+        await legalDocsSweep(); render();
+      }; }
     attachPeriodNav('legalCursor', 'legalMode', 'legal-nav');
     document.querySelectorAll('[data-lgopen]').forEach(b=> b.onclick = ()=> openLegalDocGenerator({}));
     document.querySelectorAll('[data-lgexec]').forEach(b=> b.onclick = ()=> openLegalExecutorSettings());
@@ -13717,6 +13823,9 @@
         <div class="ds-ct">${spaceTag || ''}<b>${e.time ? ftMinToTime(effectiveStart(e)) + '–' + ftMinToTime(effectiveEnd(e)) : ''}</b>${escapeHtml(gTxt)}</div>
         <div class="ds-ctitle">${escapeHtml(e.title || '')}</div>
         <div class="ds-ch">${isPrivateWithoutHost(e) ? '<span style="color:var(--danger);">без ведущего</span>' : escapeHtml(hostLine)}${isPrivateWithoutHost(e) && (e.product || '') ? ' · ' + escapeHtml(e.product) : ''}${legalSuffix(e)}</div>
+        ${isOpenMasterSlot(e) ? (()=>{ const av = (e.availableMasters||[]).filter(n=>(n||'').trim()); return av.length
+          ? `<div class="ds-ch" style="color:#4E5733;font-weight:700;">🙋 Откликнулись: ${escapeHtml(av.join(', '))} — нажмите «✎ мастер»</div>`
+          : '<div class="ds-ch" style="color:#8C6A1E;">🙋 Слот: ждём откликов мастеров</div>'; })() : ''}
         ${dsRentalHtml(e)}
         ${_gn ? `<div class="ds-cn" style="font-weight:500;">👥 ${escapeHtml(_gn)}</div>` : ''}
         ${eventFormatText(e) ? `<div class="ds-cn" style="font-weight:600;">🎨 ${escapeHtml(eventFormatText(e))}</div>` : ''}
@@ -19920,6 +20029,8 @@
     });
     const prev = document.getElementById('btn-prev');
     const next = document.getElementById('btn-next');
+    document.querySelectorAll('.slot-panel-btn').forEach(b=> b.onclick = async ()=>{ b.disabled = true; b.textContent = '⏳'; try{ await masterToggleSlot(b.dataset.eid); }catch(e){ console.error(e); } render(); });
+    { const msp = document.querySelector('.master-slots-panel'); if(msp) msp.addEventListener('toggle', ()=>{ state.masterSlotsPanelClosed = !msp.open; }); }
     const todayBtn = document.getElementById('btn-today');
     if(prev) prev.onclick = ()=>{ state.cursor = new Date(state.cursor.getFullYear(), state.cursor.getMonth()-1, 1); render(); };
     if(next) next.onclick = ()=>{ state.cursor = new Date(state.cursor.getFullYear(), state.cursor.getMonth()+1, 1); render(); };
@@ -24333,6 +24444,7 @@
       </div>
       ` : ''}
 
+      ${!isAdminFinRestricted ? renderPlanDecompHtml(monthYm) : ''}
       ${!isAdminFinRestricted ? awaitingSectionHtml : ''}
 
       <div class="analytics-section">
@@ -24375,6 +24487,232 @@
   // облегчённое окно "Выполнение плана" — только для менеджера и маркетолога.
   // показывает то же самое, что видит владелец/ассистент во вкладке "🎯 Выполнение плана" внутри Аналитики,
   // но БЕЗ доступа ко всей остальной Аналитике (без прибыли, кассы, аудита, юр.документов, отчётов мастеров и т.п.)
+  // ===================== «📊 План по продуктам» — декомпозиция плана месяца, как в таблице «Декомпозиция» =====================
+  // 10 строк: Расписание (гости), Свидания, ДР, Детские, Корпоративы, Девичники, Выездные, Другое + аренда (события),
+  // Сертификаты, Заказы + товары (шт.). План (₽ и шт.) хранится в том же плане месяца, что и раньше
+  // (byProduct['Мастер-класс'], byPrivateCat, certsRevenuePlan, ordersRevenuePlan) — поэтому его видит и «Отчёт дня»;
+  // штуки — в plan.byCatUnits. Факт и брони считаются из приложения живьём — по той же методике, что в таблице:
+  // мероприятия — по дате мероприятия и полной стоимости (согласованная сумма / оплаты, вкл. сертификаты),
+  // сертификаты — по дате продажи (без маркетинговых), брони — будущие мероприятия месяца, без пустых МК и слотов.
+  const PD_CATS = [
+    { key:'sched', name:'Расписание', unit:'гостей', plan:{ f:'product', k:'Мастер-класс' } },
+    { key:'Свидания', name:'Свидания', unit:'свиданий', plan:{ f:'cat', k:'Свидания' } },
+    { key:'Дни рождения', name:'ДР', unit:'праздников', plan:{ f:'cat', k:'Дни рождения' } },
+    { key:'Детские', name:'Детские', unit:'праздников', plan:{ f:'cat', k:'Детские' } },
+    { key:'Корпоративы', name:'Корпоративы', unit:'событий', plan:{ f:'cat', k:'Корпоративы' } },
+    { key:'Девичники', name:'Девичники', unit:'событий', plan:{ f:'cat', k:'Девичники' } },
+    { key:'Выездные', name:'Выездные', unit:'выездов', plan:{ f:'cat', k:'Выездные' } },
+    { key:'Другое', name:'Другое + аренда', unit:'событий', plan:{ f:'cat', k:'Другое' } },
+    { key:'certs', name:'Сертификаты', unit:'шт.', plan:{ f:'certs' } },
+    { key:'orders', name:'Заказы + товары', unit:'шт.', plan:{ f:'orders' } },
+  ];
+  // как называют строку в Excel → ключ строки (для вставки плана из таблицы)
+  function pdMatchName(s){
+    const t = String(s||'').toLowerCase().replace(/ё/g,'е').trim();
+    if(!t) return null;
+    if(/^распис|^мастер-?класс/.test(t)) return 'sched';
+    if(/^свидан/.test(t)) return 'Свидания';
+    if(/^др($|[\s.,(])|^дни рожд|^день рожд/.test(t)) return 'Дни рождения';
+    if(/^детск/.test(t)) return 'Детские';
+    if(/^корпор/.test(t)) return 'Корпоративы';
+    if(/^девичн/.test(t)) return 'Девичники';
+    if(/^выезд/.test(t)) return 'Выездные';
+    if(/^друго|^аренд/.test(t)) return 'Другое';
+    if(/^сертиф/.test(t)) return 'certs';
+    if(/^заказ|^товар|^издел/.test(t)) return 'orders';
+    return null;
+  }
+  function pdPlanRub(plan, c){
+    const p = plan || {};
+    if(c.plan.f === 'product') return (p.byProduct && p.byProduct[c.plan.k]) || null;
+    if(c.plan.f === 'cat') return (p.byPrivateCat && p.byPrivateCat[c.plan.k]) || null;
+    if(c.plan.f === 'certs') return p.certsRevenuePlan || null;
+    if(c.plan.f === 'orders') return p.ordersRevenuePlan || null;
+    return null;
+  }
+  function pdSetPlanRub(plan, c, v){
+    if(c.plan.f === 'product'){ plan.byProduct = plan.byProduct || {}; if(v) plan.byProduct[c.plan.k] = v; else delete plan.byProduct[c.plan.k]; }
+    else if(c.plan.f === 'cat'){ plan.byPrivateCat = plan.byPrivateCat || {}; if(v) plan.byPrivateCat[c.plan.k] = v; else delete plan.byPrivateCat[c.plan.k]; }
+    else if(c.plan.f === 'certs') plan.certsRevenuePlan = v || null;
+    else if(c.plan.f === 'orders') plan.ordersRevenuePlan = v || null;
+  }
+  // факт / брони по строкам за месяц ym; cut — «сегодня» (факт = по эту дату включительно)
+  function pdCompute(ym, cut){
+    const out = {}; PD_CATS.forEach(c=> out[c.key] = { factRub:0, factN:0, bookRub:0, bookN:0 });
+    const amt = x=> (x!==undefined && x!==null && !isNaN(x)) ? Number(x) : 0;
+    state.events.forEach(e=>{
+      if(!e.date || !e.date.startsWith(ym) || e.status === 'cancelled') return;
+      const sched = e.product === 'Мастер-класс';
+      const rub = eventRevenueForecast(e);
+      const guests = amt(e.guests);
+      if(sched){ if(!(guests > 0) && !(rub > 0)) return; }          // пустой МК — не считаем
+      else if(e.status === 'slot' && !(rub > 0)) return;            // непроданный слот — не бронь
+      const k = sched ? 'sched' : dailyReportEventCategory(e);
+      const r = out[k] || out['Другое'];
+      const n = sched ? guests : 1;
+      if(e.date <= cut){ r.factRub += rub; r.factN += n; } else { r.bookRub += rub; r.bookN += n; }
+    });
+    state.certificates.forEach(c=>{
+      if(!c.saleDate || !c.saleDate.startsWith(ym) || c.purpose === 'marketing' || c.status === 'refunded') return;
+      const r = out.certs; if(c.saleDate <= cut){ r.factRub += amt(c.amount); r.factN += 1; } else { r.bookRub += amt(c.amount); r.bookN += 1; }
+    });
+    state.incomes.forEach(i=>{
+      if(!i.date || !i.date.startsWith(ym) || !(i.product === 'Заказ' || i.product === 'Изделие')) return;
+      const r = out.orders; if(i.date <= cut){ r.factRub += amt(i.amount); r.factN += 1; } else { r.bookRub += amt(i.amount); r.bookN += 1; }
+    });
+    return out;
+  }
+  function pdPrevYm(ym){ const [y,m] = ym.split('-').map(Number); const d = new Date(y, m-2, 1); return d.getFullYear() + '-' + String(d.getMonth()+1).padStart(2,'0'); }
+  function renderPlanDecompHtml(ym, opts){
+    opts = opts || {};
+    const plan = (state.monthlyPlans && state.monthlyPlans[ym]) || {};
+    const [Y, M] = ym.split('-').map(Number);
+    const dim = new Date(Y, M, 0).getDate();
+    const today = todayStr();
+    const cut = today.slice(0,7) === ym ? today : (ym < today.slice(0,7) ? ym + '-' + String(dim).padStart(2,'0') : ym + '-00');
+    const daysLeft = today.slice(0,7) === ym ? Math.max(0, dim - Number(today.slice(8,10))) : (ym > today.slice(0,7) ? dim : 0);
+    const cur = pdCompute(ym, cut);
+    const prevYm = pdPrevYm(ym);
+    const prev = pdCompute(prevYm, prevYm + '-31');
+    const units = plan.byCatUnits || {};
+    const canEdit = ['owner','admin','assistant'].includes(state.currentRole);
+    let T = { plan:0, fact:0, book:0, have:0, left:0, day:0 };
+    const rows = PD_CATS.map(c=>{
+      const r = cur[c.key], pv = prev[c.key];
+      const planRub = Number(pdPlanRub(plan, c)) || 0;
+      const have = r.factRub + r.bookRub, haveN = r.factN + r.bookN;
+      const left = Math.max(0, planRub - have);
+      const avg = pv.factN > 0 ? pv.factRub / pv.factN : (haveN > 0 ? have / haveN : (units[c.key] ? planRub / units[c.key] : 0));
+      const leftN = avg > 0 ? Math.ceil(left / avg) : null;
+      const pct = planRub > 0 ? Math.round(have / planRub * 100) : null;
+      const perDay = daysLeft > 0 ? left / daysLeft : null;
+      T.plan += planRub; T.fact += r.factRub; T.book += r.bookRub; T.have += have; T.left += left; T.day += perDay || 0;
+      const bar = pct === null ? '' : `<div style="height:5px;background:#E5DFD0;border-radius:3px;margin-top:4px;overflow:hidden;"><div style="height:100%;width:${Math.min(100,pct)}%;background:${pct>=100?'#75804F':(pct>=70?'#E8B84B':'#C4553A')};"></div></div>`;
+      const fmtN = (n)=> c.key === 'sched' || c.key === 'certs' || c.key === 'orders' ? String(Math.round(n)) : String(Math.round(n));
+      return `<tr>
+        <td style="text-align:left;"><b>${escapeHtml(c.name)}</b><div style="font-size:10.5px;color:var(--ink-soft);">${escapeHtml(c.unit)}</div></td>
+        <td>${planRub ? formatMoney(planRub) : '—'}${units[c.key] ? `<div class="pd-sub">${units[c.key]} ${escapeHtml(c.unit)}</div>` : ''}</td>
+        <td>${formatMoney(r.factRub)}<div class="pd-sub">${fmtN(r.factN)}</div></td>
+        <td>${c.key==='certs'||c.key==='orders' ? '<span class="pd-sub">—</span>' : formatMoney(r.bookRub) + `<div class="pd-sub">${fmtN(r.bookN)}</div>`}</td>
+        <td style="min-width:110px;"><b>${formatMoney(have)}</b>${pct!==null ? ` <span style="font-weight:700;color:${pct>=100?'#4E5733':(pct>=70?'#8C6A1E':'#A3402F')};">${pct}%</span>` : ''}${bar}</td>
+        <td>${planRub ? (left > 0 ? `<b style="color:#A3402F;">${formatMoney(left)}</b>${leftN ? `<div class="pd-sub">≈ ${leftN} ${escapeHtml(c.unit)}</div>` : ''}` : '<b style="color:#4E5733;">✓ выполнен</b>') : '—'}</td>
+        <td>${planRub && left > 0 && perDay ? formatMoney(Math.round(perDay)) + (leftN && daysLeft ? `<div class="pd-sub">${(leftN/daysLeft).toFixed(2).replace('.',',')} ${escapeHtml(c.unit)}</div>` : '') : '—'}</td>
+        <td class="pd-sub">${avg ? formatMoney(Math.round(avg)) : '—'}</td>
+      </tr>`;
+    }).join('');
+    const totalPlan = plan.revenue || T.plan;
+    const totPct = totalPlan > 0 ? Math.round(T.have / totalPlan * 100) : null;
+    const leftAll = Math.max(0, totalPlan - T.have);
+    const hasPlan = T.plan > 0;
+    return `<div class="analytics-section pd-box" style="padding:14px 16px;">
+      <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:8px;">
+        <h4 style="margin:0;">📊 План по продуктам — ${escapeHtml((MONTHS[M-1]||'') + ' ' + Y)}</h4>
+        ${canEdit ? `<button class="btn btn-ghost" id="pd-paste" style="margin-left:auto;padding:5px 10px;font-size:12.5px;">📥 Вставить план из Excel</button><button class="btn btn-ghost" id="pd-edit" style="padding:5px 10px;font-size:12.5px;">✏ Изменить</button>` : ''}
+      </div>
+      ${hasPlan ? `
+      <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:8px;margin-bottom:10px;">
+        <div class="pd-kpi"><div class="pd-k">План месяца</div><div class="pd-v">${formatMoney(totalPlan)}</div></div>
+        <div class="pd-kpi"><div class="pd-k">Уже есть (факт + брони)</div><div class="pd-v">${formatMoney(T.have)}${totPct!==null ? ` · ${totPct}%` : ''}</div></div>
+        <div class="pd-kpi" style="background:${leftAll>0?'#FBE9E4':'#EEF0E4'};"><div class="pd-k">Осталось допродать</div><div class="pd-v" style="color:${leftAll>0?'#A3402F':'#4E5733'};">${leftAll>0 ? formatMoney(leftAll) : '✓ план есть'}</div></div>
+        <div class="pd-kpi"><div class="pd-k">Нужно в день${daysLeft ? ` (ост. ${daysLeft} дн.)` : ''}</div><div class="pd-v">${daysLeft && leftAll>0 ? formatMoney(Math.round(leftAll / daysLeft)) : '—'}</div></div>
+      </div>
+      <div style="overflow-x:auto;"><table class="ms-table pd-table">
+        <tr><th style="text-align:left;">Продукт</th><th>План</th><th>Факт по ${escapeHtml(cut.slice(8,10) !== '00' ? lgDateDots(cut).slice(0,5) : '—')}</th><th>Брони дальше</th><th>Уже есть</th><th>Допродать</th><th>В день</th><th title="Средний чек прошлого месяца — по нему считаются «штуки»">Ср. чек ${escapeHtml((MONTHS[Number(prevYm.slice(5))-1]||'').slice(0,3))}</th></tr>
+        ${rows}
+        <tr style="font-weight:700;background:#F2ECDD;"><td style="text-align:left;">ИТОГО</td><td>${formatMoney(T.plan)}</td><td>${formatMoney(T.fact)}</td><td>${formatMoney(T.book)}</td><td>${formatMoney(T.have)}</td><td>${formatMoney(T.left)}</td><td>${daysLeft ? formatMoney(Math.round(T.day)) : '—'}</td><td></td></tr>
+      </table></div>
+      ${plan.revenue && Math.abs(plan.revenue - T.plan) > 1 ? `<div style="font-size:12px;color:#A3402F;margin-top:6px;">⚠ Сумма планов по продуктам (${formatMoney(T.plan)}) не равна плану месяца (${formatMoney(plan.revenue)}).</div>` : ''}
+      <div style="font-size:11.5px;color:var(--ink-soft);margin-top:6px;line-height:1.45;">Факт и брони считаются из приложения: мероприятия — по дате и полной стоимости (вкл. оплату сертификатами), сертификаты — по дате продажи (без маркетинговых), пустые МК и непроданные слоты не входят. «Допродать, шт» — по среднему чеку прошлого месяца.</div>`
+      : `<div style="font-size:13px;color:var(--ink-soft);">План по продуктам на этот месяц не задан.${canEdit ? ' Откройте таблицу «Декомпозиция», выделите строки с продуктами вместе с заголовком, скопируйте и нажмите «📥 Вставить план из Excel».' : ''}</div>`}
+    </div>`;
+  }
+  function attachPlanDecompEvents(ym){
+    const pb = document.getElementById('pd-paste'); if(pb) pb.onclick = ()=> openPlanDecompEditor(ym, true);
+    const eb = document.getElementById('pd-edit'); if(eb) eb.onclick = ()=> openPlanDecompEditor(ym, false);
+  }
+  // разбор вставки из Excel: строки с названиями продуктов; колонки «ПЛАН, ₽» и «ПЛАН, шт» ищем по заголовку,
+  // без заголовка — первое число в строке считаем ₽ (если вставили только «Продукт | План ₽ | План шт»)
+  function pdParsePaste(txt){
+    const lines = String(txt||'').split(/\r?\n/).map(l=> l.split('\t'));
+    const num = v=>{ const s = String(v||'').replace(/\s| |₽|руб\.?/g,'').replace(',', '.'); return s !== '' && !isNaN(s) ? Number(s) : null; };
+    let iRub = -1, iN = -1, iMonth = -1;
+    lines.forEach(cells=>{
+      cells.forEach((c,i)=>{ const t = String(c||'').toLowerCase().trim();
+        if(/^план,?\s*₽|^план\s*\(₽\)|^план\s*руб/.test(t)) iRub = i;
+        if(/^план,?\s*шт/.test(t)) iN = i;
+        if(/^план месяца/.test(t)) iMonth = i; });
+    });
+    const res = { rows:{}, month:null };
+    lines.forEach(cells=>{
+      const first = String(cells[0]||'').trim();
+      if(/^план месяца/i.test(first)){ const v = cells.slice(1).map(num).find(x=> x !== null && x > 0); if(v) res.month = v; return; }
+      const k = pdMatchName(first); if(!k) return;
+      let rub = iRub >= 0 ? num(cells[iRub]) : null, n = iN >= 0 ? num(cells[iN]) : null;
+      if(iRub < 0){ const nums = cells.slice(1).map(num).filter(x=> x !== null); rub = nums.length ? nums[0] : null; n = nums.length > 1 ? nums[1] : null; }
+      if(rub !== null) res.rows[k] = { rub: Math.round(rub), n: n !== null ? Math.round(n) : null };
+    });
+    return res;
+  }
+  function openPlanDecompEditor(ym, pasteFirst){
+    const plan = JSON.parse(JSON.stringify((state.monthlyPlans && state.monthlyPlans[ym]) || {}));
+    const [Y, M] = ym.split('-').map(Number);
+    const wrap = document.createElement('div');
+    wrap.className = 'ts-overlay';
+    wrap.style.cssText = 'position:fixed;inset:0;z-index:12000;background:rgba(23,21,18,.5);display:flex;align-items:center;justify-content:center;padding:12px;';
+    const draw = (vals, monthVal, note)=>{
+      wrap.innerHTML = `<div style="background:#fff;border-radius:16px;max-width:620px;width:100%;max-height:92vh;overflow:auto;padding:16px 18px;">
+        <div style="display:flex;align-items:center;gap:8px;"><h3 style="margin:0;flex:1;font-size:18px;">📊 План по продуктам — ${escapeHtml((MONTHS[M-1]||'') + ' ' + Y)}</h3><button class="btn btn-ghost" data-x>×</button></div>
+        <details ${pasteFirst ? 'open' : ''} style="margin:10px 0;background:#F2ECDD;border-radius:12px;padding:10px 12px;">
+          <summary style="cursor:pointer;font-weight:700;">📥 Вставить из Excel</summary>
+          <div style="font-size:12.5px;color:#5C5650;margin:6px 0;">В таблице «Декомпозиция» выделите строки от заголовка «Продукт…» до «Заказы + товары» (можно вместе с «План месяца»), скопируйте (Ctrl+C) и вставьте сюда (Ctrl+V). Возьмутся колонки «ПЛАН, ₽» и «ПЛАН, шт».</div>
+          <textarea id="pd-txt" rows="5" style="width:100%;box-sizing:border-box;font-family:var(--font-mono);font-size:12px;border:1px solid #D9D0BC;border-radius:8px;padding:6px;" placeholder="Вставьте сюда строки из Excel"></textarea>
+          <button class="btn" id="pd-parse" style="margin-top:6px;">Разобрать вставку</button>
+          ${note ? `<div style="font-size:12.5px;margin-top:6px;color:${note.err?'#A3402F':'#4E5733'};">${escapeHtml(note.t)}</div>` : ''}
+        </details>
+        <table class="ms-table" style="width:100%;">
+          <tr><th style="text-align:left;">Продукт</th><th>План, ₽</th><th>План, шт</th></tr>
+          ${PD_CATS.map(c=> `<tr><td style="text-align:left;">${escapeHtml(c.name)} <span style="color:var(--ink-soft);font-size:11px;">${escapeHtml(c.unit)}</span></td>
+            <td><input type="number" class="pd-rub" data-k="${escapeHtml(c.key)}" value="${vals[c.key] && vals[c.key].rub ? vals[c.key].rub : ''}" style="width:120px;"></td>
+            <td><input type="number" class="pd-n" data-k="${escapeHtml(c.key)}" value="${vals[c.key] && vals[c.key].n ? vals[c.key].n : ''}" style="width:80px;"></td></tr>`).join('')}
+          <tr><td style="text-align:left;font-weight:700;">План месяца, ₽</td><td colspan="2"><input type="number" id="pd-month" value="${monthVal || ''}" style="width:140px;"> <span id="pd-sum" style="font-size:12px;color:var(--ink-soft);"></span></td></tr>
+        </table>
+        <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:12px;"><button class="btn btn-ghost" data-x>Отмена</button><button class="btn btn-primary" id="pd-save">💾 Сохранить план</button></div>
+      </div>`;
+      wrap.querySelectorAll('[data-x]').forEach(b=> b.onclick = ()=> wrap.remove());
+      const sumUpd = ()=>{ const s = [...wrap.querySelectorAll('.pd-rub')].reduce((a,i)=> a + (Number(i.value)||0), 0); wrap.querySelector('#pd-sum').textContent = 'сумма по продуктам: ' + formatMoney(s); };
+      wrap.querySelectorAll('.pd-rub').forEach(i=> i.addEventListener('input', sumUpd)); sumUpd();
+      wrap.querySelector('#pd-parse').onclick = ()=>{
+        const r = pdParsePaste(wrap.querySelector('#pd-txt').value);
+        const n = Object.keys(r.rows).length;
+        if(!n){ draw(read(), wrap.querySelector('#pd-month').value, { t:'Не нашла строк с продуктами — скопируйте вместе с колонкой «Продукт».', err:true }); return; }
+        const v = read(); Object.entries(r.rows).forEach(([k,x])=> v[k] = { rub:x.rub, n:x.n });
+        const sum = Object.values(v).reduce((a,x)=> a + (x.rub||0), 0);
+        draw(v, r.month || sum, { t:`✓ Разобрала ${n} из ${PD_CATS.length} строк — проверьте и нажмите «Сохранить план».` });
+      };
+      wrap.querySelector('#pd-save').onclick = ()=> requireAdminUnlock(async ()=>{
+        const v = read(); const p = JSON.parse(JSON.stringify((state.monthlyPlans && state.monthlyPlans[ym]) || {}));
+        p.byCatUnits = {};
+        PD_CATS.forEach(c=>{ const x = v[c.key] || {}; pdSetPlanRub(p, c, x.rub || null); if(x.n) p.byCatUnits[c.key] = x.n; });
+        const mv = Number(wrap.querySelector('#pd-month').value) || 0;
+        p.revenue = mv || PD_CATS.reduce((a,c)=> a + ((v[c.key]||{}).rub || 0), 0) || p.revenue || null;
+        if(!state.monthlyPlans) state.monthlyPlans = {};
+        state.monthlyPlans[ym] = p;
+        await saveMonthlyPlans();
+        recordAction('План по продуктам сохранён — ' + (MONTHS[M-1]||'') + ' ' + Y, 'План месяца ' + formatMoney(p.revenue||0), { cat:'money', verb:'задал(а) план' });
+        wrap.remove(); render();
+      });
+    };
+    const read = ()=>{
+      const v = {};
+      wrap.querySelectorAll('.pd-rub').forEach(i=>{ const k = i.dataset.k; v[k] = v[k] || {}; v[k].rub = i.value !== '' ? Math.round(Number(i.value)) : null; });
+      wrap.querySelectorAll('.pd-n').forEach(i=>{ const k = i.dataset.k; v[k] = v[k] || {}; v[k].n = i.value !== '' ? Math.round(Number(i.value)) : null; });
+      return v;
+    };
+    const init = {}; PD_CATS.forEach(c=> init[c.key] = { rub: pdPlanRub(plan, c), n: (plan.byCatUnits||{})[c.key] || null });
+    document.body.appendChild(wrap);
+    draw(init, plan.revenue || '', null);
+    if(pasteFirst) setTimeout(()=>{ const t = wrap.querySelector('#pd-txt'); if(t) t.focus(); }, 50);
+  }
   function renderPlanProgressView(){
     const cursor = state.analyticsCursor;
     const monthLabel = MONTHS[cursor.getMonth()] + ' ' + cursor.getFullYear();
@@ -24490,6 +24828,7 @@
           <button class="nav-btn" id="pp-next">›</button>
         </div>
       </div>
+      ${renderPlanDecompHtml(planYm)}
       <div class="analytics-section" style="padding:14px 16px;">
         <h4 style="margin-top:0;">🎯 Выполнение плана</h4>
         <div style="margin-bottom:10px;"><button class="btn btn-ghost" id="btn-add-history-daily">📝 Занести данные за этот день в прошлом году</button></div>
@@ -24503,6 +24842,7 @@
   }
 
   function attachPlanProgressViewEvents(){
+    try{ const c = state.analyticsCursor; attachPlanDecompEvents(c.getFullYear()+'-'+String(c.getMonth()+1).padStart(2,'0')); }catch(e){}
     const prev = document.getElementById('pp-prev');
     const next = document.getElementById('pp-next');
     const today = document.getElementById('pp-today');
@@ -25008,6 +25348,7 @@
         });
       };
     });
+    try{ const c = state.analyticsCursor; attachPlanDecompEvents(c.getFullYear()+'-'+String(c.getMonth()+1).padStart(2,'0')); }catch(e){}
     const editPlanBtn = document.getElementById('btn-edit-plan');
     if(editPlanBtn) editPlanBtn.onclick = ()=>{
       state.modal = {type:'plan-edit'};
@@ -25720,8 +26061,13 @@
           ${(state.currentRole==='master' && guestNamesText(ev)) ? `<div id="qh-guests" style="font-size:13px;background:var(--paper-2);border-radius:var(--radius);padding:8px 10px;white-space:pre-wrap;"><b>Гости:</b> ${escapeHtml(guestNamesText(ev))}</div>` : ''}
           <div class="field">
             <label>Мастер</label>
+            ${(()=>{ const av = (!(ev.host||'').trim() && state.currentRole !== 'master') ? (ev.availableMasters||[]).filter(n=>(n||'').trim()) : [];
+              return av.length ? `<div style="background:#EEF0E4;border-radius:10px;padding:8px 10px;margin-bottom:8px;"><div style="font-size:12px;font-weight:700;color:#4E5733;margin-bottom:6px;">🙋 Откликнулись на слот — нажмите, чтобы назначить:</div>
+                <div style="display:flex;flex-wrap:wrap;gap:6px;">${av.map(n=>{ const ok = !allowedHostsForTitle(ev.title).length || isHostAllowedForTitle(n, ev.title);
+                  return ok ? `<button type="button" class="qh-avail" data-name="${escapeHtml(n)}" style="cursor:pointer;border:none;border-radius:999px;padding:6px 12px;background:#75804F;color:#fff;font-weight:700;font-family:inherit;font-size:13px;">${escapeHtml(n)}</button>`
+                    : `<span title="Нет в списке ведущих для «${escapeHtml(ev.title)}» — добавьте в «Мероприятия и ведущие», если она может вести" style="border-radius:999px;padding:6px 12px;background:#E5E1D6;color:#8C8C8C;font-size:13px;">${escapeHtml(n)} · не ведёт этот МК</span>`; }).join('')}</div></div>` : ''; })()}
             <input type="text" id="qh-host" value="${escapeHtml(ev.host||'')}" placeholder="Начните вводить имя…" list="qh-host-suggestions" autofocus>
-            <datalist id="qh-host-suggestions">${allowedHostsForTitle(ev.title).map(h=>`<option value="${escapeHtml(h)}">`).join('')}</datalist>
+            <datalist id="qh-host-suggestions">${[...new Set([...(ev.availableMasters||[]).filter(n=>(n||'').trim()), ...allowedHostsForTitle(ev.title)])].map(h=>`<option value="${escapeHtml(h)}">`).join('')}</datalist>
           </div>
           <div style="font-size:11.5px;color:var(--ink-soft);">Это действие не требует кода доступа.</div>
           <div class="modal-actions">
@@ -25887,13 +26233,16 @@
       }
       const idx = state.events.findIndex(x=>x.id===ev.id);
       if(idx>=0){
-        state.events[idx] = {...state.events[idx], host: hostVal};
+        const _wasOpenSlot = isOpenMasterSlot(state.events[idx]);
+        state.events[idx] = {...state.events[idx], host: hostVal, ...(hostVal ? { availableMasters: [] } : {})};
         await saveEvents();
+        if(_wasOpenSlot && hostVal) recordAction('Слот: назначен мастер', `${hostVal} — «${ev.title||'Слот'}» ${formatDateText(ev.date)} ${ev.time||''}`, { cat:'event', verb:'назначил(а) мастера на слот' });
       }
       recordAction("Ведущий изменён");
       state.modal = null; overlay.remove(); render();
     };
     overlay.querySelector('#qh-save').onclick = save;
+    overlay.querySelectorAll('.qh-avail').forEach(b=> b.onclick = ()=>{ input.value = b.dataset.name; save(); });
     input.onkeydown = (e)=>{ if(e.key==='Enter') save(); };
   }
 
@@ -28926,7 +29275,9 @@
                 ${remainder>0 ? `<div class="notes" style="color:var(--status-red);">💳 Остаток: ${formatMoney(remainder)}</div>` : ''}
               </div>
               <div style="display:flex;flex-direction:column;gap:6px;flex-shrink:0;">
-                ${openSlot && state.currentRole === 'master'
+                ${openSlot && state.currentRole === 'master' && !iAmAvailable && !slotFitsMe(e)
+                  ? `<span style="font-size:11.5px;color:var(--ink-soft);max-width:130px;text-align:right;" title="Этот мастер-класс ведут: ${escapeHtml(allowedHostsForTitle(e.title).join(', '))}">не ваше направление</span>`
+                  : openSlot && state.currentRole === 'master'
                   ? `<button type="button" class="slot-signup-btn${iAmAvailable?' active':''}" data-eid="${e.id}" title="${iAmAvailable?'Отменить — я не смогу провести':'Отметить себя свободным для этого слота'}">${iAmAvailable?'✓ Вы свободны':'✅ Я свободен'}</button>`
                   : `<button class="quick-host-btn" data-eid="${e.id}" title="Сменить мастера (без кода)">✎ мастер</button>`
                 }
@@ -29046,6 +29397,7 @@
         } else {
           list.push(myName);
           recordAction('Мастер отметил себя свободным для слота', `${myName} — «${e.title||'Слот'}» ${formatDateText(e.date)} ${e.time}`);
+          sendPushNotification('🙋 Отклик на слот', `${myName} может провести «${e.title||'Слот'}» ${formatDateText(e.date)} ${e.time||''}`, ['owner','admin','assistant']);
         }
         const idx2 = state.events.findIndex(x=>x.id===id);
         if(idx2>=0) state.events[idx2] = {...state.events[idx2], availableMasters: list};
@@ -31833,6 +32185,13 @@
 
       // само мероприятие уже сохранено — окно закрываем сразу, а связанные записи (заявка, «Книга»)
       // дописываем в фоне: раньше человек ждал ещё две полные перезаписи списков, прежде чем окно закроется
+      // новый свободный слот (без ведущего) — пуш мастерам, чтобы откликнулись
+      try{
+        const _orig = overlay._feedOrig || null;
+        if(isOpenMasterSlot(updated) && (idx < 0 || !_orig || !isOpenMasterSlot(_orig)) && updated.date >= todayStr()){
+          sendPushNotification('🙋 Новый слот — нужен мастер', `«${updated.title||'Слот'}» ${formatDateText(updated.date)} ${updated.time||''} · ${(getSpace(updated.spaceId)||{}).name||''}. Откройте приложение и нажмите «Могу провести».`, ['master']);
+        }
+      }catch(e){}
       const _bgAfterSave = async ()=>{
       // привязка заявки к новому мероприятию (см. блок валидации выше) — создаём новую заявку или
       // дописываем eventId в выбранную существующую, сразу помечая её проданной этим мероприятием
