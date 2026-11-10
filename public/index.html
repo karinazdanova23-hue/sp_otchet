@@ -173,6 +173,19 @@
   .pd-kpi{ background:#F2ECDD; border-radius:12px; padding:9px 12px; }
   .pd-kpi .pd-k{ font-size:11px; color:var(--ink-soft); text-transform:uppercase; letter-spacing:.4px; }
   .pd-kpi .pd-v{ font-size:18px; font-weight:800; margin-top:2px; }
+  .cp-chip{ cursor:pointer; border:1.5px solid #D9D0BC; background:#fff; border-radius:999px; padding:5px 11px; font:inherit; font-size:12.5px; }
+  .cp-chip.on{ background:#171512; color:#fff; border-color:#171512; }
+  .cp-week{ display:grid; grid-template-columns:repeat(7,minmax(150px,1fr)); gap:8px; overflow-x:auto; padding-bottom:6px; }
+  .cp-day{ background:#FBF8F0; border-radius:12px; padding:8px; min-height:180px; display:flex; flex-direction:column; gap:6px; }
+  .cp-day.today{ box-shadow:0 0 0 2px #E8B84B inset; }
+  .cp-dh{ display:flex; gap:6px; align-items:baseline; font-size:12.5px; text-transform:capitalize; }
+  .cp-dh span{ color:#8C8C8C; font-size:11.5px; } .cp-dh .cp-n{ margin-left:auto; background:#171512; color:#fff; border-radius:9px; padding:0 6px; font-size:10.5px; }
+  .cp-card{ background:#fff; border-radius:9px; padding:7px 8px; cursor:pointer; box-shadow:0 1px 2px rgba(23,21,18,.08); }
+  .cp-card:hover{ box-shadow:0 3px 10px rgba(23,21,18,.15); }
+  .cp-t{ font-size:12.5px; font-weight:600; margin-top:3px; line-height:1.3; display:-webkit-box; -webkit-line-clamp:3; -webkit-box-orient:vertical; overflow:hidden; }
+  .cp-tag{ font-size:10px; background:#EEF0E4; color:#4E5733; border-radius:6px; padding:1px 5px; }
+  .cp-addday{ margin-top:auto; border:1px dashed #C9BFA6; background:transparent; border-radius:8px; padding:5px; font:inherit; font-size:12px; color:#6B655C; cursor:pointer; }
+  .cp-l{ font-size:11.5px; font-weight:700; letter-spacing:.4px; color:#8C8C8C; text-transform:uppercase; }
   .lt-more{ display:block; width:calc(100% - 12px); margin:6px; padding:7px 10px; border:1px dashed #C9BFA6; border-radius:10px; background:#FBF8F0; color:#171512; font-weight:600; font-size:12.5px; font-family:inherit; cursor:pointer; text-align:center; }
   .lt-more:hover{ background:#F2ECDD; border-color:#E8B84B; }
   .lt-grp-h{ display:flex; align-items:flex-start; flex-wrap:wrap; gap:4px 6px; padding:6px 8px; cursor:pointer; user-select:none; font-size:12.5px; font-weight:600; }
@@ -2099,7 +2112,7 @@
   const MARKETING_SOCIAL_NETWORKS = ['ТГ','ВК','Инста','Макс','Сайт','Гео','Авито'];
 
   const HOSTESS_LIST = ['Ира','Оксана','Соня','Сара'];
-  const MANAGER_LIST = ['Алёна','Яна'];
+  const MANAGER_LIST = ['Алёна','Даша'];
   function renderBarChart(data, opts){
     opts = opts || {};
     const height = opts.height || 160;
@@ -2165,6 +2178,46 @@
     return Array.from(names).filter(n=> n && !notAdmins.has(n.toLowerCase())).sort();
   }
   // менеджер, назначенный на день (график менеджеров — просто имя на весь день, без смен по времени)
+  // ===== Имена менеджеров: одна и та же менеджер может быть записана как «Алёна» и «Алёна Грекова» =====
+  // Канон — самое полное написание среди известных менеджеров (список сотрудников, календарь смен, личные пароли).
+  // Короткое «Алёна» склеивается с «Алёна Грекова», если среди менеджеров нет другой Алёны.
+  function mgrNorm(n){ return String(n||'').trim().toLowerCase().replace(/ё/g,'е').replace(/\s+/g,' '); }
+  function managerNamesKnown(){
+    const out = new Map(); const add = n=>{ n = String(n||'').trim(); if(n && !out.has(mgrNorm(n))) out.set(mgrNorm(n), n); };
+    MANAGER_LIST.forEach(add);
+    Object.values(state.managerShifts||{}).forEach(add);
+    Object.keys(state.managerPersonalPasswords||{}).forEach(add);
+    return Array.from(out.values());
+  }
+  function managerCanon(name){
+    const n = String(name||'').trim(); if(!n) return '';
+    const known = managerNamesKnown(); const first = mgrNorm(n).split(' ')[0];
+    const same = known.filter(k=> mgrNorm(k).split(' ')[0] === first);
+    if(!same.length) return n;
+    // несколько разных людей с одним именем (например, «Алёна Грекова» и «Алёна Смирнова») — не склеиваем короткое имя
+    const fulls = Array.from(new Set(same.filter(k=> mgrNorm(k).includes(' ')).map(mgrNorm)));
+    if(fulls.length > 1){ const ex = same.find(k=> mgrNorm(k) === mgrNorm(n)); return ex || n; }
+    return same.slice().sort((a,b)=> b.length - a.length)[0];
+  }
+  function isManagerName(name){ const c = mgrNorm(managerCanon(name)); return !!c && managerNamesKnown().some(k=> mgrNorm(managerCanon(k)) === c); }
+  // один раз: список менеджеров приводим к тем, кто реально стоит в календаре смен менеджеров (за последние 60 дней)
+  async function managersRosterFixOnce(){
+    if(state.currentRole !== 'owner') return;
+    try{ const f = await window.storage.get('managers-fix-v1', true); if(f) return; }catch(e){}
+    const from = new Date(); from.setDate(from.getDate() - 60); const fromS = fmtDate(from);
+    const onShift = Array.from(new Set(Object.entries(state.managerShifts||{}).filter(([d,n])=> d >= fromS && n && n.trim()).map(([,n])=> managerCanon(n))));
+    if(onShift.length){
+      const target = onShift.sort((a,b)=> a.localeCompare(b,'ru'));
+      const same = target.length === MANAGER_LIST.length && target.every(t=> MANAGER_LIST.some(m=> mgrNorm(managerCanon(m)) === mgrNorm(t)));
+      if(!same){
+        let r = {}; try{ const sr = await window.storage.get('staff-roster', true); if(sr) r = JSON.parse(sr.value) || {}; }catch(e){}
+        MANAGER_LIST.splice(0, MANAGER_LIST.length, ...target);
+        await storageSetWithRetry('staff-roster', JSON.stringify({ ...r, hostess: Array.isArray(r.hostess) ? r.hostess : HOSTESS_LIST.slice(), manager: MANAGER_LIST.slice(), notAdmins: state.staffNotAdmins || r.notAdmins || [] }));
+        recordAction('Список менеджеров приведён к календарю смен: ' + target.join(', '), '', { cat:'settings', silent:true });
+      }
+    }
+    try{ await storageSetWithRetry('managers-fix-v1', JSON.stringify({ at: new Date().toISOString() })); }catch(e){}
+  }
   function managerForDate(dateStr){
     const name = (state.managerShifts||{})[dateStr];
     return (name && name.trim()) ? name.trim() : '';
@@ -6309,6 +6362,7 @@
     autoCaptureForecastSnapshot();
 
     try{ managerLandingOnce(); }catch(e){}
+    if(state.currentRole === 'owner' && !state._mgrFixTried && state.unlocked){ state._mgrFixTried = true; setTimeout(()=>{ managersRosterFixOnce().catch(()=>{}); }, 1500); }
     try{ qlEnsureFab(); }catch(e){}
     if(state.view === 'today'){
       app.innerHTML = renderTodayView();
@@ -8007,7 +8061,9 @@
         <button data-marketingview="leadplan" class="${state.marketingView==='leadplan'?'active':''}">📥 План заявок</button>
         <button data-marketingview="spend" class="${state.marketingView==='spend'?'active':''}">Траты</button>
         <button data-marketingview="stats" class="${state.marketingView==='stats'?'active':''}">Статистика</button>
-        <button data-marketingview="content" class="${state.marketingView==='content'?'active':''}">Контент-план</button>
+        <button data-marketingview="romi" class="${state.marketingView==='romi'?'active':''}">💸 Окупаемость</button>
+        <button data-marketingview="weekreport" class="${state.marketingView==='weekreport'?'active':''}">📋 Отчёт недели</button>
+        <button data-marketingview="content" class="${state.marketingView==='content'?'active':''}">🗓 Контент-план</button>
         <button data-marketingview="plan" class="${state.marketingView==='plan'?'active':''}">План/факт</button>
       </div>
     `;
@@ -8015,6 +8071,8 @@
       const c = state.cursor; const ym = c.getFullYear()+'-'+pad(c.getMonth()+1);
       return subTabsHtml + renderLeadPlanHtml(ym);
     }
+    if(state.marketingView === 'romi') return subTabsHtml + renderMarketingRomiView();
+    if(state.marketingView === 'weekreport') return subTabsHtml + renderMarketingWeekReportView();
     if(state.marketingView === 'stats') return subTabsHtml + renderMarketingStatsView();
     if(state.marketingView === 'plan') return subTabsHtml + renderMarketingPlanView();
     if(state.marketingView === 'content') return subTabsHtml + renderContentPlanView();
@@ -8746,46 +8804,487 @@
     return { count: matched.length, leads: matched };
   }
 
+  // ===================== «Контент-план» — ТЗ маркетолога для СММ-специалиста (Telegram, ВК, Instagram) =====================
+  // Запись = одна публикация: дата, соцсеть, формат, тема, ТЗ, готовый текст, референсы, продукты, статус.
+  // Хранится в том же списке 'content-posts' (совместимо со старыми постами: socialNetworks / product / description).
+  // Аналитика: сколько раз о каком продукте говорили в каждой соцсети и сколько заявок пришло из этой соцсети по этому продукту.
+  const CP_NETS = [
+    { key:'tg', src:'ТГ', label:'Telegram', icon:'✈️', color:'#2AABEE' },
+    { key:'vk', src:'ВК', label:'ВКонтакте', icon:'💬', color:'#0077FF' },
+    { key:'ig', src:'Инста', label:'Instagram', icon:'📷', color:'#D6336C' },
+  ];
+  const CP_FORMATS = [
+    { key:'post', label:'Пост', icon:'📝' }, { key:'carousel', label:'Карусель', icon:'🖼' }, { key:'reels', label:'Рилс / видео', icon:'🎬' },
+    { key:'stories', label:'Сторис', icon:'⭕' }, { key:'circle', label:'Кружок', icon:'🔵' }, { key:'poll', label:'Опрос', icon:'📊' },
+  ];
+  const CP_STATUS = [
+    { key:'brief', label:'ТЗ поставлено', color:'#8C8C8C' }, { key:'work', label:'В работе', color:'#E8B84B' },
+    { key:'review', label:'На согласовании', color:'#7B5CFF' }, { key:'done', label:'Опубликовано', color:'#75804F' },
+  ];
+  // продукты для контента = строки плана заявок + то, что продаётся не через заявки
+  const CP_PRODUCTS = [
+    { key:'Дни рождения', label:'ДР', re:/(^|[^а-я])(др|дн[ея] рожд|день рожд|именин)/ },
+    { key:'Свидания', label:'Свидания', re:/свидан|втор(ой|ую) половин|пар[аы]\b|влюбл/ },
+    { key:'Детские', label:'Детские', re:/детск|ребен|ребён|дет(и|ям|ей)\b|мам[аы] с дет|школ|кружок для|утренник/ },
+    { key:'Корпоративы', label:'Корпоративы', re:/корпорат|коллег|тимбилд|команд[аеы]/ },
+    { key:'Девичники', label:'Девичники', re:/девичник|подруг|сбор подруг/ },
+    { key:'Выездные', label:'Выезды', re:/выезд|приед(ем|у)|к вам в офис|банкетн/ },
+    { key:'sched', label:'Расписание / МК', re:/расписан|арт-?ланч|мк по расписан|запись на мк/ },
+    { key:'certs', label:'Сертификаты', re:/сертификат/ },
+    { key:'items', label:'Изделия / заказы', re:/издели|распаков|заказ(ать|ы)|кружк[аиу] на заказ/ },
+  ];
+  function cpNetOf(p){ const s = (p.socialNetworks && p.socialNetworks[0]) || p.socialNetwork || ''; const n = CP_NETS.find(x=> x.src === s || x.key === p.network); return n || null; }
+  function cpGuessProducts(text){ const t = String(text||'').toLowerCase().replace(/ё/g,'е'); return CP_PRODUCTS.filter(x=> x.re.test(t)).map(x=> x.key); }
+  function cpGuessFormat(text, fallback){
+    const t = String(text||'').toLowerCase();
+    if(/опрос/.test(t)) return 'poll'; if(/кружоч|кружок(?! для)/.test(t)) return 'circle'; if(/карусел|слайд\s*1/.test(t)) return 'carousel';
+    if(/рилс|reel|видео|озвучк/.test(t)) return 'reels'; return fallback || 'post';
+  }
+  function cpProducts(p){ if(Array.isArray(p.products) && p.products.length) return p.products; const g = cpGuessProducts([p.title, p.description, p.brief, p.text].join(' ')); return g; }
+  function cpTitle(p){ return (p.title || p.description || '').split('\n')[0].trim() || 'Без темы'; }
+  function cpWeekStart(d){ const x = new Date(d.getFullYear(), d.getMonth(), d.getDate()); const wd = (x.getDay() + 6) % 7; x.setDate(x.getDate() - wd); return x; }
+  function cpCanEdit(){ return ['owner','marketer','admin','assistant'].includes(state.currentRole); }
+  function cpLinkify(s){ return escapeHtml(s||'').replace(/(https?:\/\/[^\s<]+)/g, '<a href="$1" target="_blank" rel="noopener" style="color:#0077FF;word-break:break-all;">$1</a>'); }
+
   function renderContentPlanView(){
-    const items = [...state.contentPosts].sort((a,b)=> (b.date||'').localeCompare(a.date||''));
-    const withStats = items.map(p=>({ ...p, ...leadsAfterPost(p) }));
-    const topRanked = [...withStats].sort((a,b)=> b.count - a.count).slice(0, 10);
+    if(!state.cpWeek) state.cpWeek = fmtDate(cpWeekStart(new Date()));
+    const mode = state.cpMode || 'week';
+    const netF = state.cpNet || '';
+    const tabs = `<div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center;margin-bottom:12px;">
+      ${[['week','🗓 Неделя'],['list','📋 Списком'],['stats','📊 Аналитика']].map(([k,l])=> `<button class="btn ${mode===k?'btn-primary':'btn-ghost'}" data-cpmode="${k}" style="padding:6px 12px;">${l}</button>`).join('')}
+      <span style="width:12px;"></span>
+      <button class="cp-chip ${!netF?'on':''}" data-cpnet="">Все соцсети</button>
+      ${CP_NETS.map(n=> `<button class="cp-chip ${netF===n.key?'on':''}" data-cpnet="${n.key}" style="${netF===n.key?`background:${n.color};border-color:${n.color};color:#fff;`:''}">${n.icon} ${n.label}</button>`).join('')}
+      <span style="flex:1;"></span>
+      ${cpCanEdit() ? `<button class="btn btn-ghost" id="cp-import" style="padding:6px 12px;">📥 Загрузить из Excel</button><button class="btn btn-primary" id="cp-add" style="padding:6px 14px;">+ ТЗ на публикацию</button>` : ''}
+    </div>`;
+    if(mode === 'stats') return tabs + renderContentStatsHtml();
+    const posts = (state.contentPosts||[]).filter(p=> !netF || (cpNetOf(p)||{}).key === netF);
+    const card = (p)=>{
+      const n = cpNetOf(p) || { color:'#8C8C8C', icon:'•', label:(p.socialNetworks||[]).join(', ') };
+      const f = CP_FORMATS.find(x=> x.key === (p.format || cpGuessFormat(p.title||p.description))) || CP_FORMATS[0];
+      const st = CP_STATUS.find(x=> x.key === (p.status || (p.date && p.date < todayStr() ? 'done' : 'brief'))) || CP_STATUS[0];
+      const pr = cpProducts(p);
+      return `<div class="cp-card" data-cpid="${escapeHtml(p.id)}" style="border-left:4px solid ${n.color};">
+        <div style="display:flex;align-items:center;gap:5px;font-size:11px;color:#6B655C;white-space:nowrap;"><span title="${escapeHtml(n.label)}">${n.icon}</span><span style="overflow:hidden;text-overflow:ellipsis;">${f.icon} ${escapeHtml(f.label)}</span><span style="margin-left:auto;flex:none;width:8px;height:8px;border-radius:50%;background:${st.color};" title="${escapeHtml(st.label)}"></span></div>
+        <div class="cp-t">${escapeHtml(cpTitle(p))}</div>
+        ${pr.length ? `<div style="display:flex;flex-wrap:wrap;gap:3px;margin-top:4px;">${pr.map(k=>{ const x = CP_PRODUCTS.find(y=> y.key===k); return `<span class="cp-tag">${escapeHtml(x ? x.label : k)}</span>`; }).join('')}</div>` : ''}
+        ${p.brief ? '<div style="font-size:10.5px;color:#8C8C8C;margin-top:3px;">📎 есть ТЗ' + (p.text ? ' · текст' : '') + '</div>' : (p.text ? '<div style="font-size:10.5px;color:#8C8C8C;margin-top:3px;">📎 текст</div>' : '')}
+      </div>`;
+    };
+    if(mode === 'list'){
+      const c = state.cursor; const ym = c.getFullYear()+'-'+pad(c.getMonth()+1);
+      const list = posts.filter(p=> (p.date||'').startsWith(ym)).sort((a,b)=> (a.date||'').localeCompare(b.date||''));
+      return tabs + `<div class="analytics-section"><h4 style="margin-top:0;">Публикации — ${escapeHtml(MONTHS[c.getMonth()] + ' ' + c.getFullYear())} (${list.length})</h4>
+        ${list.length ? `<div style="overflow-x:auto;"><table class="ms-table" style="width:100%;"><tr><th>Дата</th><th>Соцсеть</th><th>Формат</th><th style="text-align:left;">Тема</th><th style="text-align:left;">Продукты</th><th>Статус</th></tr>
+          ${list.map(p=>{ const n = cpNetOf(p); const f = CP_FORMATS.find(x=> x.key === (p.format||'post')) || CP_FORMATS[0]; const st = CP_STATUS.find(x=> x.key === (p.status || (p.date < todayStr() ? 'done' : 'brief'))) || CP_STATUS[0];
+            return `<tr class="cp-row" data-cpid="${escapeHtml(p.id)}" style="cursor:pointer;"><td>${escapeHtml(lgDateDots(p.date).slice(0,5))} ${escapeHtml(weekdayFromDate(p.date).slice(0,2))}</td><td>${n ? n.icon + ' ' + n.label : escapeHtml((p.socialNetworks||[]).join(', '))}</td><td>${f.icon} ${f.label}</td>
+              <td style="text-align:left;">${escapeHtml(cpTitle(p))}</td><td style="text-align:left;font-size:12px;">${cpProducts(p).map(k=> (CP_PRODUCTS.find(y=>y.key===k)||{label:k}).label).join(', ')}</td><td><span style="color:${st.color};font-weight:700;font-size:12px;">● ${st.label}</span></td></tr>`; }).join('')}
+        </table></div>` : '<div style="color:var(--ink-soft);font-size:13px;">В этом месяце публикаций нет.</div>'}</div>`;
+    }
+    // неделя
+    const ws = parseDate(state.cpWeek);
+    const days = Array.from({length:7}, (_,i)=>{ const d = new Date(ws); d.setDate(d.getDate()+i); return fmtDate(d); });
+    const we = days[6];
+    const head = `<div style="display:flex;align-items:center;gap:8px;margin-bottom:10px;">
+      <button class="nav-btn" id="cp-prev">‹</button><b style="font-size:15px;">${escapeHtml(lgDateDots(days[0]).slice(0,5))} — ${escapeHtml(lgDateDots(we))}</b><button class="nav-btn" id="cp-next">›</button>
+      <button class="today-btn" id="cp-this">эта неделя</button>
+      <span style="margin-left:auto;font-size:12px;color:var(--ink-soft);">${CP_STATUS.map(s=> `<span style="margin-left:10px;"><span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:${s.color};"></span> ${s.label}</span>`).join('')}</span></div>`;
+    const cols = days.map(d=>{
+      const dp = posts.filter(p=> p.date === d).sort((a,b)=> CP_NETS.findIndex(n=> n.key === (cpNetOf(a)||{}).key) - CP_NETS.findIndex(n=> n.key === (cpNetOf(b)||{}).key));
+      const isToday = d === todayStr();
+      return `<div class="cp-day ${isToday?'today':''}">
+        <div class="cp-dh"><b>${escapeHtml(weekdayFromDate(d))}</b> <span>${escapeHtml(lgDateDots(d).slice(0,5))}</span> <span class="cp-n">${dp.length || ''}</span></div>
+        ${dp.map(card).join('')}
+        ${cpCanEdit() ? `<button class="cp-addday" data-cpday="${d}">+ ТЗ</button>` : ''}
+      </div>`;
+    }).join('');
+    return tabs + head + `<div class="cp-week">${cols}</div>`;
+  }
 
+  function renderContentStatsHtml(){
+    const c = state.cursor; const ym = c.getFullYear()+'-'+pad(c.getMonth()+1);
+    const today = todayStr();
+    // в анализ — только уже вышедшие публикации (запланированные на будущее ещё не могли дать заявок)
+    const posts = (state.contentPosts||[]).filter(p=> (p.date||'').startsWith(ym) && p.date <= today);
+    const leads = state.leads.filter(l=> (l.requestDate||'').startsWith(ym));
+    const NOLEAD = new Set(['sched','certs','items']); // продаются в основном не через заявки
+    const salesOf = (k)=>{
+      if(k === 'sched') return { v: state.events.filter(e=> (e.date||'').startsWith(ym) && e.date <= today && e.product === 'Мастер-класс' && e.status !== 'cancelled').reduce((a,e)=> a + (Number(e.guests)||0), 0), u:'гостей на МК' };
+      if(k === 'certs') return { v: state.certificates.filter(c=> (c.saleDate||'').startsWith(ym) && c.purpose !== 'marketing' && c.status !== 'refunded').length, u:'серт. продано' };
+      return { v: state.incomes.filter(i=> (i.date||'').startsWith(ym) && (i.product === 'Заказ' || i.product === 'Изделие')).length, u:'заказов/изделий' };
+    };
+    const leadProd = (l)=>{ const k = dailyReportLeadCategory(l); if(CP_PRODUCTS.some(x=> x.key === k)) return k; if(l.product === 'Заказ') return 'items'; if(l.product === 'Мастер-класс') return 'sched'; return null; };
+    const M = {}; CP_PRODUCTS.forEach(pr=>{ M[pr.key] = {}; CP_NETS.forEach(n=> M[pr.key][n.key] = { posts:0, leads:0, sold:0 }); });
+    posts.forEach(p=>{ const n = cpNetOf(p); if(!n) return; cpProducts(p).forEach(k=>{ if(M[k]) M[k][n.key].posts++; }); });
+    leads.forEach(l=>{ const n = CP_NETS.find(x=> x.src === l.source); if(!n) return; const k = leadProd(l); if(k && M[k]){ M[k][n.key].leads++; if(l.sold) M[k][n.key].sold++; } });
+    const totPostsNet = {}, totLeadsNet = {}; CP_NETS.forEach(n=>{ totPostsNet[n.key] = posts.filter(p=> (cpNetOf(p)||{}).key === n.key).length; totLeadsNet[n.key] = leads.filter(l=> l.source === n.src).length; });
+    const plan = (state.monthlyPlans && state.monthlyPlans[ym]) || {};
+    const leadPlan = plan.byLeadCat || {};
+    const maxP = Math.max(1, ...CP_PRODUCTS.map(pr=> CP_NETS.reduce((a,n)=> a + M[pr.key][n.key].posts, 0)));
+    const cell = (x)=>{
+      const ratio = x.posts ? (x.leads / x.posts) : null;
+      return `<td style="text-align:center;">${x.posts || x.leads ? `<div style="font-weight:700;">${x.posts} <span style="color:#8C8C8C;font-weight:400;">пуб.</span> → ${x.leads} <span style="color:#8C8C8C;font-weight:400;">заяв.</span></div>
+        <div style="font-size:11px;color:${ratio===null?'#A3402F':(ratio>=1?'#4E5733':'#8C6A1E')};">${ratio===null ? (x.leads ? 'заявки без публикаций' : '') : (ratio.toFixed(1).replace('.',',') + ' заявки на публикацию')}${x.sold ? ' · продано ' + x.sold : ''}</div>` : '<span style="color:#C9BFA6;">—</span>'}</td>`;
+    };
+    const rows = CP_PRODUCTS.map(pr=>{
+      const tp = CP_NETS.reduce((a,n)=> a + M[pr.key][n.key].posts, 0), tl = CP_NETS.reduce((a,n)=> a + M[pr.key][n.key].leads, 0);
+      const lp = leadPlan[pr.key];
+      if(NOLEAD.has(pr.key)){
+        const sv = salesOf(pr.key);
+        return `<tr><td style="text-align:left;"><b>${escapeHtml(pr.label)}</b><div style="font-size:10.5px;color:#8C8C8C;">продаётся не через заявки</div>
+          <div style="height:6px;background:#E5DFD0;border-radius:3px;margin-top:4px;overflow:hidden;width:120px;"><div style="height:100%;width:${Math.round(tp/maxP*100)}%;background:#E8B84B;"></div></div></td>
+          ${CP_NETS.map(n=>{ const x = M[pr.key][n.key]; return `<td style="text-align:center;">${x.posts ? `<b>${x.posts}</b> <span style="color:#8C8C8C;">пуб.</span>` : '<span style="color:#C9BFA6;">—</span>'}${x.leads ? `<div style="font-size:11px;color:#8C8C8C;">+ ${x.leads} заявок</div>` : ''}</td>`; }).join('')}
+          <td style="text-align:center;"><b>${tp}</b> пуб. → <b>${sv.v}</b> <span style="font-size:11px;color:#8C8C8C;">${sv.u}</span></td></tr>`;
+      }
+      return `<tr><td style="text-align:left;"><b>${escapeHtml(pr.label)}</b>
+          <div style="height:6px;background:#E5DFD0;border-radius:3px;margin-top:4px;overflow:hidden;width:120px;"><div style="height:100%;width:${Math.round(tp/maxP*100)}%;background:#E8B84B;"></div></div></td>
+        ${CP_NETS.map(n=> cell(M[pr.key][n.key])).join('')}
+        <td style="text-align:center;"><b>${tp}</b> → <b>${tl}</b>${lp ? `<div style="font-size:11px;color:#8C8C8C;">план заявок ${lp}</div>` : ''}</td></tr>`;
+    }).join('');
+    // выводы
+    const ins = [];
+    CP_PRODUCTS.forEach(pr=>{
+      const tp = CP_NETS.reduce((a,n)=> a + M[pr.key][n.key].posts, 0), tl = CP_NETS.reduce((a,n)=> a + M[pr.key][n.key].leads, 0);
+      const lp = NOLEAD.has(pr.key) ? 0 : (Number(leadPlan[pr.key]) || 0);
+      if(lp && tp === 0) ins.push(`🔇 <b>${pr.label}</b>: в плане ${lp} заявок, а публикаций в этом месяце нет.`);
+      else if(lp && tl < lp * 0.5 && tp <= 2) ins.push(`📉 <b>${pr.label}</b>: заявок ${tl} из ${lp} по плану, публикаций всего ${tp} — стоит говорить чаще.`);
+      if(NOLEAD.has(pr.key)) return;
+      CP_NETS.forEach(n=>{ const x = M[pr.key][n.key]; if(x.posts >= 2 && x.leads / x.posts >= 2) ins.push(`🔥 <b>${pr.label}</b> в ${n.label}: ${x.posts} публикации → ${x.leads} заявок — работает, можно усилить.`); if(x.posts >= 3 && x.leads === 0) ins.push(`🤔 <b>${pr.label}</b> в ${n.label}: ${x.posts} публикации и ни одной заявки — пересмотреть подачу или оффер.`); });
+    });
+    // по неделям: публикации и заявки по соцсетям
+    const weeks = []; { const end = cpWeekStart(new Date()); for(let i=7;i>=0;i--){ const s = new Date(end); s.setDate(s.getDate() - 7*i); const e = new Date(s); e.setDate(e.getDate()+6); weeks.push([fmtDate(s), fmtDate(e)]); } }
+    const wk = weeks.map(([s,e])=>{ const r = { s, e }; CP_NETS.forEach(n=>{ r[n.key] = { p: (state.contentPosts||[]).filter(p=> p.date >= s && p.date <= e && p.date <= today && (cpNetOf(p)||{}).key === n.key).length, l: state.leads.filter(l=> l.requestDate >= s && l.requestDate <= e && l.source === n.src).length }; }); return r; });
+    const maxW = Math.max(1, ...wk.flatMap(r=> CP_NETS.flatMap(n=> [r[n.key].p, r[n.key].l])));
+    const weekChart = `<div style="overflow-x:auto;"><div style="display:grid;grid-template-columns:repeat(${wk.length},minmax(90px,1fr));gap:8px;min-width:720px;">
+      ${wk.map(r=> `<div style="background:#FBF8F0;border-radius:10px;padding:8px;">
+        <div style="font-size:11px;color:#6B655C;margin-bottom:6px;">${escapeHtml(lgDateDots(r.s).slice(0,5))}–${escapeHtml(lgDateDots(r.e).slice(0,5))}</div>
+        ${CP_NETS.map(n=> `<div style="display:flex;align-items:center;gap:4px;margin:3px 0;font-size:10.5px;"><span style="width:14px;">${n.icon}</span>
+          <div style="flex:1;"><div style="height:6px;border-radius:3px;background:${n.color};opacity:.45;width:${Math.round(r[n.key].p/maxW*100)}%;min-width:${r[n.key].p?3:0}px;"></div><div style="height:6px;border-radius:3px;background:${n.color};width:${Math.round(r[n.key].l/maxW*100)}%;min-width:${r[n.key].l?3:0}px;margin-top:2px;"></div></div>
+          <span style="width:34px;text-align:right;font-family:var(--font-mono);">${r[n.key].p}/${r[n.key].l}</span></div>`).join('')}
+      </div>`).join('')}</div></div>
+      <div style="font-size:11.5px;color:var(--ink-soft);margin-top:6px;">Светлая полоса — публикации, яркая — заявки из этой соцсети; цифры «публикации/заявки».</div>`;
     return `
-      <div class="cert-toolbar">
-        <div style="font-size:12px;color:var(--ink-soft);font-family:var(--font-mono);">Постов: ${items.length}</div>
-        <button class="btn btn-primary" id="btn-add-content-post">+ Добавить пост</button>
+      <div class="analytics-summary" style="margin-bottom:14px;">
+        ${CP_NETS.map(n=> `<div class="summary-card" style="border-left:4px solid ${n.color};"><div class="num" style="font-size:20px;">${totPostsNet[n.key]} → ${totLeadsNet[n.key]}</div><div class="label">${n.icon} ${n.label.toUpperCase()}: ПУБЛИКАЦИЙ → ЗАЯВОК</div></div>`).join('')}
       </div>
-
       <div class="analytics-section">
-        <h4>Топ по заявкам после поста (следующие 30 дней)</h4>
-        <div style="font-size:12px;color:var(--ink-soft);margin-bottom:10px;">Заявки в той же соцсети (и по тому же продукту, если он указан у поста) за 30 дней после публикации — покупка обычно не сразу.</div>
-        ${topRanked.length===0 || topRanked.every(p=>p.count===0) ? '<div style="color:var(--ink-soft);font-size:13px;">Пока нет постов с заявками после них.</div>' : topRanked.filter(p=>p.count>0).map(p=>`
-          <div class="stat-row">
-            <div class="stat-label">${p.date?formatDateText(p.date)+' ('+weekdayFromDate(p.date)+')':''} · ${escapeHtml((p.socialNetworks||[]).join(', '))}${p.product?' · '+escapeHtml(p.product):''}${p.direction?' · '+escapeHtml(p.direction):''}</div>
-            <div style="flex:1;font-size:13px;">${escapeHtml(p.description||'без описания')} <span style="font-family:var(--font-mono);color:var(--status-green);">— ${p.count} ${p.count===1?'заявка':'заявок'}</span></div>
-          </div>
-        `).join('')}
+        <h4 style="margin-top:0;">О чём говорим и что это даёт — ${escapeHtml(MONTHS[c.getMonth()] + ' ' + c.getFullYear())}</h4>
+        <div style="font-size:12px;color:var(--ink-soft);margin-bottom:8px;">Считаются только вышедшие публикации (по сегодняшний день). Публикации — из контент-плана (продукт определяется по теме и ТЗ, можно поправить в карточке). Заявки — из «Конверсии»: источник заявки = соцсеть, продукт заявки = строка.</div>
+        <div style="overflow-x:auto;"><table class="ms-table" style="width:100%;">
+          <tr><th style="text-align:left;">Продукт</th>${CP_NETS.map(n=> `<th style="text-align:center;color:${n.color};">${n.icon} ${n.label}</th>`).join('')}<th style="text-align:center;">Всего: публ. → заявки</th></tr>
+          ${rows}
+        </table></div>
       </div>
+      ${ins.length ? `<div class="analytics-section"><h4 style="margin-top:0;">💡 Что видно</h4>${ins.slice(0,10).map(t=> `<div style="font-size:13px;padding:4px 0;">${t}</div>`).join('')}</div>` : ''}
+      <div class="analytics-section"><h4 style="margin-top:0;">По неделям: публикации и заявки по соцсетям</h4>${weekChart}</div>`;
+  }
 
-      <div class="analytics-section">
-        <h4>Все посты</h4>
-        ${items.length === 0 ? `<div style="color:var(--ink-soft);font-size:13px;">Постов пока нет</div>` : `
-          <div class="cert-list">
-            ${withStats.map(p=>`
-              <div class="refund-row" data-pid="${p.id}">
-                <div class="cell">${p.date ? formatDateText(p.date)+' ('+weekdayFromDate(p.date)+')' : '—'}</div>
-                <div class="cell"><span class="cert-badge in_progress">${escapeHtml((p.socialNetworks||[]).join(', '))}</span></div>
-                <div class="cell">${escapeHtml(p.product||'—')}</div>
-                <div class="cell">${escapeHtml(p.direction||'Все')}</div>
-                <div class="reason">${escapeHtml(p.description||'')}</div>
-                <div class="amount" style="color:${p.count>0?'var(--status-green)':'var(--ink-soft)'};">${p.count} ${p.count===1?'заявка':'заявок'}</div>
-              </div>
-            `).join('')}
-          </div>
-        `}
+  function openContentEditor(p, isNew){
+    p = JSON.parse(JSON.stringify(p));
+    const wrap = document.createElement('div');
+    wrap.style.cssText = 'position:fixed;inset:0;z-index:12000;background:rgba(23,21,18,.5);display:flex;align-items:center;justify-content:center;padding:12px;';
+    const canEdit = cpCanEdit();
+    const net0 = (cpNetOf(p)||CP_NETS[0]).key;
+    let net = net0, fmt = p.format || cpGuessFormat(p.title || p.description, 'post'), st = p.status || (p.date && p.date < todayStr() ? 'done' : 'brief');
+    let prods = Array.isArray(p.products) && p.products.length ? p.products.slice() : cpGuessProducts([p.title, p.description, p.brief, p.text].join(' '));
+    const dup = new Set();
+    const chip = (cls, k, on, label, color)=> `<button type="button" class="${cls}" data-k="${k}" style="cursor:pointer;border-radius:999px;padding:5px 11px;font-size:12.5px;font-family:inherit;border:1.5px solid ${on?(color||'#171512'):'#D9D0BC'};background:${on?(color||'#171512'):'#fff'};color:${on?'#fff':'#171512'};">${label}</button>`;
+    const draw = ()=>{
+      wrap.innerHTML = `<div style="background:#fff;border-radius:16px;max-width:680px;width:100%;max-height:94vh;overflow:auto;padding:16px 18px;">
+        <div style="display:flex;align-items:center;gap:8px;"><h3 style="margin:0;flex:1;font-size:18px;">${isNew ? '+ ТЗ на публикацию' : '📝 Публикация'}</h3><button class="btn btn-ghost" data-x>×</button></div>
+        <div style="display:grid;grid-template-columns:150px 1fr;gap:10px;align-items:center;margin-top:12px;">
+          <label class="cp-l">Дата</label><input type="date" id="cpe-date" value="${escapeHtml(p.date||todayStr())}" ${canEdit?'':'disabled'} style="max-width:180px;">
+          <label class="cp-l">Соцсеть</label><div style="display:flex;gap:6px;flex-wrap:wrap;">${CP_NETS.map(n=> chip('cpe-net', n.key, net===n.key, n.icon+' '+n.label, n.color)).join('')}</div>
+          ${isNew ? `<label class="cp-l">Продублировать в</label><div style="display:flex;gap:10px;flex-wrap:wrap;">${CP_NETS.filter(n=> n.key !== net).map(n=> `<label style="font-size:12.5px;display:flex;gap:4px;align-items:center;"><input type="checkbox" class="cpe-dup" data-k="${n.key}" ${dup.has(n.key)?'checked':''}> ${n.label}</label>`).join('')}</div>` : ''}
+          <label class="cp-l">Формат</label><div style="display:flex;gap:6px;flex-wrap:wrap;">${CP_FORMATS.map(f=> chip('cpe-fmt', f.key, fmt===f.key, f.icon+' '+f.label)).join('')}</div>
+          <label class="cp-l">Тема</label><input type="text" id="cpe-title" value="${escapeHtml(p.title || p.description || '')}" placeholder="Например: Карусель «Что выбирают на ДР»" ${canEdit?'':'disabled'}>
+          <label class="cp-l">О каких продуктах</label><div style="display:flex;gap:5px;flex-wrap:wrap;">${CP_PRODUCTS.map(x=> chip('cpe-prod', x.key, prods.includes(x.key), x.label, '#75804F')).join('')}</div>
+        </div>
+        <div class="cp-l" style="margin-top:12px;">ТЗ для СММ — что сделать, слайды, озвучка, что показать</div>
+        <textarea id="cpe-brief" rows="5" ${canEdit?'':'disabled'} style="width:100%;box-sizing:border-box;border:1px solid #D9D0BC;border-radius:10px;padding:8px;font-family:inherit;font-size:13.5px;">${escapeHtml(p.brief||'')}</textarea>
+        <div style="display:flex;align-items:center;margin-top:10px;"><div class="cp-l" style="flex:1;">Текст публикации</div><button type="button" class="btn btn-ghost" id="cpe-copy" style="padding:3px 10px;font-size:12px;">📋 Скопировать</button></div>
+        <textarea id="cpe-text" rows="5" style="width:100%;box-sizing:border-box;border:1px solid #D9D0BC;border-radius:10px;padding:8px;font-family:inherit;font-size:13.5px;">${escapeHtml(p.text||'')}</textarea>
+        <div class="cp-l" style="margin-top:10px;">Референсы, фото, ссылки</div>
+        <textarea id="cpe-refs" rows="2" ${canEdit?'':'disabled'} style="width:100%;box-sizing:border-box;border:1px solid #D9D0BC;border-radius:10px;padding:8px;font-family:inherit;font-size:13px;" placeholder="Ссылки на рилс, Pinterest, папку с фото…">${escapeHtml(p.refs||'')}</textarea>
+        ${p.refs ? `<div style="font-size:12px;margin-top:4px;">${cpLinkify(p.refs)}</div>` : ''}
+        <div style="display:grid;grid-template-columns:150px 1fr;gap:10px;align-items:center;margin-top:12px;">
+          <label class="cp-l">Статус</label><div style="display:flex;gap:6px;flex-wrap:wrap;">${CP_STATUS.map(s=> chip('cpe-st', s.key, st===s.key, s.label, s.color)).join('')}</div>
+          <label class="cp-l">Ссылка на пост</label><input type="text" id="cpe-link" value="${escapeHtml(p.link||'')}" placeholder="после публикации">
+        </div>
+        <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:14px;">
+          ${!isNew && canEdit ? '<button class="btn btn-ghost" id="cpe-del" style="color:var(--danger);margin-right:auto;">Удалить</button>' : ''}
+          <button class="btn btn-ghost" data-x>Отмена</button><button class="btn btn-primary" id="cpe-save">💾 Сохранить</button></div>
+      </div>`;
+      const keep = ()=>{ p.date = wrap.querySelector('#cpe-date').value; p.title = wrap.querySelector('#cpe-title').value; p.brief = wrap.querySelector('#cpe-brief').value; p.text = wrap.querySelector('#cpe-text').value; p.refs = wrap.querySelector('#cpe-refs').value; p.link = wrap.querySelector('#cpe-link').value; wrap.querySelectorAll('.cpe-dup').forEach(x=>{ if(x.checked) dup.add(x.dataset.k); else dup.delete(x.dataset.k); }); };
+      wrap.querySelectorAll('[data-x]').forEach(b=> b.onclick = ()=> wrap.remove());
+      if(canEdit){
+        wrap.querySelectorAll('.cpe-net').forEach(b=> b.onclick = ()=>{ keep(); net = b.dataset.k; dup.delete(net); draw(); });
+        wrap.querySelectorAll('.cpe-fmt').forEach(b=> b.onclick = ()=>{ keep(); fmt = b.dataset.k; draw(); });
+        wrap.querySelectorAll('.cpe-prod').forEach(b=> b.onclick = ()=>{ keep(); const k = b.dataset.k; prods = prods.includes(k) ? prods.filter(x=> x!==k) : [...prods, k]; p._prodTouched = true; draw(); });
+        const t = wrap.querySelector('#cpe-title'), br = wrap.querySelector('#cpe-brief');
+        const auto = ()=>{ if(p._prodTouched) return; const g = cpGuessProducts(t.value + ' ' + br.value); if(g.join() !== prods.join()){ keep(); prods = g; draw(); const el = wrap.querySelector(document.activeElement && document.activeElement.id ? '#'+document.activeElement.id : '#cpe-title'); } };
+        t.addEventListener('change', auto); br.addEventListener('change', auto);
+      }
+      wrap.querySelectorAll('.cpe-st').forEach(b=> b.onclick = ()=>{ keep(); st = b.dataset.k; draw(); });
+      wrap.querySelector('#cpe-copy').onclick = async ()=>{ const v = wrap.querySelector('#cpe-text').value; try{ await navigator.clipboard.writeText(v); }catch(e){ const ta = wrap.querySelector('#cpe-text'); ta.select(); document.execCommand('copy'); } showToast('Текст скопирован'); };
+      const del = wrap.querySelector('#cpe-del');
+      if(del) del.onclick = async ()=>{ if(!confirm('Удалить публикацию из контент-плана?')) return; state.contentPosts = state.contentPosts.filter(x=> x.id !== p.id); await saveContentPosts(); recordAction('Контент-план: публикация удалена', cpTitle(p), { cat:'marketing' }); wrap.remove(); render(); };
+      wrap.querySelector('#cpe-save').onclick = async ()=>{
+        keep();
+        if(!p.title.trim() && !p.brief.trim()){ showGapWarningBanner('Впишите тему или ТЗ.'); return; }
+        const n = CP_NETS.find(x=> x.key === net);
+        const now = new Date().toISOString(), who = (()=>{ try{ return feedWho(); }catch(_){ return ''; } })();
+        const base = { ...p, format: fmt, status: st, products: prods, socialNetworks: [n.src], network: n.key, product: '', description: p.title, updatedAt: now, updatedBy: who };
+        delete base._prodTouched;
+        if(isNew){ base.createdAt = now; base.createdBy = who; }
+        const i = state.contentPosts.findIndex(x=> x.id === p.id);
+        if(i >= 0) state.contentPosts[i] = base; else state.contentPosts.push(base);
+        if(isNew) dup.forEach(k=>{ const dn = CP_NETS.find(x=> x.key === k); state.contentPosts.push({ ...base, id: uid(), socialNetworks:[dn.src], network: dn.key }); });
+        await saveContentPosts();
+        recordAction((isNew ? 'Контент-план: ТЗ на ' : 'Контент-план: изменено — ') + n.label, `${lgDateDots(base.date)} · ${cpTitle(base)}${dup.size && isNew ? ' (+ ' + Array.from(dup).map(k=> CP_NETS.find(x=>x.key===k).label).join(', ') + ')' : ''}`, { cat:'marketing', verb: isNew ? 'поставил(а) ТЗ' : 'изменил(а) публикацию' });
+        wrap.remove(); render();
+      };
+    };
+    document.body.appendChild(wrap); draw();
+  }
+
+  // ===== импорт из Excel (лист как у маркетолога: блоки ТЕЛЕГРАМ / СТОРИС / ПОСТЫ/РИЛС / ВК, строка с датами, ниже — публикации) =====
+  function cpLoadXlsxLib(){
+    if(window.XLSX) return Promise.resolve(window.XLSX);
+    return new Promise((res, rej)=>{ const s = document.createElement('script'); s.src = 'https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js'; s.onload = ()=> res(window.XLSX); s.onerror = ()=> rej(new Error('lib')); document.head.appendChild(s); });
+  }
+  function cpParseSheetRows(rows){
+    const out = []; let sec = null; let colDate = {};
+    const toDate = (v)=>{
+      if(v instanceof Date) return fmtDate(v);
+      if(typeof v === 'number' && v > 40000 && v < 60000){ const d = new Date(Math.round((v - 25569) * 86400000)); return d.toISOString().slice(0,10); }
+      const s = String(v||'').trim(); let m = s.match(/^(\d{4})-(\d{2})-(\d{2})/); if(m) return m[1]+'-'+m[2]+'-'+m[3];
+      m = s.match(/^(\d{1,2})\.(\d{1,2})\.(\d{2,4})$/); if(m){ const y = m[3].length === 2 ? '20'+m[3] : m[3]; return y+'-'+m[2].padStart(2,'0')+'-'+m[1].padStart(2,'0'); }
+      return null;
+    };
+    let lastTriplet = {}; // для ПОСТЫ/РИЛС: колонка → последняя созданная публикация
+    rows.forEach(r=>{
+      const a = String(r[0]==null?'':r[0]).trim(); const A = a.toUpperCase();
+      if(/^ТЕЛЕГРАМ|^TELEGRAM|^ТГ$/.test(A)){ sec = { net:'tg', kind:'list' }; colDate = {}; return; }
+      if(/^ВК|^ВКОНТАКТЕ|^VK/.test(A)){ sec = { net:'vk', kind:'list' }; colDate = {}; return; }
+      if(/^СТОРИС|^STORIES/.test(A)){ sec = { net:'ig', kind:'list', fmt:'stories' }; colDate = {}; return; }
+      if(/^ПОСТЫ|^РИЛС|^ИНСТАГРАМ|^INSTAGRAM/.test(A)){ sec = { net:'ig', kind:'triplet' }; colDate = {}; lastTriplet = {}; return; }
+      if(!sec) return;
+      const dates = r.map(toDate); const nDates = dates.filter(Boolean).length;
+      if(nDates >= 3){ colDate = {}; dates.forEach((d,i)=>{ if(d) colDate[i] = d; }); lastTriplet = {}; return; }
+      if(sec.kind === 'list'){
+        r.forEach((v,i)=>{ const t = String(v==null?'':v).trim(); if(!t || !colDate[i]) return;
+          out.push({ date: colDate[i], net: sec.net, format: sec.fmt || cpGuessFormat(t, 'post'), title: t.split('\n')[0].slice(0,140), brief: t.length > 140 || t.includes('\n') ? t : '' }); });
+      } else {
+        const label = a.toLowerCase();
+        const role = /^пост|^рилс|^карусел/.test(label) ? 'title' : (/^тз/.test(label) ? 'brief' : (/^текст/.test(label) ? 'text' : 'more'));
+        r.forEach((v,i)=>{ if(i === 0) return; const t = String(v==null?'':v).trim(); if(!t || !colDate[i]) return;
+          if(role === 'title'){ const it = { date: colDate[i], net:'ig', format: cpGuessFormat(t, 'post'), title: t.split('\n')[0].slice(0,140), brief: t.length > 140 || t.includes('\n') ? t : '' }; out.push(it); lastTriplet[i] = it; }
+          else { const it = lastTriplet[i]; if(!it) return; if(role === 'brief') it.brief = (it.brief ? it.brief + '\n' : '') + t; else if(role === 'text') it.text = t; else it.refs = (it.refs ? it.refs + '\n' : '') + t; }
+        });
+      }
+    });
+    return out;
+  }
+  function openContentImport(){
+    const wrap = document.createElement('div');
+    wrap.style.cssText = 'position:fixed;inset:0;z-index:12000;background:rgba(23,21,18,.5);display:flex;align-items:center;justify-content:center;padding:12px;';
+    let parsed = [];
+    const draw = (msg)=>{
+      const byNet = {}; parsed.forEach(x=> byNet[x.net] = (byNet[x.net]||0) + 1);
+      const ex = new Set((state.contentPosts||[]).map(p=> [p.date, (cpNetOf(p)||{}).key, cpTitle(p).toLowerCase()].join('|')));
+      const fresh = parsed.filter(x=> !ex.has([x.date, x.net, x.title.toLowerCase()].join('|')));
+      wrap.innerHTML = `<div style="background:#fff;border-radius:16px;max-width:620px;width:100%;max-height:92vh;overflow:auto;padding:16px 18px;">
+        <div style="display:flex;align-items:center;"><h3 style="margin:0;flex:1;font-size:18px;">📥 Загрузить контент-план из Excel</h3><button class="btn btn-ghost" data-x>×</button></div>
+        <div style="font-size:12.5px;color:#5C5650;margin:8px 0;line-height:1.5;">Подойдёт ваша таблица ТЗ: блоки «ТЕЛЕГРАМ», «СТОРИС», «ПОСТЫ/РИЛС» (и «ВК», если добавите), в каждом — строка с датами, ниже публикации. В «ПОСТЫ/РИЛС» строки «Пост/карусель», «ТЗ», «Текст описание» соберутся в одну карточку. Повторы не задвоятся.</div>
+        <label class="btn" style="cursor:pointer;display:inline-block;">📂 Выбрать файл .xlsx<input type="file" id="cpi-file" accept=".xlsx,.xls" style="display:none;"></label>
+        ${msg ? `<div style="font-size:12.5px;margin-top:8px;color:${msg.err?'#A3402F':'#4E5733'};">${escapeHtml(msg.t)}</div>` : ''}
+        ${parsed.length ? `<div style="margin-top:10px;font-size:13px;">Найдено: <b>${parsed.length}</b> — ${CP_NETS.filter(n=> byNet[n.key]).map(n=> n.icon + ' ' + n.label + ' ' + byNet[n.key]).join(' · ')}. Новых: <b>${fresh.length}</b>.</div>
+          <div style="max-height:260px;overflow:auto;margin-top:8px;border:1px solid #E5DFD0;border-radius:10px;">${fresh.slice(0,80).map(x=> `<div style="padding:5px 8px;border-bottom:1px solid #F2ECDD;font-size:12px;"><b>${escapeHtml(lgDateDots(x.date).slice(0,5))}</b> ${(CP_NETS.find(n=>n.key===x.net)||{}).icon||''} ${escapeHtml(x.title)}</div>`).join('')}</div>
+          <div style="display:flex;justify-content:flex-end;gap:8px;margin-top:12px;"><button class="btn btn-ghost" data-x>Отмена</button><button class="btn btn-primary" id="cpi-go" ${fresh.length?'':'disabled'}>Добавить ${fresh.length}</button></div>` : ''}
+      </div>`;
+      wrap.querySelectorAll('[data-x]').forEach(b=> b.onclick = ()=> wrap.remove());
+      wrap.querySelector('#cpi-file').onchange = async (e)=>{
+        const f = e.target.files && e.target.files[0]; if(!f) return;
+        try{
+          const X = await cpLoadXlsxLib();
+          const wb = X.read(await f.arrayBuffer(), { type:'array', cellDates:true });
+          parsed = [];
+          wb.SheetNames.forEach(sn=>{ const rows = X.utils.sheet_to_json(wb.Sheets[sn], { header:1, raw:true, defval:null }); parsed = parsed.concat(cpParseSheetRows(rows)); });
+          draw(parsed.length ? null : { t:'Не нашла блоков «ТЕЛЕГРАМ / СТОРИС / ПОСТЫ/РИЛС» с датами.', err:true });
+        }catch(err){ draw({ t:'Не получилось прочитать файл' + (err && err.message === 'lib' ? ' (нет интернета для модуля Excel)' : '') + '.', err:true }); }
+      };
+      const go = wrap.querySelector('#cpi-go');
+      if(go) go.onclick = async ()=>{
+        const now = new Date().toISOString(), who = (()=>{ try{ return feedWho(); }catch(_){ return ''; } })();
+        fresh.forEach(x=>{ const n = CP_NETS.find(y=> y.key === x.net);
+          state.contentPosts.push({ id: uid(), date: x.date, socialNetworks:[n.src], network: n.key, format: x.format, title: x.title, description: x.title, brief: x.brief || '', text: x.text || '', refs: x.refs || '',
+            products: cpGuessProducts([x.title, x.brief, x.text].join(' ')), status: x.date < todayStr() ? 'done' : 'brief', createdAt: now, createdBy: who, imported: true }); });
+        await saveContentPosts();
+        recordAction('Контент-план загружен из Excel: ' + fresh.length + ' публикаций', '', { cat:'marketing', verb:'загрузил(а) контент-план' });
+        wrap.remove(); render();
+      };
+    };
+    document.body.appendChild(wrap); draw();
+  }
+  function attachContentPlanEvents(){
+    document.querySelectorAll('[data-cpmode]').forEach(b=> b.onclick = ()=>{ state.cpMode = b.dataset.cpmode; render(); });
+    document.querySelectorAll('[data-cpnet]').forEach(b=> b.onclick = ()=>{ state.cpNet = b.dataset.cpnet; render(); });
+    const sh = (n)=>{ const d = parseDate(state.cpWeek); d.setDate(d.getDate() + n); state.cpWeek = fmtDate(d); render(); };
+    const pv = document.getElementById('cp-prev'); if(pv) pv.onclick = ()=> sh(-7);
+    const nx = document.getElementById('cp-next'); if(nx) nx.onclick = ()=> sh(7);
+    const th = document.getElementById('cp-this'); if(th) th.onclick = ()=>{ state.cpWeek = fmtDate(cpWeekStart(new Date())); render(); };
+    const blank = (d)=> ({ id: uid(), date: d || todayStr(), socialNetworks:[ (CP_NETS.find(n=> n.key === state.cpNet) || CP_NETS[0]).src ], title:'', brief:'', text:'', refs:'', products:[], status:'brief' });
+    const add = document.getElementById('cp-add'); if(add) add.onclick = ()=> openContentEditor(blank(), true);
+    document.querySelectorAll('.cp-addday').forEach(b=> b.onclick = ()=> openContentEditor(blank(b.dataset.cpday), true));
+    document.querySelectorAll('[data-cpid]').forEach(el=> el.onclick = ()=>{ const p = state.contentPosts.find(x=> x.id === el.dataset.cpid); if(p) openContentEditor(p, false); });
+    const imp = document.getElementById('cp-import'); if(imp) imp.onclick = ()=> openContentImport();
+  }
+
+  // ===================== «💸 Окупаемость каналов» — траты × заявки × продажи по каналам =====================
+  // Канал траты = соцсеть траты (ТГ/ВК/Инста/…); если соцсеть не указана — направление (Листовки, Розыгрыши, Бартер…).
+  // Канал заявки = источник заявки. Совпадение — по названию (без регистра). Выручка — сумма проданных заявок канала.
+  function pluralRu(n, one, few, many){ const a = Math.abs(n) % 100, b = a % 10; if(a > 10 && a < 20) return many; if(b === 1) return one; if(b >= 2 && b <= 4) return few; return many; }
+  function mkNorm(s){ return String(s||'').trim().toLowerCase().replace(/ё/g,'е'); }
+  const MK_ALIAS = { 'гео-сервисы':'гео', 'офлайн маркетинг':'офлайн маркетинг', 'инстаграм':'инста', 'instagram':'инста', 'телеграм':'тг', 'telegram':'тг', 'вконтакте':'вк' };
+  function mkChan(s){ const n = mkNorm(s); return MK_ALIAS[n] || n; }
+  function mkSpendChannel(m){ return m.socialNetwork ? m.socialNetwork : (m.direction || 'Прочее'); }
+  function mkChannelStats(from, to){
+    const inP = d=> d && d >= from && d <= to;
+    const ch = {}; const get = (label)=>{ const k = mkChan(label); return ch[k] || (ch[k] = { key:k, label, spend:0, spendItems:0, leads:0, sold:0, rev:0, dirs:new Set() }); };
+    (state.marketingSpend||[]).filter(m=> inP(m.date)).forEach(m=>{ const c = get(mkSpendChannel(m)); c.spend += Number(m.amount)||0; c.spendItems++; if(m.direction) c.dirs.add(m.direction); });
+    state.leads.filter(l=> inP(l.requestDate)).forEach(l=>{ const c = get(l.source || 'Не указан'); c.leads++; if(l.sold){ c.sold++; c.rev += Number(l.revenue)||0; } });
+    return Object.values(ch);
+  }
+  function renderMarketingRomiView(){
+    const c = state.cursor; const Y = c.getFullYear(), Mo = c.getMonth();
+    const ym = Y + '-' + pad(Mo+1); const from = ym + '-01', to = ym + '-' + pad(new Date(Y, Mo+1, 0).getDate());
+    const rows = mkChannelStats(from, to);
+    const paid = rows.filter(r=> r.spend > 0).sort((a,b)=> b.spend - a.spend);
+    const free = rows.filter(r=> !(r.spend > 0) && r.leads > 0).sort((a,b)=> b.leads - a.leads);
+    const T = rows.reduce((a,r)=>({ spend:a.spend+r.spend, leads:a.leads+r.leads, sold:a.sold+r.sold, rev:a.rev+r.rev }), { spend:0, leads:0, sold:0, rev:0 });
+    const PT = paid.reduce((a,r)=>({ spend:a.spend+r.spend, leads:a.leads+r.leads, sold:a.sold+r.sold, rev:a.rev+r.rev }), { spend:0, leads:0, sold:0, rev:0 });
+    const money = v=> v ? formatMoney(Math.round(v)) : '—';
+    const romiCell = (r)=>{ if(!(r.spend > 0)) return '<td>—</td>'; const x = r.rev / r.spend; return `<td><b style="color:${x>=5?'#4E5733':(x>=2?'#8C6A1E':'#A3402F')};">${x.toFixed(1).replace('.',',')} ₽</b><div class="pd-sub">на 1 ₽ трат</div></td>`; };
+    const row = (r)=> `<tr>
+      <td style="text-align:left;"><b>${escapeHtml(r.label)}</b>${r.dirs.size ? `<div class="pd-sub">${escapeHtml(Array.from(r.dirs).join(', '))}</div>` : ''}</td>
+      <td>${money(r.spend)}</td><td>${r.leads || (r.spend > 0 ? '<span style="color:#A3402F;">0</span>' : '—')}</td>
+      <td>${r.spend > 0 && r.leads ? money(r.spend / r.leads) : '—'}</td>
+      <td>${r.sold || '—'}${r.leads ? `<div class="pd-sub">${Math.round(r.sold / r.leads * 100)}%</div>` : ''}</td>
+      <td>${r.spend > 0 && r.sold ? money(r.spend / r.sold) : '—'}</td>
+      <td>${money(r.rev)}</td>${romiCell(r)}
+      <td>${r.spend > 0 && r.rev ? Math.round(r.spend / r.rev * 100) + '%' : '—'}</td></tr>`;
+    const ins = [];
+    paid.forEach(r=>{
+      if(r.leads === 0) ins.push(`🔴 <b>${escapeHtml(r.label)}</b>: потрачено ${formatMoney(r.spend)}, заявок с этим источником нет — проверьте, что менеджеры ставят источник «${escapeHtml(r.label)}», или пересмотрите канал.`);
+      else if(r.sold === 0) ins.push(`🟡 <b>${escapeHtml(r.label)}</b>: ${r.leads} заявок по ${formatMoney(Math.round(r.spend/r.leads))}, но продаж пока нет.`);
+      else if(r.rev / r.spend >= 5) ins.push(`🟢 <b>${escapeHtml(r.label)}</b>: каждый рубль вернул ${(r.rev/r.spend).toFixed(1).replace('.',',')} ₽ — канал окупается, можно масштабировать.`);
+      else if(r.rev / r.spend < 2) ins.push(`🟠 <b>${escapeHtml(r.label)}</b>: вернули ${(r.rev/r.spend).toFixed(1).replace('.',',')} ₽ на 1 ₽ — дорого, стоит пересобрать оффер или бюджет.`);
+    });
+    if(free.length) ins.push(`🌱 Без вложений пришло ${free.reduce((a,r)=>a+r.leads,0)} заявок (${free.slice(0,4).map(r=> escapeHtml(r.label) + ' ' + r.leads).join(', ')}) — органика и сарафан.`);
+    return `
+      <div class="analytics-summary" style="margin-bottom:14px;">
+        <div class="summary-card"><div class="num" style="font-size:20px;">${money(T.spend)}</div><div class="label">ТРАТЫ НА РЕКЛАМУ</div></div>
+        <div class="summary-card"><div class="num" style="font-size:20px;">${PT.leads ? money(PT.spend / PT.leads) : '—'}</div><div class="label">ЦЕНА ЗАЯВКИ (ПЛАТНЫЕ КАНАЛЫ)</div></div>
+        <div class="summary-card"><div class="num" style="font-size:20px;">${PT.sold ? money(PT.spend / PT.sold) : '—'}</div><div class="label">ЦЕНА ПРОДАЖИ</div></div>
+        <div class="summary-card"><div class="num" style="font-size:20px;">${PT.spend ? (PT.rev / PT.spend).toFixed(1).replace('.',',') + ' ₽' : '—'}</div><div class="label">ВЫРУЧКИ НА 1 ₽ ТРАТ</div></div>
       </div>
-    `;
+      <div class="analytics-section">
+        <h4 style="margin-top:0;">💸 Окупаемость каналов — ${escapeHtml(MONTHS[Mo] + ' ' + Y)}</h4>
+        <div style="font-size:12px;color:var(--ink-soft);margin-bottom:8px;">Траты — из «Маркетинг → Траты» (канал = соцсеть траты, если не указана — направление). Заявки и продажи — из «Конверсии» по источнику заявки и дате заявки; выручка — сумма проданных заявок.</div>
+        <div style="overflow-x:auto;"><table class="ms-table pd-table" style="width:100%;">
+          <tr><th style="text-align:left;">Канал</th><th>Траты</th><th>Заявки</th><th>Цена заявки</th><th>Продажи</th><th>Цена продажи</th><th>Выручка</th><th>Окупаемость</th><th title="Доля рекламных расходов в выручке">ДРР</th></tr>
+          ${paid.map(row).join('') || '<tr><td colspan="9" style="text-align:left;color:var(--ink-soft);">В этом месяце трат на рекламу нет.</td></tr>'}
+          ${free.length ? `<tr><td colspan="9" style="text-align:left;background:#F2ECDD;font-weight:700;font-size:12px;">Без вложений (органика, сарафан, звонки)</td></tr>${free.map(row).join('')}` : ''}
+          <tr style="font-weight:700;background:#F2ECDD;"><td style="text-align:left;">ИТОГО</td><td>${money(T.spend)}</td><td>${T.leads}</td><td>${T.spend && T.leads ? money(T.spend/T.leads) : '—'}</td><td>${T.sold}</td><td>${T.spend && T.sold ? money(T.spend/T.sold) : '—'}</td><td>${money(T.rev)}</td><td>${T.spend ? (T.rev/T.spend).toFixed(1).replace('.',',') + ' ₽' : '—'}</td><td>${T.spend && T.rev ? Math.round(T.spend/T.rev*100) + '%' : '—'}</td></tr>
+        </table></div>
+      </div>
+      ${ins.length ? `<div class="analytics-section"><h4 style="margin-top:0;">💡 Что видно</h4>${ins.map(t=> `<div style="font-size:13px;padding:4px 0;">${t}</div>`).join('')}</div>` : ''}
+      <div style="font-size:11.5px;color:var(--ink-soft);margin:-4px 0 12px;">Съёмки, розыгрыши-мероприятия и маркетинговые сертификаты (их себестоимость) — в «Статистике». Здесь — только то, что можно связать с источником заявки.</div>`;
+  }
+
+  // ===================== «📋 Отчёт маркетолога за неделю» — собирается сам =====================
+  function mkWeekReport(ws){
+    const we = (()=>{ const d = parseDate(ws); d.setDate(d.getDate()+6); return fmtDate(d); })();
+    const today = todayStr();
+    const posts = (state.contentPosts||[]).filter(p=> p.date >= ws && p.date <= we);
+    const stOf = p=> p.status || (p.date < today ? 'done' : 'brief');
+    const done = posts.filter(p=> stOf(p) === 'done');
+    const overdue = posts.filter(p=> p.date < today && stOf(p) !== 'done');
+    const byNet = CP_NETS.map(n=>{ const ps = posts.filter(p=> (cpNetOf(p)||{}).key === n.key); return { n, plan: ps.length, done: ps.filter(p=> stOf(p) === 'done').length, leads: state.leads.filter(l=> l.requestDate >= ws && l.requestDate <= we && l.source === n.src).length }; });
+    const leadsW = state.leads.filter(l=> l.requestDate >= ws && l.requestDate <= we);
+    const soldW = leadsW.filter(l=> l.sold);
+    // план заявок на неделю — доля месячного плана по дням недели (неделя может захватывать два месяца)
+    let planW = 0; const catPlanW = {};
+    for(let i=0;i<7;i++){ const d = parseDate(ws); d.setDate(d.getDate()+i); const ym = fmtDate(d).slice(0,7); const dim = new Date(d.getFullYear(), d.getMonth()+1, 0).getDate(); const p = (state.monthlyPlans && state.monthlyPlans[ym]) || {};
+      LP_CATS.forEach(c=>{ const v = Number((p.byLeadCat||{})[c.key])||0; catPlanW[c.key] = (catPlanW[c.key]||0) + v/dim; planW += v/dim; }); }
+    const catFact = {}; leadsW.forEach(l=>{ let k = dailyReportLeadCategory(l); if(!LP_CATS.some(c=> c.key===k)) k = 'Другое'; catFact[k] = (catFact[k]||0)+1; });
+    const ch = mkChannelStats(ws, we).filter(r=> r.spend > 0 || r.leads > 0).sort((a,b)=> b.spend - a.spend || b.leads - a.leads);
+    const spendW = ch.reduce((a,r)=> a + r.spend, 0);
+    const paidLeads = ch.filter(r=> r.spend > 0).reduce((a,r)=> a + r.leads, 0);
+    // топ публикаций недели: заявки из той же соцсети по тем же продуктам за 3 дня после выхода
+    const top = done.map(p=>{
+      const n = cpNetOf(p); if(!n) return null; const pr = cpProducts(p).filter(k=> LP_CATS.some(c=> c.key === k)); if(!pr.length) return null; const end = (()=>{ const d = parseDate(p.date); d.setDate(d.getDate()+3); return fmtDate(d); })();
+      const L = state.leads.filter(l=> l.source === n.src && l.requestDate >= p.date && l.requestDate <= end && pr.includes(dailyReportLeadCategory(l)));
+      return { p, n, leads: L.length };
+    }).filter(Boolean).filter(x=> x.leads > 0).sort((a,b)=> b.leads - a.leads).slice(0,3);
+    return { ws, we, posts, done, overdue, byNet, leadsW, soldW, planW: Math.round(planW), catPlanW, catFact, ch, spendW, paidLeads, top };
+  }
+  function renderMarketingWeekReportView(){
+    if(!state.mkWeek) state.mkWeek = fmtDate(cpWeekStart(new Date()));
+    const R = mkWeekReport(state.mkWeek);
+    const pct = (a,b)=> b ? Math.round(a/b*100) + '%' : '—';
+    const d5 = s=> lgDateDots(s).slice(0,5);
+    return `
+      <div style="display:flex;align-items:center;gap:8px;margin-bottom:12px;flex-wrap:wrap;">
+        <button class="nav-btn" id="mkw-prev">‹</button><b style="font-size:15px;">Неделя ${escapeHtml(d5(R.ws))} — ${escapeHtml(lgDateDots(R.we))}</b><button class="nav-btn" id="mkw-next">›</button>
+        <button class="today-btn" id="mkw-this">эта неделя</button>
+        <button class="btn btn-primary" id="mkw-copy" style="margin-left:auto;padding:6px 14px;">📋 Скопировать отчёт для чата</button>
+      </div>
+      <div class="analytics-summary" style="margin-bottom:14px;">
+        <div class="summary-card"><div class="num" style="font-size:20px;">${R.done.length} / ${R.posts.length}</div><div class="label">ПУБЛИКАЦИЙ: ВЫШЛО / ПО ПЛАНУ</div></div>
+        <div class="summary-card"><div class="num" style="font-size:20px;">${R.leadsW.length}${R.planW ? ' / ' + R.planW : ''}</div><div class="label">ЗАЯВОК${R.planW ? ' / ПЛАН НЕДЕЛИ' : ''}</div></div>
+        <div class="summary-card"><div class="num" style="font-size:20px;">${R.soldW.length}</div><div class="label">ПРОДАЖ ИЗ ЗАЯВОК НЕДЕЛИ</div></div>
+        <div class="summary-card"><div class="num" style="font-size:20px;">${R.spendW ? formatMoney(R.spendW) : '—'}</div><div class="label">ТРАТЫ${R.spendW && R.paidLeads ? ' · ЗАЯВКА ' + formatMoney(Math.round(R.spendW / R.paidLeads)) : ''}</div></div>
+      </div>
+      <div class="analytics-section"><h4 style="margin-top:0;">🗓 Контент</h4>
+        <table class="ms-table pd-table"><tr><th style="text-align:left;">Соцсеть</th><th>По плану</th><th>Вышло</th><th>Выполнение</th><th>Заявок из соцсети</th></tr>
+          ${R.byNet.map(x=> `<tr><td style="text-align:left;">${x.n.icon} ${x.n.label}</td><td>${x.plan}</td><td>${x.done}</td><td>${pct(x.done, x.plan)}</td><td>${x.leads}</td></tr>`).join('')}</table>
+        ${R.overdue.length ? `<div style="margin-top:8px;font-size:13px;"><b style="color:#A3402F;">Не вышло в срок (${R.overdue.length}):</b>${R.overdue.slice(0,8).map(p=> `<div style="padding:2px 0;">• ${escapeHtml(d5(p.date))} ${(cpNetOf(p)||{}).icon||''} ${escapeHtml(cpTitle(p))}</div>`).join('')}</div>` : '<div style="margin-top:8px;font-size:13px;color:#4E5733;">✓ Всё, что было запланировано на прошедшие дни, вышло.</div>'}
+      </div>
+      <div class="analytics-section"><h4 style="margin-top:0;">📥 Заявки по продуктам</h4>
+        <table class="ms-table pd-table"><tr><th style="text-align:left;">Продукт</th><th>Пришло</th><th>План недели</th><th></th></tr>
+          ${LP_CATS.map(c=>{ const f = R.catFact[c.key]||0, p = Math.round(R.catPlanW[c.key]||0); if(!f && !p) return ''; return `<tr><td style="text-align:left;">${escapeHtml(c.name)}</td><td><b>${f}</b></td><td>${p || '—'}</td><td>${p ? (f >= p ? '<span style="color:#4E5733;">✓</span>' : `<span style="color:#A3402F;">−${p - f}</span>`) : ''}</td></tr>`; }).join('')}</table>
+      </div>
+      <div class="analytics-section"><h4 style="margin-top:0;">💸 Каналы</h4>
+        ${R.ch.length ? `<table class="ms-table pd-table"><tr><th style="text-align:left;">Канал</th><th>Траты</th><th>Заявки</th><th>Цена заявки</th><th>Продажи</th></tr>
+          ${R.ch.map(r=> `<tr><td style="text-align:left;">${escapeHtml(r.label)}</td><td>${r.spend ? formatMoney(r.spend) : '—'}</td><td>${r.leads}</td><td>${r.spend && r.leads ? formatMoney(Math.round(r.spend/r.leads)) : '—'}</td><td>${r.sold}</td></tr>`).join('')}</table>` : '<div style="font-size:13px;color:var(--ink-soft);">Нет данных за неделю.</div>'}
+      </div>
+      <div class="analytics-section"><h4 style="margin-top:0;">🔥 Топ публикаций недели</h4>
+        ${R.top.length ? R.top.map((x,i)=> `<div style="font-size:13px;padding:3px 0;">${i+1}. ${escapeHtml(d5(x.p.date))} ${x.n.icon} <b>${escapeHtml(cpTitle(x.p).slice(0,80))}</b> <span class="pd-sub">(${escapeHtml(cpProducts(x.p).filter(k=> LP_CATS.some(c=> c.key===k)).map(k=> (LP_CATS.find(c=>c.key===k)||{}).name).join(', '))})</span> — ${x.leads} ${pluralRu(x.leads,'заявка','заявки','заявок')} за 3 дня</div>`).join('') : '<div style="font-size:13px;color:var(--ink-soft);">Публикаций, после которых пришли заявки по их продукту, на этой неделе нет.</div>'}
+        <div class="pd-sub" style="margin-top:4px;">Заявки из той же соцсети по продукту публикации в течение 3 дней после выхода.</div>
+      </div>`;
+  }
+  function mkWeekReportText(R){
+    const d5 = s=> lgDateDots(s).slice(0,5);
+    const L = [];
+    L.push(`📋 Маркетинг: неделя ${d5(R.ws)}–${lgDateDots(R.we)}`);
+    L.push(''); L.push(`🗓 Контент: вышло ${R.done.length} из ${R.posts.length}`);
+    R.byNet.forEach(x=>{ if(x.plan || x.leads) L.push(`• ${x.n.label}: ${x.done}/${x.plan}, заявок ${x.leads}`); });
+    if(R.overdue.length) L.push(`⚠ Не вышло в срок: ${R.overdue.length} (${R.overdue.slice(0,4).map(p=> cpTitle(p).slice(0,40)).join('; ')}${R.overdue.length>4?'…':''})`);
+    L.push(''); L.push(`📥 Заявки: ${R.leadsW.length}${R.planW ? ' из ' + R.planW + ' по плану' : ''}, продаж ${R.soldW.length}`);
+    LP_CATS.forEach(c=>{ const f = R.catFact[c.key]||0, p = Math.round(R.catPlanW[c.key]||0); if(f || p) L.push(`• ${c.name}: ${f}${p ? '/' + p : ''}`); });
+    if(R.spendW){ L.push(''); L.push(`💸 Траты: ${formatMoney(R.spendW)}${R.paidLeads ? ', цена заявки ' + formatMoney(Math.round(R.spendW/R.paidLeads)) : ''}`); R.ch.filter(r=> r.spend).forEach(r=> L.push(`• ${r.label}: ${formatMoney(r.spend)} → ${r.leads} заявок, ${r.sold} продаж`)); }
+    if(R.top.length){ L.push(''); L.push('🔥 Топ публикаций:'); R.top.forEach((x,i)=> L.push(`${i+1}. ${x.n.label} ${d5(x.p.date)} — ${cpTitle(x.p).slice(0,60)} (${x.leads} заявок)`)); }
+    return L.join('\n');
+  }
+  function attachMarketingExtraEvents(){
+    const sh = (n)=>{ const d = parseDate(state.mkWeek); d.setDate(d.getDate()+n); state.mkWeek = fmtDate(d); render(); };
+    const a = document.getElementById('mkw-prev'); if(a) a.onclick = ()=> sh(-7);
+    const b = document.getElementById('mkw-next'); if(b) b.onclick = ()=> sh(7);
+    const t = document.getElementById('mkw-this'); if(t) t.onclick = ()=>{ state.mkWeek = fmtDate(cpWeekStart(new Date())); render(); };
+    const cp = document.getElementById('mkw-copy'); if(cp) cp.onclick = async ()=>{ const txt = mkWeekReportText(mkWeekReport(state.mkWeek)); try{ await navigator.clipboard.writeText(txt); showToast('Отчёт скопирован — вставьте в чат'); }catch(e){ prompt('Скопируйте отчёт:', txt); } };
   }
 
   function renderContentPostModal(){
@@ -9082,6 +9581,8 @@
       });
     };
 
+    try{ if(state.marketingView === 'content') attachContentPlanEvents(); }catch(e){ console.error(e); }
+    try{ if(state.marketingView === 'weekreport') attachMarketingExtraEvents(); }catch(e){ console.error(e); }
     const addPostBtn = document.getElementById('btn-add-content-post');
     if(addPostBtn) addPostBtn.onclick = ()=>{
       requireUnlock(()=>{
@@ -10818,9 +11319,9 @@
     const today = todayStr(); const since = loadAddDays(today, -30);
     const q = refNorm(state.leadBoardQ || '').trim(); const ownerF = state.leadBoardOwner || '';
     const crmIdx = crmBuildIndex(); const segF = state.leadBoardSeg || '', tagF = state.leadBoardTag || ''; const crmCfgNow = crmCfg();
-    const owners = Array.from(new Set(state.leads.map(l=>l.owner).filter(Boolean))).sort((a,b)=>a.localeCompare(b,'ru'));
+    const owners = Array.from(new Set(state.leads.map(l=> managerCanon(l.owner)).filter(Boolean))).sort((a,b)=>a.localeCompare(b,'ru'));
     const match = (l)=>{
-      if(ownerF && (l.owner||'') !== ownerF) return false;
+      if(ownerF && managerCanon(l.owner||'') !== managerCanon(ownerF)) return false;
       if(state.leadBoardKind && leadKind(l) !== state.leadBoardKind) return false;
       if(segF || tagF){ const cl = crmClientOfLead(l, crmIdx); if(segF && (!cl || cl.segmentId !== segF)) return false; if(tagF && (!cl || !(cl.tagIds||[]).includes(tagF))) return false; }
       if(q){ const hay = refNorm([l.contact,l.comment,l.product,l.source,l.owner].join(' ')); if(!q.split(/\s+/).every(t=>hay.includes(t))) return false; }
@@ -12121,13 +12622,15 @@
   function renderManagersStatsHtml(period, leadsP){
     const today = todayStr();
     const money = (l)=> (l.revenue>0 ? Number(l.revenue) : 0);
-    const shiftDays = {}; Object.keys(state.managerShifts||{}).forEach(d=>{ if(!period.inPeriod(d)) return; const n = managerForDate(d); if(n) (shiftDays[n] = shiftDays[n] || []).push(d); });
-    const tasksP = (state.leadTasks||[]).filter(t=> t.due && period.inPeriod(t.due) && taskAlive(t));
-    const names = new Set(Object.keys(shiftDays)); leadsP.forEach(l=>{ if(l.owner) names.add(l.owner); }); tasksP.forEach(t=>{ if(t.assignee) names.add(t.assignee); });
+    // только менеджеры; «Алёна» и «Алёна Грекова» — один человек (см. managerCanon); задачи по юрлицам (ассистент) сюда не входят
+    const C = managerCanon;
+    const shiftDays = {}; Object.keys(state.managerShifts||{}).forEach(d=>{ if(!period.inPeriod(d)) return; const n = C(managerForDate(d)); if(n) (shiftDays[n] = shiftDays[n] || []).push(d); });
+    const tasksP = (state.leadTasks||[]).filter(t=> t.due && period.inPeriod(t.due) && taskAlive(t) && !t.docKind);
+    const names = new Set(Object.keys(shiftDays)); leadsP.forEach(l=>{ if(l.owner && isManagerName(l.owner)) names.add(C(l.owner)); }); tasksP.forEach(t=>{ if(t.assignee && isManagerName(t.assignee)) names.add(C(t.assignee)); });
     const rows = Array.from(names).map(name=>{
-      const L = leadsP.filter(l=> (l.owner||'') === name);
+      const L = leadsP.filter(l=> C(l.owner||'') === name);
       const sold = L.filter(l=>l.sold), lost = L.filter(l=> leadStatus(l) === 'lost');
-      const T = tasksP.filter(t=> (t.assignee||'') === name);
+      const T = tasksP.filter(t=> C(t.assignee||'') === name);
       const done = T.filter(t=>t.done), onTime = done.filter(t=> isoLocalDate(t.doneAt) <= t.due);
       const overdueNow = T.filter(t=> !t.done && t.due < today);
       const days = (shiftDays[name] || []).length;
