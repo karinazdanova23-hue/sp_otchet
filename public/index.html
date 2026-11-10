@@ -5205,7 +5205,44 @@
     });
     return { auto, rows, total: rows.reduce((s,r)=>s+r.amount,0) };
   }
+  // ===== Мотивация менеджеров с ноября 2026: оклад + бонус за выручку + бонус за конверсию (ступени по % плана) =====
+  //            90–100%    60–89%    < 60%
+  // выручка    18 000     7 000     0       (план — выручка студии за месяц, по умолчанию 2,1 млн)
+  // конверсия   7 000     3 000     0       (план — 60% заявок месяца в продажу)
+  // оклад      35 000    35 000    35 000
+  const MANAGER_MOTIVATION_V2_FROM = '2026-11';
+  const MANAGER_V2 = { base: 35000, revenuePlan: 2100000, convPlan: 60,
+    revenueTiers: [ { from: 90, bonus: 18000 }, { from: 60, bonus: 7000 } ],
+    convTiers:    [ { from: 90, bonus: 7000 },  { from: 60, bonus: 3000 } ] };
+  function mv2Tier(tiers, pct){ const p = Math.floor(pct); const t = tiers.find(x=> p >= x.from); return t ? t.bonus : 0; }
+  function computeManagerSalaryV2(ym){
+    const plan = (state.monthlyPlans && state.monthlyPlans[ym]) || {};
+    const revenuePlan = Number(plan.revenue) > 0 ? Number(plan.revenue) : MANAGER_V2.revenuePlan;
+    const convPlan = Number(plan.conversionPct) > 0 ? Number(plan.conversionPct) : MANAGER_V2.convPlan;
+    // выручка — как в «План по продуктам»: факт + брони месяца (к концу месяца это и есть факт)
+    const [Y, M] = ym.split('-').map(Number);
+    const pd = pdCompute(ym, ym + '-' + String(new Date(Y, M, 0).getDate()).padStart(2,'0'));
+    const revenue = Object.values(pd).reduce((a,r)=> a + r.factRub + r.bookRub, 0);
+    const today = todayStr();
+    const factOnly = today.slice(0,7) === ym ? Object.values(pdCompute(ym, today)).reduce((a,r)=> a + r.factRub, 0) : revenue;
+    // конверсия — заявки месяца (по дате заявки) → проданные
+    const leads = state.leads.filter(l=> l.requestDate && l.requestDate.startsWith(ym));
+    const sold = leads.filter(l=> l.sold).length;
+    const conv = leads.length ? sold / leads.length * 100 : 0;
+    const revenuePct = revenuePlan > 0 ? revenue / revenuePlan * 100 : 0;
+    const convPct = convPlan > 0 ? conv / convPlan * 100 : 0;
+    const bonusRevenue = mv2Tier(MANAGER_V2.revenueTiers, revenuePct);
+    const bonusConv = mv2Tier(MANAGER_V2.convTiers, convPct);
+    const nextRev = MANAGER_V2.revenueTiers.slice().reverse().find(t=> Math.floor(revenuePct) < t.from);
+    const nextConv = MANAGER_V2.convTiers.slice().reverse().find(t=> Math.floor(convPct) < t.from);
+    return { scheme:'v2', base: MANAGER_V2.base, revenue, factOnly, revenuePlan, revenuePct, bonusRevenue,
+      leadsCount: leads.length, soldCount: sold, conv, convPlan, convPct, bonusConv,
+      nextRev: nextRev ? { bonus: nextRev.bonus, need: Math.max(0, Math.ceil(revenuePlan * nextRev.from / 100 - revenue)) } : null,
+      nextConv: nextConv ? { bonus: nextConv.bonus, needPct: convPlan * nextConv.from / 100 } : null,
+      total: MANAGER_V2.base + bonusRevenue + bonusConv };
+  }
   function computeManagerSalaryForMonth(ym){
+    if(ym >= MANAGER_MOTIVATION_V2_FROM) return computeManagerSalaryV2(ym);
     const revenueByStatus = { confirmed: 0, tentative: 0 };
     // "Выездные" считаем вместе с "Частником" (та же ставка) — выездное мероприятие такая же
     // индивидуальная продажа менеджера, просто не в студии; бонус считаем не с факта оплаты,
@@ -7967,12 +8004,17 @@
   function renderMarketingView(){
     const subTabsHtml = `
       <div class="cert-subtabs">
+        <button data-marketingview="leadplan" class="${state.marketingView==='leadplan'?'active':''}">📥 План заявок</button>
         <button data-marketingview="spend" class="${state.marketingView==='spend'?'active':''}">Траты</button>
         <button data-marketingview="stats" class="${state.marketingView==='stats'?'active':''}">Статистика</button>
         <button data-marketingview="content" class="${state.marketingView==='content'?'active':''}">Контент-план</button>
         <button data-marketingview="plan" class="${state.marketingView==='plan'?'active':''}">План/факт</button>
       </div>
     `;
+    if(state.marketingView === 'leadplan'){
+      const c = state.cursor; const ym = c.getFullYear()+'-'+pad(c.getMonth()+1);
+      return subTabsHtml + renderLeadPlanHtml(ym);
+    }
     if(state.marketingView === 'stats') return subTabsHtml + renderMarketingStatsView();
     if(state.marketingView === 'plan') return subTabsHtml + renderMarketingPlanView();
     if(state.marketingView === 'content') return subTabsHtml + renderContentPlanView();
@@ -8968,6 +9010,7 @@
     document.querySelectorAll('[data-marketingview]').forEach(btn=>{
       btn.onclick = ()=>{ state.marketingView = btn.dataset.marketingview; render(); };
     });
+    { const le = document.getElementById('lp-edit'); if(le){ const c = state.cursor; le.onclick = ()=> openLeadPlanEditor(c.getFullYear()+'-'+pad(c.getMonth()+1)); } }
 
     const prevBtn = document.getElementById('ms-prev');
     if(prevBtn) prevBtn.onclick = ()=>{ state.marketingSpendCursor = new Date(state.marketingSpendCursor.getFullYear(), state.marketingSpendCursor.getMonth()-1, 1); render(); };
@@ -11127,7 +11170,8 @@
     const tabs = [['board','Воронка'],['tasks','Задачи'],['clients','Клиенты'],['stats','Статистика и список']];
     const nOpen = (state.leadTasks||[]).filter(t=>!t.done && t.due && t.due <= todayStr() && taskAlive(t)).length;
     const bar = `<div class="sub-tabs" style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:12px;">${tabs.map(t=>`<button class="btn ${tab===t[0]?'btn-primary':'btn-ghost'}" data-convtab="${t[0]}">${t[1]}${t[0]==='tasks' && nOpen ? ' <span style="color:'+(tab==='tasks'?'#fff':'var(--danger)')+';">('+nOpen+')</span>' : ''}</button>`).join('')}</div>`;
-    return bar + (tab === 'tasks' ? renderLeadTasksView() : (tab === 'clients' ? renderClientsView() : tab === 'stats' ? renderConversionStatsView() : renderLeadBoard()));
+    const _lpStrip = (tab !== 'clients' && tab !== 'stats') ? (()=>{ try{ const c = new Date(); return renderLeadPlanHtml(c.getFullYear()+'-'+pad(c.getMonth()+1), { strip:true }); }catch(e){ return ''; } })() : '';
+    return bar + _lpStrip + (tab === 'tasks' ? renderLeadTasksView() : (tab === 'clients' ? renderClientsView() : tab === 'stats' ? renderConversionStatsView() : renderLeadBoard()));
   }
 
 
@@ -13086,6 +13130,7 @@
         <div class="summary-card"><div class="num" style="font-size:18px;">− ${formatMoney(dedSum)}</div><div class="label">ПРОЦЕНТЫ УВОЛЕННОЙ ЗА ПРОДАЖИ ДО ${escapeHtml(state.dc.from.split('-').reverse().join('.'))} (${dedRows.length} ШТ.)</div></div>
         <div class="summary-card"><div class="num" style="font-size:22px;">${formatMoney(calc.total - dedSum)}</div><div class="label">НОВОМУ МЕНЕДЖЕРУ ЗА МЕСЯЦ ПОСЛЕ ВЫЧЕТА</div></div>
       </div>` : '';
+    if(calc.scheme === 'v2') return renderManagerSalaryV2Html(calc, label, isOwnerSal, mySalTotal, mySalEdited);
     return `
       <div class="cal-nav">
         <div class="month-label" style="text-transform:capitalize;">${escapeHtml(label)}</div>
@@ -13135,6 +13180,56 @@
         </div>
       </div>
       ${isOwnerSal ? dcBoxHtml() : ''}
+    `;
+  }
+
+  function renderManagerSalaryV2Html(c, label, isOwnerSal, mySalTotal, mySalEdited){
+    const pctTxt = p=> (Math.floor(p*10)/10).toString().replace('.',',') + '%';
+    const tierCol = (pct, active)=> active ? (Math.floor(pct) >= 90 ? '#75804F' : '#E8B84B') : '#F2ECDD';
+    const tbl = (title, tiers, pct, bonus)=> {
+      const cells = [ { lbl:'90–100%', b: tiers[0].bonus, on: Math.floor(pct) >= 90 }, { lbl:'60–89%', b: tiers[1].bonus, on: Math.floor(pct) >= 60 && Math.floor(pct) < 90 }, { lbl:'< 60%', b: 0, on: Math.floor(pct) < 60 } ];
+      return `<div style="display:grid;grid-template-columns:1.3fr repeat(3,1fr);gap:6px;align-items:stretch;margin-bottom:6px;">
+        <div style="display:flex;align-items:center;font-weight:700;">${title}</div>
+        ${cells.map((x,i)=> `<div style="border-radius:10px;padding:8px;text-align:center;background:${x.on ? ['#75804F','#E8B84B','#E9D6CF'][i] : '#fff'};color:${x.on && i===0 ? '#fff' : '#171512'};border:${x.on ? '2px solid #171512' : '1px solid #D9D0BC'};${x.on ? '' : 'opacity:.7;'}">
+          <div style="font-size:11px;">${x.lbl}</div><div style="font-weight:800;font-family:var(--font-mono);">${formatMoney(x.b)}</div></div>`).join('')}
+      </div>`;
+    };
+    const bar = (pct)=> `<div style="position:relative;height:10px;background:#E5DFD0;border-radius:5px;overflow:hidden;margin:6px 0 2px;">
+        <div style="position:absolute;left:0;top:0;bottom:0;width:${Math.min(100,pct)}%;background:${Math.floor(pct)>=90?'#75804F':(Math.floor(pct)>=60?'#E8B84B':'#C4553A')};"></div>
+        <div style="position:absolute;left:60%;top:0;bottom:0;width:2px;background:#171512;opacity:.35;"></div><div style="position:absolute;left:90%;top:0;bottom:0;width:2px;background:#171512;opacity:.35;"></div></div>
+      <div style="position:relative;height:14px;font-size:10.5px;color:var(--ink-soft);"><span style="position:absolute;left:0;">0</span><span style="position:absolute;left:60%;transform:translateX(-50%);">60%</span><span style="position:absolute;left:90%;transform:translateX(-50%);">90%</span><span style="position:absolute;right:0;">100%</span></div>`;
+    const total = isOwnerSal ? c.total : mySalTotal;
+    return `
+      <div class="cal-nav">
+        <div class="month-label" style="text-transform:capitalize;">${escapeHtml(label)}</div>
+        <div class="cal-nav-btns">
+          <button class="today-btn" id="ms-sal-today">текущий месяц</button>
+          <button class="nav-btn" id="ms-sal-prev">‹</button>
+          <button class="nav-btn" id="ms-sal-next">›</button>
+        </div>
+      </div>
+      <div style="font-size:11.5px;color:var(--ink-soft);font-family:var(--font-mono);margin-bottom:12px;">Мотивация с ноября 2026: оклад + бонус за выполнение плана по выручке + бонус за конверсию. Ступени — по % выполнения плана.${isOwnerSal ? ' Сумма — на одного менеджера.' : ''}</div>
+      <div class="analytics-summary" style="margin-bottom:16px;">
+        <div class="summary-card"><div class="num" style="font-size:24px;">${formatMoney(total)}</div><div class="label">${isOwnerSal ? 'ИТОГО ЗА МЕСЯЦ — НА ОДНОГО МЕНЕДЖЕРА' : (mySalEdited ? 'МОЯ ЗП (ВПИСАНА РУКОВОДИТЕЛЕМ)' : 'МОЯ ЗП ЗА МЕСЯЦ (ПРОГНОЗ)')}</div></div>
+        <div class="summary-card"><div class="num" style="font-size:18px;">${formatMoney(c.base)}</div><div class="label">ОКЛАД</div></div>
+        <div class="summary-card"><div class="num" style="font-size:18px;">${formatMoney(c.bonusRevenue)}</div><div class="label">БОНУС ЗА ВЫРУЧКУ</div></div>
+        <div class="summary-card"><div class="num" style="font-size:18px;">${formatMoney(c.bonusConv)}</div><div class="label">БОНУС ЗА КОНВЕРСИЮ</div></div>
+      </div>
+      <div class="analytics-section">
+        <h4 style="margin-top:0;">💰 Выручка: ${formatMoney(c.revenue)} из ${formatMoney(c.revenuePlan)} — ${pctTxt(c.revenuePct)} плана</h4>
+        ${bar(c.revenuePct)}
+        <div style="font-size:12.5px;color:var(--ink-soft);margin:6px 0 10px;">Факт + брони месяца${c.factOnly !== c.revenue ? ` (из них уже проведено ${formatMoney(c.factOnly)})` : ''}. ${c.nextRev ? `<b style="color:#171512;">До бонуса ${formatMoney(c.nextRev.bonus)} осталось продать ${formatMoney(c.nextRev.need)}.</b>` : '<b style="color:#4E5733;">Максимальный бонус ✓</b>'}</div>
+        ${tbl('Бонус за выручку', MANAGER_V2.revenueTiers, c.revenuePct, c.bonusRevenue)}
+      </div>
+      <div class="analytics-section">
+        <h4 style="margin-top:0;">🎯 Конверсия: ${pctTxt(c.conv)} при плане ${c.convPlan}% — ${pctTxt(c.convPct)} плана</h4>
+        ${bar(c.convPct)}
+        <div style="font-size:12.5px;color:var(--ink-soft);margin:6px 0 10px;">Заявок за месяц: ${c.leadsCount}, продано: ${c.soldCount}. ${c.nextConv ? `<b style="color:#171512;">Для бонуса ${formatMoney(c.nextConv.bonus)} нужна конверсия от ${String(c.nextConv.needPct).replace('.',',')}%${c.leadsCount ? ` (≈ ${Math.ceil(c.leadsCount * c.nextConv.needPct / 100)} продаж из ${c.leadsCount} заявок)` : ''}.</b>` : '<b style="color:#4E5733;">Максимальный бонус ✓</b>'}</div>
+        ${tbl('Бонус за конверсию', MANAGER_V2.convTiers, c.convPct, c.bonusConv)}
+      </div>
+      <div class="analytics-section" style="font-size:12.5px;color:var(--ink-soft);line-height:1.5;">
+        <b style="color:#171512;">Как считается.</b> Выручка — вся выручка студии за месяц (мероприятия по дате и полной стоимости, сертификаты по дате продажи, заказы и изделия), как в «📊 План по продуктам». Конверсия — доля заявок месяца, перешедших в продажу. План берётся из плана месяца (сейчас: выручка ${formatMoney(c.revenuePlan)}, конверсия ${c.convPlan}%). Пока месяц не закончился — это прогноз: бонус окончательно считается по итогам месяца.
+      </div>
     `;
   }
 
@@ -24445,6 +24540,7 @@
       ` : ''}
 
       ${!isAdminFinRestricted ? renderPlanDecompHtml(monthYm) : ''}
+      ${!isAdminFinRestricted ? renderLeadPlanHtml(monthYm, { compact:true }) : ''}
       ${!isAdminFinRestricted ? awaitingSectionHtml : ''}
 
       <div class="analytics-section">
@@ -24627,6 +24723,7 @@
     </div>`;
   }
   function attachPlanDecompEvents(ym){
+    const le = document.getElementById('lp-edit'); if(le) le.onclick = ()=> openLeadPlanEditor(ym);
     const pb = document.getElementById('pd-paste'); if(pb) pb.onclick = ()=> openPlanDecompEditor(ym, true);
     const eb = document.getElementById('pd-edit'); if(eb) eb.onclick = ()=> openPlanDecompEditor(ym, false);
   }
@@ -24675,6 +24772,7 @@
             <td><input type="number" class="pd-rub" data-k="${escapeHtml(c.key)}" value="${vals[c.key] && vals[c.key].rub ? vals[c.key].rub : ''}" style="width:120px;"></td>
             <td><input type="number" class="pd-n" data-k="${escapeHtml(c.key)}" value="${vals[c.key] && vals[c.key].n ? vals[c.key].n : ''}" style="width:80px;"></td></tr>`).join('')}
           <tr><td style="text-align:left;font-weight:700;">План месяца, ₽</td><td colspan="2"><input type="number" id="pd-month" value="${monthVal || ''}" style="width:140px;"> <span id="pd-sum" style="font-size:12px;color:var(--ink-soft);"></span></td></tr>
+          <tr><td style="text-align:left;font-weight:700;">План конверсии, %</td><td colspan="2"><input type="number" id="pd-conv" value="${(state.monthlyPlans && state.monthlyPlans[ym] && state.monthlyPlans[ym].conversionPct) || (ym >= MANAGER_MOTIVATION_V2_FROM ? MANAGER_V2.convPlan : '')}" style="width:80px;"> <span style="font-size:12px;color:var(--ink-soft);">— от него считается бонус менеджеров за конверсию</span></td></tr>
         </table>
         <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:12px;"><button class="btn btn-ghost" data-x>Отмена</button><button class="btn btn-primary" id="pd-save">💾 Сохранить план</button></div>
       </div>`;
@@ -24694,6 +24792,7 @@
         p.byCatUnits = {};
         PD_CATS.forEach(c=>{ const x = v[c.key] || {}; pdSetPlanRub(p, c, x.rub || null); if(x.n) p.byCatUnits[c.key] = x.n; });
         const mv = Number(wrap.querySelector('#pd-month').value) || 0;
+        { const cv = Number(wrap.querySelector('#pd-conv').value); if(cv > 0) p.conversionPct = cv; }
         p.revenue = mv || PD_CATS.reduce((a,c)=> a + ((v[c.key]||{}).rub || 0), 0) || p.revenue || null;
         if(!state.monthlyPlans) state.monthlyPlans = {};
         state.monthlyPlans[ym] = p;
@@ -24712,6 +24811,198 @@
     document.body.appendChild(wrap);
     draw(init, plan.revenue || '', null);
     if(pasteFirst) setTimeout(()=>{ const t = wrap.querySelector('#pd-txt'); if(t) t.focus(); }, 50);
+  }
+  // ===================== «📥 План заявок» — сколько заявок нужно по продуктам, чтобы выполнить план продаж =====================
+  // Хранится в плане месяца: byLeadCat (шт., его же видит «Отчёт дня»), byLeadConv (конверсия для плана, %),
+  // leadNotes (комментарий для маркетолога), leadsCount (итого). Факт — заявки CRM по дате заявки.
+  const LP_CATS = [
+    { key:'Дни рождения', name:'ДР' }, { key:'Свидания', name:'Свидания' }, { key:'Детские', name:'Детские' },
+    { key:'Корпоративы', name:'Корпоративы' }, { key:'Девичники', name:'Девичники' }, { key:'Выездные', name:'Выезды' }, { key:'Другое', name:'Другое' },
+  ];
+  const LP_MONTHS_PREP = ['январе','феврале','марте','апреле','мае','июне','июле','августе','сентябре','октябре','ноябре','декабре'];
+  function lpMatch(s){
+    const t = String(s||'').toLowerCase().replace(/ё/g,'е').trim();
+    if(/^выезд/.test(t)) return 'Выездные';
+    const k = pdMatchName(s);
+    if(k === 'sched' || k === 'certs') return k;
+    return LP_CATS.some(c=> c.key === k) ? k : null;
+  }
+  function lpFact(ym, cut){
+    const r = {}; LP_CATS.forEach(c=> r[c.key] = { all:0, cut:0, sold:0 });
+    state.leads.forEach(l=>{
+      if(!l.requestDate || !l.requestDate.startsWith(ym)) return;
+      let k = dailyReportLeadCategory(l); if(!r[k]) k = 'Другое';
+      r[k].all++; if(l.requestDate <= cut) r[k].cut++; if(l.sold) r[k].sold++;
+    });
+    return r;
+  }
+  function renderLeadPlanHtml(ym, opts){
+    opts = opts || {};
+    const plan = (state.monthlyPlans && state.monthlyPlans[ym]) || {};
+    const [Y, M] = ym.split('-').map(Number);
+    const dim = new Date(Y, M, 0).getDate();
+    const today = todayStr(), curYm = today.slice(0,7);
+    const cut = curYm === ym ? today : (ym < curYm ? ym + '-' + String(dim).padStart(2,'0') : ym + '-00');
+    const daysLeft = curYm === ym ? Math.max(0, dim - Number(today.slice(8,10))) : (ym > curYm ? dim : 0);
+    const dayNo = curYm === ym ? Number(today.slice(8,10)) : (ym < curYm ? dim : 0);
+    const f = lpFact(ym, cut);
+    const byLead = plan.byLeadCat || {}, conv = plan.byLeadConv || {}, notes = plan.leadNotes || {}, units = plan.byCatUnits || {};
+    const canEdit = ['owner','admin','assistant','marketer'].includes(state.currentRole);
+    let T = { plan:0, came:0, sold:0, left:0 };
+    const rows = LP_CATS.map(c=>{
+      const p = Number(byLead[c.key]) || 0, x = f[c.key];
+      const left = Math.max(0, p - x.all), pct = p > 0 ? Math.round(x.all / p * 100) : null;
+      const expected = p > 0 && dayNo ? Math.round(p * dayNo / dim) : null;   // «по графику» к сегодняшнему дню (равномерно)
+      const behind = expected !== null && x.all < expected;
+      const cf = x.all ? Math.round(x.sold / x.all * 100) : null;
+      T.plan += p; T.came += x.all; T.sold += x.sold; T.left += left;
+      if(!p && !x.all) return '';
+      return `<tr>
+        <td style="text-align:left;"><b>${escapeHtml(c.name)}</b></td>
+        <td>${p || '—'}</td>
+        <td><b>${x.all}</b>${pct !== null ? ` <span style="font-weight:700;color:${pct>=100?'#4E5733':(behind?'#A3402F':'#8C6A1E')};">${pct}%</span>` : ''}
+          ${p ? `<div style="height:4px;background:#E5DFD0;border-radius:2px;margin-top:3px;overflow:hidden;"><div style="height:100%;width:${Math.min(100,pct)}%;background:${pct>=100?'#75804F':(behind?'#C4553A':'#E8B84B')};"></div></div>` : ''}</td>
+        <td>${p ? (left ? `<b style="color:${behind?'#A3402F':'#171512'};">${left}</b>` : '<b style="color:#4E5733;">✓</b>') : '—'}</td>
+        <td>${p && left && daysLeft ? (left / daysLeft).toFixed(1).replace('.',',') : '—'}</td>
+        <td>${conv[c.key] ? conv[c.key] + '%' : '—'}<div class="pd-sub">${cf !== null ? 'факт ' + cf + '%' : ''}</div></td>
+        ${opts.compact ? '' : `<td style="text-align:left;white-space:normal;min-width:220px;font-size:12px;color:#5C5650;">${escapeHtml(notes[c.key]||'')}</td>`}
+      </tr>`;
+    }).join('');
+    const totPlan = Number(plan.leadsCount) || T.plan;
+    const hasPlan = T.plan > 0;
+    const leftAll = Math.max(0, totPlan - T.came);
+    const other = [['sched','Расписание','гостей'],['certs','Сертификаты','шт.']].filter(([k])=> units[k] || notes[k]);
+    if(opts.strip){
+      if(!hasPlan) return '';
+      const pct = totPlan ? Math.round(T.came / totPlan * 100) : 0;
+      return `<div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;background:#FBF3DC;border:1px solid #E8B84B;border-radius:12px;padding:8px 12px;margin:0 0 10px;font-size:13px;">
+        <span><b>📥 План заявок на ${escapeHtml((MONTHS[M-1]||''))}:</b> пришло <b>${T.came}</b> из ${totPlan} (${pct}%)
+        ${leftAll && daysLeft ? `· нужно ещё <b>${leftAll}</b> — <b>${(leftAll/daysLeft).toFixed(1).replace('.',',')}</b> в день` : (leftAll ? '' : '· <b style="color:#4E5733;">план выполнен ✓</b>')}</span>
+        <span style="color:var(--ink-soft);">${LP_CATS.filter(c=> byLead[c.key]).map(c=>{ const x=f[c.key]; return escapeHtml(c.name)+' '+x.all+'/'+byLead[c.key]; }).join(' · ')}</span></div>`;
+    }
+    return `<div class="analytics-section lp-box" style="padding:14px 16px;">
+      <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:8px;">
+        <h4 style="margin:0;">📥 План заявок — ${escapeHtml((MONTHS[M-1]||'') + ' ' + Y)}</h4>
+        ${canEdit ? `<button class="btn btn-ghost" id="lp-edit" style="margin-left:auto;padding:5px 10px;font-size:12.5px;">📥 Вставить из Excel / ✏ изменить</button>` : ''}
+      </div>
+      ${hasPlan ? `
+      <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:8px;margin-bottom:10px;">
+        <div class="pd-kpi"><div class="pd-k">План заявок</div><div class="pd-v">${totPlan}</div></div>
+        <div class="pd-kpi"><div class="pd-k">Пришло${dayNo && curYm===ym ? ' по ' + dayNo + '-е' : ''}</div><div class="pd-v">${T.came} · ${totPlan ? Math.round(T.came/totPlan*100) : 0}%</div></div>
+        <div class="pd-kpi" style="background:${leftAll?'#FBE9E4':'#EEF0E4'};"><div class="pd-k">Нужно ещё</div><div class="pd-v" style="color:${leftAll?'#A3402F':'#4E5733'};">${leftAll || '✓'}</div></div>
+        <div class="pd-kpi"><div class="pd-k">В день${daysLeft ? ' (ост. ' + daysLeft + ' дн.)' : ''}</div><div class="pd-v">${leftAll && daysLeft ? (leftAll/daysLeft).toFixed(1).replace('.',',') : '—'}</div></div>
+      </div>
+      <div style="overflow-x:auto;"><table class="ms-table pd-table">
+        <tr><th style="text-align:left;">Продукт</th><th>План</th><th>Пришло</th><th>Осталось</th><th>В день</th><th>Конверсия<br>план / факт</th>${opts.compact ? '' : '<th style="text-align:left;">Комментарий для маркетолога</th>'}</tr>
+        ${rows}
+        <tr style="font-weight:700;background:#F2ECDD;"><td style="text-align:left;">ИТОГО</td><td>${totPlan}</td><td>${T.came}</td><td>${leftAll}</td><td>${leftAll && daysLeft ? (leftAll/daysLeft).toFixed(1).replace('.',',') : '—'}</td><td>${T.came ? Math.round(T.sold/T.came*100) + '%' : '—'}</td>${opts.compact ? '' : '<td></td>'}</tr>
+      </table></div>
+      ${other.length ? `<div style="margin-top:10px;font-size:12.5px;"><b>Не через заявки (YCLIENTS, сайт, касса):</b>
+        ${other.map(([k,n,u])=> `<div style="margin-top:4px;">• <b>${n}</b>${units[k] ? ': цель ' + units[k] + ' ' + u : ''}${notes[k] ? ` — <span style="color:#5C5650;">${escapeHtml(notes[k])}</span>` : ''}</div>`).join('')}</div>` : ''}
+      <div style="font-size:11.5px;color:var(--ink-soft);margin-top:6px;">«Пришло» — заявки из «Конверсии» с датой заявки в этом месяце (продукт заявки → строка; выезд → «Выезды»). Красным — отстаёт от равномерного графика.</div>`
+      : `<div style="font-size:13px;color:var(--ink-soft);">План заявок на этот месяц не задан.${canEdit ? ' Скопируйте таблицу «План заявок» из Excel (вместе со строкой заголовков) и нажмите «📥 Вставить из Excel».' : ''}</div>`}
+    </div>`;
+  }
+  // разбор вставки: заголовок с «Продукт», «Конверсия для плана», «ЗАЯВОК в ноябре/декабре», «Комментарий…»;
+  // одна вставка может заполнить сразу несколько месяцев. Вторая табличка (Расписание/Сертификаты) — комментарии.
+  function lpParsePaste(txt, baseYm){
+    const lines = String(txt||'').split(/\r?\n/).map(l=> l.split('\t'));
+    const num = v=>{ const s = String(v||'').replace(/\s| |%/g,'').replace(',', '.'); return s !== '' && !isNaN(s) ? Number(s) : null; };
+    const [bY, bM] = baseYm.split('-').map(Number);
+    let cols = null; const out = {}; // ym -> {cats:{k:{n,conv,note}}, notes:{}}
+    const ymFor = (mi)=>{ let y = bY; if(mi + 1 < bM - 2) y++; return y + '-' + String(mi+1).padStart(2,'0'); };
+    lines.forEach(cells=>{
+      const low = cells.map(c=> String(c||'').toLowerCase().replace(/ё/g,'е').trim());
+      if(low[0] === 'продукт'){
+        cols = { conv:-1, note:-1, months:[] };
+        low.forEach((t,i)=>{
+          if(/^конверсия/.test(t)) cols.conv = i;
+          if(/^комментар/.test(t)) cols.note = i;
+          const m = t.match(/^заявок\s+в\s+([а-я]+)/); if(m){ const mi = LP_MONTHS_PREP.indexOf(m[1]); if(mi >= 0) cols.months.push({ i, ym: ymFor(mi) }); }
+        });
+        return;
+      }
+      if(!cols) return;
+      const k = lpMatch(cells[0]); if(!k) return;
+      const note = cols.note >= 0 ? String(cells[cols.note]||'').trim() : '';
+      if(k === 'sched' || k === 'certs'){
+        (cols.months.length ? cols.months.map(x=> x.ym) : [baseYm]).forEach(ym=>{ out[ym] = out[ym] || { cats:{} }; if(note) out[ym].cats[k] = { note }; });
+        if(!cols.months.length && note){ out[baseYm] = out[baseYm] || { cats:{} }; out[baseYm].cats[k] = { note }; }
+        return;
+      }
+      let cv = cols.conv >= 0 ? num(cells[cols.conv]) : null; if(cv !== null && cv <= 1) cv = cv * 100; if(cv !== null) cv = Math.round(cv);
+      cols.months.forEach(x=>{ const n = num(cells[x.i]); if(n === null) return; out[x.ym] = out[x.ym] || { cats:{} }; out[x.ym].cats[k] = { n: Math.round(n), conv: cv, note }; });
+    });
+    return out;
+  }
+  function openLeadPlanEditor(ym){
+    const [Y, M] = ym.split('-').map(Number);
+    const wrap = document.createElement('div');
+    wrap.style.cssText = 'position:fixed;inset:0;z-index:12000;background:rgba(23,21,18,.5);display:flex;align-items:center;justify-content:center;padding:12px;';
+    let extra = {}; // другие месяцы из вставки
+    const draw = (vals, note)=>{
+      wrap.innerHTML = `<div style="background:#fff;border-radius:16px;max-width:760px;width:100%;max-height:92vh;overflow:auto;padding:16px 18px;">
+        <div style="display:flex;align-items:center;gap:8px;"><h3 style="margin:0;flex:1;font-size:18px;">📥 План заявок — ${escapeHtml((MONTHS[M-1]||'') + ' ' + Y)}</h3><button class="btn btn-ghost" data-x>×</button></div>
+        <div style="margin:10px 0;background:#F2ECDD;border-radius:12px;padding:10px 12px;">
+          <div style="font-size:12.5px;color:#5C5650;margin-bottom:6px;">Выделите в Excel таблицу «План заявок» от строки «Продукт…» до «Сертификаты» и вставьте сюда. Если в таблице несколько месяцев (ноябрь и декабрь) — сохранятся сразу все.</div>
+          <textarea id="lp-txt" rows="4" style="width:100%;box-sizing:border-box;font-family:var(--font-mono);font-size:12px;border:1px solid #D9D0BC;border-radius:8px;padding:6px;" placeholder="Вставьте сюда строки из Excel"></textarea>
+          <button class="btn" id="lp-parse" style="margin-top:6px;">Разобрать вставку</button>
+          ${note ? `<div style="font-size:12.5px;margin-top:6px;color:${note.err?'#A3402F':'#4E5733'};">${escapeHtml(note.t)}</div>` : ''}
+        </div>
+        <table class="ms-table" style="width:100%;">
+          <tr><th style="text-align:left;">Продукт</th><th>Заявок</th><th>Конверсия, %</th><th style="text-align:left;">Комментарий для маркетолога</th></tr>
+          ${LP_CATS.map(c=> `<tr><td style="text-align:left;">${escapeHtml(c.name)}</td>
+            <td><input type="number" class="lp-n" data-k="${escapeHtml(c.key)}" value="${vals[c.key] && vals[c.key].n != null ? vals[c.key].n : ''}" style="width:70px;"></td>
+            <td><input type="number" class="lp-c" data-k="${escapeHtml(c.key)}" value="${vals[c.key] && vals[c.key].conv != null ? vals[c.key].conv : ''}" style="width:60px;"></td>
+            <td><input type="text" class="lp-note" data-k="${escapeHtml(c.key)}" value="${escapeHtml(vals[c.key] && vals[c.key].note || '')}" style="width:100%;min-width:220px;"></td></tr>`).join('')}
+          ${[['sched','Расписание (цель — в «План по продуктам»)'],['certs','Сертификаты (цель — в «План по продуктам»)']].map(([k,n])=> `<tr><td style="text-align:left;font-size:12.5px;">${n}</td><td></td><td></td>
+            <td><input type="text" class="lp-note" data-k="${k}" value="${escapeHtml(vals[k] && vals[k].note || '')}" style="width:100%;"></td></tr>`).join('')}
+        </table>
+        <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:12px;align-items:center;">
+          <span id="lp-extra" style="font-size:12px;color:var(--ink-soft);flex:1;">${Object.keys(extra).length ? 'Ещё сохранится: ' + Object.keys(extra).map(x=> MONTHS[Number(x.slice(5))-1] + ' ' + x.slice(0,4)).join(', ') : ''}</span>
+          <button class="btn btn-ghost" data-x>Отмена</button><button class="btn btn-primary" id="lp-save">💾 Сохранить</button></div>
+      </div>`;
+      wrap.querySelectorAll('[data-x]').forEach(b=> b.onclick = ()=> wrap.remove());
+      wrap.querySelector('#lp-parse').onclick = ()=>{
+        const r = lpParsePaste(wrap.querySelector('#lp-txt').value, ym);
+        const months = Object.keys(r);
+        if(!months.length){ draw(read(), { t:'Не нашла таблицу — скопируйте вместе со строкой заголовков («Продукт», «ЗАЯВОК в …»).', err:true }); return; }
+        const v = read();
+        if(r[ym]) Object.entries(r[ym].cats).forEach(([k,x])=> v[k] = { ...(v[k]||{}), ...Object.fromEntries(Object.entries(x).filter(([,y])=> y !== null && y !== undefined && y !== '')) });
+        extra = {}; months.filter(x=> x !== ym).forEach(x=> extra[x] = r[x]);
+        draw(v, { t:`✓ Нашла месяцы: ${months.map(x=> MONTHS[Number(x.slice(5))-1]).join(', ')}. Проверьте и сохраните.` });
+      };
+      wrap.querySelector('#lp-save').onclick = ()=> requireAdminUnlock(async ()=>{
+        if(!state.monthlyPlans) state.monthlyPlans = {};
+        const apply = (tym, vals)=>{
+          const p = JSON.parse(JSON.stringify(state.monthlyPlans[tym] || {}));
+          p.byLeadCat = p.byLeadCat || {}; p.byLeadConv = {}; p.leadNotes = {};
+          LP_CATS.forEach(c=>{ const x = vals[c.key] || {}; if(x.n != null && x.n !== '') p.byLeadCat[c.key] = Number(x.n); else delete p.byLeadCat[c.key]; if(x.conv) p.byLeadConv[c.key] = Number(x.conv); if(x.note) p.leadNotes[c.key] = x.note; });
+          ['sched','certs'].forEach(k=>{ const x = vals[k]; if(x && x.note) p.leadNotes[k] = x.note; });
+          const sum = LP_CATS.reduce((a,c)=> a + (Number(p.byLeadCat[c.key])||0), 0);
+          if(sum) p.leadsCount = sum;
+          state.monthlyPlans[tym] = p;
+        };
+        apply(ym, read());
+        Object.entries(extra).forEach(([tym, r])=> apply(tym, r.cats));
+        await saveMonthlyPlans();
+        recordAction('План заявок сохранён — ' + [ym, ...Object.keys(extra)].map(x=> MONTHS[Number(x.slice(5))-1]).join(', '), '', { cat:'lead', verb:'задал(а) план заявок' });
+        wrap.remove(); render();
+      });
+    };
+    const read = ()=>{
+      const v = {};
+      wrap.querySelectorAll('.lp-n').forEach(i=>{ const k=i.dataset.k; v[k]=v[k]||{}; v[k].n = i.value !== '' ? Number(i.value) : null; });
+      wrap.querySelectorAll('.lp-c').forEach(i=>{ const k=i.dataset.k; v[k]=v[k]||{}; v[k].conv = i.value !== '' ? Number(i.value) : null; });
+      wrap.querySelectorAll('.lp-note').forEach(i=>{ const k=i.dataset.k; v[k]=v[k]||{}; v[k].note = i.value.trim(); });
+      return v;
+    };
+    const plan = (state.monthlyPlans && state.monthlyPlans[ym]) || {};
+    const init = {};
+    LP_CATS.forEach(c=> init[c.key] = { n: (plan.byLeadCat||{})[c.key] ?? null, conv: (plan.byLeadConv||{})[c.key] ?? null, note: (plan.leadNotes||{})[c.key] || '' });
+    ['sched','certs'].forEach(k=> init[k] = { note: (plan.leadNotes||{})[k] || '' });
+    document.body.appendChild(wrap);
+    draw(init, null);
   }
   function renderPlanProgressView(){
     const cursor = state.analyticsCursor;
@@ -24829,6 +25120,7 @@
         </div>
       </div>
       ${renderPlanDecompHtml(planYm)}
+      ${renderLeadPlanHtml(planYm, { compact:true })}
       <div class="analytics-section" style="padding:14px 16px;">
         <h4 style="margin-top:0;">🎯 Выполнение плана</h4>
         <div style="margin-bottom:10px;"><button class="btn btn-ghost" id="btn-add-history-daily">📝 Занести данные за этот день в прошлом году</button></div>
