@@ -11009,7 +11009,7 @@
     new:   [['Связаться с клиентом, назначить разговор', 1]],
     needs: [['Написать клиенту: получил ли бриф, ответить на вопросы', 1]],
     brief: [['Подготовить и отправить КП', 2]],
-    kp:    [['Написать клиенту по КП: посмотрел ли, есть ли вопросы', 1], ['Написать клиенту ещё раз: узнать решение по КП', 2]]
+    kp:    [['Уточнить, как КП: посмотрел ли, есть ли вопросы', 1], ['Отправить оффер', 3], ['Спросить актуальность', 4]]
   };
   // день отключения связки с Единым журналом: B2B-заявки с этого дня ведутся здесь же, с этапами и задачами
   const JOURNAL_OFF_DATE = '2026-11-09';
@@ -11032,6 +11032,32 @@
       if(n){ showToast('B2B-заявки теперь ведутся здесь: поставлено задач — ' + n); render(); }
     }catch(e){ console.warn('migrateB2bTasksOnce', e); }
   }
+  // ===== Сжатие автозадач под дату мероприятия =====
+  // Все касания должны пройти до кануна мероприятия (последний срок — день до него). Если окна не хватает,
+  // сроки сдвигаются ближе, а при совсем коротком окне задачи склеиваются в одну-две — чтобы не ставить то, что не успеть.
+  function leadDaysToEvent(lead){
+    if(!lead || !lead.eventDate) return null;
+    const a = parseDate(todayStr()), b = parseDate(lead.eventDate);
+    return Math.round((b - a) / 86400000);
+  }
+  function leadCompressTasks(T, lead, st){
+    const D = leadDaysToEvent(lead);
+    if(D === null || !T.length) return T;
+    const W = D - 1;                                  // сколько дней есть на касания (до кануна включительно)
+    const maxDay = Math.max(...T.map(x=> x[1]));
+    if(W >= maxDay) return T;                         // времени хватает — стандартная цепочка
+    const when = lgDateDots(lead.eventDate);
+    if(st === 'kp'){
+      if(W >= 3) return [[T[0][0], 1], [T[1][0], 2], [T[2][0], 3]];
+      if(W === 2) return [[T[0][0], 1], ['Отправить оффер и спросить актуальность (мероприятие ' + when + ')', 2]];
+      if(W === 1) return [['Уточнить по КП, отправить оффер и узнать решение (мероприятие ' + when + ')', 1]];
+      return [['Срочно: узнать решение по КП — мероприятие ' + (D === 1 ? 'завтра' : (D === 0 ? 'сегодня' : 'было ' + when)), 0]];
+    }
+    // остальные этапы: срок не позже кануна; если канун уже прошёл — сегодня
+    const last = Math.max(0, W);
+    const seen = new Set();
+    return T.map(([title, days])=> [title, Math.min(days, last)]).filter(([title, d])=>{ const k = d + '|' + title; if(seen.has(k)) return false; seen.add(k); return true; });
+  }
   async function leadStageTasks(lead, prevSt){
     const st = leadStatus(lead);
     if(prevSt !== null && prevSt !== undefined && st === prevSt) return;
@@ -11041,8 +11067,9 @@
     if(st === 'sold' || st === 'lost'){ open.forEach(t=>{ t.done = true; t.doneAt = now; }); }
     else {
       open.filter(t=>t.auto).forEach(t=>{ t.done = true; t.doneAt = now; });
-      // сроки — в календарных днях от момента, когда заявка попала в колонку
-      const T = LEAD_AUTO_TASKS[st];
+      // сроки — в календарных днях от момента, когда заявка попала в колонку;
+      // если до мероприятия мало времени — цепочка сжимается (см. leadCompressTasks)
+      const T = leadCompressTasks(LEAD_AUTO_TASKS[st] || [], lead, st);
       (T || []).forEach(([title, days])=>{
         const due = leadWorkDay(loadAddDays(todayStr(), days));
         state.leadTasks.push({ id: uid(), leadId: lead.id, title, due, done: false, doneAt: '', assignee: leadAssigneeFor(due, lead), createdBy: leadWho(), createdAt: now, auto: true, followN: 0 });
@@ -11092,6 +11119,9 @@
     [['дат','время','день'], '{имя}, здравствуйте! Подскажите, какая дата и время вам удобны?\nСейчас есть свободные окна: … — могу придержать любое из них для вас до завтра.'],
     [['бриф'], '{имя}, добрый день! Отправляли вам бриф по {продукт}. Удалось посмотреть?\nЕсли какие-то вопросы вызывают сомнения — пишите, помогу заполнить за пару минут 🙂'],
     [['решени','добивк','напомн','ещё раз','еще раз'], '{имя}, здравствуйте! Хотела уточнить — получилось определиться с {продукт}?\nДаты быстро разбирают, поэтому могу придержать для вас время до завтра. Если что-то смущает — расскажите, подберём вариант.'],
+    [['как кп','по кп'], '{имя}, добрый день! Удалось посмотреть наше предложение по {продукт}? 🙂\nКак вам программа и формат? Если есть вопросы или хочется что-то поменять — напишите, всё подстроим.'],
+    [['оффер'], '{имя}, здравствуйте! Для вас придержали {дата} и подготовили приятное предложение: …\nОно действует до … — успеем забронировать? 🙌'],
+    [['актуальн'], '{имя}, добрый день! Подскажите, пожалуйста, мероприятие ещё актуально? 🙂\nЕсли планы поменялись — тоже напишите, чтобы мы не держали за вами дату.'],
     [['по кп','посмотрел','вопрос'], '{имя}, добрый день! Удалось посмотреть наше предложение?\nЕсли есть вопросы по программе, мастер-классу или стоимости — с радостью отвечу, а если что-то хочется поменять — подстроим.'],
     [['кп','предложени'], '{имя}, здравствуйте! Подготовили для вас предложение по {продукт} — отправляю 🙌\nПосмотрите, пожалуйста, и напишите, что откликается — доработаем под ваши пожелания.'],
     [['перезвон','позвон','звонок'], '{имя}, здравствуйте! Это {менеджер}, студия «Свободное Пространство». Не смогла до вас дозвониться по заявке на {продукт}.\nКогда вам удобно поговорить — или продолжим здесь, в переписке?'],
@@ -11671,7 +11701,7 @@
     const tabs = [['board','Воронка'],['tasks','Задачи'],['clients','Клиенты'],['stats','Статистика и список']];
     const nOpen = (state.leadTasks||[]).filter(t=>!t.done && t.due && t.due <= todayStr() && taskAlive(t)).length;
     const bar = `<div class="sub-tabs" style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:12px;">${tabs.map(t=>`<button class="btn ${tab===t[0]?'btn-primary':'btn-ghost'}" data-convtab="${t[0]}">${t[1]}${t[0]==='tasks' && nOpen ? ' <span style="color:'+(tab==='tasks'?'#fff':'var(--danger)')+';">('+nOpen+')</span>' : ''}</button>`).join('')}</div>`;
-    const _lpStrip = (tab !== 'clients' && tab !== 'stats') ? (()=>{ try{ const c = new Date(); return renderLeadPlanHtml(c.getFullYear()+'-'+pad(c.getMonth()+1), { strip:true }); }catch(e){ return ''; } })() : '';
+    const _lpStrip = (tab !== 'clients' && tab !== 'stats') ? (()=>{ try{ const c = new Date(); const ym = c.getFullYear()+'-'+pad(c.getMonth()+1); return renderRevenuePlanStrip(ym) + renderLeadPlanHtml(ym, { strip:true }); }catch(e){ return ''; } })() : '';
     return bar + _lpStrip + (tab === 'tasks' ? renderLeadTasksView() : (tab === 'clients' ? renderClientsView() : tab === 'stats' ? renderConversionStatsView() : renderLeadBoard()));
   }
 
@@ -25224,6 +25254,23 @@
       <div style="font-size:11.5px;color:var(--ink-soft);margin-top:6px;line-height:1.45;">Факт и брони считаются из приложения: мероприятия — по дате и полной стоимости (вкл. оплату сертификатами), сертификаты — по дате продажи (без маркетинговых), пустые МК и непроданные слоты не входят. «Допродать, шт» — по среднему чеку прошлого месяца.</div>`
       : `<div style="font-size:13px;color:var(--ink-soft);">План по продуктам на этот месяц не задан.${canEdit ? ' Откройте таблицу «Декомпозиция», выделите строки с продуктами вместе с заголовком, скопируйте и нажмите «📥 Вставить план из Excel».' : ''}</div>`}
     </div>`;
+  }
+  // строка «План выручки» над воронкой — менеджеры видят план сразу после входа в свой профиль
+  function renderRevenuePlanStrip(ym){
+    const plan = (state.monthlyPlans && state.monthlyPlans[ym]) || {};
+    const [Y, M] = ym.split('-').map(Number); const dim = new Date(Y, M, 0).getDate();
+    const totalPlan = Number(plan.revenue) || PD_CATS.reduce((a,c)=> a + (Number(pdPlanRub(plan, c))||0), 0);
+    if(!totalPlan) return '';
+    const pd = pdCompute(ym, ym + '-' + String(dim).padStart(2,'0'));
+    const have = Object.values(pd).reduce((a,r)=> a + r.factRub + r.bookRub, 0);
+    const today = todayStr(); const daysLeft = today.slice(0,7) === ym ? Math.max(0, dim - Number(today.slice(8,10))) : 0;
+    const left = Math.max(0, totalPlan - have), pct = Math.round(have / totalPlan * 100);
+    const parts = PD_CATS.map(c=>{ const p = Number(pdPlanRub(plan, c))||0; if(!p) return ''; const r = pd[c.key]; const h = r.factRub + r.bookRub; return `${escapeHtml(c.name)} ${Math.round(h/p*100)}%`; }).filter(Boolean).join(' · ');
+    return `<div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;background:#EEF0E4;border:1px solid #75804F;border-radius:12px;padding:8px 12px;margin:0 0 8px;font-size:13px;cursor:pointer;" onclick="document.querySelector('[data-view=planprogress]') && document.querySelector('[data-view=planprogress]').click()" title="Подробнее — вкладка «🎯 План»">
+      <span><b>📊 План выручки на ${escapeHtml(MONTHS[M-1]||'')}:</b> уже есть <b>${formatMoney(have)}</b> из ${formatMoney(totalPlan)} (${pct}%)
+      ${left ? `· допродать <b>${formatMoney(left)}</b>${daysLeft ? ` — <b>${formatMoney(Math.round(left/daysLeft))}</b> в день` : ''}` : '· <b style="color:#4E5733;">план выполнен ✓</b>'}</span>
+      <div style="flex:1;min-width:120px;height:6px;background:#D9DCC8;border-radius:3px;overflow:hidden;"><div style="height:100%;width:${Math.min(100,pct)}%;background:#75804F;"></div></div>
+      ${parts ? `<span style="color:var(--ink-soft);font-size:12px;width:100%;">${parts}</span>` : ''}</div>`;
   }
   function attachPlanDecompEvents(ym){
     const le = document.getElementById('lp-edit'); if(le) le.onclick = ()=> openLeadPlanEditor(ym);
