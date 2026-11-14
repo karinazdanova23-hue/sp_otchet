@@ -5222,7 +5222,10 @@
           if(!same && b0 && JSON.stringify(got) === JSON.stringify(b0)) lost = true; // вернулась старая версия
           // одновременная запись с другого устройства затёрла поля, которые меняли МЫ, — дописываем их заново
           if(!same && b0){ const jj = mergeNorm;
-            Object.keys(Object.assign({}, x, b0)).forEach(f=>{ if(f === 'payments') return; if(jj(x[f]) !== jj(b0[f]) && jj(got[f]) !== jj(want[f])) lost = true; }); }
+            Object.keys(Object.assign({}, x, b0)).forEach(f=>{ if(f === 'payments') return; if(jj(x[f]) !== jj(b0[f]) && jj(got[f]) !== jj(want[f])) lost = true; });
+            // новая оплата, которую мы добавили, пропала из записанной версии (одновременная запись с другого устройства) — дописываем
+            if(Array.isArray(x.payments)){ const bIds = new Set((b0.payments||[]).map(q=> q && q.id)); const gIds = new Set((got.payments||[]).map(q=> q && q.id)); const wIds = new Set((want.payments||[]).map(q=> q && q.id));
+              if(x.payments.some(q=> q && q.id && !bIds.has(q.id) && wIds.has(q.id) && !gIds.has(q.id))) lost = true; } }
         });
         deletes.forEach(k=>{ if(backMap.has(k)) lost = true; });
         if(!lost) break;
@@ -5236,6 +5239,14 @@
         finalArr = Array.from(m2.values());
         const okRe = await storageSetWithRetry(storageKey, JSON.stringify(finalArr));
         if(!okRe) return;
+        // своё состояние приводим к тому, что реально записано
+        if(_mergeSaveSeq[storageKey] === _mySeq){ try{ applyMerged(finalArr); }catch(e){} }
+        if(storageKey === 'events' && window.__dupPayDropped && window.__dupPayDropped.length){
+          const d = window.__dupPayDropped; window.__dupPayDropped = [];
+          try{ showGapWarningBanner(`Оплата ${d.map(x=> formatMoney(x.amount)).join(', ')} по «${d[0].title}» уже была внесена с другого устройства — второй раз не записана.`); }catch(e){}
+          for(const x of d){ try{ const ev = state.events.find(e=> e.id === x.id); if(ev) await syncEventPaymentsToBook(ev); }catch(e){} }
+          try{ if(!state.modal) render(); }catch(e){}
+        }
       }
     };
     if(okSet) _verify().catch(e=>console.error('verify-save', e));
@@ -5301,12 +5312,56 @@
   }
   // защита оплат: если, пока у человека была открыта старая форма мероприятия, кто-то другой добавил оплату,
   // то при сохранении этой формы чужая (новая) оплата не затирается, а добавляется к оплатам формы
+  // одна и та же оплата, внесённая почти одновременно с двух устройств (например, администратор принял остаток
+  // через «Оплату», а у другого человека была открыта старая карточка, и он тоже внёс этот остаток): тот же гость,
+  // та же сумма, тот же счёт, тот же день, обе — новые относительно исходной версии. Вторую не записываем.
+  function payDupKey(p){ return [p.guestId || '', Number(p.amount)||0, p.source || '', p.date || (p.ts ? String(p.ts).slice(0,10) : '')].join('|'); }
   function mergeEventPayments(serverEv, localEv, baseEv){
     const baseIds = new Set(((baseEv && baseEv.payments) || []).map(p=>p && p.id).filter(Boolean));
     const localIds = new Set((localEv.payments || []).map(p=>p && p.id).filter(Boolean));
     const extra = (serverEv.payments || []).filter(p=> p && p.id && !baseIds.has(p.id) && !localIds.has(p.id));
     if(!extra.length) return localEv;
+    const isLive = p=> p && p.source !== 'Сертификат' && !p.certRedemptionRef && p.type !== 'refund' && !p.refundRef;
+    const extraKeys = new Map(); extra.filter(isLive).forEach(p=>{ const k = payDupKey(p); extraKeys.set(k, (extraKeys.get(k)||0) + 1); });
+    const dropped = [];
+    const localKept = (localEv.payments || []).filter(p=>{
+      if(!p || !p.id || baseIds.has(p.id) || !isLive(p)) return true;
+      const k = payDupKey(p); const n = extraKeys.get(k) || 0;
+      if(n > 0){ extraKeys.set(k, n - 1); dropped.push(p); return false; }
+      return true;
+    });
+    if(dropped.length){
+      const sum = dropped.reduce((t,p)=> t + (Number(p.amount)||0), 0);
+      const out = Object.assign({}, localEv, { payments: localKept.concat(extra) });
+      // «Выручка» в своей копии была увеличена на дубль — возвращаем серверную, если её не правили иначе
+      if(Number(localEv.price) - sum === Number(baseEv && baseEv.price) || Number(localEv.price) === Number(serverEv.price)) out.price = serverEv.price;
+      (window.__dupPayDropped = window.__dupPayDropped || []).push({ id: localEv.id, title: localEv.title || '', amount: sum });
+      return out;
+    }
     return Object.assign({}, localEv, { payments: (localEv.payments || []).concat(extra) });
+  }
+  // уже записанные двойные оплаты: те же гость/сумма/счёт/день, а «Выручка» мероприятия меньше суммы журнала —
+  // признак, что вторую оплату внесли параллельно (она не прибавилась к выручке)
+  function findDupPayments(ev){
+    const pays = (ev.payments||[]).filter(p=> p && p.source !== 'Сертификат' && !p.certRedemptionRef && p.type !== 'refund' && !p.refundRef);
+    const cash = pays.reduce((t,p)=> t + (Number(p.amount)||0), 0);
+    let gap = cash - (Number(ev.price)||0);
+    const groups = {}; pays.forEach(p=>{ (groups[payDupKey(p)] = groups[payDupKey(p)] || []).push(p); });
+    const out = [];
+    Object.values(groups).forEach(g=>{ if(g.length < 2) return; g.sort((a,b)=> String(a.ts||'').localeCompare(String(b.ts||'')));
+      g.slice(1).forEach(p=>{ const a = Number(p.amount)||0; if(a > 0 && gap >= a){ out.push({ keep: g[0], dup: p }); gap -= a; } }); });
+    return out;
+  }
+  async function removeDupPayments(evId){
+    const i = state.events.findIndex(e=> e.id === evId); if(i < 0) return 0;
+    const ev = { ...state.events[i] }; const d = findDupPayments(ev); if(!d.length) return 0;
+    const ids = new Set(d.map(x=> x.dup.id));
+    ev.payments = (ev.payments||[]).filter(p=> !ids.has(p.id));
+    state.events[i] = ev;
+    await saveEvents();
+    await syncEventPaymentsToBook(state.events.find(e=> e.id === evId));
+    recordAction('Убрана двойная оплата', `«${ev.title||''}» ${ev.date||''} · ` + d.map(x=> formatMoney(x.dup.amount)).join(', '), { cat:'money', obj: ev.title||'' });
+    return d.length;
   }
   // защита от «старой формы»: пока у человека была открыта карточка/список, кто-то другой мог изменить мероприятие
   // (например, мастер сдал отчёт). Поле, которое ЭТОТ человек не менял (равно исходному), берём с сервера,
@@ -5341,6 +5396,8 @@
       state.events = finalArr;
       state._eventsBaseline = JSON.parse(JSON.stringify(finalArr));
     }, undefined, mergeEventItem);
+    if(window.__dupPayDropped && window.__dupPayDropped.length){ const d = window.__dupPayDropped; window.__dupPayDropped = [];
+      try{ showGapWarningBanner(`Оплата ${d.map(x=> formatMoney(x.amount)).join(', ')} по «${d[0].title}» уже была внесена с другого устройства — второй раз не записана.`); }catch(e){} }
     try{ legalDocsSweepSoon(); }catch(e){} // прикрепили договор/акт или поменяли плательщика — пересчитать задачи по документам
     return r;
   }
@@ -18340,6 +18397,7 @@
     const cancelledPaid = state.events.filter(e=> e.status === 'cancelled' && e.date && e.date.startsWith(ym) && (evPaidMap.get(e.id)||0) > 0);
     const evBook = evMonth.map(e=>({ e, m: eventBookMismatch(e) })).filter(x=> x.m.auto || x.m.warn).sort((a,b)=> (a.e.date||'').localeCompare(b.e.date||''));
     const evBookFixable = evBook.filter(x=> x.m.auto);
+    const dupPays = state.events.filter(e=> e.date && e.date.startsWith(ym)).map(e=> ({ e, d: findDupPayments(e) })).filter(x=> x.d.length);
 
     const incLine = (i, extra)=> `<div class="stat-row" style="font-size:12.5px;"><div style="flex:1;"><span data-rc-inc="${escapeHtml(i.id)}" style="cursor:pointer;text-decoration:underline dotted;">${escapeHtml(formatDateText(i.date))} · ${escapeHtml(mon(num(i.amount)))} · ${escapeHtml(i.product||'')} · ${escapeHtml(i.account||'')}</span><div style="color:var(--ink-soft);font-size:11.5px;">${escapeHtml((i.comment||'').replace(/\n/g,' ').slice(0,90))}</div></div>${extra||''}</div>`;
     const flagBtn = i=> owner ? `<button class="btn btn-ghost" data-rc-flag="${escapeHtml(i.id)}" style="padding:2px 8px;font-size:11.5px;">не считать в выручку</button>` : '';
@@ -18379,6 +18437,15 @@
       </div>
 
       <div style="font-weight:700;margin:16px 0 6px;">3. Проверки доходов</div>
+      ${dupPays.length ? `<div class="analytics-section" style="border:2px solid var(--danger, #c0392b);margin-bottom:10px;">
+        <div style="font-weight:700;">⚠️ Двойные оплаты: ${dupPays.length}</div>
+        <div style="font-size:12px;color:var(--ink-soft);margin:4px 0 8px;">Одна и та же оплата записана дважды (тот же гость, сумма, счёт и день), а «Выручка» мероприятия учитывает её один раз — значит, её внесли параллельно с двух устройств. «Убрать дубль» удалит лишнюю строку из журнала и из «Книги», выручка не изменится.</div>
+        ${dupPays.map(x=> `<div class="stat-row" style="font-size:12.5px;align-items:flex-start;gap:8px;">
+          <div style="flex:1;"><span data-rc-ev="${escapeHtml(x.e.id)}" style="cursor:pointer;font-weight:600;text-decoration:underline dotted;">${escapeHtml(formatDateText(x.e.date))} · ${escapeHtml(x.e.time||'')} · ${escapeHtml(x.e.title||'')}</span>
+            ${x.d.map(p=>{ const g = (x.e.guestList||[]).find(gg=> gg.id === p.dup.guestId); return `<div>• ${formatMoney(p.dup.amount)} · ${escapeHtml(p.dup.source||'')}${g ? ' · ' + escapeHtml(g.name||'') : ''} — записано дважды${p.keep.by || p.dup.by ? ' (' + escapeHtml([p.keep.by, p.dup.by].filter(Boolean).join(' и ')) + ')' : ''}</div>`; }).join('')}</div>
+          <button class="btn btn-ghost" data-rc-dedup="${escapeHtml(x.e.id)}" style="padding:3px 10px;font-size:12px;flex-shrink:0;">Убрать дубль</button>
+        </div>`).join('')}
+      </div>` : ''}
       <div class="analytics-section" style="border:2px solid ${evBookFixable.length ? 'var(--danger, #c0392b)' : 'var(--line-strong)'};margin-bottom:10px;">
         <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
           <div style="font-weight:700;flex:1;">${evBookFixable.length ? '⚠️' : '✅'} Сверка «Выручка мероприятия ↔ Книга»</div>
@@ -18684,6 +18751,7 @@
       render();
     };
     document.querySelectorAll('[data-rc-fixev]').forEach(el=> el.onclick = ()=> runFix([el.dataset.rcFixev], el));
+    document.querySelectorAll('[data-rc-dedup]').forEach(el=> el.onclick = async ()=>{ if(!canFixBook) return; el.disabled = true; el.textContent = 'Убираю…'; try{ const n = await removeDupPayments(el.dataset.rcDedup); showToast(n ? 'Дубль убран' : 'Дублей уже нет'); }catch(e){ alert('Не удалось сохранить. Проверьте интернет и повторите.'); } render(); });
     { const fa = document.getElementById('rc-fix-all'); if(fa) fa.onclick = ()=>{ const ids = [...document.querySelectorAll('[data-rc-fixev]')].map(b=> b.dataset.rcFixev); if(!ids.length) return; if(!confirm('Исправить записи в Книге по ' + ids.length + ' ' + pluralRu(ids.length,'мероприятию','мероприятиям','мероприятиям') + '?')) return; runFix(ids, fa); }; }
     document.querySelectorAll('[data-rc-flag]').forEach(el=> el.onclick = ()=> setFlag(el.dataset.rcFlag, true));
     document.querySelectorAll('[data-rc-unflag]').forEach(el=> el.onclick = ()=> setFlag(el.dataset.rcUnflag, false));
@@ -34163,7 +34231,11 @@
       const journalSum = paymentsArr.filter(p=>!p.certRedemptionRef).reduce((s,p)=> s + (Number(p.amount)||0), 0);
       const priceInput = overlay.querySelector('#f-price');
       const priceVal = priceInput.value === '' ? 0 : Number(priceInput.value);
-      if(priceVal !== journalSum){
+      const _dups = findDupPayments({ payments: paymentsArr, price: priceVal });
+      if(_dups.length){
+        hintEl.textContent = `⚠ Похоже, оплата записана дважды: ${_dups.map(x=> formatMoney(x.dup.amount) + ' · ' + (x.dup.source||'')).join(', ')} — одна и та же сумма, счёт и день, а в «Выручке» она учтена один раз. Уберите лишнюю строку через «Книга → Сверка → Двойные оплаты» (там выручка не изменится).`;
+        hintEl.style.display = 'block';
+      } else if(priceVal !== journalSum){
         hintEl.textContent = `⚠ Сумма в журнале платежей — ${formatMoney(journalSum)}, а в поле «Выручка» — ${formatMoney(priceVal)}. Проверьте, не разошлось ли.`;
         hintEl.style.display = 'block';
       } else {
