@@ -3343,6 +3343,7 @@
     salaryAdjustments: null,
     monthlyPlans: null,
     refOverrides: null,
+    kpTexts: null,
     refSettings: null,
     refLog: null,
     netProfitManual: null,
@@ -3996,6 +3997,10 @@
       state.refSettings = rs ? JSON.parse(rs.value) : {};
     }catch(e){ state.refSettings = {}; }
     try{
+      const kt = await window.storage.get('kp-texts', true);
+      state.kpTexts = kt ? JSON.parse(kt.value) : {};
+    }catch(e){ state.kpTexts = {}; }
+    try{
       const lsr = await window.storage.get('load-settings', true);
       state.loadSettings = lsr ? JSON.parse(lsr.value) : {};
     }catch(e){ state.loadSettings = {}; }
@@ -4158,6 +4163,7 @@
     state._monthlyPlansBaseline = JSON.parse(JSON.stringify(state.monthlyPlans));
     state._refOverridesBaseline = JSON.parse(JSON.stringify(state.refOverrides||{}));
     state._refSettingsBaseline = JSON.parse(JSON.stringify(state.refSettings||{}));
+    state._kpTextsBaseline = JSON.parse(JSON.stringify(state.kpTexts||{}));
     state._loadSettingsBaseline = JSON.parse(JSON.stringify(state.loadSettings||{}));
     state._refLogBaseline = JSON.parse(JSON.stringify(state.refLog||[]));
     state._dailyReportSnapshotsBaseline = JSON.parse(JSON.stringify(state.dailyReportSnapshots));
@@ -7787,6 +7793,65 @@
   async function saveRefSettings(){
     await saveMapMerged('reference-settings', state.refSettings, state._refSettingsBaseline, (m)=>{ state.refSettings = m; state._refSettingsBaseline = JSON.parse(JSON.stringify(m)); });
   }
+
+  // ---- тексты для КП-картинок: короткое «продающее» описание мероприятия ----
+  // хранятся в общем ключе 'kp-texts' по названию мероприятия (одно на все категории);
+  // если руководитель ничего не задал — берём текст по умолчанию или первое предложение описания с сайта
+  const KP_TEXT_DEFAULTS = {
+    'Керамика (лепка из глины)': {title:'Керамика', desc:'Слепите чашку, тарелочку или миску и распишите её — посуда, сделанная своими руками', tags:'готово через месяц'},
+    'Гончарный круг': {title:'Гончарный круг', desc:'Создадите кружку или миску на гончарном круге и распишете её ангобом', tags:'готово через месяц'},
+    'Панно-ваза': {title:'Панно-ваза', desc:'Мягкие складки ткани и золото на фактурном фоне — стильный акцент для интерьера', tags:''},
+    'Дофаминовая ваза': {title:'Дофаминовая ваза', desc:'Яркая ваза с гипсовыми лимонами, ягодами и сердечками — для цветов, кистей или просто для радости', tags:'забираете в тот же день'},
+    'Свободный акрил (рисование акрилом)': {title:'Свободный акрил', desc:'Каждый рисует свой сюжет: цветы, птиц, закат — всё, что по душе', tags:'забираете в тот же день'},
+    'Картина-аффирмация': {title:'Картина-аффирмация', desc:'Тёплые слова на красивом фоне — чтобы улыбаться каждый день', tags:''},
+    '3D-аффирмации': {title:'3D-аффирмация', desc:'Любимая фраза оживает объёмными буквами на нежном фоне', tags:''},
+    'Фактурные картины': {title:'Фактурная картина', desc:'Рельеф, золото и серебро — такую картину хочется трогать руками', tags:''},
+    'Фактурная луна с подсветкой': {title:'Фактурная луна', desc:'Рельефная луна с подсветкой: днём — декор, вечером — мягкий свет', tags:'забираете в тот же день'},
+    'Дофаминовая картина': {title:'Дофаминовая картина', desc:'Сочные полоски и объёмные детали — ягодки, лимончики, круассаны. Заряд радости на холсте', tags:'забираете в тот же день'},
+    'Роспись одежды': {title:'Роспись одежды', desc:'Шопер или любимая вещь с вашим рисунком — второй такой ни у кого не будет', tags:''},
+    'Роспись шоперов': {title:'Роспись шопера', desc:'Шопер с вашим рисунком — второй такой ни у кого не будет', tags:''},
+    'Изготовление свечи': {title:'Ароматные свечи', desc:'Свеча с сухоцветами и деревянным фитилём — тёплый уют для дома', tags:'свой аромат, забираете в тот же день'},
+    'Свеча и диффузор': {title:'Свеча и диффузор', desc:'Свеча и диффузор с ароматом, который вы подберёте сами, — уют для дома', tags:'забираете в тот же день'},
+    'Авторские духи (авторский парфюм)': {title:'Авторские духи', desc:'Смешаете свой парфюм — нежный, свежий или пряный, как нравится именно вам', tags:'забираете сразу'},
+    'Эпоксидная смола': {title:'Эпоксидная смола', desc:'Часы, картины, подставки или ёлочные игрушки — смола с блёстками и пигментами сияет и переливается', tags:'готово до 10 дней'},
+    'Портреты в стиле Pinterest': {title:'Портрет в стиле Pinterest', desc:'Нежный портрет в модной эстетике — себя или подруги', tags:''},
+    'Коты-мемы': {title:'Коты-мемы', desc:'Любимый котик-мем на холсте — улыбка гарантирована', tags:''},
+    'Винная дегустация': {title:'Винная дегустация', desc:'Три вина, праздничный фуршет и тёплые разговоры — особенный вечер в кругу близких', tags:''},
+    'Тафтинг (создание ковра, в т.ч. на девичнике)': {title:'Тафтинг', desc:'Создадите свой мягкий ковёр в технике тафтинга — яркий акцент для дома', tags:''},
+  };
+  function kpTextDefault(item){
+    const d = KP_TEXT_DEFAULTS[item.name];
+    if(d) return Object.assign({}, d);
+    const title = String(item.name||'').replace(/\s*\([^)]*\)\s*/g,' ').replace(/\s+/g,' ').trim();
+    const first = String(item.desc||'').split(/(?<=[.!?])\s+/)[0] || '';
+    const com = ((item.vars||[])[0]||{}).com || '';
+    const tags = /сразу|тот же (день|вечер)/i.test(com) ? 'забираете в тот же день' : (/1 месяц|через месяц/i.test(com) ? 'готово через месяц' : (/до 10 дней/i.test(com) ? 'готово до 10 дней' : ''));
+    return { title, desc: first.replace(/\.$/,''), tags };
+  }
+  function kpTextFor(item){
+    const ov = (state.kpTexts||{})[item.name];
+    const base = kpTextDefault(item);
+    return ov ? { title: ov.title || base.title, desc: ov.desc || base.desc, tags: ov.tags != null ? ov.tags : base.tags, custom: true } : Object.assign(base, { custom:false });
+  }
+  async function saveKpTexts(){
+    await saveMapMerged('kp-texts', state.kpTexts, state._kpTextsBaseline, (m)=>{ state.kpTexts = m; state._kpTextsBaseline = JSON.parse(JSON.stringify(m)); });
+  }
+  // источник для генератора КП-картинок (вкладка «🖼 КП»): мероприятия справочника с текстами и ценами для частных групп
+  window.KPGenSource = function(){
+    const out = []; const seen = {};
+    const order = ['priv','teen','kids','sched'];
+    order.forEach(cid=>{
+      const cat = REFERENCE_DATA.cats.find(c=>c.id===cid); if(!cat) return;
+      cat.groups.forEach(g=> g.items.forEach(item=>{
+        if(seen[item.name]) return; seen[item.name] = true;
+        const t = kpTextFor(item);
+        const vars = (item.vars||[]).map(v0=>{ const v = refEffVariant(cat, item, v0); const t0 = v.tiers[0] || {};
+          return { label: v.label, dur: v.dur || '', price: t0.price, unit: t0.unit || '', lbl: t0.lbl || '', tiers: v.tiers.length }; });
+        out.push({ group: refShortGroup(g.name), ref: item.name, title: t.title, desc: t.desc, tags: t.tags, vars });
+      }));
+    });
+    return out;
+  };
   async function saveRefLog(){
     if(state.refLog.length > 3000) state.refLog = state.refLog.slice(-3000);
     await saveCollectionMerged('reference-log', state.refLog, state._refLogBaseline, (a)=>{ state.refLog = a; state._refLogBaseline = JSON.parse(JSON.stringify(a)); });
@@ -8139,6 +8204,14 @@
           ${v.mat ? `<div>В стоимость входит</div><div>${escapeHtml(v.mat)}</div>` : ''}
           ${v.com ? `<div>Важно знать</div><div>${escapeHtml(v.com)}</div>` : ''}
         </div>
+        ${(()=>{ const kt = kpTextFor(item); return `<div class="ref-box" id="ref-kptext"><h4>🖼 Текст для КП-картинки ${kt.custom?'<span style="font-weight:400;font-size:11px;color:var(--ink-soft);">· изменён</span>':''}</h4>
+          ${edit ? `<div style="display:flex;flex-direction:column;gap:6px;">
+            <input type="text" id="kpt-title" value="${escapeHtml(kt.title)}" placeholder="Название в КП">
+            <textarea id="kpt-desc" rows="2" placeholder="Короткое описание (1–2 предложения)">${escapeHtml(kt.desc)}</textarea>
+            <input type="text" id="kpt-tags" value="${escapeHtml(kt.tags)}" placeholder="Плашки через запятую: готово через месяц, забираете в тот же день">
+            <div class="ref-row"><button class="btn btn-primary" id="kpt-save">Сохранить</button>${kt.custom?'<button class="btn btn-ghost" id="kpt-reset">Вернуть по умолчанию</button>':''}<span style="font-size:11.5px;color:var(--ink-soft);">Менеджеры увидят этот текст во вкладке «🖼 КП».</span></div>
+          </div>` : `<div style="font-size:13px;line-height:1.5;"><b>${escapeHtml(kt.title)}</b><br>${escapeHtml(kt.desc)}${kt.tags?`<br><span style="color:var(--ink-soft);">Плашки: ${escapeHtml(kt.tags)}</span>`:''}</div>`}
+        </div>`; })()}
         ${item.desc ? `<details><summary style="cursor:pointer;font-size:13px;color:var(--ink-soft);">Описание с сайта</summary><div style="font-size:13px;margin-top:6px;line-height:1.5;">${escapeHtml(item.desc)}</div></details>` : ''}
         ${item.link ? `<div style="margin-top:10px;"><a href="${escapeHtml(item.link)}" target="_blank" rel="noopener" style="font-size:13px;">Страница на сайте ↗</a></div>` : ''}
       `;
@@ -8222,6 +8295,17 @@
         await saveRefOverrides(); drawDetail();
       });
       detEl.querySelectorAll('[data-reset]').forEach(b=> b.onclick = async ()=>{ const t = v.tiers[+b.dataset.reset]; delete state.refOverrides[t.okey]; await saveRefOverrides(); drawDetail(); });
+      attachKpTextEditor(item);
+    }
+    function attachKpTextEditor(item){
+      const sv = detEl.querySelector('#kpt-save'); if(!sv) return;
+      sv.onclick = async ()=>{
+        if(!state.kpTexts) state.kpTexts = {};
+        state.kpTexts[item.name] = { title: detEl.querySelector('#kpt-title').value.trim(), desc: detEl.querySelector('#kpt-desc').value.trim(), tags: detEl.querySelector('#kpt-tags').value.trim() };
+        await saveKpTexts(); drawDetail();
+      };
+      const rs = detEl.querySelector('#kpt-reset');
+      if(rs) rs.onclick = async ()=>{ delete state.kpTexts[item.name]; await saveKpTexts(); drawDetail(); };
     }
     function backBar(){ return '<button class="btn btn-ghost" id="ref-back" style="margin-bottom:10px;">← К справочнику</button>'; }
     function drawSettings(){
@@ -11056,6 +11140,7 @@
       <div class="cert-subtabs">
         ${!hideRefundsConversion ? `<button data-certview="conversion" class="${state.certView==='conversion'?'active':''}" style="${state.currentRole==='manager'?'font-weight:700;':''}">📈 Конверсия</button>` : ''}
         ${isAdminNoRefundsConversion ? `<button data-certview="conversion" class="${state.certView==='conversion'?'active':''}">👥 Клиенты</button>` : ''}
+        ${!isHostessLimited ? `<button data-certview="kp" class="${state.certView==='kp'?'active':''}">🖼 КП</button>` : ''}
         <button data-certview="certificates" class="${state.certView==='certificates'?'active':''}">Сертификаты</button>
         ${(!isHostessLimited && ['owner','admin'].includes(state.currentRole)) ? `<button data-certview="salary-adj" class="${state.certView==='salary-adj'?'active':''}">Корректировки ЗП</button>` : ''}
         ${(!isHostessLimited && ['owner','manager'].includes(state.currentRole)) ? `<button data-certview="manager-salary" class="${state.certView==='manager-salary'?'active':''}">${state.currentRole==='owner' ? 'ЗП менеджеров' : '💰 Моя ЗП'}</button>` : ''}
@@ -11067,6 +11152,9 @@
         ${(!isHostessLimited && !isAdminNoRefundsConversion) ? `<button data-certview="outreach" class="${state.certView==='outreach'?'active':''}">🎉 Поздравления${outreachDueCount()>0?` <span style="display:inline-block;min-width:18px;padding:0 5px;border-radius:9px;background:var(--status-red);color:#fff;font-size:11px;font-weight:600;line-height:18px;text-align:center;">${outreachDueCount()}</span>`:''}</button>` : ''}
       </div>
     `;
+    if(state.certView === 'kp' && !isHostessLimited){
+      return subTabsHtml + (window.KPGen ? window.KPGen.renderHtml() : '<p>Генератор КП не загрузился — обновите страницу.</p>');
+    }
     if(state.certView === 'deposits' && !isHostessLimited){
       return subTabsHtml + renderDepositsView();
     }
@@ -11504,6 +11592,7 @@
   function attachCertificatesEvents(){
     attachLeadBoardEvents();
     if(state.certView === 'legal'){ try{ attachLegalViewEvents(); }catch(e){ console.warn(e); } }
+    if(state.certView === 'kp' && window.KPGen){ try{ window.KPGen.attach(); }catch(e){ console.warn(e); } }
     document.querySelectorAll('[data-certview]').forEach(btn=>{
       btn.onclick = ()=>{ state.certView = btn.dataset.certview; state.certSummaryExpandedYears = new Set(); render(); };
     });
@@ -36275,6 +36364,518 @@
 })();
 </script>
 
+
+<script>
+/* ===== Генератор КП-картинок (вкладка «🖼 КП» в разделе «Для менеджеров») =====
+   Самостоятельный модуль: своё состояние, свой рендер формы и превью на <canvas>.
+   В основном приложении нужны только три хука: кнопка вкладки, вызов KPGen.renderHtml()
+   и KPGen.attach() после рендера. Тексты черновика сохраняются в localStorage,
+   фото живут только в текущей сессии (чтобы не переполнить хранилище). */
+(function(){
+  const LS_KEY = 'kpgen_draft_v1';
+  const W = 1080, PAD = 80, CW = W - PAD*2, SCALE = 2;
+  const C = { green:'#949E7C', bg:'#F3F2EE', card:'#FFFFFF', soft:'#E4E6D8', ink:'#2E3427', text:'#4A5040', muted:'#6E7858', yellow:'#EED789', dark:'#2E3427' };
+  const F_HEAD = '"Unbounded", "Arial Black", sans-serif';
+  const F_BODY = '"Inter", "Helvetica Neue", Arial, sans-serif';
+  const LOGO_SRC = 'data:image/png;base64,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';
+
+  const OCCASIONS = ['МАСТЕР-КЛАСС НА ДЕНЬ РОЖДЕНИЯ','МАСТЕР-КЛАСС','ДЕНЬ РОЖДЕНИЯ','ДЕТСКИЙ ДЕНЬ РОЖДЕНИЯ','КОРПОРАТИВ','КОРПОРАТИВ · ВЫЕЗДНОЙ МАСТЕР-КЛАСС','ИНДИВИДУАЛЬНЫЙ МАСТЕР-КЛАСС','МАСТЕР-КЛАСС НА ДЕВИЧНИК','СЕМЕЙНЫЙ МАСТЕР-КЛАСС'];
+
+  // готовые описания направлений — менеджер выбирает и при необходимости правит
+  const PRESETS = [
+    {name:'Керамика', desc:'Слепите чашку, тарелочку или миску и распишите её — посуда, сделанная своими руками', tags:'готово через месяц'},
+    {name:'Мини-керамика', desc:'Мини-тарелочка с котиком, лимонами или своей надписью — милый декор или подарок', tags:'готово через месяц'},
+    {name:'Украшения из глины', desc:'Серьги, подвески или брошки из глины — с рельефом и в любимых цветах', tags:'готово через месяц'},
+    {name:'Мини-вазы для декора', desc:'Слепите вазу своей формы и распишите её — с котиком, полосками или веточками', tags:'готово через месяц'},
+    {name:'Керамика: кино и вино', desc:'Лепите из глины под любимый фильм с бокалом вина — уютный вечер в компании', tags:'готово через месяц'},
+    {name:'Дофаминовая картина', desc:'Сочные полоски и объёмные детали — ягодки, лимончики, круассаны. Заряд радости на холсте', tags:'забираете в тот же день'},
+    {name:'Свободный акрил', desc:'Каждый рисует свой сюжет: цветы, птиц, закат — всё, что по душе', tags:'забираете в тот же день'},
+    {name:'Картина-аффирмация', desc:'Тёплые слова на красивом фоне — чтобы улыбаться каждый день', tags:''},
+    {name:'3D-аффирмация', desc:'Любимая фраза оживает объёмными буквами на нежном фоне', tags:''},
+    {name:'Фактурная картина', desc:'Рельеф, золото и серебро — такую картину хочется трогать руками', tags:''},
+    {name:'Панно-ваза', desc:'Мягкие складки ткани и золото на фактурном фоне — стильный акцент для интерьера', tags:''},
+    {name:'Портрет в стиле Pinterest', desc:'Нежный портрет в модной эстетике — себя или подруги', tags:''},
+    {name:'Коты-мемы', desc:'Любимый котик-мем на холсте — улыбка гарантирована', tags:''},
+    {name:'Роспись одежды', desc:'Шопер или любимая вещь с вашим рисунком — второй такой ни у кого не будет', tags:''},
+    {name:'Авторские духи', desc:'Смешаете свой парфюм — нежный, свежий или пряный, как нравится именно вам', tags:''},
+    {name:'Ароматные свечи', desc:'Свеча с сухоцветами и деревянным фитилём — тёплый уют для дома', tags:'свой аромат'},
+    {name:'Игрушки из смолы', desc:'Снежинки, звёзды, лошадки — смола с блёстками превращает их в сияющие украшения', tags:'заберёте через 5 дней'},
+    {name:'Роспись ёлочных игрушек', desc:'Деревянные спилы или гипсовые фигурки — расписываете в любимых цветах', tags:'забираете сразу'},
+    {name:'Рождественский венок', desc:'Живая пихта, дольки апельсина, корица и бадьян — венок пахнет хвоей и пряностями', tags:'забираете сразу'},
+    {name:'Композиция на спиле', desc:'Свеча, хвоя, шишки, корица и апельсины на деревянном спиле', tags:'новогодний'},
+    {name:'Свечи в бокалах', desc:'Ароматная свеча в бокале: пряный, цитрусовый или хвойный аромат', tags:'новогодний'},
+    {name:'Картины в винтажных рамах', desc:'Миниатюрная картина в гипсовой раме, которую можно раскрасить в любой цвет', tags:'новогодний'},
+  ];
+  const NOTES = [
+    {id:'fixed5', text:'Стоимость рассчитана на компанию от 5 гостей и фиксируется при бронировании. Если кто-то не сможет прийти, сумма остаётся прежней — мы готовим место и материалы для каждого'},
+    {id:'ceramics', text:'Керамика готова через месяц: сушка, обжиг и глазурь. Забрать изделия можно на Пушкина, 6'},
+    {id:'included', text:'В стоимость входят мастер и все материалы'},
+    {id:'offsite', text:'Выездной формат: мастер, материалы и выезд включены в стоимость'},
+    {id:'prepay', text:'Бронирование — предоплата 2 000 ₽, остаток в день мастер-класса. Возврат при отмене не позднее чем за 3 дня'},
+  ];
+
+  function blankDir(){ return {name:'', desc:'', tags:'', price:'', ref:'', photos:[null,null], pos:[null,null], fit:[false,false], faces:[null,null]}; }
+  function defaults(){
+    return {
+      occasion:'МАСТЕР-КЛАСС НА ДЕНЬ РОЖДЕНИЯ', title1:'КЕРАМИКА', title2:'',
+      date:'', guests:'', duration:'', chipExtra:'', lead:'',
+      dirLabel:'Выберите мастер-класс', dirs:[blankDir()],
+      prices:[{label:'', price:'', unit:'за гостя', hl:true}],
+      notes:{}, noteCustom:''
+    };
+  }
+  let D = load();
+  const imgCache = {}; // dataURL -> HTMLImageElement
+  let logoImg = null;
+
+  function load(){
+    try{
+      const raw = JSON.parse(localStorage.getItem(LS_KEY)||'null');
+      if(raw && raw.dirs){ raw.dirs.forEach(d=>{ d.photos=[null,null]; d.pos=[null,null]; d.fit=[false,false]; d.faces=[null,null]; delete d.focus; }); return Object.assign(defaults(), raw); }
+    }catch(e){}
+    return defaults();
+  }
+  function save(){
+    try{
+      const copy = JSON.parse(JSON.stringify(D, (k,v)=> (k==='photos'||k==='faces') ? undefined : v));
+      localStorage.setItem(LS_KEY, JSON.stringify(copy));
+    }catch(e){}
+  }
+  const esc = s => String(s==null?'':s).replace(/[&<>"']/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+
+  // ---------- шрифты ----------
+  let fontsReady = null;
+  function ensureFonts(){
+    if(fontsReady) return fontsReady;
+    if(!document.getElementById('kpgen-fonts')){
+      const l = document.createElement('link');
+      l.id='kpgen-fonts'; l.rel='stylesheet';
+      l.href='https://fonts.googleapis.com/css2?family=Unbounded:wght@600;700;800&family=Inter:wght@400;500;600;700&display=swap';
+      document.head.appendChild(l);
+    }
+    const want = ['800 40px Unbounded','700 20px Unbounded','400 18px Inter','600 18px Inter','500 18px Inter'];
+    fontsReady = Promise.race([
+      Promise.all(want.map(f=>document.fonts.load(f,'АБВ ₽ 123'))).catch(()=>{}),
+      new Promise(r=>setTimeout(r,4000))
+    ]);
+    return fontsReady;
+  }
+  function loadLogo(){
+    return new Promise(res=>{ if(logoImg) return res(); const i=new Image(); i.onload=()=>{logoImg=i;res();}; i.onerror=()=>res(); i.src=LOGO_SRC; });
+  }
+  function getImg(src){
+    if(!src) return null;
+    if(imgCache[src]) return imgCache[src].complete ? imgCache[src] : null;
+    const i=new Image(); i.onload=()=>scheduleDraw(); i.src=src; imgCache[src]=i; return null;
+  }
+
+  // ---------- расчёты ----------
+  function guestRange(){
+    const m = String(D.guests||'').match(/(\d+)\s*(?:[-–—]\s*(\d+))?/);
+    if(!m) return null;
+    const a=+m[1], b=m[2]?+m[2]:a; return a>0 ? [a,b] : null;
+  }
+  const num = s => { const n = parseFloat(String(s||'').replace(/\s/g,'').replace(',','.')); return isFinite(n)?n:null; };
+  const fmt = n => String(Math.round(n)).replace(/\B(?=(\d{3})+(?!\d))/g,' ');
+  function guestsWord(n){ const m10=n%10, m100=n%100; if(m10===1&&m100!==11) return 'гостя'; return 'гостей'; }
+  function totalText(p){
+    const v=num(p.price); const g=guestRange();
+    if(v==null || !g || p.unit!=='за гостя') return '';
+    const [a,b]=g; const who = a===b ? `${a} ${guestsWord(a)}` : `${a}–${b} гостей`;
+    return (a===b ? fmt(v*a) : fmt(v*a)+'–'+fmt(v*b)) + ' ₽ за ' + who;
+  }
+  function guestsChip(){
+    const g=guestRange(); if(!g) return String(D.guests||'').trim();
+    const [a,b]=g; if(a!==b) return `${a}–${b} гостей`;
+    const m10=a%10,m100=a%100; const w = (m10===1&&m100!==11)?'гость':(m10>=2&&m10<=4&&(m100<12||m100>14))?'гостя':'гостей';
+    return `${a} ${w}`;
+  }
+
+  // ---------- примитивы рисования ----------
+  function rr(ctx,x,y,w,h,r){ r=Math.min(r,w/2,h/2); ctx.beginPath(); ctx.moveTo(x+r,y); ctx.arcTo(x+w,y,x+w,y+h,r); ctx.arcTo(x+w,y+h,x,y+h,r); ctx.arcTo(x,y+h,x,y,r); ctx.arcTo(x,y,x+w,y,r); ctx.closePath(); }
+  function wrap(ctx,text,maxW){
+    const out=[]; String(text||'').split('\n').forEach(par=>{
+      const words=par.split(/\s+/).filter(Boolean); let line='';
+      words.forEach(w=>{ const t=line?line+' '+w:w; if(ctx.measureText(t).width>maxW && line){ out.push(line); line=w; } else line=t; });
+      if(line) out.push(line);
+    }); return out;
+  }
+  function textBlock(ctx,text,x,y,maxW,font,lh,color,draw,align){
+    ctx.font=font; const lines=wrap(ctx,text,maxW);
+    if(draw){ ctx.fillStyle=color; ctx.textBaseline='top'; ctx.textAlign=align||'left';
+      lines.forEach((l,i)=>ctx.fillText(l, align==='center'?x+maxW/2:(align==='right'?x+maxW:x), y+i*lh)); ctx.textAlign='left'; }
+    return lines.length*lh;
+  }
+  // Кадрирование «по лицам»: если на фото найдены лица, кадр строится так, чтобы все они
+  // попали внутрь с запасом сверху; без лиц — смещение к верхней трети (лица обычно там).
+  // ph.pos (0..100) — ручной сдвиг менеджера, ph.fit — показать фото целиком.
+  function cropRect(img,w,h,ph){
+    const s=Math.max(w/img.width,h/img.height), sw=w/s, sh=h/s;
+    const slackX=img.width-sw, slackY=img.height-sh;
+    let fx=slackX/2, fy=slackY*0.3;
+    const f=ph&&ph.faces;
+    if(f){
+      const fcx=(f.l+f.r)/2*img.width, top=f.t*img.height, bot=f.b*img.height, fh=bot-top;
+      fx=fcx-sw/2;
+      // лица — у верхнего края кадра с небольшим запасом: так под ними остаётся место для работ в руках
+      const pad=Math.min(fh*0.5, sh*0.10);
+      fy = top-pad;
+    }
+    if(ph&&ph.pos!=null){ const k=ph.pos/100; if(slackY>1) fy=slackY*k; if(slackX>1) fx=slackX*k; }
+    fx=Math.max(0,Math.min(slackX,fx)); fy=Math.max(0,Math.min(slackY,fy));
+    return [fx,fy,sw,sh];
+  }
+  function cover(ctx,img,x,y,w,h,ph,r){
+    ctx.save(); rr(ctx,x,y,w,h,r||0); ctx.clip();
+    if(img && ph && ph.fit){
+      const [bx,by,bw,bh]=cropRect(img,w,h,{pos:50});
+      ctx.filter='blur(18px) brightness(0.92)'; ctx.drawImage(img,bx,by,bw,bh,x-20,y-20,w+40,h+40); ctx.filter='none';
+      const s=Math.min(w/img.width,h/img.height), dw=img.width*s, dh=img.height*s;
+      ctx.drawImage(img,x+(w-dw)/2,y+(h-dh)/2,dw,dh);
+    } else if(img){
+      const [fx,fy,sw,sh]=cropRect(img,w,h,ph);
+      ctx.drawImage(img,fx,fy,sw,sh,x,y,w,h);
+    } else {
+      ctx.fillStyle=C.soft; ctx.fillRect(x,y,w,h);
+      ctx.fillStyle=C.muted; ctx.font=`500 16px ${F_BODY}`; ctx.textAlign='center'; ctx.textBaseline='middle';
+      ctx.fillText('добавьте фото', x+w/2, y+h/2); ctx.textAlign='left';
+    }
+    ctx.restore();
+  }
+  // плашки-теги с переносом; возвращает высоту
+  function pills(ctx,items,x,y,maxW,draw,o){
+    o=Object.assign({font:`600 15px ${F_BODY}`,h:30,px:13,gap:8,bg:C.soft,color:'#3C4430'},o||{});
+    ctx.font=o.font; let cx=x, cy=y;
+    items.forEach(t=>{ const w=ctx.measureText(t).width+o.px*2;
+      if(cx>x && cx+w>x+maxW){ cx=x; cy+=o.h+o.gap; }
+      if(draw){ ctx.fillStyle=o.bg; rr(ctx,cx,cy,w,o.h,o.h/2); ctx.fill(); ctx.fillStyle=o.color; ctx.textBaseline='middle'; ctx.fillText(t,cx+o.px,cy+o.h/2+1); }
+      cx+=w+o.gap; });
+    return items.length ? (cy-y)+o.h : 0;
+  }
+  const tagsOf = d => String(d.tags||'').split(/;|,(?!\d)/).map(s=>s.trim()).filter(Boolean);
+  const photosOf = d => (d.photos||[]).map((p,i)=>p?{src:p,pos:(d.pos||[])[i],fit:(d.fit||[])[i],faces:(d.faces||[])[i]}:null).filter(Boolean);
+
+  // ---------- макет: один проход считает высоту, второй рисует ----------
+  function layout(ctx,draw){
+    let y=0;
+    // шапка
+    const titleLines=[D.title1,D.title2].map(s=>String(s||'').trim().toUpperCase()).filter(Boolean);
+    let ts = titleLines.length>1 ? 56 : 68;
+    ctx.font=`800 ${ts}px ${F_HEAD}`;
+    while(ts>30 && titleLines.some(l=>ctx.measureText(l).width>CW)){ ts-=2; ctx.font=`800 ${ts}px ${F_HEAD}`; }
+    const occ=String(D.occasion||'').trim();
+    let hy=36; const logoH=90;
+    hy+=logoH;
+    if(occ) hy+=14+42;
+    hy+=16+titleLines.length*Math.round(ts*1.12);
+    const headH=hy+70;
+    if(draw){
+      ctx.fillStyle=C.bg; ctx.fillRect(0,0,W,ctx.canvas.height/SCALE);
+      ctx.fillStyle=C.green; ctx.beginPath(); ctx.moveTo(0,0); ctx.lineTo(W,0);
+      const base=headH-14; let x=W, up=false; ctx.lineTo(W,base);
+      const steps=[38,32,40,48,29,30,45,31,39,46,29,44,34,29,30,41,41,30,35,30,45,41,29,46,31,35,48,36,48,36];
+      let i=0; while(x>0){ x-=steps[i%steps.length]; i++; ctx.lineTo(Math.max(x,0), up? base : base-30+((i*7)%9)); up=!up; }
+      ctx.lineTo(0,base-10); ctx.closePath(); ctx.fill();
+      let yy=36;
+      if(logoImg) ctx.drawImage(logoImg,(W-126)/2,yy,126,90);
+      yy+=logoH;
+      if(occ){
+        yy+=14; ctx.font=`700 19px ${F_HEAD}`; const pw=ctx.measureText(occ).width+52;
+        ctx.strokeStyle='rgba(255,255,255,.85)'; ctx.lineWidth=2; rr(ctx,(W-pw)/2,yy,pw,42,21); ctx.stroke();
+        ctx.fillStyle='#fff'; ctx.textAlign='center'; ctx.textBaseline='middle'; ctx.fillText(occ,W/2,yy+22); ctx.textAlign='left'; yy+=42;
+      }
+      yy+=16; ctx.font=`800 ${ts}px ${F_HEAD}`; ctx.fillStyle='#fff'; ctx.textAlign='center'; ctx.textBaseline='top';
+      titleLines.forEach((l,k)=>ctx.fillText(l,W/2,yy+k*Math.round(ts*1.12))); ctx.textAlign='left';
+    }
+    y=headH+10;
+    // плашки
+    const chips=[D.date&&('📅 '+D.date), guestsChip()&&('👥 '+guestsChip()), D.duration&&('⏱ '+D.duration), D.chipExtra&&('✦ '+D.chipExtra)].filter(Boolean).map(s=>s.replace(/^\S+ /,''));
+    if(chips.length){
+      ctx.font=`600 20px ${F_BODY}`; const widths=chips.map(c=>ctx.measureText(c).width+44); const tot=widths.reduce((a,b)=>a+b,0)+14*(chips.length-1);
+      if(draw){ let cx=(W-Math.min(tot,CW))/2; chips.forEach((c,k)=>{ ctx.fillStyle='#fff'; rr(ctx,cx,y,widths[k],48,24); ctx.fill(); ctx.fillStyle=C.ink; ctx.textBaseline='middle'; ctx.fillText(c,cx+22,y+25); cx+=widths[k]+14; }); }
+      y+=48+24;
+    }
+    if(String(D.lead||'').trim()){ y+=textBlock(ctx,D.lead,PAD+30,y,CW-60,`500 21px ${F_BODY}`,30,'#3C4430',draw,'center')+22; }
+    // направления
+    const dirs=D.dirs.filter(d=>d.name||d.desc||photosOf(d).length);
+    if(dirs.length){
+      if(D.dirLabel){ if(draw){ ctx.font=`700 17px ${F_HEAD}`; ctx.fillStyle=C.muted; ctx.textBaseline='top'; ctx.fillText(String(D.dirLabel).toUpperCase(),PAD+4,y); } y+=34; }
+      const cards=[]; for(let k=0;k<dirs.length;k++){ const last = k===dirs.length-1 && dirs.length%2===1; cards.push({d:dirs[k], wide: dirs.length===1 || last}); }
+      let k=0;
+      while(k<cards.length){
+        if(cards[k].wide){ y+=wideCard(ctx,cards[k].d,PAD,y,CW,draw)+16; k++; }
+        else{ const cw=(CW-16)/2; const h1=colCard(ctx,cards[k].d,PAD,y,cw,false,0), h2=colCard(ctx,cards[k+1].d,PAD+cw+16,y,cw,false,0); const h=Math.max(h1,h2);
+          if(draw){ colCard(ctx,cards[k].d,PAD,y,cw,true,h); colCard(ctx,cards[k+1].d,PAD+cw+16,y,cw,true,h); }
+          y+=h+16; k+=2; }
+      }
+    }
+    // цены
+    const prices=D.prices.filter(p=>p.label||num(p.price)!=null);
+    if(prices.length){ y+=4; y+=priceBlock(ctx,prices,PAD,y,CW,draw)+16; }
+    // примечания
+    const notes=NOTES.filter(n=>D.notes[n.id]).map(n=>n.text); if(String(D.noteCustom||'').trim()) notes.push(D.noteCustom.trim());
+    notes.forEach(t=>{ const h=textBlock(ctx,t,PAD+28,0,CW-56,`500 18px ${F_BODY}`,26,C.ink,false)+40;
+      if(draw){ ctx.fillStyle=C.soft; rr(ctx,PAD,y,CW,h,22); ctx.fill(); textBlock(ctx,t,PAD+28,y+20,CW-56,`500 18px ${F_BODY}`,26,C.ink,true); }
+      y+=h+12; });
+    return y+40;
+  }
+  function cardBody(ctx,d,x,y,w,draw){
+    let h=0;
+    h+=textBlock(ctx,d.name,x,y+h,w,`800 23px ${F_HEAD}`,30,C.ink,draw)+8;
+    if(d.desc) h+=textBlock(ctx,d.desc,x,y+h,w,`400 17.5px ${F_BODY}`,25,C.text,draw)+10;
+    const t=tagsOf(d); if(t.length) h+=pills(ctx,t,x,y+h,w,draw)+10;
+    if(String(d.price||'').trim()){ ctx.font=`800 26px ${F_HEAD}`; if(draw){ ctx.fillStyle=C.ink; ctx.textBaseline='top'; ctx.fillText(d.price,x,y+h+4); } h+=40; }
+    return h;
+  }
+  function photoArea(ctx,d,x,y,w,h,draw,r){
+    if(!draw) return; const ph=photosOf(d);
+    if(!ph.length){ cover(ctx,null,x,y,w,h,null,r); return; }
+    if(ph.length===1){ cover(ctx,getImg(ph[0].src),x,y,w,h,ph[0],r); return; }
+    ctx.save(); rr(ctx,x,y,w,h,r); ctx.clip(); const hw=(w-6)/2;
+    cover(ctx,getImg(ph[0].src),x,y,hw,h,ph[0],0); cover(ctx,getImg(ph[1].src),x+hw+6,y,hw,h,ph[1],0); ctx.restore();
+  }
+  function colCard(ctx,d,x,y,w,draw,fixedH){
+    const PH=300, bodyH=cardBody(ctx,d,x+22,y+PH+20,w-44,false), h=fixedH||PH+20+bodyH+14;
+    if(draw){ ctx.fillStyle=C.card; rr(ctx,x,y,w,h,24); ctx.fill(); ctx.save(); rr(ctx,x,y,w,h,24); ctx.clip(); photoArea(ctx,d,x,y,w,PH,true,0); ctx.restore(); cardBody(ctx,d,x+22,y+PH+20,w-44,true); }
+    return h;
+  }
+  function wideCard(ctx,d,x,y,w,draw){
+    const PW=Math.round(w*0.45), bodyH=cardBody(ctx,d,x+PW+28,y+28,w-PW-56,false), h=Math.max(300,bodyH+50);
+    if(draw){ ctx.fillStyle=C.card; rr(ctx,x,y,w,h,26); ctx.fill(); ctx.save(); rr(ctx,x,y,w,h,26); ctx.clip(); photoArea(ctx,d,x,y,PW,h,true,0); ctx.restore();
+      const off=Math.max(28,(h-bodyH)/2); cardBody(ctx,d,x+PW+28,y+off,w-PW-56,true); }
+    return h;
+  }
+  function priceBlock(ctx,prices,x,y,w,draw){
+    if(prices.length===1){
+      const p=prices[0], tot=totalText(p), h=118;
+      if(draw){ ctx.fillStyle=C.yellow; rr(ctx,x,y,w,h,26); ctx.fill();
+        ctx.textBaseline='alphabetic'; ctx.fillStyle=C.ink; ctx.font=`800 46px ${F_HEAD}`; const v=(num(p.price)!=null?fmt(num(p.price))+' ₽':''); ctx.fillText(v,x+32,y+62);
+        const vw=ctx.measureText(v).width; ctx.font=`700 22px ${F_HEAD}`; ctx.fillText(p.unit||'',x+32+vw+14,y+62);
+        ctx.font=`500 19px ${F_BODY}`; ctx.fillStyle='#3A3A2A'; ctx.fillText(p.label||'',x+32,y+94);
+        if(tot){ const [sum,...rest]=tot.split(' за '); ctx.textAlign='right'; ctx.font=`800 30px ${F_HEAD}`; ctx.fillStyle=C.ink; ctx.fillText(sum,x+w-32,y+58); ctx.font=`500 19px ${F_BODY}`; ctx.fillStyle='#3A3A2A'; ctx.fillText('за '+rest.join(' за '),x+w-32,y+88); ctx.textAlign='left'; }
+      }
+      return h;
+    }
+    const rowH=78, h=28+prices.length*rowH+12;
+    if(draw){ ctx.fillStyle=C.card; rr(ctx,x,y,w,h,26); ctx.fill();
+      prices.forEach((p,i)=>{ const ry=y+20+i*rowH;
+        if(p.hl){ ctx.fillStyle=C.yellow; rr(ctx,x+12,ry,w-24,rowH-6,18); ctx.fill(); }
+        else if(i>0){ ctx.fillStyle='rgba(46,52,39,.10)'; ctx.fillRect(x+30,ry-3,w-60,1.5); }
+        ctx.textBaseline='alphabetic'; ctx.fillStyle=C.ink; ctx.font=`600 20px ${F_BODY}`; ctx.fillText(p.label||'',x+32,ry+33);
+        const tot=totalText(p); if(tot){ ctx.font=`500 15.5px ${F_BODY}`; ctx.fillStyle='#5A6050'; ctx.fillText(tot,x+32,ry+56); }
+        ctx.textAlign='right'; ctx.font=`500 16px ${F_BODY}`; ctx.fillStyle='#5A6050'; const u=p.unit||''; ctx.fillText(u,x+w-32,ry+46); const uw=ctx.measureText(u).width;
+        ctx.font=`800 30px ${F_HEAD}`; ctx.fillStyle=C.ink; ctx.fillText(num(p.price)!=null?fmt(num(p.price))+' ₽':'',x+w-32-uw-10,ry+48); ctx.textAlign='left';
+      });
+    }
+    return h;
+  }
+
+  // ---------- рендер на canvas ----------
+  let drawTimer=null;
+  function scheduleDraw(){ clearTimeout(drawTimer); drawTimer=setTimeout(draw,120); }
+  async function draw(){
+    const cv=document.getElementById('kpgen-canvas'); if(!cv) return;
+    await ensureFonts(); await loadLogo();
+    const m=document.createElement('canvas').getContext('2d');
+    const H=Math.ceil(layout(m,false));
+    cv.width=W*SCALE; cv.height=H*SCALE;
+    const ctx=cv.getContext('2d'); ctx.setTransform(SCALE,0,0,SCALE,0,0);
+    layout(ctx,true);
+  }
+  function download(){
+    const cv=document.getElementById('kpgen-canvas'); if(!cv) return;
+    draw().then(()=>{
+      cv.toBlob(b=>{ const a=document.createElement('a'); const name=('КП_'+[D.title1,D.title2,D.date].filter(Boolean).join('_')).replace(/[\\/:*?"<>|\s]+/g,'_').slice(0,80);
+        a.href=URL.createObjectURL(b); a.download=name+'.jpg'; document.body.appendChild(a); a.click(); setTimeout(()=>{URL.revokeObjectURL(a.href); a.remove();},1000); },'image/jpeg',0.92);
+    });
+  }
+  // фото ужимаем до 1400 px по большей стороне — превью не тормозит
+  function readPhoto(file){
+    return new Promise(res=>{ const r=new FileReader(); r.onload=()=>{ const i=new Image(); i.onload=()=>{ const k=Math.min(1,1400/Math.max(i.width,i.height)); const c=document.createElement('canvas'); c.width=Math.round(i.width*k); c.height=Math.round(i.height*k); c.getContext('2d').drawImage(i,0,0,c.width,c.height); res(c.toDataURL('image/jpeg',0.9)); }; i.src=r.result; }; r.readAsDataURL(file); });
+  }
+
+  // ---------- поиск лиц ----------
+  // 1) встроенный в браузер FaceDetector (Chrome на Android/macOS), 2) MediaPipe (грузится один раз из CDN).
+  // Любая ошибка — просто «лиц не нашли», и работает обычное кадрирование к верхней трети.
+  let mpDetector=null, mpTried=false;
+  async function getMp(){
+    if(mpDetector||mpTried) return mpDetector; mpTried=true;
+    try{
+      const V='0.10.14';
+      const vision=await import(`https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@${V}/vision_bundle.mjs`);
+      const fs=await vision.FilesetResolver.forVisionTasks(`https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@${V}/wasm`);
+      mpDetector=await vision.FaceDetector.createFromOptions(fs,{baseOptions:{modelAssetPath:'https://storage.googleapis.com/mediapipe-models/face_detector/blaze_face_short_range/float16/1/blaze_face_short_range.tflite'},runningMode:'IMAGE',minDetectionConfidence:0.4});
+    }catch(e){ console.warn('kpgen: face detector unavailable', e); mpDetector=null; }
+    return mpDetector;
+  }
+  function loadImage(src){ return new Promise((res,rej)=>{ const i=new Image(); i.onload=()=>res(i); i.onerror=rej; i.src=src; }); }
+  async function detectFaces(src){
+    try{
+      const img=await loadImage(src); let boxes=[];
+      if('FaceDetector' in window){
+        try{ const fd=new window.FaceDetector({fastMode:false,maxDetectedFaces:20}); boxes=(await fd.detect(img)).map(f=>({x:f.boundingBox.x,y:f.boundingBox.y,w:f.boundingBox.width,h:f.boundingBox.height})); }catch(e){ boxes=[]; }
+      }
+      if(!boxes.length){
+        const det=await getMp();
+        if(det){
+          // маленькие лица на групповых фото модель видит лучше по частям: целиком + две половины
+          const runOn=(cx,cy,cw,ch)=>{ const c=document.createElement('canvas'); c.width=cw; c.height=ch; c.getContext('2d').drawImage(img,cx,cy,cw,ch,0,0,cw,ch);
+            return (det.detect(c).detections||[]).map(d=>({x:d.boundingBox.originX+cx,y:d.boundingBox.originY+cy,w:d.boundingBox.width,h:d.boundingBox.height})); };
+          boxes=runOn(0,0,img.width,img.height);
+          if(img.width>=img.height){ const hw=Math.round(img.width*0.55); boxes=boxes.concat(runOn(0,0,hw,img.height),runOn(img.width-hw,0,hw,img.height)); }
+          else { const hh=Math.round(img.height*0.55); boxes=boxes.concat(runOn(0,0,img.width,hh),runOn(0,img.height-hh,img.width,hh)); }
+        }
+      }
+      boxes=boxes.filter(b=>b.w>img.width*0.025);
+      if(!boxes.length) return null;
+      const l=Math.min(...boxes.map(b=>b.x)), r=Math.max(...boxes.map(b=>b.x+b.w));
+      const t=Math.min(...boxes.map(b=>b.y-b.h*0.35)), bt=Math.max(...boxes.map(b=>b.y+b.h*1.1)); // запас на волосы и подбородок
+      return {l:Math.max(0,l/img.width), r:Math.min(1,r/img.width), t:Math.max(0,t/img.height), b:Math.min(1,bt/img.height)};
+    }catch(e){ return null; }
+  }
+
+  // ---------- форма ----------
+  function inp(path,val,ph,extra){ return `<input class="kpg-in" data-k="${path}" value="${esc(val)}" placeholder="${esc(ph||'')}" ${extra||''}>`; }
+  // список мероприятий: из Справочника приложения (тексты правит руководитель), иначе — встроенный
+  function refList(){ try{ return (typeof window.KPGenSource==='function') ? (window.KPGenSource()||[]) : []; }catch(e){ return []; } }
+  function presetOptions(d){
+    const L=refList();
+    if(L.length){
+      const groups={}; L.forEach((it,k)=>{ (groups[it.group]=groups[it.group]||[]).push([it,k]); });
+      return '<option value="">— выбрать из Справочника —</option>'+Object.keys(groups).map(g=>`<optgroup label="${esc(g)}">${groups[g].map(([it,k])=>`<option value="r:${k}" ${d.ref===it.ref?'selected':''}>${esc(it.title)}</option>`).join('')}</optgroup>`).join('');
+    }
+    return '<option value="">— взять готовое описание —</option>'+PRESETS.map((p,k)=>`<option value="p:${k}">${esc(p.name)}</option>`).join('');
+  }
+  const unitShort = u => /за чел/.test(u) ? 'гость' : String(u||'').replace(/^за\s*/,'');
+  function varSelect(d,i){
+    if(!d.ref) return '';
+    const it=refList().find(x=>x.ref===d.ref); if(!it || !it.vars.length) return '';
+    return `<select class="kpg-in" data-var="${i}"><option value="">— вариант из Справочника (размер, длительность) —</option>${it.vars.map((v,k)=>`<option value="${k}">${esc([v.label&&v.label!=='—'?v.label:'', (v.price!=null&&v.tiers===1&&/за чел/.test(v.unit)?fmt(v.price)+' ₽ / гость':''), v.dur].filter(Boolean).join(' · ')||'вариант '+(k+1))}</option>`).join('')}</select>`;
+  }
+  function dirHtml(d,i){
+    const ph=[0,1].map(j=>`<div class="kpg-ph">${d.photos[j]?`<img src="${d.photos[j]}" alt="">`:''}
+      <label class="kpg-btn kpg-sm">${d.photos[j]?'Заменить':'Фото '+(j+1)}<input type="file" accept="image/*" data-photo="${i}:${j}" hidden></label>
+      ${d.photos[j]?`<button class="kpg-btn kpg-sm" data-delphoto="${i}:${j}">✕</button>
+        <div class="kpg-fit"><span>${d.faces[j]?'🙂 лица найдены':(d.faces[j]===false?'лиц не нашли':'')}</span>
+        <label>сдвиг <input type="range" min="0" max="100" value="${d.pos[j]==null?50:d.pos[j]}" data-pos="${i}:${j}"></label>
+        ${d.pos[j]!=null?`<button class="kpg-btn kpg-sm" data-posauto="${i}:${j}">авто</button>`:''}
+        <label><input type="checkbox" data-k="dirs.${i}.fit.${j}" ${d.fit[j]?'checked':''}> целиком</label></div>`:''}</div>`).join('');
+    return `<div class="kpg-dir"><div class="kpg-row"><b>Направление ${i+1}</b>
+      <select class="kpg-in" data-preset="${i}">${presetOptions(d)}</select>
+      <button class="kpg-btn kpg-sm" data-dirup="${i}" title="Выше">↑</button><button class="kpg-btn kpg-sm" data-deldir="${i}" title="Удалить">✕</button></div>
+      ${inp(`dirs.${i}.name`,d.name,'Название (Керамика)')}
+      <textarea class="kpg-in" data-k="dirs.${i}.desc" rows="2" placeholder="Описание">${esc(d.desc)}</textarea>
+      ${inp(`dirs.${i}.tags`,d.tags,'Плашки через запятую: холст 30×40, 2 часа, забираете в тот же день')}
+      ${varSelect(d,i)}
+      ${inp(`dirs.${i}.price`,d.price,'Цена в карточке (необязательно): 1 900 ₽ / гость')}
+      <div class="kpg-phs">${ph}</div></div>`;
+  }
+  function renderHtml(){
+    const g=guestRange();
+    return `<style>
+      .kpg{display:grid;grid-template-columns:minmax(320px,440px) 1fr;gap:20px;align-items:start}
+      @media(max-width:900px){.kpg{grid-template-columns:1fr}}
+      .kpg-form{display:flex;flex-direction:column;gap:14px}
+      .kpg-sec{background:var(--white,#fff);border:1px solid var(--line-strong,#ccc);border-radius:6px;padding:14px;display:flex;flex-direction:column;gap:8px}
+      .kpg-sec h4{margin:0 0 2px;font-size:14px}
+      .kpg-in{width:100%;box-sizing:border-box;padding:8px 10px;border:1px solid var(--line-strong,#ccc);border-radius:4px;font:inherit;font-size:14px;background:#fff}
+      textarea.kpg-in{resize:vertical}
+      .kpg-row{display:flex;gap:6px;align-items:center}.kpg-row>.kpg-in{flex:1}
+      .kpg-btn{border:1px solid var(--line-strong,#ccc);background:#fff;border-radius:4px;padding:8px 12px;cursor:pointer;font-size:13px;white-space:nowrap}
+      .kpg-btn.kpg-main{background:var(--ink,#171512);color:#fff;border-color:transparent;font-weight:600;padding:12px 16px;font-size:14px}
+      .kpg-sm{padding:5px 8px;font-size:12px;width:auto}
+      .kpg-dir{border:1px dashed var(--line-strong,#ccc);border-radius:6px;padding:10px;display:flex;flex-direction:column;gap:6px}
+      .kpg-phs{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+      .kpg-ph{display:flex;flex-wrap:wrap;gap:4px;align-items:center}.kpg-ph img{width:100%;height:90px;object-fit:cover;border-radius:4px}
+      .kpg-prev{position:sticky;top:10px;background:#e9e8e3;border-radius:6px;padding:12px;max-height:calc(100vh - 40px);overflow:auto}
+      .kpg-prev canvas{width:100%;height:auto;display:block;box-shadow:0 2px 12px rgba(0,0,0,.12)}
+      .kpg-hint{font-size:12px;color:var(--ink-soft,#666)}
+      .kpg-fit{display:flex;flex-wrap:wrap;gap:6px;align-items:center;font-size:12px;width:100%}.kpg-fit input[type=range]{width:90px;vertical-align:middle}
+      .kpg-chk{display:flex;gap:8px;align-items:flex-start;font-size:13px;line-height:1.35}
+    </style>
+    <div class="kpg">
+      <div class="kpg-form">
+        <div class="kpg-sec"><h4>Шапка</h4>
+          <select class="kpg-in" data-k="occasion">${['',...OCCASIONS].map(o=>`<option value="${esc(o)}" ${D.occasion===o?'selected':''}>${o?esc(o):'— без плашки —'}</option>`).join('')}${D.occasion&&!OCCASIONS.includes(D.occasion)?`<option selected>${esc(D.occasion)}</option>`:''}</select>
+          ${inp('occasion',OCCASIONS.includes(D.occasion)?'':D.occasion,'…или впишите свой текст плашки','data-free="1"')}
+          ${inp('title1',D.title1,'Заголовок, строка 1 (КЕРАМИКА)')}
+          ${inp('title2',D.title2,'Строка 2 — необязательно')}
+        </div>
+        <div class="kpg-sec"><h4>Детали</h4>
+          ${inp('date',D.date,'Дата и время: 18 декабря, 17:00')}
+          ${inp('guests',D.guests,'Гостей: 5 или 5–6')}
+          ${inp('duration',D.duration,'Длительность: 2 часа')}
+          ${inp('chipExtra',D.chipExtra,'Ещё плашка: Приедем к вам / 14 лет')}
+          <textarea class="kpg-in" data-k="lead" rows="2" placeholder="Подзаголовок (необязательно)">${esc(D.lead)}</textarea>
+        </div>
+        <div class="kpg-sec"><h4>Направления</h4>
+          ${inp('dirLabel',D.dirLabel,'Подпись над карточками')}
+          ${D.dirs.map(dirHtml).join('')}
+          <button class="kpg-btn" data-adddir="1">+ Добавить направление</button>
+          <div class="kpg-hint">1 направление — широкая карточка, 2+ — сетка по два. Если фото режет лица, выберите «верх».</div>
+        </div>
+        <div class="kpg-sec"><h4>Стоимость</h4>
+          ${D.prices.map((p,i)=>`<div class="kpg-row">
+            ${inp(`prices.${i}.label`,p.label,'Вариант: Холст 20×20 / любой МК')}
+            ${inp(`prices.${i}.price`,p.price,'₽','style="max-width:90px"')}
+            <select class="kpg-in" data-k="prices.${i}.unit" style="max-width:120px">${['за гостя','за компанию','за двоих','за троих'].map(u=>`<option ${p.unit===u?'selected':''}>${u}</option>`).join('')}</select>
+            <label class="kpg-sm" title="Выделить жёлтым"><input type="checkbox" data-k="prices.${i}.hl" ${p.hl?'checked':''}>★</label>
+            <button class="kpg-btn kpg-sm" data-delprice="${i}">✕</button></div>`).join('')}
+          <button class="kpg-btn" data-addprice="1">+ Вариант цены</button>
+          <div class="kpg-hint">${g?`Итог «за гостя» считается автоматически на ${guestsChip()}.`:'Укажите число гостей — итог посчитается сам.'}</div>
+        </div>
+        <div class="kpg-sec"><h4>Примечания внизу</h4>
+          ${NOTES.map(n=>`<label class="kpg-chk"><input type="checkbox" data-note="${n.id}" ${D.notes[n.id]?'checked':''}><span>${esc(n.text)}</span></label>`).join('')}
+          <textarea class="kpg-in" data-k="noteCustom" rows="2" placeholder="Своё примечание">${esc(D.noteCustom)}</textarea>
+        </div>
+        <div class="kpg-row"><button class="kpg-btn kpg-main" data-kpdl="1" style="flex:1">⬇ Скачать JPG</button><button class="kpg-btn" data-kpreset="1">Очистить</button></div>
+      </div>
+      <div class="kpg-prev"><canvas id="kpgen-canvas"></canvas></div>
+    </div>`;
+  }
+  function setPath(path,val){
+    const ks=path.split('.'); let o=D; for(let i=0;i<ks.length-1;i++) o=o[ks[i]]; o[ks[ks.length-1]]=val;
+  }
+  function rerenderForm(){ const host=document.getElementById('kpgen-host'); if(!host) return; host.innerHTML=renderHtml(); attach(); }
+  function attach(){
+    const host=document.getElementById('kpgen-host'); if(!host) return;
+    host.querySelectorAll('[data-k]').forEach(el=>{
+      const ev = (el.tagName==='SELECT'||el.type==='checkbox') ? 'change' : 'input';
+      el.addEventListener(ev,()=>{ setPath(el.dataset.k, el.type==='checkbox'?el.checked:el.value); save();
+        if(el.dataset.k==='occasion' || el.dataset.k==='guests'){ if(el.tagName==='SELECT'){ rerenderForm(); } }
+        scheduleDraw(); });
+    });
+    host.querySelectorAll('[data-note]').forEach(el=>el.onchange=()=>{ D.notes[el.dataset.note]=el.checked; save(); scheduleDraw(); });
+    host.querySelectorAll('[data-preset]').forEach(el=>el.onchange=()=>{ const d=D.dirs[+el.dataset.preset]; const [kind,k]=String(el.value).split(':');
+      if(kind==='r'){ const it=refList()[+k]; if(!it) return; d.name=it.title; d.desc=it.desc; d.tags=it.tags||''; d.ref=it.ref; d.price=''; }
+      else if(kind==='p'){ const p=PRESETS[+k]; if(!p) return; d.name=p.name; d.desc=p.desc; d.tags=p.tags; d.ref=''; }
+      else return; save(); rerenderForm(); });
+    host.querySelectorAll('[data-var]').forEach(el=>el.onchange=()=>{ const d=D.dirs[+el.dataset.var]; const it=refList().find(x=>x.ref===d.ref); const v=it&&it.vars[+el.value]; if(!v) return;
+      if(v.price!=null && v.tiers===1 && /за чел/.test(v.unit)) d.price=fmt(v.price)+' ₽ / гость';
+      const tg=tagsOf(d); const extra=[]; if(v.label&&v.label!=='—'&&!/марафон|классика/i.test(v.label)) extra.push(v.label); if(v.dur) extra.push(v.dur);
+      extra.forEach(x=>{ if(!tg.includes(x)) tg.unshift(x); }); d.tags=tg.join(', '); save(); rerenderForm(); });
+    host.querySelectorAll('[data-photo]').forEach(el=>el.onchange=async()=>{ const f=el.files&&el.files[0]; if(!f) return; const [i,j]=el.dataset.photo.split(':').map(Number); const src=await readPhoto(f); const d=D.dirs[i]; d.photos[j]=src; d.pos[j]=null; d.faces[j]=null; rerenderForm(); detectFaces(src).then(fc=>{ if(d.photos[j]!==src) return; d.faces[j]=fc||false; rerenderForm(); }); });
+    host.querySelectorAll('[data-pos]').forEach(el=>el.oninput=()=>{ const [i,j]=el.dataset.pos.split(':').map(Number); D.dirs[i].pos[j]=+el.value; save(); scheduleDraw(); });
+    host.querySelectorAll('[data-pos]').forEach(el=>el.onchange=()=>rerenderForm());
+    host.querySelectorAll('[data-posauto]').forEach(el=>el.onclick=()=>{ const [i,j]=el.dataset.posauto.split(':').map(Number); D.dirs[i].pos[j]=null; save(); rerenderForm(); });
+    host.querySelectorAll('[data-delphoto]').forEach(el=>el.onclick=()=>{ const [i,j]=el.dataset.delphoto.split(':').map(Number); D.dirs[i].photos[j]=null; D.dirs[i].faces[j]=null; D.dirs[i].pos[j]=null; rerenderForm(); });
+    host.querySelectorAll('[data-adddir]').forEach(el=>el.onclick=()=>{ D.dirs.push(blankDir()); save(); rerenderForm(); });
+    host.querySelectorAll('[data-deldir]').forEach(el=>el.onclick=()=>{ D.dirs.splice(+el.dataset.deldir,1); if(!D.dirs.length) D.dirs.push(blankDir()); save(); rerenderForm(); });
+    host.querySelectorAll('[data-dirup]').forEach(el=>el.onclick=()=>{ const i=+el.dataset.dirup; if(i>0){ [D.dirs[i-1],D.dirs[i]]=[D.dirs[i],D.dirs[i-1]]; save(); rerenderForm(); } });
+    host.querySelectorAll('[data-addprice]').forEach(el=>el.onclick=()=>{ D.prices.push({label:'',price:'',unit:'за гостя',hl:false}); save(); rerenderForm(); });
+    host.querySelectorAll('[data-delprice]').forEach(el=>el.onclick=()=>{ D.prices.splice(+el.dataset.delprice,1); if(!D.prices.length) D.prices.push({label:'',price:'',unit:'за гостя',hl:true}); save(); rerenderForm(); });
+    host.querySelectorAll('[data-kpdl]').forEach(el=>el.onclick=download);
+    host.querySelectorAll('[data-kpreset]').forEach(el=>el.onclick=()=>{ if(!confirmReset()) return; D=defaults(); save(); rerenderForm(); });
+    scheduleDraw();
+  }
+  // без window.confirm (в приложении его избегают) — двойное нажатие в течение 3 секунд
+  let resetArmed=0;
+  function confirmReset(){ const now=Date.now(); if(now-resetArmed<3000){ resetArmed=0; return true; } resetArmed=now; const b=document.querySelector('[data-kpreset]'); if(b){ b.textContent='Нажмите ещё раз'; setTimeout(()=>{ if(b.isConnected) b.textContent='Очистить'; },3000);} return false; }
+
+  window.KPGen = { renderHtml: ()=>`<div id="kpgen-host">${renderHtml()}</div>`, attach, _state:()=>D, _draw:draw, _detect:detectFaces };
+})();
+
+</script>
 
 <script>
   if('serviceWorker' in navigator){
