@@ -198,6 +198,13 @@
   .cp-dragging{ opacity:.25; }
   .cp-ph{ border:2px dashed #E8B84B; border-radius:9px; background:rgba(232,184,75,.08); }
   .cp-mlist{ display:none; }
+  .cp-wdots{ display:none; gap:4px; margin:0 0 8px; }
+  .cp-wdots button{ flex:1; border:1.5px solid #D9D0BC; background:#fff; border-radius:10px; padding:5px 0 4px; font:inherit; font-size:11px; line-height:1.2; color:#171512; cursor:pointer; }
+  .cp-wdots button b{ display:block; font-size:13px; }
+  .cp-wdots button.today{ border-color:#E8B84B; box-shadow:0 0 0 1px #E8B84B inset; }
+  .cp-wdots button.on{ background:#171512; color:#fff; border-color:#171512; }
+  .cp-wdots button i{ font-style:normal; display:block; font-size:10px; color:#8C8C8C; min-height:12px; }
+  .cp-wdots button.on i{ color:#E8B84B; }
   details.mk-fold{ padding:0 !important; overflow:hidden; background:#fff; border:1px solid var(--line); border-radius:12px; margin:0 0 10px !important; }
   details.mk-fold > summary{ list-style:none; cursor:pointer; display:flex; align-items:center; gap:10px; flex-wrap:wrap; padding:14px 16px; user-select:none; }
   details.mk-fold > summary::-webkit-details-marker{ display:none; }
@@ -235,18 +242,21 @@
     .cp-whead .today-btn{ white-space:nowrap; padding:6px 8px; }
     .cp-whead b{ flex:1; text-align:center; }
     .cp-hint, .cp-legend{ display:none !important; }
-    .cp-week{ display:flex !important; flex-direction:column; overflow:visible !important; gap:10px !important; }
-    .cp-day{ min-height:0 !important; padding:10px !important; }
-    .cp-day.empty{ flex-direction:row !important; align-items:center; padding:8px 10px !important; }
-    .cp-day.empty .cp-dh{ flex:1; }
-    .cp-day.empty .cp-addday{ margin-top:0 !important; width:auto; padding:4px 12px; }
-    .cp-dh{ font-size:14px; } .cp-dh span{ font-size:12.5px; }
-    .cp-card{ padding:10px 12px !important; border-radius:12px !important; }
-    .cp-t{ font-size:14.5px !important; -webkit-line-clamp:4 !important; }
-    .cp-st{ font-size:12px !important; padding:4px 11px !important; }
-    .cp-tag{ font-size:11.5px !important; padding:2px 7px !important; }
-    .cp-shoot-l{ font-size:12px !important; }
-    .cp-addday{ padding:9px !important; font-size:13px !important; }
+    /* на телефоне дни — столбиками рядом (по 2 на экране), листаются вбок пальцем */
+    .cp-week{ display:grid !important; grid-auto-flow:column; grid-template-columns:none !important; grid-auto-columns:calc((100vw - 42px) / 2);
+      overflow-x:auto !important; overflow-y:visible; gap:8px !important; scroll-snap-type:x proximity; -webkit-overflow-scrolling:touch;
+      margin:0 -4px; padding-left:4px; padding-right:4px; scroll-padding-left:4px; align-items:start; scrollbar-width:none; }
+    .cp-week::-webkit-scrollbar{ display:none; }
+    .cp-week.cp-nosnap{ scroll-snap-type:none !important; }
+    .cp-day{ scroll-snap-align:start; min-height:220px !important; padding:8px 6px !important; gap:6px !important; }
+    .cp-dh{ font-size:13px; flex-wrap:wrap; row-gap:0; } .cp-dh span{ font-size:11.5px; }
+    .cp-card{ padding:8px 8px !important; border-radius:10px !important; }
+    .cp-t{ font-size:13px !important; -webkit-line-clamp:5 !important; }
+    .cp-st{ font-size:11px !important; padding:3px 8px !important; max-width:100%; overflow:hidden; text-overflow:ellipsis; }
+    .cp-tag{ font-size:10.5px !important; padding:1px 6px !important; }
+    .cp-shoot-l{ font-size:11px !important; }
+    .cp-addday{ padding:8px !important; font-size:13px !important; }
+    .cp-wdots{ display:flex !important; }
     .cp-ltable{ display:none; }
     .cp-mlist{ display:block; }
     .cpe-wrap{ padding:0 !important; align-items:stretch !important; }
@@ -9746,7 +9756,8 @@
         ${cpCanEdit() ? `<button class="cp-addday" data-cpday="${d}">+ ТЗ</button>` : ''}
       </div>`;
     }).join('');
-    return tabs + head + `<div class="cp-week">${cols}</div>`;
+    const wdots = `<div class="cp-wdots">${days.map(d=>{ const n = posts.filter(p=> p.date === d).length; const wd = ['Вс','Пн','Вт','Ср','Чт','Пт','Сб'][parseDate(d).getDay()]; return `<button type="button" data-cpgo="${d}" class="${d === todayStr() ? 'today' : ''}"><b>${wd}</b>${escapeHtml(lgDateDots(d).slice(0,2))}<i>${n ? n : ''}</i></button>`; }).join('')}</div>`;
+    return tabs + head + wdots + `<div class="cp-week">${cols}</div>`;
   }
 
   function renderContentStatsHtml(){
@@ -10112,6 +10123,7 @@
     CPD.ph.style.height = r.height + 'px';
     card.parentNode.insertBefore(CPD.ph, card);
     CPD.drag = { card, ghost, dx, dy };
+    { const wk = document.querySelector('.cp-week'); if(wk) wk.classList.add('cp-nosnap'); }
     document.addEventListener('touchmove', cpDragTouchMove, { passive:false });
     if(navigator.vibrate) try{ navigator.vibrate(15); }catch(_){}
   }
@@ -10132,10 +10144,12 @@
   }
   function cpDragAbort(){
     if(CPD.timer){ clearTimeout(CPD.timer); CPD.timer = null; } CPD.start = null;
+    { const wk = document.querySelector('.cp-week'); if(wk) wk.classList.remove('cp-nosnap'); }
     if(CPD.drag){ CPD.drag.ghost.remove(); CPD.drag.card.classList.remove('cp-dragging'); if(CPD.ph) CPD.ph.remove(); CPD.drag = null; document.removeEventListener('touchmove', cpDragTouchMove, { passive:false }); }
   }
   async function cpDragFinish(){
     const { card, ghost } = CPD.drag; CPD.drag = null;
+    { const wk = document.querySelector('.cp-week'); if(wk){ state._cpWeekScroll = { week: state.cpWeek, left: wk.scrollLeft }; wk.classList.remove('cp-nosnap'); } }
     document.removeEventListener('touchmove', cpDragTouchMove, { passive:false });
     ghost.remove(); card.classList.remove('cp-dragging');
     const ph = CPD.ph; const col = ph && ph.closest('.cp-day');
@@ -10198,10 +10212,22 @@
     document.querySelectorAll('.cp-st').forEach(b=> b.onclick = (e)=>{ e.stopPropagation(); if(b.classList.contains('ro')) return; cpOpenStatusMenu(b); });
     const imp = document.getElementById('cp-import'); if(imp) imp.onclick = ()=> openContentImport();
     cpAttachDrag();
-    // на телефоне при открытии недели сразу показываем сегодняшний день (один раз на неделю)
-    if(window.innerWidth <= 700 && (state.cpMode || 'week') === 'week' && state._cpScrolledWeek !== state.cpWeek){
-      state._cpScrolledWeek = state.cpWeek;
-      setTimeout(()=>{ const td = document.querySelector('.cp-day.today'); if(!td) return; const hh = (document.querySelector('.cp-whead')||{offsetHeight:60}).offsetHeight; const y = td.getBoundingClientRect().top + window.scrollY - hh - 8; if(y > 0) window.scrollTo(0, y); }, 300);
+    // на телефоне дни — столбики, листаются вбок. Помним, куда пролистали (после смены статуса/перерисовки не прыгаем в начало),
+    // при первом открытии недели — сразу к сегодняшнему дню.
+    const wk = document.querySelector('.cp-week');
+    if(wk && window.innerWidth <= 700 && (state.cpMode || 'week') === 'week'){
+      const colLeft = (col)=> Math.max(0, col.getBoundingClientRect().left - wk.getBoundingClientRect().left + wk.scrollLeft - 4);
+      const markDot = ()=>{ const cols = Array.from(wk.querySelectorAll('.cp-day')); let cur = 0; cols.forEach((c,i)=>{ if(colLeft(c) <= wk.scrollLeft + 10) cur = i; });
+        document.querySelectorAll('.cp-wdots button').forEach((b,i)=> b.classList.toggle('on', i === cur || i === cur + 1)); };
+      const saved = state._cpWeekScroll;
+      if(saved && saved.week === state.cpWeek){ wk.scrollLeft = saved.left; }
+      else if(state._cpScrolledWeek !== state.cpWeek){
+        state._cpScrolledWeek = state.cpWeek;
+        const td = wk.querySelector('.cp-day.today'); if(td) wk.scrollLeft = colLeft(td);
+      }
+      markDot();
+      wk.addEventListener('scroll', ()=>{ state._cpWeekScroll = { week: state.cpWeek, left: wk.scrollLeft }; markDot(); }, { passive:true });
+      document.querySelectorAll('[data-cpgo]').forEach(b=> b.onclick = ()=>{ const col = wk.querySelector(`[data-cpday-col="${b.dataset.cpgo}"]`); if(col) wk.scrollTo({ left: colLeft(col), behavior:'smooth' }); });
     }
   }
 
