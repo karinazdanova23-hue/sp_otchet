@@ -430,6 +430,7 @@
   .ms-kpi.good .v{ color:var(--status-green); }
   .ms-kpi.bad .v{ color:var(--danger); }
   .ms-bar{ height:5px; background:var(--line); border-radius:3px; margin-top:8px; overflow:hidden; }
+  .ms-bar.ms-split{ display:flex; height:8px; } .ms-bar.ms-split span{ display:block; height:100%; }
   .ms-bar span{ display:block; height:100%; }
   .ms-note{ font-size:11px; color:var(--ink-soft); margin-top:5px; }
   .ms-funnel{ display:flex; flex-direction:column; gap:3px; }
@@ -446,6 +447,8 @@
   .gt-g{ width:52px; text-align:right; font-weight:700; }
   .gt-note{ font-size:12px; color:var(--ink-soft); margin-top:8px; }
   .fc-strip{ background:#FFF4D6; border:1px solid #E8B84B; border-radius:12px; padding:8px 12px; margin:0 0 10px; font-size:13px; cursor:pointer; }
+  .fc-strip.fc-next{ background:#EEF0E4; border-color:#75804F; }
+  .fc-next-sub{ font-size:12.5px; margin-top:4px; color:#3F4430; }
   .fc-bar{ display:flex; height:14px; background:#EFE9DC; border-radius:7px; overflow:hidden; margin:6px 0 4px; }
   .fc-legend{ display:flex; flex-wrap:wrap; gap:4px 14px; font-size:11.5px; color:var(--ink-soft); margin-bottom:10px; }
   .fc-legend i{ display:inline-block; width:10px; height:10px; border-radius:2px; margin-right:4px; vertical-align:-1px; }
@@ -474,6 +477,52 @@
   .lc-mgr{ display:flex; flex-wrap:wrap; gap:8px; margin-bottom:12px; }
   .lc-mbtn{ border:1px solid var(--line-strong); background:var(--white); border-radius:10px; padding:6px 12px; text-align:left; cursor:pointer; font:inherit; font-size:13px; }
   .lc-mbtn.on{ border:2px solid var(--ink); }
+  .dy-strip{ width:100%; display:flex; flex-wrap:wrap; align-items:center; gap:6px 14px; background:#171512; color:#F2ECDD; border:none; border-radius:12px; padding:10px 14px; margin:0 0 12px; font:inherit; font-size:13px; cursor:pointer; text-align:left; }
+  .dy-strip b{ color:#E8B84B; } .dy-strip.rop-strip{ background:#3F4430; }
+  .rop-row{ display:grid; grid-template-columns:1.6fr 1fr 1.2fr .8fr 1.4fr .9fr; gap:8px; padding:7px 4px; border-bottom:1px solid var(--line); font-size:13px; align-items:center; }
+  .rop-row.rop-h{ font-size:11.5px; color:var(--ink-soft); font-weight:600; } .rop-row .bad{ color:var(--danger); }
+  .rop-open{ display:grid; grid-template-columns:1.6fr 1.2fr 1fr 1.3fr .9fr; gap:8px; padding:6px 4px; border-bottom:1px solid #F1EBDD; font-size:12.5px; cursor:pointer; } .rop-open.bad{ background:#FDF0EC; }
+  .rop-via{ font-size:11px; color:var(--ink-soft); }
+  @media (max-width:700px){ .rop-row{ grid-template-columns:1.3fr .8fr 1fr .8fr 1.2fr; } .rop-row > :last-child{ display:none; } .rop-open{ grid-template-columns:1fr auto; } .rop-open > span:nth-child(3), .rop-open > span:nth-child(5){ display:none; } } .dy-s-t{ font-weight:800; color:#fff; } .dy-s-more{ margin-left:auto; color:#8C8C8C; font-size:12px; }
+  .dy-head{ display:flex; align-items:center; gap:8px; flex-wrap:wrap; margin-bottom:6px; } .dy-head b{ font-size:15px; text-transform:none; } .dy-head b::first-letter{ text-transform:uppercase; }
+  .dy-head input[type=date]{ font:inherit; font-size:13px; padding:5px 8px; border:1px solid var(--line); border-radius:8px; background:#fff; }
+  .dy-shift{ margin-left:auto; font-size:12.5px; color:var(--ink-soft); }
+  .dy-hint{ font-size:11.5px; color:var(--ink-soft); margin-bottom:10px; }
+  .dy-kpis{ display:grid; grid-template-columns:repeat(4,1fr); gap:8px; margin-bottom:14px; }
+  .dy-kpi{ background:#fff; border:1px solid var(--line); border-radius:12px; padding:10px 12px; }
+  .dy-kv{ font-size:22px; font-weight:800; } .dy-kl{ font-size:12px; color:var(--ink-soft); } .dy-ks{ font-size:12.5px; font-weight:700; color:#75804F; margin-top:2px; }
+  .dy-avg{ font-size:11px; color:#8C8C8C; margin-top:3px; } .dy-avg.up{ color:#4E7A2E; } .dy-avg.up::before{ content:'▲ '; } .dy-avg.down{ color:#B8863A; } .dy-avg.down::before{ content:'▼ '; }
+  .dy-sec{ font-weight:800; font-size:14px; margin:14px 0 8px; }
+  .dy-cards{ display:grid; grid-template-columns:repeat(auto-fill,minmax(300px,1fr)); gap:10px; }
+  .dy-card{ background:#fff; border:1px solid var(--line); border-radius:12px; padding:12px; } .dy-card.shift{ box-shadow:0 0 0 2px #E8B84B inset; }
+  .dy-ch{ display:flex; align-items:center; gap:6px; flex-wrap:wrap; font-size:14.5px; } .dy-acts{ margin-left:auto; font-size:12px; color:var(--ink-soft); display:flex; gap:6px; align-items:center; } .dy-acts .dy-avg{ margin:0; }
+  .dy-tag{ font-size:10.5px; background:#E8B84B; color:#171512; border-radius:999px; padding:1px 8px; font-weight:700; } .dy-tag.grey{ background:#EEE7D6; color:#6B655C; }
+  .dy-nums{ display:grid; grid-template-columns:repeat(5,1fr); gap:4px; margin:10px 0 8px; text-align:center; }
+  .dy-nums > div{ background:#F7F2E6; border-radius:8px; padding:6px 2px; font-size:10.5px; color:#6B655C; line-height:1.25; }
+  .dy-nums b{ display:block; font-size:18px; color:#171512; } .dy-nums small{ display:block; font-size:10px; color:#75804F; font-weight:700; } .dy-nums small.bad{ color:var(--danger); }
+  .dy-busy{ font-size:12px; color:var(--ink-soft); }
+  .dy-bars{ display:flex; align-items:flex-end; gap:2px; height:44px; margin-top:6px; }
+  .dy-bar{ flex:1; height:100%; display:flex; flex-direction:column; justify-content:flex-end; position:relative; }
+  .dy-bar i{ display:block; background:#75804F; border-radius:3px 3px 0 0; } .dy-bar span{ position:absolute; bottom:-14px; left:0; font-size:9px; color:#8C8C8C; }
+  .dy-bars{ margin-bottom:14px; border-bottom:1px solid #EEE7D6; }
+  .dy-od{ margin-top:4px; font-size:12px; color:var(--danger); }
+  .dy-row{ display:grid; grid-template-columns:1.4fr 1.4fr 1fr auto; gap:8px; align-items:center; background:#fff; border:1px solid var(--line); border-radius:8px; padding:8px 10px; margin-bottom:5px; font-size:13px; cursor:pointer; }
+  .dy-row span{ color:var(--ink-soft); } .dy-sum{ color:#75804F; white-space:nowrap; }
+  .dy-go{ grid-column:1 / -1; display:flex; flex-wrap:wrap; gap:6px; margin-top:2px; }
+  .dy-gb{ display:inline-flex; align-items:center; gap:4px; border:1.5px solid #D9D0BC; background:#FBF8F0; color:#171512 !important; border-radius:999px; padding:6px 12px; font:inherit; font-size:12.5px; font-weight:600; cursor:pointer; text-decoration:none; }
+  .dy-gb:hover{ border-color:#171512; } .dy-gb.chat{ background:#E8B84B; border-color:#E8B84B; }
+  .dy-gb.off{ cursor:default; color:#8C8C8C !important; font-weight:400; background:transparent; border-style:dashed; }
+  .lb-card.dy-flash{ box-shadow:0 0 0 3px #E8B84B, 0 6px 18px rgba(23,21,18,.25) !important; transition:box-shadow .3s; }
+  details.dy-feed{ margin-top:14px; background:#fff; border:1px solid var(--line); border-radius:12px; padding:0 12px; }
+  details.dy-feed > summary{ cursor:pointer; font-weight:700; font-size:13.5px; padding:11px 0; }
+  .dy-frow{ display:grid; grid-template-columns:44px 22px 1fr auto; gap:6px; padding:6px 0; border-top:1px solid #F1EBDD; font-size:12.5px; } .dy-frow[data-dylead]{ cursor:pointer; }
+  .dy-ft{ color:#8C8C8C; font-family:var(--font-mono); } .dy-fw{ color:var(--ink-soft); font-size:11.5px; white-space:nowrap; }
+  @media (max-width:700px){
+    .dy-kpis{ grid-template-columns:repeat(2,1fr); } .dy-shift{ margin-left:0; flex-basis:100%; }
+    .dy-head{ display:grid; grid-template-columns:40px 1fr 40px; } .dy-head b{ font-size:14px; text-align:center; } .dy-head input[type=date], .dy-head .today-btn, .dy-shift{ grid-column:1 / -1; } .dy-hint{ display:none; }
+    .dy-cards{ grid-template-columns:1fr; } .dy-row{ grid-template-columns:1fr auto; } .dy-row span{ grid-column:1; font-size:12px; }
+    .dy-frow{ grid-template-columns:40px 20px 1fr; } .dy-fw{ grid-column:3; }
+  }
   .lc-head, .lc-row{ display:grid; grid-template-columns: 2fr 1fr 1.1fr 1.6fr 1.6fr; gap:10px; align-items:start; padding:8px 10px; }
   .lc-head{ font-size:11.5px; color:var(--ink-soft); font-family:var(--font-mono); }
   .lc-row{ background:var(--white); border:1px solid var(--line); border-radius:8px; margin-bottom:6px; cursor:pointer; font-size:13px; }
@@ -1601,6 +1650,8 @@
     const topChild = (el)=>{ while(el && el.parentElement !== body) el = el.parentElement; return el; };
     // «🎥 На этом мероприятии снимаем контент» — всегда наверху карточки, вне блоков
     { const sb = body.querySelector('#ev-shoot-box'); if(sb){ const t = topChild(sb); if(t) body.insertBefore(t, body.firstChild); } }
+    // мастеру и SMM контакты клиента и привязка к заявке (менеджерская информация) не нужны
+    if(['master','smm'].includes(state.currentRole)) ['#ev-lead-box','#lead-link-field'].forEach(sel=>{ const el = body.querySelector(sel); if(el) el.style.display = 'none'; });
     const secs = [];
     const plan = EV_SECTIONS.map(def=>{
       const nodes = [];
@@ -1628,7 +1679,7 @@
       if(key === 'main'){ const st = overlay.querySelector('.status-opt.active'); const d = val('#f-date'); const t = val('#f-time'); const g = val('#f-guests');
         return [st ? st.textContent.trim() : '', d ? prepDateShort(d) + (t ? ' ' + t : '') : '', g ? g + ' чел.' : ''].filter(Boolean).join(' · '); }
       if(key === 'host'){ const h = val('#f-host'); const mp = (state.currentRole === 'hostess' || state.currentRole === 'smm') ? 0 : (parseInt(val('#f-master-pay')) || 0); return (h || 'ведущий не назначен') + (mp ? ' · ' + money(mp) : ''); }
-      if(key === 'guest'){ const a = val('#f-age-category'); const c = val('#f-lead-contact'); const gl = overlay.querySelector('#guest-breakdown-summary-text'); return [c, a, gl ? gl.textContent.trim() : ''].filter(Boolean).join(' · ').slice(0, 70); }
+      if(key === 'guest'){ const a = val('#f-age-category'); const c = ['master','smm'].includes(state.currentRole) ? '' : val('#f-lead-contact'); const gl = overlay.querySelector('#guest-breakdown-summary-text'); return [c, a, gl ? gl.textContent.trim() : ''].filter(Boolean).join(' · ').slice(0, 70); }
       if(key === 'money'){ let paid = 0; try{ paid = JSON.parse(val('#f-payments') || '[]').reduce((x,p)=> x + (Number(p.amount)||0), 0); }catch(e){}
         const ag = parseInt(val('#f-agreed-price')) || parseInt(val('#f-price')) || 0; const lg = val('#f-payer-type') === 'legal';
         if(financeHiddenInEventModal()) return lg ? 'юрлицо' : '';
@@ -1645,7 +1696,8 @@
       secs.forEach(sec=>{
         const kids = Array.from(sec.querySelector('.ev-sec-b').children);
         const visible = kids.some(k=> k.style.display !== 'none' && getComputedStyle(k).display !== 'none');
-        sec.style.display = visible ? '' : 'none';
+        const finHidden = financeHiddenInEventModal() && (sec.dataset.sec === 'money' || sec.dataset.sec === 'cost'); // мастеру/маркетологу/SMM деньги и себестоимость не нужны
+        sec.style.display = (visible && !finHidden) ? '' : 'none';
         const open = isOpen(sec); sec.classList.toggle('closed', !open);
         sec.querySelector('.ev-sec-sum').textContent = summary(sec.dataset.sec);
       });
@@ -6008,6 +6060,7 @@
     if(r === 'master' || r === 'hostess') return ['event','schedule','master','task'].includes(c) && (c !== 'task' || e.who === feedWho());
     if(r === 'marketer') return ['event','schedule','marketing','cert','client','lead'].includes(c);
     if(r === 'smm') return ['event','schedule','marketing'].includes(c);
+    if(r === 'admin' && c === 'lead') return false; // ход заявок — менеджерская информация
     return true;
   }
   function feedTime(ts){
@@ -7184,7 +7237,7 @@
     // поздравления гостей с ДР — сколько сообщений менеджерам ещё нужно отправить (сегодня + просрочено)
     const outreachToday = outreachTodayCount();
     const outreachOverdue = outreachOverdueCount();
-    if((outreachToday + outreachOverdue) > 0 && roleCanAccessManagersTab(state.currentRole)){
+    if((outreachToday + outreachOverdue) > 0 && roleCanAccessManagersTab(state.currentRole) && state.currentRole !== 'admin'){
       alerts.push({icon:'🎉', text:`Поздравления: сегодня ${outreachToday}${outreachOverdue>0?`, просрочено ${outreachOverdue}`:''}`, view:'certificates', certView:'outreach'});
     }
 
@@ -7488,7 +7541,7 @@
       buttons.push({key:'certificates', html: `<button data-view="certificates" class="${state.view==='certificates'?'active':''}">${role==='hostess' ? 'Сертификаты / Изделия' : 'Для менеджеров'}</button>`});
     }
     if(roleCanAccessManagersTab(role) || role === 'smm'){
-      buttons.push({key:'marketing', html: `<button data-view="marketing" class="${state.view==='marketing'?'active':''}">${role === 'smm' ? '🗓 Контент-план' : 'Маркетинг'}</button>`});
+      buttons.push({key:'marketing', html: `<button data-view="marketing" class="${state.view==='marketing'?'active':''}">Маркетинг</button>`});
     }
     if(roleCanAccessBook(role)){
       buttons.push({key:'book', html: `<button data-view="book" class="${state.view==='book'?'active':''}">Книга</button>`});
@@ -8765,17 +8818,21 @@
     };
   }
   function renderMarketingView(){
-    if(state.currentRole === 'smm'){ state.marketingView = 'content'; return renderContentPlanView(); }
+    // SMM видит весь отдел маркетинга (раньше — только контент-план)
+    // старшему администратору в маркетинге открыты только «Траты» и «Промокоды» (контент-план и аналитика — нет)
+    const MK_ADMIN_HIDDEN = ['content','leadplan','weekreport','stats','romi','plan'];
+    const mkAdmin = state.currentRole === 'admin';
+    if(mkAdmin && (!state.marketingView || MK_ADMIN_HIDDEN.includes(state.marketingView))) state.marketingView = 'spend';
     const subTabsHtml = `
       <div class="cert-subtabs mk-subtabs">
-        <button data-marketingview="content" class="${state.marketingView==='content'?'active':''}">🗓 Контент-план</button>
-        <button data-marketingview="leadplan" class="${state.marketingView==='leadplan'?'active':''}">📥 План заявок</button>
-        <button data-marketingview="weekreport" class="${state.marketingView==='weekreport'?'active':''}">📋 Отчёт недели</button>
-        <button data-marketingview="stats" class="${state.marketingView==='stats'?'active':''}">📊 Статистика</button>
-        <button data-marketingview="romi" class="${state.marketingView==='romi'?'active':''}">💸 Окупаемость</button>
+        ${mkAdmin ? '' : `<button data-marketingview="content" class="${state.marketingView==='content'?'active':''}">🗓 Контент-план</button>`}
+        ${mkAdmin ? '' : `<button data-marketingview="leadplan" class="${state.marketingView==='leadplan'?'active':''}">📥 План заявок</button>`}
+        ${mkAdmin ? '' : `<button data-marketingview="weekreport" class="${state.marketingView==='weekreport'?'active':''}">📋 Отчёт недели</button>`}
+        ${mkAdmin ? '' : `<button data-marketingview="stats" class="${state.marketingView==='stats'?'active':''}">📊 Статистика</button>`}
+        ${mkAdmin ? '' : `<button data-marketingview="romi" class="${state.marketingView==='romi'?'active':''}">💸 Окупаемость</button>`}
         <button data-marketingview="spend" class="${state.marketingView==='spend'?'active':''}">🧾 Траты</button>
         <button data-marketingview="promo" class="${state.marketingView==='promo'?'active':''}">🎟 Промокоды</button>
-        <button data-marketingview="plan" class="${state.marketingView==='plan'?'active':''}">🎯 План/факт</button>
+        ${mkAdmin ? '' : `<button data-marketingview="plan" class="${state.marketingView==='plan'?'active':''}">🎯 План/факт</button>`}
       </div>
     `;
     if(state.marketingView === 'leadplan'){
@@ -8978,7 +9035,7 @@
     const bloggersNoReach = bloggerSpend.filter(m=> !(Number(m.reach) > 0)).length + bloggerGuests.length;
     // подписки по соцсетям
     const subs = state.socialSubs || {};
-    const canSubs = ['owner','marketer','admin','assistant'].includes(state.currentRole);
+    const canSubs = ['owner','marketer','smm','admin','assistant'].includes(state.currentRole);
     const prevYm = (()=>{ const d = new Date(year, monthIdx - 1, 1); return d.getFullYear() + '-' + pad(d.getMonth() + 1); })();
     const subOf = (ymX, k)=> (subs[ymX] && subs[ymX][k] !== undefined && subs[ymX][k] !== null) ? Number(subs[ymX][k]) : null;
     const yearSum = (k)=>{ let t = 0, any = false; for(let i = 1; i <= 12; i++){ const v = subOf(year + '-' + pad(i), k); if(v !== null){ t += v; any = true; } } return any ? t : null; };
@@ -9623,7 +9680,7 @@
   function cpWeekStart(d){ const x = new Date(d.getFullYear(), d.getMonth(), d.getDate()); const wd = (x.getDay() + 6) % 7; x.setDate(x.getDate() - wd); return x; }
   // полные права (ставить ТЗ, менять дату/соцсеть/тему, удалять) — маркетолог и руководство;
   // «SMM / съёмка» (Катя, Алина) — статус, ТЗ для съёмки, текст, ссылка, статистика, отчёты мастеров
-  function cpCanEdit(){ return ['owner','marketer','admin','assistant'].includes(state.currentRole); }
+  function cpCanEdit(){ return ['owner','marketer','smm','assistant'].includes(state.currentRole); }
   function cpCanWork(){ return cpCanEdit() || state.currentRole === 'smm'; }
   function cpLinkify(s){ return escapeHtml(s||'').replace(/(https?:\/\/[^\s<]+)/g, '<a href="$1" target="_blank" rel="noopener" style="color:#0077FF;word-break:break-all;">$1</a>'); }
   function cpStatusOf(p){ return CP_STATUS.find(x=> x.key === (p.status || (p.date && p.date < todayStr() ? 'done' : 'brief'))) || CP_STATUS[0]; }
@@ -10987,14 +11044,18 @@
     if(isHostessLimited && !['certificates','item-sales'].includes(state.certView)){
       state.certView = 'certificates';
     }
-    if(isAdminNoRefundsConversion && ['refunds','conversion'].includes(state.certView)){
+    // старшему администратору менеджерская информация (воронка, аналитика, конверсия, поздравления-воронка) закрыта;
+    // из «Конверсии» ему открыта только база клиентов с переходом в диалог
+    if(isAdminNoRefundsConversion && ['refunds','outreach'].includes(state.certView)){
       state.certView = 'certificates';
     }
+    if(isAdminNoRefundsConversion && state.certView === 'conversion') state.convTab = 'clients';
     if(state.certView==='salary-adj' && !['owner','admin'].includes(state.currentRole)) state.certView='certificates';
     if(state.certView==='manager-salary' && !['owner','manager'].includes(state.currentRole)) state.certView='certificates';
     const subTabsHtml = `
       <div class="cert-subtabs">
         ${!hideRefundsConversion ? `<button data-certview="conversion" class="${state.certView==='conversion'?'active':''}" style="${state.currentRole==='manager'?'font-weight:700;':''}">📈 Конверсия</button>` : ''}
+        ${isAdminNoRefundsConversion ? `<button data-certview="conversion" class="${state.certView==='conversion'?'active':''}">👥 Клиенты</button>` : ''}
         <button data-certview="certificates" class="${state.certView==='certificates'?'active':''}">Сертификаты</button>
         ${(!isHostessLimited && ['owner','admin'].includes(state.currentRole)) ? `<button data-certview="salary-adj" class="${state.certView==='salary-adj'?'active':''}">Корректировки ЗП</button>` : ''}
         ${(!isHostessLimited && ['owner','manager'].includes(state.currentRole)) ? `<button data-certview="manager-salary" class="${state.certView==='manager-salary'?'active':''}">${state.currentRole==='owner' ? 'ЗП менеджеров' : '💰 Моя ЗП'}</button>` : ''}
@@ -11003,7 +11064,7 @@
         <button data-certview="item-sales" class="${state.certView==='item-sales'?'active':''}">Изделия</button>
         ${!isHostessLimited ? `<button data-certview="orders" class="${state.certView==='orders'?'active':''}">Заказ</button>` : ''}
         ${!isHostessLimited ? `<button data-certview="deposits" class="${state.certView==='deposits'?'active':''}">💰 Депозиты${depositsOpenCount()>0?` <span style="display:inline-block;background:var(--status-red);color:#fff;border-radius:9px;padding:0 6px;font-size:10.5px;margin-left:3px;">${depositsOpenCount()}</span>`:''}</button>` : ''}
-        ${!isHostessLimited ? `<button data-certview="outreach" class="${state.certView==='outreach'?'active':''}">🎉 Поздравления${outreachDueCount()>0?` <span style="display:inline-block;min-width:18px;padding:0 5px;border-radius:9px;background:var(--status-red);color:#fff;font-size:11px;font-weight:600;line-height:18px;text-align:center;">${outreachDueCount()}</span>`:''}</button>` : ''}
+        ${(!isHostessLimited && !isAdminNoRefundsConversion) ? `<button data-certview="outreach" class="${state.certView==='outreach'?'active':''}">🎉 Поздравления${outreachDueCount()>0?` <span style="display:inline-block;min-width:18px;padding:0 5px;border-radius:9px;background:var(--status-red);color:#fff;font-size:11px;font-weight:600;line-height:18px;text-align:center;">${outreachDueCount()}</span>`:''}</button>` : ''}
       </div>
     `;
     if(state.certView === 'deposits' && !isHostessLimited){
@@ -12255,6 +12316,7 @@
       <div class="row2"><div class="field"><label>Срок</label><input type="date" id="lt-due" value="${leadWorkDay(loadAddDays(todayStr(),1))}"></div>
       <div class="field"><label>Ответственный</label><input type="text" id="lt-who" value="${escapeHtml(leadAssigneeFor(leadWorkDay(loadAddDays(todayStr(),1)), lead))}"></div></div>
       <div id="lt-hint" style="font-size:11.5px;color:var(--ink-soft);margin-top:-4px;"></div>
+      ${taskRopCheckboxHtml('lt-rop')}
       <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:8px;"><button class="btn btn-ghost" id="lt-cancel">Отмена</button><button class="btn btn-primary" id="lt-save">Добавить</button></div></div>`;
     document.body.appendChild(wrap);
     const dueEl = wrap.querySelector('#lt-due'), whoEl = wrap.querySelector('#lt-who'), hint = wrap.querySelector('#lt-hint');
@@ -12265,7 +12327,7 @@
       const title = wrap.querySelector('#lt-title').value.trim();
       if(!title){ wrap.querySelector('#lt-title').style.borderColor = 'var(--danger)'; return; }
       if(!Array.isArray(state.leadTasks)) state.leadTasks = [];
-      state.leadTasks.push({ id: uid(), leadId, title, due: wrap.querySelector('#lt-due').value || '', done: false, doneAt: '', assignee: wrap.querySelector('#lt-who').value.trim() || leadWho(), createdBy: leadWho(), createdAt: new Date().toISOString(), auto: false });
+      state.leadTasks.push({ id: uid(), leadId, title, due: wrap.querySelector('#lt-due').value || '', done: false, doneAt: '', assignee: wrap.querySelector('#lt-who').value.trim() || leadWho(), createdBy: leadWho(), createdAt: new Date().toISOString(), auto: false, ...taskRopFields(wrap.querySelector('#lt-rop')) });
       wrap.remove(); await saveLeadTasks(); render();
     };
     setTimeout(()=>{ const t = wrap.querySelector('#lt-title'); if(t) t.focus(); }, 30);
@@ -12782,9 +12844,11 @@
     const jb = document.getElementById('btn-js-open'); if(jb) jb.onclick = ()=> openJournalSyncPopup();
     const ej = document.getElementById('lt-export-json'); if(ej) ej.onclick = ()=> exportLeadTasks('json');
     const ec = document.getElementById('lt-export-csv'); if(ec) ec.onclick = ()=> exportLeadTasks('csv');
-    document.querySelectorAll('[data-convtab]').forEach(b=> b.onclick = ()=>{ state.convTab = b.dataset.convtab; render(); });
+    document.querySelectorAll('[data-convtab]').forEach(b=> b.onclick = ()=>{ state.convTab = b.dataset.convtab; if(b.dataset.convtab === 'forecast') state.fcYm = b.dataset.fcnext || ''; render(); });
     document.querySelectorAll('[data-ltctl]').forEach(b=> b.onclick = ()=>{ state.ltCtlOwner = b.dataset.ltctl; render(); });
     try{ if(state.convTab === 'forecast') attachForecastEvents(); }catch(e){ console.error(e); }
+    try{ if(state.convTab === 'day') attachLeadDayEvents(); }catch(e){ console.error(e); }
+    { const rs = document.getElementById('rop-strip'); if(rs) rs.onclick = ()=>{ state.convTab = 'stats'; render(); setTimeout(()=>{ const s = document.getElementById('rop-sec'); if(s) s.scrollIntoView({ behavior:'smooth', block:'start' }); }, 150); }; }
     document.querySelectorAll('.lc-row[data-openlead]').forEach(r=> r.onclick = ()=>{ const l = state.leads.find(x=> x.id === r.dataset.openlead); if(l) requireUnlock(()=>{ state.modal = {type:'lead', isNew:false, lead:{...l}}; render(); }); });
     document.querySelectorAll('[data-bkind]').forEach(b=> b.onclick = ()=>{ state.leadBoardKind = b.dataset.bkind; render(); });
     const q = document.getElementById('lb-q');
@@ -12882,13 +12946,196 @@
     });
   }
 
+  // ===================== «📅 День»: что продано за день и активность менеджеров =====================
+  // Считаем по уже имеющимся данным: история заявок (lead.log — смены этапов, кто сделал), задачи (doneAt/doneBy),
+  // КП (kpOffers), дата продажи (lead.saleDate), дата заведения (createdAt). Ничего нового не сохраняет.
+  function dyWhoKey(n){ const s = String(n||'').trim(); if(!s) return ''; return isManagerName(s) ? managerCanon(s) : s; }
+  function dyTime(ts){ const d = new Date(ts); return isNaN(d) ? '' : pad(d.getHours()) + ':' + pad(d.getMinutes()); }
+  function dyStats(D){
+    const P = {}; const T = { newLeads:0, sold:0, rev:0, moves:0, lost:0, done:0, kp:0, soldList:[], feed:[] };
+    const per = (who)=>{ const k = dyWhoKey(who) || 'Без имени'; return P[k] = P[k] || { name:k, newLeads:0, sold:0, rev:0, moves:0, lost:0, done:0, late:0, kp:0, acts:[] }; };
+    const onDay = (ts)=> !!ts && isoLocalDate(ts) === D;
+    const act = (who, ts, icon, text, leadId)=>{ const p = per(who); p.acts.push(ts); T.feed.push({ ts, who: p.name, icon, text, leadId }); };
+    (state.leads||[]).forEach(l=>{
+      const log = Array.isArray(l.log) ? l.log : [];
+      const cr = log.find(x=> x.type === 'created');
+      const cTs = l.createdAt || l.quickAt || (cr && cr.ts) || '';
+      const isNew = cTs ? onDay(cTs) : (l.requestDate === D);
+      const nm = l.contact || 'без контакта';
+      if(isNew){
+        T.newLeads++;
+        const owner = l.owner || l.createdBy || l.quickBy || (cr && (cr.by || cr.who)) || '';
+        per(owner).newLeads++;
+        const by = l.createdBy || l.quickBy || (cr && (cr.by || cr.who)) || owner;
+        if(cTs) act(by, cTs, '🆕', 'Новая заявка: ' + nm + (l.source ? ' · ' + l.source : ''), l.id);
+      }
+      if(l.sold && l.saleDate === D){
+        const amt = Number(l.revenue) > 0 ? Number(l.revenue) : 0;
+        T.sold++; T.rev += amt; const p = per(l.owner || ''); p.sold++; p.rev += amt;
+        T.soldList.push(l);
+      }
+      log.forEach(x=>{
+        if(!onDay(x.ts) || x.type === 'created') return;
+        if(x.type === 'stage'){ T.moves++; const p = per(x.who); p.moves++; if(x.to === 'lost'){ T.lost++; p.lost++; }
+          act(x.who, x.ts, x.to === 'sold' ? '💰' : x.to === 'lost' ? '✖️' : '➡️', nm + ': ' + String(x.text||'').replace(/^Этап:\s*/, ''), l.id); }
+        else act(x.who, x.ts, LT_ICON[x.type] || '•', nm + ': ' + (x.text||''), l.id);
+      });
+    });
+    (state.leadTasks||[]).forEach(t=>{
+      if(!t.done || t.autoClosed || t.docClosed || !onDay(t.doneAt)) return;
+      const who = t.doneBy || t.assignee || ''; const p = per(who); p.done++; T.done++;
+      if(taskOrigin(t).kind === 'auto'){ p.doneAuto = (p.doneAuto||0) + 1; T.doneAuto = (T.doneAuto||0) + 1; } else { p.doneMan = (p.doneMan||0) + 1; T.doneMan = (T.doneMan||0) + 1; }
+      const late = t.due && D > t.due; if(late) p.late++;
+      const l = state.leads.find(x=> x.id === t.leadId);
+      act(who, t.doneAt, late ? '⏰' : '✅', 'Задача «' + (t.title||'') + '»' + (l ? ' · ' + (l.contact||'') : '') + (late ? ' (с опозданием)' : ''), t.leadId);
+    });
+    // ручные задачи, поставленные в этот день (кто поставил)
+    (state.leadTasks||[]).forEach(t=>{ if(t.docKind || !onDay(t.createdAt)) return; const g = taskOrigin(t); if(g.kind === 'auto') return;
+      const p = per(g.setter || t.createdBy || ''); p.setMan = (p.setMan||0) + 1; const l = state.leads.find(x=> x.id === t.leadId);
+      act(g.setter || t.createdBy || '', t.createdAt, '✍️', 'Поставил(а) задачу «' + (t.title||'') + '»' + (g.kind !== 'self' ? ' → ' + (t.assignee||'') : ' себе') + (l ? ' · ' + (l.contact||'') : ''), t.leadId); });
+    (state.kpOffers||[]).forEach(o=>{ if(!onDay(o.createdAt)) return; const p = per(o.createdBy || ''); p.kp++; T.kp++;
+      const l = state.leads.find(x=> x.id === o.leadId); act(o.createdBy || '', o.createdAt, '📄', 'КП' + (o.total ? ' на ' + formatMoney(o.total) : '') + (l ? ' · ' + (l.contact||'') : ''), o.leadId); });
+    const shift = managerForDate(D); if(shift) per(shift).onShift = true;
+    T.feed.sort((a,b)=> String(b.ts).localeCompare(String(a.ts)));
+    return { P, T, shift: shift ? dyWhoKey(shift) : '' };
+  }
+  function dyVisibleName(){ return state.currentRole === 'manager' && state.loggedInManagerName ? dyWhoKey(state.loggedInManagerName) : ''; }
+  // короткая строка «Сегодня» над воронкой и задачами
+  function renderDayStrip(){
+    try{
+      const D = todayStr(); const s = dyStats(D); const me = dyVisibleName();
+      const x = me ? (s.P[me] || { sold:0, rev:0, newLeads:0, moves:0, done:0 }) : s.T;
+      return `<button type="button" class="dy-strip" data-convtab="day">
+        <span class="dy-s-t">📅 ${me ? 'Мой день' : 'Сегодня'}</span>
+        <span>💰 продано <b>${x.sold}</b>${x.rev ? ' · <b>' + formatMoney(x.rev) + '</b>' : ''}</span>
+        <span>🆕 заявок <b>${x.newLeads}</b></span>
+        <span>➡️ по воронке <b>${x.moves}</b></span>
+        <span>✅ задач <b>${x.done}</b></span>
+        <span class="dy-s-more">подробнее ›</span></button>`;
+    }catch(e){ console.warn(e); return ''; }
+  }
+  function renderLeadDayView(){
+    const D = state.dyDate || todayStr(); const me = dyVisibleName();
+    const s = dyStats(D);
+    // для сравнения — среднее за 7 предыдущих дней
+    const prev = Array.from({length:7}, (_,i)=>{ const d = parseDate(D); d.setDate(d.getDate() - i - 1); return dyStats(fmtDate(d)); });
+    const avg = (get)=> Math.round(prev.reduce((a,x)=> a + get(x), 0) / 7 * 10) / 10;
+    const pick = (st)=> me ? (st.P[me] || { sold:0, rev:0, newLeads:0, moves:0, lost:0, done:0, kp:0 }) : st.T;
+    const X = pick(s);
+    const cmp = (v, a)=>{ if(!a && !v) return ''; const cls = v > a ? 'up' : v < a ? 'down' : ''; return `<div class="dy-avg ${cls}">обычно ${String(a).replace('.', ',')}/день</div>`; };
+    const kpi = (icon, label, val, sub, a)=> `<div class="dy-kpi"><div class="dy-kv">${icon} ${val}</div><div class="dy-kl">${label}</div>${sub ? `<div class="dy-ks">${sub}</div>` : ''}${a}</div>`;
+    const isToday = D === todayStr();
+    const head = `<div class="dy-head">
+      <button class="nav-btn" id="dy-prev">‹</button>
+      <b>${escapeHtml(weekdayFromDate(D))}, ${escapeHtml(formatDateText(D))}</b>
+      <button class="nav-btn" id="dy-next">›</button>
+      ${isToday ? '' : '<button class="today-btn" id="dy-today">сегодня</button>'}
+      <input type="date" id="dy-date" value="${D}">
+      ${s.shift ? `<span class="dy-shift">На смене: <b>${escapeHtml(s.shift)}</b></span>` : '<span class="dy-shift">Смена менеджера не назначена</span>'}
+    </div>`;
+    const kpis = `<div class="dy-kpis">
+      ${kpi('💰', 'Продано', X.sold, X.rev ? formatMoney(X.rev) : '', cmp(X.sold, avg(st=> pick(st).sold)))}
+      ${kpi('🆕', 'Новых заявок', X.newLeads, '', cmp(X.newLeads, avg(st=> pick(st).newLeads)))}
+      ${kpi('➡️', 'Движений по воронке', X.moves, X.lost ? 'из них отказов: ' + X.lost : '', cmp(X.moves, avg(st=> pick(st).moves)))}
+      ${kpi('✅', 'Задач выполнено', X.done, X.done ? '⚙️ авто ' + (X.doneAuto||0) + ' · ✍️ ручных ' + (X.doneMan||0) : '', cmp(X.done, avg(st=> pick(st).done)))}
+    </div>`;
+    // карточки людей: менеджеры (и все, кто что-то делал с заявками)
+    let people = Object.values(s.P).filter(p=> p.acts.length || p.sold || p.newLeads || p.onShift);
+    if(me) people = people.filter(p=> p.name === me);
+    const mgrFirst = (p)=> isManagerName(p.name) ? 0 : 1;
+    people.sort((a,b)=> mgrFirst(a) - mgrFirst(b) || (b.acts.length - a.acts.length));
+    const H0 = 8, H1 = 23;
+    const nowOpenOverdue = (name)=> isToday ? (state.leadTasks||[]).filter(t=> !t.done && !t.docKind && t.due && t.due < D && taskAlive(t) && dyWhoKey(t.assignee) === name).length : 0;
+    const pcard = (p)=>{
+      const ts = p.acts.slice().sort(); const hours = new Array(24).fill(0);
+      ts.forEach(t=>{ const d = new Date(t); if(!isNaN(d)) hours[d.getHours()]++; });
+      const maxH = Math.max(1, ...hours); const activeH = hours.filter(v=> v > 0).length;
+      const usual = avg(st=> (st.P[p.name] ? st.P[p.name].acts.length : 0));
+      const od = nowOpenOverdue(p.name);
+      const bars = Array.from({length: H1 - H0}, (_,i)=>{ const h = H0 + i, v = hours[h];
+        return `<div class="dy-bar" title="${pad(h)}:00–${pad(h+1)}:00 · действий: ${v}"><i style="height:${v ? Math.max(12, Math.round(v / maxH * 100)) : 0}%"></i><span>${h % 3 === 0 ? h : ''}</span></div>`; }).join('');
+      return `<div class="dy-card${p.onShift ? ' shift' : ''}">
+        <div class="dy-ch"><b>${escapeHtml(p.name)}</b>${p.onShift ? '<span class="dy-tag">на смене</span>' : ''}${!isManagerName(p.name) ? '<span class="dy-tag grey">не менеджер</span>' : ''}
+          <span class="dy-acts">${p.acts.length} ${pluralRu(p.acts.length, 'действие', 'действия', 'действий')}${usual ? ` <span class="dy-avg ${p.acts.length > usual ? 'up' : p.acts.length < usual ? 'down' : ''}">обычно ${String(usual).replace('.', ',')}</span>` : ''}</span></div>
+        <div class="dy-nums">
+          <div><b>${p.sold}</b>продаж${p.rev ? `<small>${formatMoney(p.rev)}</small>` : ''}</div>
+          <div><b>${p.newLeads}</b>новых заявок</div>
+          <div><b>${p.moves}</b>по воронке${p.lost ? `<small>отказов ${p.lost}</small>` : ''}</div>
+          <div><b>${p.done}</b>задач${p.done ? `<small style="color:#6B655C;">⚙️ ${p.doneAuto||0} · ✍️ ${p.doneMan||0}</small>` : ''}${p.late ? `<small class="bad">с опозданием ${p.late}</small>` : ''}</div>
+          <div><b>${p.kp}</b>КП</div>
+        </div>
+        ${p.setMan ? `<div class="dy-busy">✍️ Поставил(а) ручных задач: <b>${p.setMan}</b></div>` : ''}
+        ${ts.length ? `<div class="dy-busy">Занятость: <b>${dyTime(ts[0])} – ${dyTime(ts[ts.length-1])}</b> · активных часов: <b>${activeH}</b></div>
+        <div class="dy-bars">${bars}</div>` : `<div class="dy-busy" style="color:var(--danger);">${p.onShift ? 'На смене, но действий в приложении нет' : 'Действий нет'}</div>`}
+        ${od ? `<div class="dy-od">⚠ Сейчас просрочено задач: <b>${od}</b></div>` : ''}
+      </div>`;
+    };
+    const soldList = (me ? s.T.soldList.filter(l=> dyWhoKey(l.owner) === me) : s.T.soldList);
+    const sold = soldList.length ? `<div class="dy-sec">💰 Продажи за день</div>${soldList.map(l=>{
+      const chat = dyLeadChat(l);
+      const ev = l.eventId ? state.events.find(e=> e.id === l.eventId) : null;
+      const ord = l.orderId ? (state.orders||[]).find(o=> o.id === l.orderId) : null;
+      return `<div class="dy-row" data-dylead="${escapeHtml(l.id)}"><b>${escapeHtml(l.contact || 'без контакта')}</b><span>${escapeHtml(l.product || '')}${leadKind(l) === 'b2b' ? ' · B2B' : ''}</span><span>${escapeHtml(l.owner || '—')}</span><b class="dy-sum">${Number(l.revenue) > 0 ? formatMoney(Number(l.revenue)) : '—'}</b>
+        <div class="dy-go">
+          ${chat ? `<a class="dy-gb chat" href="${escapeHtml(chat.url)}" target="_blank" rel="noopener" title="${escapeHtml(chat.url)}">💬 Диалог · ${escapeHtml(chat.label)}</a>` : '<span class="dy-gb off" title="В заявке нет ни ссылки на соцсеть, ни ника, ни телефона">💬 нет контакта для чата</span>'}
+          ${ev ? `<button type="button" class="dy-gb" data-dyev="${escapeHtml(ev.id)}">📅 Мероприятие · ${escapeHtml(formatDateText(ev.date))}${ev.time ? ' ' + escapeHtml(ev.time) : ''}</button>` : (ord ? `<button type="button" class="dy-gb" data-dyord="1" data-dylead2="${escapeHtml(l.id)}">📦 Заказ</button>` : '<span class="dy-gb off">📅 мероприятие не привязано</span>')}
+          <button type="button" class="dy-gb" data-dyfunnel="${escapeHtml(l.id)}">📈 Заявка в воронке</button>
+        </div></div>`; }).join('')}` : '';
+    const feed = (me ? s.T.feed.filter(f=> f.who === me) : s.T.feed);
+    const feedHtml = feed.length ? `<details class="dy-feed"><summary>🕓 Лента дня — ${feed.length} ${pluralRu(feed.length, 'действие', 'действия', 'действий')}</summary>
+      ${feed.slice(0, 300).map(f=> `<div class="dy-frow"${f.leadId ? ` data-dylead="${escapeHtml(f.leadId)}"` : ''}><span class="dy-ft">${dyTime(f.ts)}</span><span>${f.icon}</span><span class="dy-fx">${escapeHtml(f.text)}</span><span class="dy-fw">${escapeHtml(f.who)}</span></div>`).join('')}</details>` : '';
+    return `<div class="dy-wrap">${head}
+      <div class="dy-hint">Продажи — по дате продажи заявки; «по воронке» — каждая смена этапа (кто её сделал); задачи — выполненные менеджером (автозакрытые программой не считаются): ⚙️ автозадачи воронки и ✍️ ручные, которые поставили себе, коллеге или руководство. «Обычно» — среднее за 7 предыдущих дней.</div>
+      ${kpis}
+      ${people.length ? `<div class="dy-sec">👥 ${me ? 'Моя активность' : 'Кто что сделал'}</div><div class="dy-cards">${people.map(pcard).join('')}</div>` : '<div style="color:var(--ink-soft);font-size:13px;margin:10px 0;">За этот день действий с заявками нет.</div>'}
+      ${sold}${feedHtml}</div>`;
+  }
+  // ссылка на диалог с клиентом: чат из карточки клиента → ссылка/ник из заявки → Telegram по номеру телефона
+  function dyLeadChat(l){
+    try{ const c = crmClientOfLead(l); const u = c ? crmSafeUrl(c.chatUrl) : ''; if(u) return { url:u, label: socialLabelOfUrl(u) || 'чат' }; }catch(e){}
+    const cp = leadContactParts(l);
+    const raw = l.socialUrl || cp.social;
+    if(raw){ const r = socialResolve(l.source, raw); const u = r.url || (/^https?:\/\//i.test(raw) ? crmSafeUrl(raw) : (/^@?[A-Za-z0-9_]{4,}$/.test(raw) ? 'https://t.me/' + raw.replace(/^@/,'') : ''));
+      if(u) return { url:u, label: socialLabelOfUrl(u) || 'соцсеть' }; }
+    let d = String(cp.phone || l.phone || '').replace(/\D/g,'');
+    if(d.length === 11 && d[0] === '8') d = '7' + d.slice(1); if(d.length === 10) d = '7' + d;
+    if(d.length === 11) return { url: 'https://t.me/+' + d, label: 'Telegram по номеру' };
+    return null;
+  }
+  // открыть заявку прямо в воронке: вкладка «Воронка», колонка продаж раскрыта, карточка подсвечена
+  function dyOpenInFunnel(id){
+    const l = state.leads.find(x=> x.id === id); if(!l) return;
+    const st = leadStatus(l);
+    state.convTab = 'board'; state.leadBoardQ = ''; state.leadBoardKind = ''; state.leadBoardOwner = ''; state.leadBoardSeg = ''; state.leadBoardTag = '';
+    if(st === 'sold' || st === 'lost'){ state.lbOpen = Object.assign({}, state.lbOpen || {}, { [st]: true }); }
+    render();
+    setTimeout(()=>{
+      const card = document.querySelector(`.lb-card[data-lid="${CSS.escape(id)}"]`);
+      if(card){ card.scrollIntoView({ behavior:'smooth', block:'center', inline:'center' }); card.classList.add('dy-flash'); setTimeout(()=> card.classList.remove('dy-flash'), 2600); }
+      else requireUnlock(()=>{ state.modal = {type:'lead', isNew:false, lead:{...l}}; render(); }); // старше 30 дней в воронке не видна — открываем карточку
+    }, 120);
+  }
+  function attachLeadDayEvents(){
+    const go = (n)=>{ const d = parseDate(state.dyDate || todayStr()); d.setDate(d.getDate() + n); state.dyDate = fmtDate(d); render(); };
+    const p = document.getElementById('dy-prev'); if(p) p.onclick = ()=> go(-1);
+    const n = document.getElementById('dy-next'); if(n) n.onclick = ()=> go(1);
+    const t = document.getElementById('dy-today'); if(t) t.onclick = ()=>{ state.dyDate = todayStr(); render(); };
+    const i = document.getElementById('dy-date'); if(i) i.onchange = ()=>{ if(i.value){ state.dyDate = i.value; render(); } };
+    document.querySelectorAll('.dy-go a').forEach(a=> a.onclick = (e)=> e.stopPropagation());
+    document.querySelectorAll('[data-dyev]').forEach(b=> b.onclick = (e)=>{ e.stopPropagation(); const ev = state.events.find(x=> x.id === b.dataset.dyev); if(ev) requireUnlock(()=>{ state.modal = {type:'event', event:{...ev}, isNew:false, keepAll:true}; render(); }); });
+    document.querySelectorAll('[data-dyord]').forEach(b=> b.onclick = (e)=>{ e.stopPropagation(); state.certView = 'orders'; render(); });
+    document.querySelectorAll('[data-dyfunnel]').forEach(b=> b.onclick = (e)=>{ e.stopPropagation(); dyOpenInFunnel(b.dataset.dyfunnel); });
+    document.querySelectorAll('[data-dylead]').forEach(r=> r.onclick = ()=>{ const l = state.leads.find(x=> x.id === r.dataset.dylead); if(l) requireUnlock(()=>{ state.modal = {type:'lead', isNew:false, lead:{...l}}; render(); }); });
+  }
+
   function renderConversionView(){
+    if(state.currentRole === 'admin'){ state.convTab = 'clients'; return renderClientsView(); }
     const tab = state.convTab || 'board';
-    const tabs = [['board','Воронка'],['tasks','Задачи'],['control','🕓 Контроль'],['forecast','🔮 Прогноз'],['clients','Клиенты'],['stats','Статистика и список']];
+    const tabs = [['board','Воронка'],['tasks','Задачи'],['day','📅 День'],['control','🕓 Контроль'],['forecast','🔮 Прогноз'],['clients','Клиенты'],['stats','Статистика и список']];
     const nOpen = (state.leadTasks||[]).filter(t=>!t.done && t.due && t.due <= todayStr() && taskAlive(t)).length;
     const bar = `<div class="sub-tabs" style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:12px;">${tabs.map(t=>`<button class="btn ${tab===t[0]?'btn-primary':'btn-ghost'}" data-convtab="${t[0]}">${t[1]}${t[0]==='tasks' && nOpen ? ' <span style="color:'+(tab==='tasks'?'#fff':'var(--danger)')+';">('+nOpen+')</span>' : ''}</button>`).join('')}</div>`;
-    const _lpStrip = (tab !== 'clients' && tab !== 'stats' && tab !== 'control' && tab !== 'forecast') ? (()=>{ try{ const c = new Date(); const ym = c.getFullYear()+'-'+pad(c.getMonth()+1); return renderRevenuePlanStrip(ym) + renderLeadPlanHtml(ym, { strip:true }); }catch(e){ return ''; } })() : '';
-    return bar + _lpStrip + (tab === 'board' ? renderForecastStrip() : '') + (tab === 'forecast' ? renderForecastView() : tab === 'control' ? renderLeadControlView() : tab === 'tasks' ? renderLeadTasksView() : (tab === 'clients' ? renderClientsView() : tab === 'stats' ? renderConversionStatsView() : renderLeadBoard()));
+    const _lpStrip = (tab !== 'clients' && tab !== 'stats' && tab !== 'control' && tab !== 'forecast' && tab !== 'day') ? (()=>{ try{ const c = new Date(); const ym = c.getFullYear()+'-'+pad(c.getMonth()+1); return renderRevenuePlanStrip(ym) + renderLeadPlanHtml(ym, { strip:true }); }catch(e){ return ''; } })() : '';
+    return bar + ((tab === 'board' || tab === 'tasks') ? renderDayStrip() : '') + (tab === 'tasks' ? renderRopTasksStrip() : '') + _lpStrip + (tab === 'board' ? renderForecastStrip() + renderForecastNextStrip() : '') + (tab === 'day' ? renderLeadDayView() : tab === 'forecast' ? renderForecastView() : tab === 'control' ? renderLeadControlView() : tab === 'tasks' ? renderLeadTasksView() : (tab === 'clients' ? renderClientsView() : tab === 'stats' ? renderConversionStatsView() : renderLeadBoard()));
   }
 
 
@@ -13840,6 +14087,83 @@
   // ===================== Статистика: менеджеры и причины отказов =====================
   // локальная дата (Омск) из ISO-отметки — doneAt хранится в UTC
   function isoLocalDate(iso){ if(!iso) return ''; const d = new Date(iso); return isNaN(d) ? String(iso).slice(0,10) : fmtDate(d); }
+  // откуда задача: автозадача (воронка/проверка/быстрая заявка) или ручная — и кто её поставил
+  const TASK_SYS_AUTHORS = ['автозадача','проверка задач','переезд из журнала','автоматически'];
+  function taskOrigin(t){
+    const by = String(t.createdBy||'').trim();
+    if(t.auto || t.fillTask || t.nudge || TASK_SYS_AUTHORS.includes(by.toLowerCase())) return { kind:'auto' };
+    const setter = by ? (isManagerName(by) ? managerCanon(by) : by) : '';
+    const assignee = t.assignee ? (isManagerName(t.assignee) ? managerCanon(t.assignee) : t.assignee) : '';
+    if(!setter || setter === assignee) return { kind:'self', setter: assignee };
+    return { kind: isManagerName(setter) ? 'peer' : 'boss', setter };
+  }
+  // ===== Задачи от РОП (руководитель сам или ассистент по его просьбе) =====
+  // forOwner: true — поставлено руководителем или «по просьбе руководителя»; false — ассистент поставил от себя.
+  // Старые задачи без отметки: «Руководитель» и «Ассистент» считаем задачами РОП.
+  function taskIsRop(t){
+    if(t.auto || t.fillTask || t.nudge || t.docKind) return false;
+    if(t.forOwner === true) return true; if(t.forOwner === false) return false;
+    const by = String(t.createdBy||'').trim(); return by === ROLE_LABELS.owner || by === ROLE_LABELS.assistant;
+  }
+  function taskRopFields(flagEl){
+    const r = state.currentRole;
+    if(r === 'owner') return { forOwner: true };
+    if(r === 'assistant') return { forOwner: !!(flagEl ? flagEl.checked : true) };
+    return {};
+  }
+  function taskRopCheckboxHtml(id){
+    return state.currentRole === 'assistant' ? `<label style="display:flex;gap:6px;align-items:center;font-size:12.5px;margin-top:6px;cursor:pointer;"><input type="checkbox" id="${id}" checked style="width:16px;height:16px;"> 👑 По просьбе руководителя (РОП) — попадёт в аналитику задач РОП</label>` : '';
+  }
+  function renderRopTasksHtml(period){
+    if(!['owner','admin','assistant'].includes(state.currentRole)) return '';
+    const today = todayStr(); const C = (n)=> isManagerName(n||'') ? managerCanon(n) : (n || '—');
+    const all = (state.leadTasks||[]).filter(t=> taskIsRop(t) && t.createdAt && period.inPeriod(isoLocalDate(t.createdAt)));
+    const via = (t)=> String(t.createdBy||'').trim() === ROLE_LABELS.assistant ? 'assistant' : 'owner';
+    const st = (L)=>{
+      const done = L.filter(t=> t.done && !t.autoClosed && !t.docClosed);
+      const closedAuto = L.filter(t=> t.done && (t.autoClosed || t.docClosed));
+      const open = L.filter(t=> !t.done);
+      const onTime = done.filter(t=> !t.due || isoLocalDate(t.doneAt) <= t.due);
+      const overdue = open.filter(t=> t.due && t.due < today);
+      const days = done.map(t=> (new Date(t.doneAt) - new Date(t.createdAt)) / 864e5).filter(v=> v >= 0);
+      const avgD = days.length ? Math.round(days.reduce((a,b)=>a+b,0) / days.length * 10) / 10 : null;
+      const base = L.length - closedAuto.length;
+      return { n: L.length, done: done.length, pct: base ? Math.round(done.length / base * 100) : null, onTime: done.length ? Math.round(onTime.length / done.length * 100) : null,
+        open: open.length, overdue: overdue.length, closedAuto: closedAuto.length, avgD };
+    };
+    const S = st(all); const nOwner = all.filter(t=> via(t) === 'owner').length, nAsst = all.length - nOwner;
+    const k = (v, l, sub, cls)=> `<div class="ms-kpi ${cls||''}"><div class="v">${v}</div><div class="l">${l}</div>${sub ? `<div class="s">${sub}</div>` : ''}</div>`;
+    const byM = {}; all.forEach(t=>{ const m = C(t.assignee); (byM[m] = byM[m] || []).push(t); });
+    const mRows = Object.entries(byM).sort((a,b)=> b[1].length - a[1].length).map(([m, L])=>{ const x = st(L);
+      return `<div class="rop-row"><b>${escapeHtml(m)}</b><span>${x.n}</span><span>${x.done}${x.pct !== null ? ' · ' + x.pct + '%' : ''}</span><span>${x.onTime !== null ? x.onTime + '%' : '—'}</span><span class="${x.overdue ? 'bad' : ''}">${x.open}${x.overdue ? ' (просроч. ' + x.overdue + ')' : ''}</span><span>${x.avgD !== null ? x.avgD + ' дн.' : '—'}</span></div>`; }).join('');
+    const openL = all.filter(t=> !t.done).sort((a,b)=> (a.due||'9999').localeCompare(b.due||'9999'));
+    const openHtml = openL.slice(0, 40).map(t=>{ const l = state.leads.find(x=> x.id === t.leadId); const od = t.due && t.due < today;
+      return `<div class="rop-open${od ? ' bad' : ''}"${l ? ` data-openlead="${escapeHtml(l.id)}"` : ''}><span>${escapeHtml(t.title||'')}</span><span>${escapeHtml(l ? (l.contact||'') : '')}</span><span>${escapeHtml(C(t.assignee))}</span><span>${t.due ? leadDueHtml(t.due) : 'без срока'}</span><span class="rop-via">${via(t) === 'assistant' ? 'через ассистента' : 'сама'}</span></div>`; }).join('');
+    return `<div class="analytics-section" id="rop-sec">
+      <h4>👑 Задачи от РОП — ${escapeHtml(period.periodLabel)}</h4>
+      <div style="font-size:12px;color:var(--ink-soft);margin-bottom:8px;">Задачи, которые руководитель поставил сам или ассистент поставил по просьбе руководителя (галочка «👑 По просьбе руководителя» при создании). Считаются по дате постановки.</div>
+      ${all.length ? `<div class="ms-grid" style="grid-template-columns:repeat(auto-fill,minmax(130px,1fr));">
+        ${k(S.n, 'поставлено', 'сама ' + nOwner + ' · через ассистента ' + nAsst)}
+        ${k(S.done, 'выполнено', S.pct !== null ? S.pct + '% от поставленных' : '', 'good')}
+        ${k(S.onTime !== null ? S.onTime + '%' : '—', 'в срок', '')}
+        ${k(S.avgD !== null ? S.avgD + ' дн.' : '—', 'в среднем на выполнение', '')}
+        ${k(S.open, 'не выполнено', S.overdue ? 'просрочено ' + S.overdue : '', S.overdue ? 'bad' : '')}
+        ${S.closedAuto ? k(S.closedAuto, 'закрыто программой', 'заявка продана / отказ') : ''}
+      </div>
+      <div class="rop-row rop-h" style="margin-top:12px;"><span>Кому</span><span>Поставлено</span><span>Выполнено</span><span>В срок</span><span>Не выполнено</span><span>Время</span></div>${mRows}
+      ${openL.length ? `<details class="ms-more" ${S.overdue ? 'open' : ''} style="margin-top:10px;"><summary>Не выполнены сейчас — ${openL.length}</summary>${openHtml}</details>` : ''}` : '<div style="font-size:13px;color:var(--ink-soft);">За этот период задач от РОП нет.</div>'}
+    </div>`;
+  }
+  function renderRopTasksStrip(){
+    try{
+      if(!['owner','admin','assistant'].includes(state.currentRole)) return '';
+      const ym = todayStr().slice(0,7); const today = todayStr();
+      const L = (state.leadTasks||[]).filter(t=> taskIsRop(t) && t.createdAt && isoLocalDate(t.createdAt).slice(0,7) === ym);
+      if(!L.length) return '';
+      const done = L.filter(t=> t.done && !t.autoClosed && !t.docClosed).length; const open = L.filter(t=> !t.done); const od = open.filter(t=> t.due && t.due < today).length;
+      return `<button type="button" class="dy-strip rop-strip" id="rop-strip"><span class="dy-s-t">👑 Мои задачи (РОП) за ${escapeHtml(MONTHS[new Date().getMonth()])}</span><span>поставлено <b>${L.length}</b></span><span>выполнено <b>${done}</b></span><span>не выполнено <b>${open.length}</b></span>${od ? `<span style="color:#F08C7A;">просрочено <b>${od}</b></span>` : ''}<span class="dy-s-more">подробнее ›</span></button>`;
+    }catch(e){ return ''; }
+  }
   function renderManagersStatsHtml(period, leadsP){
     const today = todayStr();
     const money = (l)=> (l.revenue>0 ? Number(l.revenue) : 0);
@@ -13863,7 +14187,11 @@
       return { name, days, leads: L.length, sold: sold.length, lost: lost.length, conv: L.length ? Math.round(sold.length/L.length*100) : null,
         rev, avg: sold.length ? Math.round(rev/sold.length) : 0, tasks: T.length, done: done.length, onTimePct: done.length ? Math.round(onTime.length/done.length*100) : null,
         overdue: overdueNow.length, perDay: days ? Math.round(done.length/days*10)/10 : null, leadsPerDay: days ? Math.round(L.length/days*10)/10 : null,
-        doneOffShift: done.length - doneOnShift, topR, topRN: topR ? rs[topR] : 0, rs, L };
+        doneOffShift: done.length - doneOnShift, topR, topRN: topR ? rs[topR] : 0, rs, L,
+        tk: (()=>{ const o = { auto:0, autoAll:0, self:0, peer:0, boss:0, manAll:0, setSelf:0, setOther:0 };
+          T.forEach(t=>{ const k = taskOrigin(t).kind; if(k === 'auto'){ o.autoAll++; if(t.done) o.auto++; } else { o.manAll++; if(t.done) o[k]++; } });
+          (state.leadTasks||[]).forEach(t=>{ if(t.docKind || !t.createdAt || !period.inPeriod(isoLocalDate(t.createdAt))) return; const g = taskOrigin(t); if(g.kind === 'auto' || C(g.setter||'') !== name) return; if(g.kind === 'self') o.setSelf++; else o.setOther++; });
+          o.man = o.self + o.peer + o.boss; return o; })() };
     }).filter(r=> r.leads || r.tasks || r.days).sort((a,b)=> b.leads - a.leads || b.tasks - a.tasks);
     if(!rows.length) return '';
     const best = (key)=>{ const v = rows.filter(r=>r[key]!==null && (key!=='conv' || r.leads>=3)).map(r=>r[key]); return v.length ? Math.max(...v) : null; };
@@ -13892,6 +14220,15 @@
           ${kpi('просрочено сейчас', r.overdue, '', r.overdue ? 'bad' : '')}
         </div>
         <div class="ms-bar" title="Доля задач, выполненных в срок"><span style="width:${r.onTimePct||0}%;background:${pctCol};"></span></div>
+        <div class="ms-grp">Задачи: автозадачи и ручные</div>
+        <div class="ms-grid">
+          ${kpi('⚙️ автозадач выполнено', r.tk.auto, 'из ' + r.tk.autoAll + (r.tk.autoAll ? ' · ' + Math.round(r.tk.auto / r.tk.autoAll * 100) + '%' : ''))}
+          ${kpi('✍️ ручных выполнено', r.tk.man, 'из ' + r.tk.manAll + (r.tk.manAll ? ' · ' + Math.round(r.tk.man / r.tk.manAll * 100) + '%' : ''))}
+          ${kpi('ручные от кого', r.tk.man ? `${r.tk.self}/${r.tk.peer}/${r.tk.boss}` : '—', 'себе / коллега / руководство')}
+          ${kpi('поставил(а) сам(а)', r.tk.setSelf + r.tk.setOther, 'себе ' + r.tk.setSelf + ' · другим ' + r.tk.setOther)}
+        </div>
+        ${(r.tk.auto + r.tk.man) ? `<div class="ms-bar ms-split" title="Доля автозадач и ручных среди выполненных"><span style="width:${Math.round(r.tk.auto / (r.tk.auto + r.tk.man) * 100)}%;background:#8C8C8C;"></span><span style="width:${Math.round(r.tk.man / (r.tk.auto + r.tk.man) * 100)}%;background:#E8B84B;"></span></div>
+        <div class="ms-note">выполнено: ⚙️ авто ${Math.round(r.tk.auto / (r.tk.auto + r.tk.man) * 100)}% · ✍️ ручные ${Math.round(r.tk.man / (r.tk.auto + r.tk.man) * 100)}%</div>` : ''}
         ${msFunnelHtml(r)}
         ${r.doneOffShift > 0 && r.days ? `<div class="ms-note">${r.doneOffShift} задач закрыто не в свою смену</div>` : ''}
       </div>`;
@@ -14086,6 +14423,7 @@
 
       ${renderLegalDocsControlHtml(period)}
       ${renderManagersStatsHtml(period, allLeadsInPeriod)}
+      ${renderRopTasksHtml(period)}
       ${renderLostReasonsHtml(period, allLeadsInPeriod)}
       <div class="analytics-section">
         <h4>📤 Исходящие — Поздравления с ДР</h4>
@@ -15113,9 +15451,12 @@
   }
   function crmSafeUrl(u){ u = String(u||'').trim(); if(!u) return ''; if(!/^https?:\/\//i.test(u)) u = 'https://' + u; return /^https?:\/\/[^\s]+$/i.test(u) ? u : ''; }
   function crmChatBtn(c, small){
-    const u = c ? crmSafeUrl(c.chatUrl) : '';
+    if(!c) return '';
+    let u = crmSafeUrl(c.chatUrl), label = '';
+    if(!u){ try{ const x = dyLeadChat({ contact: c.contact || '', clientId: c.id }); if(x){ u = x.url; label = x.label; } }catch(e){} }
     if(!u) return '';
-    return `<a href="${escapeHtml(u)}" target="_blank" rel="noopener" class="crm-chat" style="font-size:${small?'11px':'12.5px'};text-decoration:none;">💬 чат</a>`;
+    if(!label) label = socialLabelOfUrl(u) || 'чат';
+    return `<a href="${escapeHtml(u)}" target="_blank" rel="noopener" class="crm-chat" title="${escapeHtml(u)}" style="font-size:${small?'11px':'12.5px'};text-decoration:none;white-space:nowrap;">💬 Диалог · ${escapeHtml(label)}</a>`;
   }
   // найти или создать клиента по заявке; поля seg/tags/chat применяются, только если переданы
   function crmUpsertForLead(lead, vals, prefClientId){
@@ -16575,6 +16916,38 @@
       return `<div class="fc-strip" data-convtab="forecast">🔮 <b>Прогноз на ${escapeHtml(MONTHS[f.M-1])}: ${formatMoney(f.forecast)}</b> — ${pct}% плана${f.forecast < f.totalPlan ? ` · не хватает <b>${formatMoney(f.totalPlan - f.forecast)}</b>` : ' ✓'} <span style="color:var(--ink-soft);">→ подробнее</span></div>`;
     }catch(e){ return ''; }
   }
+  // ===== Следующий месяц: в текущем месяце продаём будущий — «рука на пульсе» =====
+  function fcNextYm(ym){ const [y,m] = (ym || todayStr().slice(0,7)).split('-').map(Number); const d = new Date(y, m, 1); return d.getFullYear() + '-' + String(d.getMonth()+1).padStart(2,'0'); }
+  function fcPrevYm(ym){ const [y,m] = ym.split('-').map(Number); const d = new Date(y, m - 2, 1); return d.getFullYear() + '-' + String(d.getMonth()+1).padStart(2,'0'); }
+  // тот же день месяцем раньше (15.11 → 15.10; 31.03 → 28/29.02)
+  function fcMonthAgo(ds){ const [y,m,d] = ds.split('-').map(Number); const dim = new Date(y, m - 1, 0).getDate(); const x = new Date(y, m - 2, Math.min(d, dim)); return fmtDate(x); }
+  // предпродажи месяца ym к дате asOf: проданные заявки на этот месяц (по дате продажи) и пришедшие заявки на этот месяц
+  function fcPresale(ym, asOf){
+    const r = { sold:0, rev:0, leads:0 };
+    (state.leads||[]).forEach(l=>{
+      const m = l.eventDate ? l.eventDate.slice(0,7) : fcLeadMonth(l); if(m !== ym) return;
+      const req = l.requestDate || (l.createdAt ? isoLocalDate(l.createdAt) : '');
+      if(req && req <= asOf) r.leads++;
+      if(l.sold && l.saleDate && l.saleDate <= asOf){ r.sold++; r.rev += Number(l.revenue) > 0 ? Number(l.revenue) : 0; }
+    });
+    return r;
+  }
+  function fcPulse(ym){
+    const today = todayStr(); const cmpYm = fcPrevYm(ym); const cmpAsOf = fcMonthAgo(today);
+    return { now: fcPresale(ym, today), was: fcPresale(cmpYm, cmpAsOf), cmpYm, cmpAsOf };
+  }
+  function fcArrow(a, b){ return a > b ? '<span style="color:#4E7A2E;">▲</span>' : a < b ? '<span style="color:#B8863A;">▼</span>' : ''; }
+  function renderForecastNextStrip(){
+    try{
+      const ym = fcNextYm(); const f = fcCompute(ym); const pu = fcPulse(ym);
+      const mn = MONTHS[f.M-1]; const pct = f.totalPlan ? Math.round(f.forecast / f.totalPlan * 100) : null;
+      const cmpMn = MONTHS[Number(pu.cmpYm.slice(5)) - 1];
+      return `<div class="fc-strip fc-next" data-convtab="forecast" data-fcnext="${ym}">
+        🗓 <b>${escapeHtml(mn.charAt(0).toUpperCase() + mn.slice(1))} — продаём сейчас.</b> Уже есть <b>${formatMoney(f.have)}</b> · в работе ${f.items.length} ${pluralRu(f.items.length,'заявка','заявки','заявок')} ≈ <b>${formatMoney(f.pipe)}</b> · прогноз <b>${formatMoney(f.forecast)}</b>${pct !== null ? ` — ${pct}% плана${f.forecast < f.totalPlan ? ` · не хватает <b>${formatMoney(f.totalPlan - f.forecast)}</b>` : ' ✓'}` : ' · <span style="color:var(--danger);">план на ' + escapeHtml(mn.toLowerCase()) + ' не задан</span>'}
+        <div class="fc-next-sub">Темп: на ${escapeHtml(mn.toLowerCase())} продано <b>${pu.now.sold}</b> ${pluralRu(pu.now.sold,'заявка','заявки','заявок')} на <b>${formatMoney(pu.now.rev)}</b> ${fcArrow(pu.now.rev, pu.was.rev)} · на ${escapeHtml(cmpMn.toLowerCase())} к ${escapeHtml(lgDateDots(pu.cmpAsOf).slice(0,5))} было ${pu.was.sold} на ${formatMoney(pu.was.rev)} · заявок на ${escapeHtml(mn.toLowerCase())}: ${pu.now.leads} ${fcArrow(pu.now.leads, pu.was.leads)} (было ${pu.was.leads}) <span style="color:var(--ink-soft);">→ подробнее</span></div>
+      </div>`;
+    }catch(e){ console.warn(e); return ''; }
+  }
   function renderForecastView(){
     const curYm = todayStr().slice(0,7);
     const nextYm = (()=>{ const [y,m] = curYm.split('-').map(Number); const d = new Date(y, m, 1); return d.getFullYear() + '-' + String(d.getMonth()+1).padStart(2,'0'); })();
@@ -16603,7 +16976,7 @@
     return `
       <div style="display:flex;gap:6px;margin-bottom:10px;flex-wrap:wrap;">
         <button class="btn ${ym === curYm ? 'btn-primary' : 'btn-ghost'}" data-fcym="${curYm}">${escapeHtml(MONTHS[Number(curYm.slice(5))-1])}</button>
-        <button class="btn ${ym === nextYm ? 'btn-primary' : 'btn-ghost'}" data-fcym="${nextYm}">${escapeHtml(MONTHS[Number(nextYm.slice(5))-1])}</button>
+        <button class="btn ${ym === nextYm ? 'btn-primary' : 'btn-ghost'}" data-fcym="${nextYm}">${escapeHtml(MONTHS[Number(nextYm.slice(5))-1])} · продаём сейчас</button>
       </div>
       <div class="analytics-section">
         <h4 style="margin-top:0;">🔮 Прогноз выручки на ${escapeHtml(mn)}: ${formatMoney(f.forecast)}${pct !== null ? ` · ${pct}% плана` : ''}</h4>
@@ -16617,6 +16990,12 @@
         ${f.noDate.length ? `<div class="lc-s" style="margin-top:8px;">Ещё ${f.noDate.length} ${pluralRu(f.noDate.length,'заявка','заявки','заявок')} без даты мероприятия на ${formatMoney(f.noDate.reduce((a,x)=>a+x.amount,0))} (≈ ${formatMoney(f.noDateExp)} с учётом шанса) — в прогноз не входят. Уточните у клиентов месяц — прогноз станет точнее.</div>` : ''}
         ${f.pastDate.length ? `<div class="lc-s" style="margin-top:4px;color:var(--danger);">${f.pastDate.length} ${pluralRu(f.pastDate.length,'заявка','заявки','заявок')} в работе, а дата мероприятия уже прошла — закройте их (продажа или отказ), в прогноз они не входят.</div>` : ''}
       </div>
+      ${ym === nextYm ? (()=>{ const pu = fcPulse(ym); const cmpMn = MONTHS[Number(pu.cmpYm.slice(5)) - 1].toLowerCase(); const d = lgDateDots(todayStr()).slice(0,5), d0 = lgDateDots(pu.cmpAsOf).slice(0,5);
+        const row = (label, a, b, money)=> `<div class="fc-st"><div>${label}</div><div><b>${money ? formatMoney(a) : a}</b> ${fcArrow(a, b)}</div><div>${money ? formatMoney(b) : b}</div><div>${b ? (a >= b ? '+' : '') + Math.round((a - b) / b * 100) + '%' : '—'}</div><div></div></div>`;
+        return `<div class="analytics-section"><h4 style="margin-top:0;">📈 Темп предпродаж: ${escapeHtml(mn.toLowerCase())} сейчас vs ${escapeHtml(cmpMn)} месяц назад</h4>
+          <div class="fc-st fc-st-h"><div></div><div>На ${escapeHtml(mn.toLowerCase())} к ${d}</div><div>На ${escapeHtml(cmpMn)} к ${d0}</div><div>Разница</div><div></div></div>
+          ${row('Продано заявок', pu.now.sold, pu.was.sold)}${row('Сумма продаж', pu.now.rev, pu.was.rev, true)}${row('Пришло заявок на месяц', pu.now.leads, pu.was.leads)}
+          <div class="lc-s" style="margin-top:6px;">Сравниваем с тем, как продавался ${escapeHtml(cmpMn)}, когда до него оставалось столько же времени. Считаются заявки с датой мероприятия (или месяцем) в этом месяце; продажа — по дате продажи. ▲ — продаём быстрее, ▼ — медленнее.</div></div>`; })() : ''}
       <div class="analytics-section">
         <h4 style="margin-top:0;">Заявки по этапам</h4>
         <div class="fc-st fc-st-h"><div>Этап</div><div>Заявок</div><div>Сумма</div><div>Шанс</div><div>Ожидаем</div></div>
@@ -16913,6 +17292,7 @@
               <button type="button" class="btn btn-ghost" id="lt2-add">+ задача</button>
             </div>
             <div id="lt2-hint" style="font-size:11.5px;color:var(--ink-soft);margin-top:3px;">Задачи сохранятся вместе с заявкой и появятся на вкладке «Задачи».</div>
+            ${taskRopCheckboxHtml('lt2-rop')}
           </div>
           ${!isNew ? (()=>{ const _cur = state.leads.find(x=> x.id === lead.id) || lead; return leadTimelineHtml(_cur); })() : ''}
           <div class="field">
@@ -16963,7 +17343,7 @@
       const addDraft = ()=>{
         const title = titleEl.value.trim(); if(!title){ titleEl.style.borderColor = 'var(--danger)'; return false; }
         titleEl.style.borderColor = '';
-        draft.push({ id: uid(), leadId, title, due: dueEl.value || '', done: false, doneAt: '', assignee: whoEl.value.trim() || leadWho(), createdBy: leadWho(), createdAt: new Date().toISOString(), auto: false });
+        draft.push({ id: uid(), leadId, title, due: dueEl.value || '', done: false, doneAt: '', assignee: whoEl.value.trim() || leadWho(), createdBy: leadWho(), createdAt: new Date().toISOString(), auto: false, ...taskRopFields(overlay.querySelector('#lt2-rop')) });
         titleEl.value = ''; draw(); return true;
       };
       overlay.querySelector('#lt2-add').onclick = ()=>{ addDraft(); titleEl.focus(); };
@@ -26044,7 +26424,7 @@
             <button class="btn btn-ghost analytics-panel-btn" data-panel="yearsummary">📆 Сводка по годам</button>
             <button class="btn btn-ghost analytics-panel-btn" data-panel="auditlog">📜 Журнал действий</button>
             <button class="btn btn-ghost analytics-panel-btn" data-panel="integrity" style="${(state.eventsIntegrityAlerts&&state.eventsIntegrityAlerts.length>0)?'border-color:var(--status-red);color:var(--status-red);':''}">🛡 Сохранность расписания</button>
-            <button class="btn btn-ghost analytics-panel-btn" data-panel="marketing">📣 Маркетинг</button>
+            ${state.currentRole === 'admin' ? '' : `<button class="btn btn-ghost analytics-panel-btn" data-panel="marketing">📣 Маркетинг</button>`}
             ${canSeeDailyReport ? `<button class="btn btn-ghost" id="btn-daily-report">📋 Отчёт дня</button>` : ''}
           </div>
         </div>
@@ -27317,7 +27697,7 @@
           <button class="btn btn-ghost analytics-panel-btn" data-panel="yearsummary">📆 Сводка по годам</button>
             <button class="btn btn-ghost analytics-panel-btn" data-panel="auditlog">📜 Журнал действий</button>
             <button class="btn btn-ghost analytics-panel-btn" data-panel="integrity" style="${(state.eventsIntegrityAlerts&&state.eventsIntegrityAlerts.length>0)?'border-color:var(--status-red);color:var(--status-red);':''}">🛡 Сохранность расписания</button>
-            <button class="btn btn-ghost analytics-panel-btn" data-panel="marketing">📣 Маркетинг</button>
+            ${state.currentRole === 'admin' ? '' : `<button class="btn btn-ghost analytics-panel-btn" data-panel="marketing">📣 Маркетинг</button>`}
             ${canSeeDailyReport ? `<button class="btn btn-ghost" id="btn-daily-report">📋 Отчёт дня</button>` : ''}
           ${state.currentRole==='owner' ? `<button class="btn btn-ghost owner-panel-btn" data-panel="netprofit" style="border-color:#6B4A1E;color:#6B4A1E;">🔒 Чистая прибыль</button>` : ''}
             ${state.currentRole==='owner' ? `<button class="btn btn-ghost owner-panel-btn" data-panel="netprofit-calc" style="border-color:#6B4A1E;color:#6B4A1E;">🧮 Калькулятор плана</button>` : ''}
@@ -27622,7 +28002,7 @@
     const dayNo = curYm === ym ? Number(today.slice(8,10)) : (ym < curYm ? dim : 0);
     const f = lpFact(ym, cut);
     const byLead = plan.byLeadCat || {}, conv = plan.byLeadConv || {}, notes = plan.leadNotes || {}, units = plan.byCatUnits || {};
-    const canEdit = ['owner','admin','assistant','marketer'].includes(state.currentRole);
+    const canEdit = ['owner','admin','assistant','marketer','smm'].includes(state.currentRole);
     let T = { plan:0, came:0, sold:0, left:0 };
     const rows = LP_CATS.map(c=>{
       const p = Number(byLead[c.key]) || 0, x = f[c.key];
@@ -32995,8 +33375,8 @@
           ${reportPhotoFieldHtml('6. ', !!(ev.masterReport && typeof ev.masterReport==='object' && ev.masterReport.hasPhoto), state.currentRole!=='master')}
           <div class="modal-actions">
             <div style="display:flex;gap:8px;">
-              ${!isNew ? `<button class="btn-danger" id="btn-del">Удалить</button>` : ''}
-              ${!isNew ? `<button class="btn btn-ghost" id="btn-duplicate">🔁 Повторить</button>` : ''}
+              ${(!isNew && state.currentRole !== 'master') ? `<button class="btn-danger" id="btn-del">Удалить</button>` : ''}
+              ${(!isNew && state.currentRole !== 'master') ? `<button class="btn btn-ghost" id="btn-duplicate">🔁 Повторить</button>` : ''}
             </div>
             <div style="display:flex;gap:8px;">
               <button class="btn btn-ghost" id="btn-cancel">Отмена</button>
