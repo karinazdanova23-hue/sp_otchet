@@ -876,6 +876,7 @@
      при любой ширине окна браузера и любом масштабе страницы; длинные названия мероприятий обрезаются
      многоточием внутри колонки (см. .evt-title), а не раздувают её */
   .cal-grid-wrap{ overflow-x: auto; width: 100%; }
+  .cal-offsite{ background:#6B4E9B; color:#fff; font-weight:700; font-size:11px; border-radius:4px; padding:1px 5px; margin:1px 0 2px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
   .cal-grid{
     display:grid; grid-template-columns: repeat(7, minmax(0, 1fr));
     border-top: 1px solid var(--line-strong); border-left: 1px solid var(--line-strong);
@@ -2593,14 +2594,30 @@
   // (старший только отмечается в графике, его оплата приложением не считается)
   const FULLDAY_FROM = '2026-11-01';
   const HOSTESS_BASE_SALARY = 40000;
+  // с ноября 2026: старший администратор — оклад 60 000 ₽; переработка у всех — по ставке своего оклада.
+  // Часы в месяце при графике 4/2: 365,25/12 дней × 4/6 ≈ 20,3 смены × 8 рабочих часов (9 часов смены − 1 час обеда) ≈ 162,3 ч.
+  const SENIOR_ADMIN_BASE_SALARY = 60000;
+  const ADMIN_MONTH_WORK_HOURS = 365.25/12 * 4/6 * 8;
+  const ADMIN_PAY_V2_FROM = '2026-11-01';
+  const ADMIN_EXTRA_RATE = Math.round(HOSTESS_BASE_SALARY / ADMIN_MONTH_WORK_HOURS);          // 246 ₽/ч
+  const SENIOR_EXTRA_RATE = Math.round(SENIOR_ADMIN_BASE_SALARY / ADMIN_MONTH_WORK_HOURS);   // 370 ₽/ч
+  // старший администратор: стоит в строке «Старший админ» или у человека должность «Старший администратор» в доступах
+  function isSeniorAdminName(name){
+    try{ return staffPositionsOf(name).some(id=>{ const p = staffPositionById(id); return p && (p.id === 'pos-senior-admin' || /старш\S* админ/i.test(p.name)); }); }catch(e){ return false; }
+  }
+  function adminIsSenior(name, def){ return !!(def && def.senior) || isSeniorAdminName(name); }
+  function adminExtraRate(dateStr, name, def){
+    if(dateStr < ADMIN_PAY_V2_FROM) return HOSTESS_EXTRA_HOUR_RATE;
+    return adminIsSenior(name, def) ? SENIOR_EXTRA_RATE : ADMIN_EXTRA_RATE;
+  }
   const SHIFT_DEFS_OLD = [
     { key: 'shift1', label: '12:00–17:00', start: '12:00', end: '17:00' },
     { key: 'shift2', label: '17:00–22:00', start: '17:00', end: '22:00' },
   ];
   const SHIFT_DEFS_FULL = [
     { key: 'shift1', label: '1-й админ 12:00–21:00', start: '12:00', end: '21:00' },
-    { key: 'shift2', label: '2-й админ 13:00–22:00', start: '13:00', end: '22:00' },
-    { key: 'shift3', label: 'Старший админ', start: '12:00', end: '22:00', senior: true },
+    { key: 'shift2', label: '2-й админ / старший 13:00–22:00', start: '13:00', end: '22:00' },
+    { key: 'shift3', label: 'Старший админ 13:00–22:00', start: '13:00', end: '22:00', senior: true },
   ];
   function shiftDefsForDate(dateStr){ return (dateStr && dateStr >= FULLDAY_FROM) ? SHIFT_DEFS_FULL : SHIFT_DEFS_OLD; }
   function shiftDefFor(dateStr, key){ return shiftDefsForDate(dateStr).find(x=>x.key===key); }
@@ -2609,8 +2626,9 @@
   function hostessShiftPay(dateStr, rawEntry, def, rate){
     const extra = shiftExtraHours(rawEntry, def);
     if(dateStr < FULLDAY_FROM) return rate + extra*HOSTESS_EXTRA_HOUR_RATE;
-    if(def.senior) return 0;
-    return extra*HOSTESS_EXTRA_HOUR_RATE;
+    const en = normalizeShiftEntry(rawEntry, def);
+    if(dateStr < ADMIN_PAY_V2_FROM && def.senior) return 0;
+    return Math.round(extra * adminExtraRate(dateStr, en && en.name, def));
   }
   // оклад админов с ноября: 40 000 ₽/мес, по 20 000 ₽ за каждую половину месяца, где у человека есть хотя бы одна смена
   function hostessBaseSalaryFor(ym){
@@ -2623,12 +2641,15 @@
       const day = (state.hostessShifts||{})[ds];
       if(!day) continue;
       SHIFT_DEFS_FULL.forEach(def=>{
-        if(def.senior) return;
+        const v2 = ds >= ADMIN_PAY_V2_FROM;
+        if(def.senior && !v2) return;
         const en = normalizeShiftEntry(day[def.key], def);
         if(!en || !en.name || !en.name.trim()) return;
         const n = en.name.trim();
         if(!res[n]) res[n] = {h1:0, h2:0};
-        res[n][d<=15?'h1':'h2'] = HOSTESS_BASE_SALARY/2;
+        const base = v2 && adminIsSenior(n, def) ? SENIOR_ADMIN_BASE_SALARY : HOSTESS_BASE_SALARY;
+        const k = d<=15?'h1':'h2';
+        res[n][k] = Math.max(res[n][k], base/2);
       });
     }
     return res;
@@ -3383,7 +3404,7 @@
     marketingStatsMode: 'month',
     marketingPlanCursor: new Date(),
     suppliers: null,
-    procurementTab: 'stock',
+    procurementTab: 'warehouse',
     stockReceipts: null,
     procurementBudgetCursor: new Date(new Date().getFullYear(), new Date().getMonth(), 1),
     daysOff: null,
@@ -3868,6 +3889,7 @@
         state.staffNotAdmins = Array.isArray(r.notAdmins) ? r.notAdmins : [];
       }
     }catch(e){}
+    try{ await loadStaffPositions(); }catch(e){ state.staffPos = {}; }
 
     try{
       const sa = await window.storage.get('staff-archive', true);
@@ -3987,6 +4009,8 @@
       const rc = await window.storage.get('stock-receipts', true);
       state.stockReceipts = rc ? JSON.parse(rc.value) : [];
     }catch(e){ state.stockReceipts = []; }
+    try{ await loadFinanceAudit(); }catch(e){ state.financeAudit = []; }
+    try{ await loadStockData(); }catch(e){ console.error('stock load', e); state.stockItems = state.stockItems || []; state.stockRevisions = state.stockRevisions || []; state.stockWriteoffs = state.stockWriteoffs || []; }
 
     try{
       const ro = await window.storage.get('reference-overrides', true);
@@ -4140,6 +4164,7 @@
       const mss = await window.storage.get('master-shifts', true);
       state.masterShifts = mss ? JSON.parse(mss.value) : {};
     }catch(e){ state.masterShifts = {}; }
+    await loadHelperShifts();
     try{
       const cdr = await window.storage.get('closed-days', true);
       state.closedDays = cdr ? JSON.parse(cdr.value) : {};
@@ -4517,6 +4542,9 @@
     const payments = event.payments;
     let paymentsIdsAssigned = legacyAdded;
     payments.forEach(p=>{ if(!p.id){ p.id = uid(); paymentsIdsAssigned = true; } });
+    // кто принял оплату: если вписали только что в карточке мероприятия (сегодня) и имя не записано — это тот, кто сейчас сохраняет
+    { const today = todayStr();
+      payments.forEach(p=>{ if(p.by || p.certRedemptionRef || p.refundRef) return; const pd = p.date || (p.ts ? fmtDate(new Date(p.ts)) : ''); if(pd === today && !state.incomes.some(i=> i.paymentId === p.id)){ try{ p.by = feedWho(); paymentsIdsAssigned = true; }catch(e){} } }); }
 
     // "живые" оплаты — не сертификат (эти деньги уже учтены доходом при продаже сертификата) и не возврат.
     const genuinePayments = payments.filter(p=> p.source !== 'Сертификат' && !p.certRedemptionRef && p.type !== 'refund' && !p.refundRef);
@@ -4558,6 +4586,7 @@
         account: p.source || '', eventId: event.id, paymentId: p.id, amount: Number(p.amount)||0,
         masterName: '', itemSaleId: '', orderId: '',
         comment: `Оплата по журналу: ${event.title || 'без названия'}${guestSuffix}${p.note ? ' · ' + p.note : ''}`, autoFromPayment: true,
+        acceptedBy: p.by || (existing && existing.acceptedBy) || '',
       };
       if(!existing || existing.date!==entry.date || existing.amount!==entry.amount || existing.account!==entry.account || existing.comment!==entry.comment){
         const idx = state.incomes.findIndex(i=>i.id===entry.id);
@@ -5149,6 +5178,7 @@
     'hostess-shifts': ()=>saveHostessShifts(),
     'manager-shifts': ()=>saveManagerShifts(),
     'master-shifts': ()=>saveMasterShifts(),
+    'helper-shifts': ()=>saveHelperShifts(),
     'closed-days': ()=>saveClosedDays()
   };
   const failedSaveKeys = new Set();
@@ -5932,7 +5962,8 @@
     const rows = MANAGER_LIST.map(name=>{
       const v = ov[name];
       const edited = v!==undefined && v!==null && v!=='' && !isNaN(Number(v));
-      return { name, amount: edited ? Number(v) : auto, edited, auto };
+      const adj = managerAdjSum(ym, name);
+      return { name, amount: (edited ? Number(v) : auto) + adj, edited, auto, adj };
     });
     return { auto, rows, total: rows.reduce((s,r)=>s+r.amount,0) };
   }
@@ -6159,6 +6190,7 @@
   function feedWho(){
     const r = state.currentRole;
     return (r === 'manager' && state.loggedInManagerName) || (r === 'master' && state.loggedInMasterName) || (r === 'hostess' && state.loggedInHostessName)
+      || (state.loggedInStaffName && state.loggedInStaffRole === r ? state.loggedInStaffName : '')
       || state.loggedInManagerName || state.loggedInMasterName || state.loggedInHostessName || (ROLE_LABELS[r] || r || '—');
   }
   function feedCanSee(e){
@@ -6422,25 +6454,294 @@
       state._birthdayOutreachBaseline = JSON.parse(JSON.stringify(finalArr));
     });
   }
+  // ===================== 🚩 КОНТРОЛЬ: персональная ответственность =====================
+  // Журнал денег ('finance-audit'): удаления доходов/расходов и правки задним числом — пишется автоматически при сохранении.
+  // Флажки (считаются на лету, ничего вручную вести не нужно):
+  //   деньги: удалённые записи, правки задним числом, недоплата после мероприятия (на админов смены), оплата без гостя/мероприятия;
+  //   мастера: несданный отчёт; админы: незакрытый день, невыданная ЗП помощнику.
+  const CONTROL_FROM = '2026-11-01';
+  const CONTROL_KINDS = {
+    del:    { icon:'🗑', label:'Удалена запись в Книге' },
+    retro:  { icon:'✎', label:'Изменено задним числом' },
+    debt:   { icon:'💸', label:'Недоплата после мероприятия' },
+    nolink: { icon:'❓', label:'Оплата без гостя / мероприятия' },
+    report: { icon:'📝', label:'Не сдан отчёт мастера' },
+    day:    { icon:'📅', label:'День не закрыт' },
+    helper: { icon:'🤝', label:'Не выдана ЗП помощнику' },
+  };
+  // ---- журнал ----
+  async function loadFinanceAudit(){
+    try{ const r = await window.storage.get('finance-audit', true); state.financeAudit = r ? JSON.parse(r.value) : []; }catch(e){ state.financeAudit = []; }
+    if(!Array.isArray(state.financeAudit)) state.financeAudit = [];
+    state._financeAuditBaseline = JSON.parse(JSON.stringify(state.financeAudit));
+  }
+  async function saveFinanceAudit(){
+    if(!Array.isArray(state._financeAuditBaseline)) return;
+    if(state.financeAudit.length > 3000) state.financeAudit = state.financeAudit.slice().sort((a,b)=> (b.ts||'').localeCompare(a.ts||'')).slice(0, 3000);
+    await saveCollectionMerged('finance-audit', state.financeAudit, state._financeAuditBaseline, (a)=>{ state.financeAudit = a; state._financeAuditBaseline = JSON.parse(JSON.stringify(a)); });
+  }
+  const AUDIT_KEYS = { inc: ['amount','account','date','eventId','operation'], exp: ['amount','source','date','category','master'] };
+  function auditPick(coll, r){ const o = {}; AUDIT_KEYS[coll].forEach(k=>{ o[k] = r ? (r[k] === undefined ? '' : r[k]) : ''; }); return o; }
+  // вызывается из saveIncomes/saveExpenses ДО сохранения: сравниваем с тем, что было загружено
+  function auditFinanceChanges(coll, arr, baseline){
+    if(!Array.isArray(baseline) || !Array.isArray(state.financeAudit)) return false;
+    let who = ''; try{ who = feedWho(); }catch(e){}
+    const now = new Date().toISOString(), today = todayStr(), yest = addDaysIso(today, -1);
+    const cur = new Map((arr||[]).filter(Boolean).map(x=>[x.id, x]));
+    let added = false;
+    (baseline||[]).forEach(b=>{
+      if(!b || !b.id) return;
+      const r = cur.get(b.id);
+      if(!r){
+        // служебные дубли зеркал оплат (когда остаётся другая запись по тому же платежу) — не считаем удалением
+        if(b.paymentId && (arr||[]).some(x=> x && x.paymentId === b.paymentId)) return;
+        if(b.safeTransfer || b.netProfitRef) return;
+        state.financeAudit.push({ id: uid(), ts: now, type:'del', coll, recId: b.id, by: who, role: state.currentRole || '', rec: JSON.parse(JSON.stringify(b)), viaEvent: !!b.autoFromPayment });
+        added = true; return;
+      }
+      const old = (b.date && b.date < yest) || (b.createdAt && (Date.now() - new Date(b.createdAt).getTime()) > 24*3600*1000);
+      if(!old) return;
+      const pb = auditPick(coll, b), pr = auditPick(coll, r);
+      if(JSON.stringify(pb) === JSON.stringify(pr)) return;
+      state.financeAudit.push({ id: uid(), ts: now, type:'retro', coll, recId: b.id, by: who, role: state.currentRole || '', before: pb, after: pr, viaEvent: !!r.autoFromPayment, comment: r.comment || b.comment || '' });
+      added = true;
+    });
+    return added;
+  }
+  // ---- кто на смене ----
+  function adminsOnShift(ds){
+    const day = (state.hostessShifts||{})[ds]; if(!day) return [];
+    const out = [];
+    shiftDefsForDate(ds).forEach(def=>{ const en = normalizeShiftEntry(day[def.key], def); if(en && en.name && en.name.trim() && !out.includes(en.name.trim())) out.push(en.name.trim()); });
+    return out;
+  }
+  function seniorAdminNames(){ try{ const s = staffEveryone().filter(n=> isSeniorAdminName(n)); return s.length ? s : ['Старший администратор']; }catch(e){ return ['Старший администратор']; } }
+  // ---- все флажки ----
+  function controlFlags(){
+    const out = [], today = todayStr();
+    const add = (kind, who, f)=> (Array.isArray(who) ? (who.length ? who : ['не назначено']) : [who || 'не назначено']).forEach(w=> out.push({ kind, who: w, ...f }));
+    // 1–2. журнал: удаления и правки задним числом (свои действия руководителя не флажим)
+    (state.financeAudit||[]).forEach(a=>{
+      if(a.ack || a.restored || a.role === 'owner') return;
+      if((Date.now() - new Date(a.ts).getTime()) > 45*86400000) return;
+      if(a.type === 'del'){
+        const r = a.rec || {};
+        add('del', a.by, { date: a.ts.slice(0,10), amount: Number(r.amount)||0, auditId: a.id, text: `${a.coll==='inc'?'доход':'расход'} ${formatMoney(Number(r.amount)||0)} · ${a.coll==='inc' ? (r.account||'') : (r.category||'') + (r.source ? ', ' + r.source : '')} · за ${formatDateText(r.date||'')}${r.comment ? ' · ' + r.comment : ''}${a.viaEvent ? ' (оплата удалена из мероприятия)' : ''}` });
+      } else if(a.type === 'retro'){
+        const ch = Object.keys(a.before||{}).filter(k=> String(a.before[k]) !== String((a.after||{})[k]));
+        const L = { amount:'сумма', account:'способ оплаты', source:'источник', date:'дата', eventId:'мероприятие', operation:'операция', category:'категория', master:'кому' };
+        const fmt = (k,v)=> k === 'amount' ? formatMoney(Number(v)||0) : (k === 'date' ? formatDateText(v) : (k === 'eventId' ? (v ? linkedEventLabel(v) : 'нет') : (v || '—')));
+        add('retro', a.by, { date: a.ts.slice(0,10), amount: Number((a.after||{}).amount)||0, auditId: a.id, text: `${a.coll==='inc'?'доход':'расход'} от ${formatDateText((a.before||{}).date||'')}: ${ch.map(k=> L[k] + ' ' + fmt(k, a.before[k]) + ' → ' + fmt(k, a.after[k])).join(', ')}${a.comment ? ' · ' + a.comment : ''}` });
+      }
+    });
+    // 3. недоплата после мероприятия — на админов той смены
+    (state.events||[]).forEach(e=>{
+      if(!e.date || e.date >= today || e.date < CONTROL_FROM) return;
+      if(!['confirmed','tentative','offsite'].includes(e.status)) return;
+      const rem = eventRemainderTotal(e); if(!(rem > 0)) return;
+      add('debt', adminsOnShift(e.date), { date: e.date, amount: rem, eventId: e.id, text: `${formatDateText(e.date)} ${e.time||''} · ${e.title||''} — не доплачено ${formatMoney(rem)}` });
+    });
+    // 4. оплата без привязки: в Книге без мероприятия/заказа/продажи; в мероприятии с несколькими гостями — без гостя
+    (state.incomes||[]).forEach(i=>{
+      if(!i.createdBy || !i.date || i.date < CONTROL_FROM || i.safeTransfer || i.autoFromPayment || i.autoFromEvent) return;
+      if(!/оплат/i.test(i.operation||'')) return;
+      if(i.eventId || i.itemSaleId || i.orderId || i.certId || i.certificateId || i.leadId) return;
+      try{ if(isYclientsPayoutIncome(i)) return; }catch(e){}
+      add('nolink', i.createdBy, { date: i.date, amount: Number(i.amount)||0, incomeId: i.id, text: `${formatDateText(i.date)} · ${formatMoney(Number(i.amount)||0)} ${i.account||''} — не привязана к мероприятию${i.comment ? ' · ' + i.comment : ''}` });
+    });
+    (state.events||[]).forEach(e=>{
+      if(!e.date || e.date < CONTROL_FROM || !Array.isArray(e.payments) || (e.guestList||[]).length < 2) return;
+      e.payments.forEach(p=>{
+        if(!p.by || p.guestId || p.certRedemptionRef || p.refundRef || p.type === 'refund' || p.source === 'Сертификат' || p.legacyLump) return;
+        add('nolink', p.by, { date: p.date || e.date, amount: Number(p.amount)||0, eventId: e.id, text: `${formatDateText(e.date)} · ${e.title||''} — ${formatMoney(Number(p.amount)||0)} ${p.source||''} без имени гостя` });
+      });
+    });
+    // 5. мастера: несданный отчёт
+    try{
+      state.events.filter(e=> e.host && e.host.trim() && e.date && e.date <= today && e.date >= CONTROL_FROM && isReportRequiredForEvent(e) && !hasMasterReport(e)).forEach(e=>{
+        add('report', e.host.trim(), { date: e.date, eventId: e.id, text: `${formatDateText(e.date)} ${e.time||''} · ${e.title||''}` });
+      });
+    }catch(e){}
+    // 6. админы: день не закрыт
+    try{ unclosedDays().filter(d=> d >= CONTROL_FROM).forEach(d=> add('day', adminsOnShift(d), { date: d, dayClose: d, text: `${formatDateText(d)} — касса и оплаты дня не сверены` })); }catch(e){}
+    // 7. ЗП помощнику не выдана в день смены
+    try{
+      Object.entries(state.helperShifts||{}).forEach(([d, arr])=>{
+        if(d > today || d < CONTROL_FROM) return;
+        (arr||[]).forEach(s=>{ if(!helperPaidExpense(s)) add('helper', seniorAdminNames(), { date: d, amount: helperPay(s), text: `${formatDateText(d)} · ${s.name} ${s.start}–${s.end} — ${formatMoney(helperPay(s))}` }); });
+      });
+    }catch(e){}
+    return out.sort((a,b)=> (b.date||'').localeCompare(a.date||''));
+  }
+  function controlMyName(){ return state.loggedInHostessName || state.loggedInManagerName || state.loggedInMasterName || (state.loggedInStaffRole === state.currentRole ? state.loggedInStaffName : '') || ''; }
+  function controlSeesAll(){ return ['owner','assistant','admin'].includes(state.currentRole); }
+  function controlVisibleFlags(){
+    const all = controlFlags();
+    const isAuditRole = ['owner','assistant'].includes(state.currentRole);
+    if(controlSeesAll()){
+      let f = all.filter(x=> isAuditRole || (x.kind !== 'del' && x.kind !== 'retro'));
+      // старший администратор: свои удаления/правки не видит как «чужие», но и чужие журнальные не видит — их смотрит руководитель
+      return f;
+    }
+    const me = spKey(controlMyName());
+    if(!me) return [];
+    return all.filter(x=> spKey(x.who) === me && x.kind !== 'del' && x.kind !== 'retro');
+  }
+  function controlAlert(){
+    let flags = []; try{ flags = controlVisibleFlags(); }catch(e){ return null; }
+    if(state.currentRole === 'master') flags = flags.filter(x=> x.kind !== 'report'); // отчёты у мастера и так в отдельном баннере
+    if(!flags.length) return null;
+    const money = flags.filter(x=> ['del','retro','debt','nolink'].includes(x.kind)).length;
+    return { icon:'🚩', text: controlSeesAll() ? `Контроль: ${flags.length}${money ? ' · по деньгам ' + money : ''}` : `Ваши флажки: ${flags.length}`, controlFlags: true };
+  }
+  // ---- окно ----
+  function openControlPopup(filterWho){
+    const old = document.getElementById('ctrl-pop'); if(old) old.remove();
+    const all = controlVisibleFlags();
+    const seesAll = controlSeesAll();
+    const isAuditRole = ['owner','assistant'].includes(state.currentRole);
+    const people = {};
+    all.forEach(f=>{ const p = people[f.who] = people[f.who] || { n:0, kinds:{} }; p.n++; p.kinds[f.kind] = (p.kinds[f.kind]||0) + 1; });
+    const list = filterWho ? all.filter(f=> f.who === filterWho) : all;
+    // один и тот же долг висит на двух админах — в общем списке показываем один раз
+    const seen = new Set();
+    const shown = list.filter(f=>{ const k = f.kind + '|' + (f.auditId||f.eventId||f.incomeId||f.dayClose||'') + '|' + f.text; if(!filterWho && seen.has(k)) return false; seen.add(k); return true; });
+    const byKind = {}; shown.forEach(f=> (byKind[f.kind] = byKind[f.kind] || []).push(f));
+    const wrap = document.createElement('div'); wrap.id = 'ctrl-pop'; wrap.className = 'ts-overlay';
+    const kindOrder = ['del','retro','debt','nolink','report','day','helper'];
+    wrap.innerHTML = `<div class="ts-modal" style="max-width:760px;">
+      <div class="ts-head"><div><div class="ts-kicker">${seesAll ? 'Ответственность по сотрудникам' : escapeHtml(controlMyName() || 'Мои задачи')}</div><h3>🚩 ${seesAll ? 'Контроль' : 'Мои флажки'}: ${all.length}</h3>
+        <div class="ts-meta" style="margin-top:4px;">Флажок снимается сам, когда всё исправлено: доплату приняли, оплату привязали, отчёт сдали, день закрыли.${isAuditRole ? ' Удаления и правки задним числом снимаете вы кнопкой «✓ ок».' : ''}</div></div><button class="ts-x" data-x>×</button></div>
+      ${seesAll && Object.keys(people).length ? `<div style="margin:10px 0 4px;overflow-x:auto;"><table style="width:100%;border-collapse:collapse;font-size:12.5px;">
+        <tr style="color:var(--ink-soft);text-align:left;"><th style="padding:4px 6px;">Сотрудник</th>${kindOrder.filter(k=> isAuditRole || (k!=='del'&&k!=='retro')).map(k=>`<th style="padding:4px 4px;text-align:center;" title="${escapeHtml(CONTROL_KINDS[k].label)}">${CONTROL_KINDS[k].icon}</th>`).join('')}<th style="padding:4px 6px;text-align:right;">Всего</th></tr>
+        ${Object.entries(people).sort((a,b)=> b[1].n - a[1].n).map(([w,p])=>`<tr data-ctrl-who="${escapeHtml(w)}" style="cursor:pointer;border-top:1px solid var(--line);${filterWho===w?'background:var(--paper-2);':''}"><td style="padding:5px 6px;font-weight:600;">${escapeHtml(w)}</td>${kindOrder.filter(k=> isAuditRole || (k!=='del'&&k!=='retro')).map(k=>`<td style="text-align:center;${p.kinds[k]?'color:var(--status-red);font-weight:700;':'color:var(--ink-soft);'}">${p.kinds[k]||'·'}</td>`).join('')}<td style="text-align:right;padding:5px 6px;font-weight:700;">${p.n}</td></tr>`).join('')}
+      </table>${filterWho ? `<button class="btn btn-ghost" data-ctrl-who="" style="margin-top:6px;font-size:12px;">✕ Показать всех (сейчас: ${escapeHtml(filterWho)})</button>` : '<div style="font-size:11px;color:var(--ink-soft);margin-top:4px;">Нажмите на строку — останутся флажки этого человека.</div>'}</div>` : ''}
+      <div style="margin-top:8px;">
+        ${shown.length ? kindOrder.filter(k=> byKind[k]).map(k=>`<div style="margin-top:12px;"><div style="font-weight:700;font-size:13.5px;margin-bottom:4px;">${CONTROL_KINDS[k].icon} ${escapeHtml(CONTROL_KINDS[k].label)} · ${byKind[k].length}</div>
+          ${byKind[k].slice(0,80).map(f=>`<div style="display:flex;gap:8px;align-items:flex-start;padding:5px 0;border-top:1px solid var(--line);font-size:12.5px;">
+            <div style="flex:1;min-width:0;">${escapeHtml(f.text)}${seesAll ? `<div style="font-size:11px;color:var(--ink-soft);">${['del','retro','nolink'].includes(f.kind) ? 'кто: ' : (k==='report' ? 'мастер: ' : 'отвечает: ')}${escapeHtml(f.who)}</div>` : ''}</div>
+            <div style="display:flex;gap:4px;flex-shrink:0;">
+              ${f.eventId ? `<button class="btn btn-ghost" data-ctrl-ev="${escapeHtml(f.eventId)}" style="padding:2px 8px;font-size:11.5px;">открыть</button>` : ''}
+              ${f.incomeId ? `<button class="btn btn-ghost" data-ctrl-inc="${escapeHtml(f.incomeId)}" style="padding:2px 8px;font-size:11.5px;">привязать</button>` : ''}
+              ${f.dayClose ? `<button class="btn btn-ghost" data-ctrl-day="1" style="padding:2px 8px;font-size:11.5px;">закрыть день</button>` : ''}
+              ${f.kind === 'helper' ? `<button class="btn btn-ghost" data-ctrl-helper="${escapeHtml(f.date)}" style="padding:2px 8px;font-size:11.5px;">выдать</button>` : ''}
+              ${f.kind === 'del' && isAuditRole ? `<button class="btn btn-ghost" data-ctrl-restore="${escapeHtml(f.auditId)}" style="padding:2px 8px;font-size:11.5px;" title="Вернуть запись в Книгу">↩ вернуть</button>` : ''}
+              ${(f.kind === 'del' || f.kind === 'retro') && isAuditRole ? `<button class="btn btn-ghost" data-ctrl-ack="${escapeHtml(f.auditId)}" style="padding:2px 8px;font-size:11.5px;">✓ ок</button>` : ''}
+            </div></div>`).join('')}${byKind[k].length > 80 ? `<div style="font-size:11.5px;color:var(--ink-soft);">и ещё ${byKind[k].length-80}…</div>` : ''}</div>`).join('') : '<div style="padding:16px;text-align:center;color:var(--status-green);">✓ Всё чисто — флажков нет</div>'}
+      </div>
+      ${isAuditRole ? `<details style="margin-top:14px;"><summary style="cursor:pointer;font-size:12.5px;color:var(--ink-soft);">Журнал денег — все удаления и правки за 45 дней (${(state.financeAudit||[]).filter(a=> (Date.now()-new Date(a.ts).getTime()) < 45*86400000).length})</summary>
+        ${(state.financeAudit||[]).filter(a=> (Date.now()-new Date(a.ts).getTime()) < 45*86400000).sort((a,b)=> b.ts.localeCompare(a.ts)).slice(0,200).map(a=>`<div style="font-size:11.5px;padding:3px 0;border-top:1px solid var(--line);">${escapeHtml(new Date(a.ts).toLocaleString('ru-RU',{timeZone:'Asia/Omsk',day:'numeric',month:'short',hour:'2-digit',minute:'2-digit'}))} · <b>${escapeHtml(a.by||'—')}</b> · ${a.type==='del'?'удалил(а)':'изменил(а)'} ${a.coll==='inc'?'доход':'расход'} ${formatMoney(Number((a.rec||a.after||{}).amount)||0)}${a.restored?' · ↩ возвращено':''}${a.ack?' · ✓ '+escapeHtml(a.ack.by||''):''}</div>`).join('')}
+      </details>` : ''}
+    </div>`;
+    document.body.appendChild(wrap);
+    const close = ()=> wrap.remove();
+    wrap.onclick = (e)=>{ if(e.target === wrap) close(); };
+    wrap.querySelectorAll('[data-x]').forEach(b=> b.onclick = close);
+    wrap.querySelectorAll('[data-ctrl-who]').forEach(b=> b.onclick = ()=> openControlPopup(b.dataset.ctrlWho || ''));
+    wrap.querySelectorAll('[data-ctrl-ev]').forEach(b=> b.onclick = ()=>{ const ev = state.events.find(x=>x.id===b.dataset.ctrlEv); close(); if(ev) requireUnlock(()=>{ state.modal = {type:'event', event:{...ev}, isNew:false, keepAll:true}; render(); }); });
+    wrap.querySelectorAll('[data-ctrl-inc]').forEach(b=> b.onclick = ()=>{ const i = state.incomes.find(x=>x.id===b.dataset.ctrlInc); close(); if(i){ state.modal = {type:'income', isNew:false, income:{...i}}; render(); } });
+    wrap.querySelectorAll('[data-ctrl-day]').forEach(b=> b.onclick = ()=>{ close(); requireViewAccess('book', ()=>{ state.view = 'book'; state.bookView = 'dayclose'; render(); }); });
+    wrap.querySelectorAll('[data-ctrl-helper]').forEach(b=> b.onclick = ()=>{ close(); state.modal = { type:'day', date: b.dataset.ctrlHelper }; render(); });
+    wrap.querySelectorAll('[data-ctrl-ack]').forEach(b=> b.onclick = async ()=>{
+      const a = state.financeAudit.find(x=>x.id===b.dataset.ctrlAck); if(!a) return;
+      a.ack = { by: feedWho(), ts: new Date().toISOString() }; await saveFinanceAudit(); openControlPopup(filterWho);
+    });
+    wrap.querySelectorAll('[data-ctrl-restore]').forEach(b=> b.onclick = async ()=>{
+      const a = state.financeAudit.find(x=>x.id===b.dataset.ctrlRestore); if(!a || !a.rec) return;
+      const arr = a.coll === 'inc' ? state.incomes : state.expenses;
+      if(arr.some(x=> x.id === a.rec.id)){ showToast('Эта запись уже есть в Книге'); }
+      else if(a.viaEvent){ showToast('Это оплата из мероприятия — верните её в журнале оплат мероприятия', 'error'); return; }
+      else {
+        arr.push({ ...a.rec, restoredAt: new Date().toISOString(), restoredBy: feedWho() });
+        if(a.coll === 'inc') await saveIncomes(); else await saveExpenses();
+        recordAction('Запись возвращена в Книгу', `${a.coll==='inc'?'доход':'расход'} ${formatMoney(Number(a.rec.amount)||0)} · удалил(а) ${a.by||'—'}`);
+      }
+      a.restored = { by: feedWho(), ts: new Date().toISOString() }; await saveFinanceAudit(); render(); openControlPopup(filterWho);
+    });
+  }
+  // мастер: отчёты, не сданные в этой половине месяца — условие выдачи ЗП
+  function masterMissingReportsInHalf(name, ym, half){
+    const k = spKey(name); if(!k) return [];
+    if(!(state.hostsList||[]).some(h=> spKey(h) === k)) return [];
+    const today = todayStr();
+    return (state.events||[]).filter(e=> e.date && e.date.startsWith(ym) && e.date <= today && (half==='H1' ? Number(e.date.slice(8,10)) <= 15 : Number(e.date.slice(8,10)) > 15)
+      && e.host && spKey(e.host) === k && isReportRequiredForEvent(e) && !hasMasterReport(e));
+  }
+
+  // кто и когда внёс / изменил запись в «Книге» (доходы, расходы). Стоит в одном месте — при сохранении,
+  // поэтому срабатывает для всех способов добавления: форма, «Принять оплату», выдача ЗП, касса, автозаписи.
+  // Если запись перезаписали целиком (зеркала оплат и т. п.) — автор переносится с прошлой версии.
+  const STAMP_FIELDS = ['createdAt','createdBy','createdRole','editedAt','editedBy'];
+  function stampStrip(r){ const o = {}; Object.keys(r||{}).sort().forEach(k=>{ if(!STAMP_FIELDS.includes(k)) o[k] = r[k]; }); return JSON.stringify(o); }
+  function stampIsAuto(r){ return Object.keys(r||{}).some(k=> /^auto/.test(k) && r[k]); }
   function stampNewRecords(arr, baseline){
     if(!Array.isArray(baseline)) return;
-    const known = new Set((baseline||[]).map(x=>x && x.id));
+    const base = new Map((baseline||[]).filter(Boolean).map(x=>[x.id, x]));
     const now = new Date().toISOString();
-    (arr||[]).forEach(r=>{ if(r && !r.createdAt && !known.has(r.id)) r.createdAt = now; });
+    let who = ''; try{ who = feedWho(); }catch(e){ who = ROLE_LABELS[state.currentRole] || ''; }
+    (arr||[]).forEach(r=>{
+      if(!r) return;
+      const b = base.get(r.id);
+      if(!b){
+        if(!r.createdAt) r.createdAt = now;
+        if(!r.createdBy) r.createdBy = r.acceptedBy || (stampIsAuto(r) && !r.autoFromPayment ? 'автоматически' : who);
+        if(!r.createdRole) r.createdRole = state.currentRole || '';
+        return;
+      }
+      ['createdAt','createdBy','createdRole','editedAt','editedBy'].forEach(k=>{ if(!r[k] && b[k]) r[k] = b[k]; });
+      if(!stampIsAuto(r) && stampStrip(r) !== stampStrip(b)){ r.editedAt = now; r.editedBy = who; }
+    });
+  }
+  // строка «кто внёс» под записью
+  function bookAuthorHtml(r){
+    if(!r) return '';
+    const t = iso=>{ try{ const d = new Date(iso); return d.toLocaleString('ru-RU', {day:'numeric', month:'short', hour:'2-digit', minute:'2-digit', timeZone:'Asia/Omsk'}); }catch(e){ return ''; } };
+    const parts = [];
+    if(r.createdBy) parts.push((r.autoFromPayment ? '💳 принял(а) ' : '✍ внёс(ла) ') + r.createdBy + (r.createdAt ? ', ' + t(r.createdAt) : ''));
+    else parts.push('✍ кто внёс — не записано');
+    if(r.editedBy && r.editedAt) parts.push('✎ изменил(а) ' + r.editedBy + ', ' + t(r.editedAt));
+    return `<div style="font-size:10.5px;color:var(--ink-soft);margin-top:2px;">${escapeHtml(parts.join(' · '))}</div>`;
+  }
+  function bookWhoOf(r){ return (r && r.createdBy) || '— не записано'; }
+  // сводка «кто сколько провёл» за период: доходы по способам оплаты и расходы по источникам
+  function bookWhoSummaryHtml(inPeriod, kind){
+    if(bookTotalsHidden(state.currentRole)) return '';
+    const isOwner = state.currentRole === 'owner';
+    const rows = {};
+    const add = (who, key, amt)=>{ const w = rows[who] = rows[who] || { inc:{}, exp:{}, n:0 }; w[key.k][key.a] = (w[key.k][key.a]||0) + amt; w.n++; };
+    (state.incomes||[]).forEach(i=>{ if(!inPeriod(i.date)) return; const a = Number(i.amount)||0; if(!a) return; add(bookWhoOf(i), {k:'inc', a: i.account || 'без счёта'}, a); });
+    (state.expenses||[]).forEach(e=>{ if(!inPeriod(expenseAccrualDate(e)) || e.safeTransferType === 'collection') return; if(!isOwner && (e.ownerOnly || e.category==='Аренда' || e.category==='Зарплата')) return; const a = Number(e.amount)||0; if(!a) return; add(bookWhoOf(e), {k:'exp', a: e.source || 'без источника'}, a); });
+    const names = Object.keys(rows).sort((a,b)=> (a.startsWith('—')?1:0)-(b.startsWith('—')?1:0) || a.localeCompare(b,'ru'));
+    if(!names.length) return '';
+    const fmt = m=> Object.entries(m).sort((a,b)=>b[1]-a[1]).map(([k,v])=> escapeHtml(k) + ' ' + formatMoney(v)).join(' · ');
+    const sel = state.bookWho || '';
+    return `<details class="analytics-section" style="margin-bottom:14px;" data-fold="bookwho" ${(state.groupOpen && state.groupOpen['bookwho']) ? 'open' : ''}>
+      <summary style="cursor:pointer;font-weight:600;">👤 Кто вносил деньги за период</summary>
+      <div style="font-size:11.5px;color:var(--ink-soft);margin:6px 0;">Кто принял оплату (наличные, точка, перевод) и кто провёл расход (из кассы, со счёта). Нажмите на имя — в списке останутся только его записи. Старые записи, внесённые до этой функции, — «не записано».</div>
+      ${names.map(n=>{ const r = rows[n]; return `<div class="stat-row" style="align-items:flex-start;cursor:pointer;${sel===n?'background:var(--paper-2);border-radius:6px;':''}" data-bookwho="${escapeHtml(n)}">
+        <div style="width:150px;font-weight:600;">${escapeHtml(n)}</div>
+        <div style="flex:1;font-size:12px;line-height:1.5;">${Object.keys(r.inc).length ? '<span style="color:var(--status-green);">＋ ' + fmt(r.inc) + '</span><br>' : ''}${Object.keys(r.exp).length ? '<span style="color:var(--status-red);">− ' + fmt(r.exp) + '</span>' : ''}</div>
+      </div>`; }).join('')}
+      ${sel ? `<button class="btn btn-ghost" data-bookwho="" style="margin-top:6px;font-size:12px;">✕ Показать всех (сейчас: ${escapeHtml(sel)})</button>` : ''}
+    </details>`;
   }
   async function saveIncomes(){
+    let aud = false; try{ aud = auditFinanceChanges('inc', state.incomes, state._incomesBaseline); }catch(e){ console.error(e); }
     stampNewRecords(state.incomes, state._incomesBaseline);
     await saveCollectionMerged('incomes', state.incomes, state._incomesBaseline, (finalArr)=>{
       state.incomes = finalArr;
       state._incomesBaseline = JSON.parse(JSON.stringify(finalArr));
     });
+    if(aud){ try{ await saveFinanceAudit(); }catch(e){ console.error(e); } }
   }
   async function saveExpenses(){
+    let aud = false; try{ aud = auditFinanceChanges('exp', state.expenses, state._expensesBaseline); }catch(e){ console.error(e); }
     stampNewRecords(state.expenses, state._expensesBaseline);
     await saveCollectionMerged('expenses', state.expenses, state._expensesBaseline, (finalArr)=>{
       state.expenses = finalArr;
       state._expensesBaseline = JSON.parse(JSON.stringify(finalArr));
     });
+    if(aud){ try{ await saveFinanceAudit(); }catch(e){ console.error(e); } }
   }
   async function saveSalaryChecks(){
     await saveCollectionMerged('salary-checks', state.salaryChecks, state._salaryChecksBaseline, (finalArr)=>{
@@ -6499,9 +6800,11 @@
     const left = accrued - paid;
     const key = [name, ym, half].map(encodeURIComponent).join('|');
     const hasMarker = salaryPayMarkers(name, ym, half).length > 0;
+    let noRep = []; try{ noRep = masterMissingReportsInHalf(name, ym, half); }catch(e){}
+    const repWarn = noRep.length ? `<div style="font-size:12px;color:var(--status-red);font-weight:600;margin-bottom:4px;">⚠ Не сдано отчётов: ${noRep.length} (${noRep.slice(0,4).map(e=> formatDateText(e.date)).join(', ')}${noRep.length>4?'…':''}) — условие выдачи ЗП не выполнено</div>` : '';
     const undo = hasMarker ? ` <button type="button" class="btn btn-ghost" data-salunpay="${key}" style="font-size:11px;padding:3px 8px;">отменить</button>` : '';
     if(left > 0){
-      return `<span style="display:inline-flex;gap:8px;align-items:center;flex-wrap:wrap;"><button type="button" class="btn btn-primary" data-salpay="${key}" data-left="${left}" style="font-size:12px;padding:5px 10px;">💵 Выдано — ${formatMoney(left)}</button>${paid>0?`<span style="font-size:11.5px;color:var(--ink-soft);">уже выдано ${formatMoney(paid)}</span>${undo}`:''}</span>`;
+      return repWarn + `<span style="display:inline-flex;gap:8px;align-items:center;flex-wrap:wrap;"><button type="button" class="btn btn-primary" data-salpay="${key}" data-left="${left}" style="font-size:12px;padding:5px 10px;">💵 Выдано — ${formatMoney(left)}</button>${paid>0?`<span style="font-size:11.5px;color:var(--ink-soft);">уже выдано ${formatMoney(paid)}</span>${undo}`:''}</span>`;
     }
     return `<span style="display:inline-flex;gap:8px;align-items:center;flex-wrap:wrap;font-size:12.5px;color:var(--status-green);font-weight:600;">✅ Выдано ${formatMoney(paid)}${undo}</span>`;
   }
@@ -7074,7 +7377,7 @@
       const val = input.value.trim();
       errorEl.style.color = 'var(--danger)'; errorEl.textContent = 'Неверный пароль, попробуйте ещё раз';
       { const _left = loginLockLeft(); if(_left > 0){ errorEl.textContent = loginLockMsg(_left); errorEl.style.display = 'block'; input.value = ''; return; } }
-      const matchedRole = CODE_LOGIN_ROLES.find(r => val && val === state.roleCodes[r]);
+      const matchedRole = sharedCodeRoles().find(r => val && val === state.roleCodes[r]);
       if(matchedRole){
         recordLogin(true, matchedRole, '', 'общий пароль должности'); loginNoteOk();
         state.currentRole = matchedRole;
@@ -7137,6 +7440,12 @@
         state.loggedInMasterName = null;
         state.loggedInHostessName = null;
         state.loggedInManagerName = matchedManagerName;
+        render();
+        checkPushSubscriptionStatus().then(enabled=>{ state.pushEnabled = enabled; render(); });
+        return;
+      }
+      if(_pick && _pick.other){
+        loginAsOtherStaff(_pick);
         render();
         checkPushSubscriptionStatus().then(enabled=>{ state.pushEnabled = enabled; render(); });
         return;
@@ -7464,6 +7773,11 @@
     const outOfStock = state.materialsCatalog.filter(m=>m.trackStock && (m.stock===undefined||m.stock===null||m.stock<=0));
     if(outOfStock.length > 0) alerts.push({icon:'🧱', text:`Закончился материал: ${outOfStock.map(m=>m.name).join(', ')}`, view: roleCanAccessProcurement(state.currentRole) ? 'procurement' : undefined});
 
+    // склад: закончились или ниже минимума (только после первой ревизии)
+    try{
+      const lowW = (state.stockItems||[]).filter(it=>{ const b = stockBalance(it); return b.started && (b.stock <= 0 || (Number(it.minStock)>0 && b.stock < Number(it.minStock))); });
+      if(lowW.length > 0) alerts.push({icon:'🏬', text:`Склад: заканчивается ${lowW.slice(0,6).map(m=>m.name).join(', ')}${lowW.length>6?' и ещё '+(lowW.length-6):''}`, view: roleCanAccessProcurement(state.currentRole) ? 'procurement' : undefined});
+    }catch(e){}
     // остаток ниже заданного минимума (но ещё не закончился)
     const belowMinStock = state.materialsCatalog.filter(m=>m.trackStock && m.minStock>0 && m.stock!==undefined && m.stock!==null && m.stock>0 && m.stock<m.minStock);
     if(belowMinStock.length > 0) alerts.push({icon:'📉', text:`Ниже минимального остатка: ${belowMinStock.map(m=>m.name).join(', ')}`, view: roleCanAccessProcurement(state.currentRole) ? 'procurement' : undefined});
@@ -7493,6 +7807,7 @@
       const nf = eventsMissingFormat(30).length;
       if(nf > 0) alerts.push({icon:'🎨', text:`Не указан формат (холст / граммовка / флаконы): ${nf}`, formats:true});
     }
+    try{ const ca = controlAlert(); if(ca) alerts.unshift(ca); }catch(e){ console.error(e); }
     try{
       const rm = computeReminders();
       if(rm.total > 0) alerts.push({icon:'🔔', text:`Напоминания: ${[rm.payouts.length?`выплаты ${rm.payouts.length}`:'', rm.unpaid.length?`недоплаты ${rm.unpaid.length}`:'', rm.certs.length?`сертификаты ${rm.certs.length}`:'', rm.leads.length?`заявки ${rm.leads.length}`:''].filter(Boolean).join(', ')}`, reminders:true});
@@ -7820,7 +8135,7 @@
       </div>
       ${alerts.length ? `
       <div class="daily-alerts-banner">
-        ${alerts.map(a=>`<span class="daily-alert-item${(a.view||a.legalDocs||a.wishes||a.missingReports||a.reminders||a.formats)?' clickable':''}" ${a.formats?'data-alert-formats="1"':''} ${a.view?`data-alert-view="${a.view}" data-alert-certview="${a.certView||''}" data-alert-preptab="${a.prepTab||''}"`:''} ${a.missingReports?'data-alert-missingreports="1"':''} ${a.legalDocs?'data-alert-legaldocs="1"':''} ${a.reminders?'data-alert-reminders="1"':''} ${a.wishes?'data-alert-wishes="1"':''}>${a.icon} ${escapeHtml(a.text)}</span>`).join('')}
+        ${alerts.map(a=>`<span class="daily-alert-item${(a.view||a.legalDocs||a.wishes||a.missingReports||a.reminders||a.formats||a.controlFlags)?' clickable':''}" ${a.formats?'data-alert-formats="1"':''} ${a.controlFlags?'data-alert-control="1" style="background:#FBE3DD;color:#9B2C1F;font-weight:700;"':''} ${a.view?`data-alert-view="${a.view}" data-alert-certview="${a.certView||''}" data-alert-preptab="${a.prepTab||''}"`:''} ${a.missingReports?'data-alert-missingreports="1"':''} ${a.legalDocs?'data-alert-legaldocs="1"':''} ${a.reminders?'data-alert-reminders="1"':''} ${a.wishes?'data-alert-wishes="1"':''}>${a.icon} ${escapeHtml(a.text)}</span>`).join('')}
       </div>
       ` : ''}
     `;
@@ -7866,14 +8181,18 @@
       const hostessLine = shiftSummaryShort(dStr);
       const hostessGap = inMonth && hostessCoverageGap(dStr);
       const masterLine = mastersOnDuty(dStr).join(', ');
+      const helperLine = helperShortLine(dStr);
+      const offsiteDay = evts.filter(e=> e.spaceId === 's5' || e.status === 'offsite');
       const managerLine = managerForDate(dStr);
       const dayOffEntries = dayOffEntriesFor(dStr);
       cells += `
         <div class="cal-cell ${inMonth?'':'other-month'} ${isToday?'today':''}" data-date="${dStr}">
           <div class="cal-daynum">${d.getDate()}${hasWarning?' <span class="cal-warn-icon" title="Перерыв между мероприятиями меньше 30 минут">⚠</span>':''}</div>
+          ${offsiteDay.length ? `<div class="cal-offsite" title="${escapeHtml(offsiteDay.map(e=>(e.time||'')+' '+(e.title||'')).join('\n'))}">🚐 ВЫЕЗД${offsiteDay.length>1?' ×'+offsiteDay.length:''} ${escapeHtml(offsiteDay[0].time||'')}</div>` : ''}
           ${hostessLine ? `<div class="cal-hostess" title="Админ: ${escapeHtml(hostessLine)}">🧑 ${escapeHtml(hostessLine)}</div>` : ''}
           ${hostessGap ? `<div class="cal-hostess" style="color:#b71c1c;font-weight:600;" title="В этот день меньше двух человек: нужно два админа или админ + старший">⚠ админов: ${hostessCoverageCount(dStr)} из 2</div>` : ''}
           ${masterLine ? `<div class="cal-hostess" style="color:var(--accent);" title="Мастера (15:00–22:00): ${escapeHtml(masterLine)}">🎨 ${escapeHtml(masterLine)}</div>` : ''}
+          ${helperLine ? `<div class="cal-hostess" style="color:#6B4E9B;" title="Помощник администратора: ${escapeHtml(helperLine)}">🤝 ${escapeHtml(helperLine)}</div>` : ''}
           ${managerLine ? `<div class="cal-manager" title="Менеджер: ${escapeHtml(managerLine)}">👔 ${escapeHtml(managerLine)}</div>` : ''}
           ${dayOffEntries.length ? `<div class="cal-dayoff-line" title="Выходной: ${escapeHtml(dayOffEntries.map(x=>ROLE_LABELS[x.role] ? `${x.name} (${ROLE_LABELS[x.role]})` : x.name).join(', '))}">🚫 ${escapeHtml(dayOffEntries.map(x=>x.name).join(', '))}</div>` : ''}
           <div class="cal-events">
@@ -7940,6 +8259,7 @@
       ${renderWishesBar()}
       ${renderScheduleRecsPanel()}
       ${renderLoadAdvicePanel()}
+      ${helperShortLine(todayStr()) ? `<div style="background:#EFE8F7;color:#4A3570;border-radius:10px;padding:8px 12px;font-size:13px;margin-bottom:10px;">🤝 Сегодня помощник администратора: <b>${escapeHtml(helperShortLine(todayStr()))}</b></div>` : ''}
       <div class="cal-grid-wrap">
         <div class="cal-grid">
           ${DOW.map(d=>`<div class="cal-dow">${d}</div>`).join('')}
@@ -11368,7 +11688,7 @@
       return subTabsHtml + renderSalaryAdjustmentsView();
     }
     if(state.certView === 'manager-salary'){
-      return subTabsHtml + renderManagerSalaryView();
+      return subTabsHtml + renderManagerSalaryView() + managerAdjustmentsHtml();
     }
     if(state.certView === 'dismiss-calc' && state.currentRole === 'assistant'){
       if(!state.dc.loaded && !state.dc._loading){ state.dc._loading = true; dcLoad().then(()=>{ if(state.view==='certificates' && state.certView==='dismiss-calc') render(); }); }
@@ -13251,7 +13571,7 @@
         if(cTs) act(by, cTs, '🆕', 'Новая заявка: ' + nm + (l.source ? ' · ' + l.source : ''), l.id);
       }
       if(l.sold && l.saleDate === D){
-        const amt = Number(l.revenue) > 0 ? Number(l.revenue) : 0;
+        const amt = leadActualRevenue(l).amount;
         T.sold++; T.rev += amt; const p = per(l.owner || ''); p.sold++; p.rev += amt;
         T.soldList.push(l);
       }
@@ -13279,6 +13599,19 @@
     const shift = managerForDate(D); if(shift) per(shift).onShift = true;
     T.feed.sort((a,b)=> String(b.ts).localeCompare(String(a.ts)));
     return { P, T, shift: shift ? dyWhoKey(shift) : '' };
+  }
+  // фактическая сумма продажи: договорная сумма привязанного мероприятия (или выручка заказа),
+  // а не то, что менеджер вписал в заявку. Если ничего не привязано — сумма из заявки.
+  function leadActualRevenue(l){
+    const ev = l && l.eventId ? state.events.find(e=> e.id === l.eventId) : null;
+    if(ev){
+      if(ev.status === 'cancelled') return { amount: 0, src: 'cancelled' };
+      const t = eventTotalExpected(ev);
+      if(t > 0) return { amount: t, src: 'event' };
+    }
+    const ord = l && l.orderId ? (state.orders||[]).find(o=> o.id === l.orderId) : null;
+    if(ord && Number(ord.revenue) > 0) return { amount: Number(ord.revenue), src: 'order' };
+    return { amount: Number(l && l.revenue) > 0 ? Number(l.revenue) : 0, src: 'lead' };
   }
   function dyVisibleName(){ return state.currentRole === 'manager' && state.loggedInManagerName ? dyWhoKey(state.loggedInManagerName) : ''; }
   // короткая строка «Сегодня» над воронкой и задачами
@@ -13356,7 +13689,11 @@
       const chat = dyLeadChat(l);
       const ev = l.eventId ? state.events.find(e=> e.id === l.eventId) : null;
       const ord = l.orderId ? (state.orders||[]).find(o=> o.id === l.orderId) : null;
-      return `<div class="dy-row" data-dylead="${escapeHtml(l.id)}"><b>${escapeHtml(l.contact || 'без контакта')}</b><span>${escapeHtml(l.product || '')}${leadKind(l) === 'b2b' ? ' · B2B' : ''}</span><span>${escapeHtml(l.owner || '—')}</span><b class="dy-sum">${Number(l.revenue) > 0 ? formatMoney(Number(l.revenue)) : '—'}</b>
+      return `<div class="dy-row" data-dylead="${escapeHtml(l.id)}"><b>${escapeHtml(l.contact || 'без контакта')}</b><span>${escapeHtml(l.product || '')}${leadKind(l) === 'b2b' ? ' · B2B' : ''}</span><span>${escapeHtml(l.owner || '—')}</span><b class="dy-sum">${(()=>{ const a = leadActualRevenue(l); const w = Number(l.revenue)||0;
+          if(a.src === 'cancelled') return '<span style="color:var(--status-red);">отменено</span>';
+          const main = a.amount > 0 ? formatMoney(a.amount) : '—';
+          const note = a.src === 'lead' && a.amount ? '<div style="font-size:11px;font-weight:400;color:#8A5A1E;">мероприятие не привязано — сумма из заявки</div>' : '';
+          return main + note; })()}</b>
         <div class="dy-go">
           ${chat ? `<a class="dy-gb chat" href="${escapeHtml(chat.url)}" target="_blank" rel="noopener" title="${escapeHtml(chat.url)}">💬 Диалог · ${escapeHtml(chat.label)}</a>` : '<span class="dy-gb off" title="В заявке нет ни ссылки на соцсеть, ни ника, ни телефона">💬 нет контакта для чата</span>'}
           ${ev ? `<button type="button" class="dy-gb" data-dyev="${escapeHtml(ev.id)}">📅 Мероприятие · ${escapeHtml(formatDateText(ev.date))}${ev.time ? ' ' + escapeHtml(ev.time) : ''}</button>` : (ord ? `<button type="button" class="dy-gb" data-dyord="1" data-dylead2="${escapeHtml(l.id)}">📦 Заказ</button>` : '<span class="dy-gb off">📅 мероприятие не привязано</span>')}
@@ -15485,7 +15822,7 @@
     if(!isOwnerSal){
       const mn = (state.loggedInManagerName||'').trim();
       const row = computeManagersPayForMonth(ym).rows.find(r=> r.name.toLowerCase() === mn.toLowerCase());
-      if(row && row.edited){ mySalTotal = row.amount; mySalEdited = true; }
+      if(row){ mySalTotal = row.amount; mySalEdited = row.edited; }
     }
     if(isOwnerSal && !state.dc.loaded && !state.dc._loading){ state.dc._loading = true; dcLoad().then(()=>{ if(state.view==='certificates' && state.certView==='manager-salary') render(); }); }
     let dedRows = [], dedSum = 0;
@@ -16907,9 +17244,11 @@
     dsLastMobile = false;
     const d = parseDate(ds);
     const dLabel = d.toLocaleDateString('ru-RU', {weekday:'long', day:'numeric', month:'long'});
-    const spaces = ftSpaces();
     const dayEvs = state.events.filter(e=> e.date === ds && e.status !== 'cancelled' && e.time);
     const offsite = dayEvs.filter(e=> e.spaceId === 's5');
+    // выездные — отдельной полноценной колонкой «🚐 Выезд» (раньше были мелкой строкой сверху и терялись)
+    const offSpace = state.spaces.find(x=>x.id==='s5');
+    const spaces = offsite.length && offSpace ? [...ftSpaces(), offSpace] : ftSpaces();
     const inSpaces = dayEvs.filter(e=> spaces.some(s=>s.id === e.spaceId));
     let t0 = 10*60, t1 = 22*60;
     inSpaces.forEach(e=>{ t0 = Math.min(t0, Math.floor(effectiveStart(e)/60)*60); t1 = Math.max(t1, Math.ceil(effectiveEnd(e)/60)*60); });
@@ -16936,7 +17275,9 @@
         lanes[ln] = en; info.set(e.id, { lane: ln, n: 1 }); cluster.push(e); clusterEnd = Math.max(clusterEnd, en);
       });
       if(cluster.length) flush();
-      const free = ftWindows(s.id, ds, t0, t1).filter(w=> w[1]-w[0] >= 60);
+      const free = s.id === 's5' ? [] : ftWindows(s.id, ds, t0, t1).filter(w=> w[1]-w[0] >= 60);
+      const isOff = s.id === 's5';
+      const colHead = isOff ? `<div class="ds-colhead ds-offhead"><b>🚐 ВЫЕЗД</b> <span>${evs.length} мер.</span></div>` : `<div class="ds-colhead"><b>${escapeHtml(s.name)}</b> <span>до ${SPACE_CAPACITY[s.id] || '?'} · ${evs.length ? evs.length + ' мер.' : 'пусто'}</span></div>`;
       if(layout === 'cards'){
         const items = evs.map(e=>({ t: effectiveStart(e), ev: e })).concat(free.map(w=>({ t: w[0], free: w })));
         items.sort((a,b)=> a.t - b.t);
@@ -16947,7 +17288,7 @@
         const _avail = Math.max(300, window.innerHeight - 200);
         let fs = 14; while(fs > 10 && _lines * fs * 1.32 > _avail) fs--;
         const body = items.length ? items.map(it=> it.ev ? dsCardHtml(it.ev, warn, fs) : `<div class="ds-free-strip" data-dsfree="${s.id}|${it.free[0]}|${it.free[1]-it.free[0]}">🟢 свободно ${ftMinToTime(it.free[0])}–${ftMinToTime(it.free[1])}</div>`).join('') : '<div class="ds-free-strip" data-dsfree="' + s.id + '|' + t0 + '|' + (t1 - t0) + '">🟢 свободно весь день</div>';
-        return `<div class="ds-col"><div class="ds-colhead"><b>${escapeHtml(s.name)}</b> <span>до ${SPACE_CAPACITY[s.id] || '?'} · ${evs.length ? evs.length + ' мер.' : 'пусто'}</span></div><div class="ds-cards">${body}</div></div>`;
+        return `<div class="ds-col${isOff?' ds-offcol':''}">${colHead}<div class="ds-cards">${body}</div></div>`;
       }
       const evHtml = evs.map(e=>{
         const st = timeToMinutes(e.time), en = st + (Number(e.duration)||60); const inf = info.get(e.id);
@@ -16960,7 +17301,7 @@
           <div class="ds-s">${(e.host||'').trim() ? escapeHtml(e.host) : (isPrivateWithoutHost(e) ? '<span style="color:var(--danger);">без ведущего</span>' : '')}${Number(e.guests) ? ' · 👥 ' + Number(e.guests) : ''}${warn[e.id] ? ' · <span style="color:var(--danger);">⚠ перерыв ' + Math.max(0, warn[e.id].gap) + ' мин</span>' : ''}</div></div>`;
       }).join('');
       const freeHtml = free.map(w=> `<div class="ds-free" data-dsfree="${s.id}|${w[0]}|${w[1]-w[0]}" style="top:${pct(w[0])}%;height:${(w[1]-w[0])/span*100}%;" title="Создать мероприятие в это время">свободно ${ftMinToTime(w[0])}–${ftMinToTime(w[1])}</div>`).join('');
-      return `<div class="ds-col"><div class="ds-colhead"><b>${escapeHtml(s.name)}</b> <span>до ${SPACE_CAPACITY[s.id] || '?'} · ${evs.length ? evs.length + ' мер.' : 'пусто'}</span></div>
+      return `<div class="ds-col${isOff?' ds-offcol':''}">${colHead}
         <div class="ds-colbody" data-t0="${t0}" data-span="${span}">${hours.map(m=>`<div class="ds-hline" style="top:${pct(m)}%;"></div>`).join('')}${freeHtml}${evHtml}</div></div>`;
     }).join('');
     return `<style>
@@ -16980,6 +17321,9 @@
       .ds-axis{ position:relative; margin-top:26px; }
       .ds-axis span{ position:absolute; right:4px; transform:translateY(-50%); font-size:11px; color:var(--ink-soft); font-family:var(--font-mono); }
       .ds-col{ display:flex; flex-direction:column; min-height:0; }
+      .ds-offhead{ background:#6B4E9B; color:#fff; border-radius:6px 6px 0 0; padding:4px 8px; box-sizing:border-box; } .ds-offhead span{ color:#EDE3FA !important; }
+      .ds-offcol .ds-colbody, .ds-offcol .ds-cards{ border:2px solid #6B4E9B; background:#F4EEFB; border-radius:0 0 6px 6px; }
+      .ds-offcol .ds-cards{ padding:4px; }
       .ds-colhead{ height:26px; font-size:12.5px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; } .ds-colhead span{ font-size:11px; color:var(--ink-soft); }
       .ds-colbody{ position:relative; flex:1; min-height:0; border:1px solid var(--line); border-radius:6px; background:var(--paper); overflow:hidden; }
       .ds-past{ opacity:.5; filter:saturate(.35); }
@@ -17023,7 +17367,7 @@
       </div>
       ${dayOffEntriesFor(ds).length && !state.dsOffOpen ? `<div style="font-size:12px;margin-bottom:4px;color:var(--ink-soft);">🚫 Выходные: ${escapeHtml(dayOffEntriesFor(ds).map(x=>x.name).join(', '))}</div>` : ''}
       ${state.dsOffOpen ? `<div style="max-height:40%;overflow:auto;margin-bottom:6px;">${renderDaysOffBlock(ds)}</div>` : ''}
-      ${offsite.length ? `<div style="font-size:12px;margin-bottom:4px;">🚐 Выезд: ${offsite.map(e=>`<button type="button" class="ft-chip ds-off" data-eid="${escapeHtml(e.id)}">${escapeHtml(e.time)} ${escapeHtml(e.title||'')}</button>`).join(' ')}</div>` : ''}
+      ${offsite.length ? `<div style="background:#6B4E9B;color:#fff;border-radius:8px;padding:6px 10px;font-size:13px;font-weight:600;margin-bottom:6px;">🚐 Сегодня ${offsite.length === 1 ? 'выездное мероприятие' : 'выездных мероприятий: ' + offsite.length} — смотрите колонку «Выезд» справа</div>` : ''}
       <div class="ds-grid">
         ${layout === 'cards' ? '' : `<div class="ds-axis">${hours.map(m=>`<span style="top:${pct(m)}%;">${String(m/60).padStart(2,'0')}:00</span>`).join('')}</div>`}
         ${cols}
@@ -18753,9 +19097,9 @@
               <input type="checkbox" id="bulk-adj-select-all" style="width:18px;height:18px;">Выбрать всех
             </label>
             <div id="bulk-adj-names" style="display:flex;flex-direction:column;gap:6px;max-height:240px;overflow-y:auto;padding-right:4px;">
-              ${state.hostsList.map(h=>`
+              ${staffEveryone().map(h=>`
                 <label style="display:flex;align-items:center;gap:8px;cursor:pointer;font-size:13.5px;">
-                  <input type="checkbox" class="bulk-adj-name-check" value="${escapeHtml(h)}" style="width:16px;height:16px;">${escapeHtml(h)}
+                  <input type="checkbox" class="bulk-adj-name-check" value="${escapeHtml(h)}" style="width:16px;height:16px;">${escapeHtml(h)} <span style="font-size:11px;color:var(--ink-soft);">${escapeHtml(staffPositionsLabel(h))}</span>
                 </label>
               `).join('')}
             </div>
@@ -18838,7 +19182,7 @@
           <div class="field">
             <label>Мастер</label>
             <input type="text" id="adj-master" value="${escapeHtml(adj.masterName||'')}" placeholder="Начните вводить имя…" list="host-suggestions-adj">
-            <datalist id="host-suggestions-adj">${state.hostsList.map(h=>`<option value="${escapeHtml(h)}">`).join('')}</datalist>
+            <datalist id="host-suggestions-adj">${staffEveryone().map(h=>`<option value="${escapeHtml(h)}" label="${escapeHtml(staffPositionsLabel(h))}">`).join('')}</datalist>
           </div>
           <div class="field">
             <label>Причина</label>
@@ -19453,6 +19797,7 @@
       <div class="cert-subtabs">
         <button data-bookview="incomes" class="${state.bookView!=='expenses'&&state.bookView!=='book-analytics'&&state.bookView!=='reconcile'&&state.bookView!=='dayclose'?'active':''}">Доходы</button>
         <button data-bookview="expenses" class="${state.bookView==='expenses'?'active':''}">Расходы</button>
+        ${controlSeesAll() ? (()=>{ let n = 0; try{ n = controlVisibleFlags().filter(x=> ['del','retro','debt','nolink'].includes(x.kind)).length; }catch(e){} return `<button type="button" id="btn-book-control" style="${n?'color:#9B2C1F;font-weight:700;':''}">🚩 Контроль${n ? ' (' + n + ')' : ''}</button>`; })() : ''}
         ${!hideTotals ? `<button data-bookview="book-analytics" class="${state.bookView==='book-analytics'?'active':''}">Аналитика</button>` : ''}
         ${['owner','admin','assistant'].includes(state.currentRole) ? `<button data-bookview="reconcile" class="${state.bookView==='reconcile'?'active':''}">🔎 Сверка</button>` : ''}
         ${DAYCLOSE_ROLES.includes(state.currentRole) ? (()=>{ const n = unclosedDays().length; return `<button data-bookview="dayclose" class="${state.bookView==='dayclose'?'active':''}">✅ Закрытие дня${n ? ` <span style="background:var(--danger);color:#fff;border-radius:9px;padding:0 6px;font-size:11px;">${n}</span>` : ''}</button>`; })() : ''}
@@ -20949,9 +21294,9 @@
     const inPeriod = period ? period.inPeriod : (()=>true);
     const periodLabel = period ? period.periodLabel : '';
     const hideTotals = bookTotalsHidden(state.currentRole);
-    const items = state.incomes.filter(i=>inPeriod(i.date)).sort((a,b)=> (b.date||'').localeCompare(a.date||''));
+    const items = state.incomes.filter(i=>inPeriod(i.date) && (!state.bookWho || bookWhoOf(i) === state.bookWho)).sort((a,b)=> (b.date||'').localeCompare(a.date||''));
     const total = items.reduce((s,i)=> s + ((i.amount!==undefined&&i.amount!==null&&!isNaN(i.amount))?Number(i.amount):0), 0);
-    return `
+    return `${bookWhoSummaryHtml(inPeriod, 'inc')}
       <div class="cert-toolbar">
         <div style="font-size:12px;color:var(--ink-soft);font-family:var(--font-mono);">${escapeHtml(periodLabel)} · Записей: ${items.length}${hideTotals ? '' : ' · Сумма: '+formatMoney(total)}</div>
         <div style="display:flex;gap:8px;">
@@ -20967,7 +21312,7 @@
               <div class="cell">${escapeHtml(i.product||'')}</div>
               <div class="cell">${escapeHtml(i.account||'')}${i.viaYuklient?' <span style="color:var(--ink-soft);font-size:11px;">· Юклиент</span>':''}${isYclientsPayoutIncome(i)?' <span style="color:var(--ink-soft);font-size:11px;" title="Не входит в выручку: деньги уже учтены в другом месте">· не в выручке</span>':''}</div>
               <div class="amount">${i.amount!==undefined&&i.amount!==null ? formatMoney(i.amount) : ''}</div>
-              <div class="reason">${i.eventId ? '🔗 '+escapeHtml(linkedEventLabel(i.eventId))+(i.comment?' · ':'') : ''}${escapeHtml(i.comment||'')}</div>
+              <div class="reason">${i.eventId ? '🔗 '+escapeHtml(linkedEventLabel(i.eventId))+(i.comment?' · ':'') : ''}${escapeHtml(i.comment||'')}${bookAuthorHtml(i)}</div>
             </div>
           `, i=>i.amount, hideTotals)}
       `}
@@ -20998,7 +21343,7 @@
     const hideTotals = bookTotalsHidden(state.currentRole);
     // «Аренда»/«Зарплата» — видно только руководителю (та же чувствительная инфа, что и в «Ручных расходах»)
     const expensesP = state.expenses.filter(e=>inPeriod(expenseAccrualDate(e)) && (isOwner || (!e.ownerOnly && e.category!=='Аренда' && e.category!=='Зарплата')));
-    const items = [...expensesP].sort((a,b)=> (b.date||'').localeCompare(a.date||''));
+    const items = [...expensesP].filter(e=> !state.bookWho || bookWhoOf(e) === state.bookWho).sort((a,b)=> (b.date||'').localeCompare(a.date||''));
     const total = items.filter(e=>e.safeTransferType!=='collection').reduce((s,e)=> s + ((e.amount!==undefined&&e.amount!==null&&!isNaN(e.amount))?Number(e.amount):0), 0);
 
     const byCategory = {};
@@ -21024,7 +21369,7 @@
     const salaryPersonTotal = salaryPersonList.reduce((s,[k,v])=>s+v.sum,0);
     const maxSalaryPerson = Math.max(1, ...salaryPersonList.map(x=>x[1].sum));
 
-    return `
+    return `${bookWhoSummaryHtml(inPeriod, 'exp')}
       ${salaryPersonList.length ? `
       <div class="analytics-section" style="margin-bottom:20px;">
         <h4>Зарплата по сотрудникам — кому сколько выдано · ${formatMoney(salaryPersonTotal)}</h4>
@@ -21062,7 +21407,7 @@
               <div class="cell">${escapeHtml(e.source||'')}</div>
               <div class="amount">${e.amount!==undefined&&e.amount!==null ? formatMoneyPrecise(e.amount) : ''}</div>
               <div class="cell">${escapeHtml(e.responsible||'')}</div>
-              <div class="comment">${escapeHtml(e.comment||'')}</div>
+              <div class="comment">${escapeHtml(e.comment||'')}${bookAuthorHtml(e)}</div>
             </div>
           `, e=> e.safeTransferType==='collection' ? 0 : e.amount, hideTotals)}
       `}
@@ -21082,6 +21427,8 @@
     });
   }
   function attachBookEvents(){
+    { const cb = document.getElementById('btn-book-control'); if(cb) cb.onclick = (ev)=>{ ev.preventDefault(); ev.stopPropagation(); openControlPopup(); }; }
+    document.querySelectorAll('[data-bookwho]').forEach(b=> b.onclick = (ev)=>{ ev.preventDefault(); ev.stopPropagation(); const v = b.dataset.bookwho; state.bookWho = (v && state.bookWho !== v) ? v : ''; render(); });
     document.querySelectorAll('[data-bookview]').forEach(btn=>{
       btn.onclick = ()=>{ state.bookView = btn.dataset.bookview; render(); };
     });
@@ -23415,6 +23762,7 @@
           return;
         }
         if(item.dataset.alertFormats){ openMissingFormatsPopup(); return; }
+        if(item.dataset.alertControl){ openControlPopup(); return; }
         if(item.dataset.alertLegaldocs){
           // всё по юрлицам — в одном месте: «Для менеджеров → 🏢 Юрлица» (таблица контроля по мероприятиям и заказам)
           requireViewAccess('certificates', ()=>{ state.view = 'certificates'; state.certView = 'legal'; render(); });
@@ -23639,6 +23987,8 @@
       overlay.innerHTML = renderQuickShiftModal(state.modal.shiftDate, state.modal.shiftKey, state.modal.rawEntry);
     } else if(state.modal.type === 'close-month'){
       overlay.innerHTML = renderCloseMonthModal(state.modal.ym);
+    } else if(state.modal.type === 'helper-shift'){
+      overlay.innerHTML = renderHelperShiftModal();
     } else if(state.modal.type === 'quick-master-shift'){
       overlay.innerHTML = renderQuickMasterShiftModal(state.modal.shiftDate);
     } else if(state.modal.type === 'quick-manager-shift'){
@@ -23707,6 +24057,12 @@
       overlay.innerHTML = renderSupplierModal();
     } else if(state.modal.type === 'stock-receipt'){
       overlay.innerHTML = renderStockReceiptModal();
+    } else if(state.modal.type === 'stock-revision'){
+      overlay.innerHTML = renderStockRevisionModal();
+    } else if(state.modal.type === 'stock-writeoff'){
+      overlay.innerHTML = renderStockWriteoffModal();
+    } else if(state.modal.type === 'stock-item'){
+      overlay.innerHTML = renderStockItemModal();
     } else if(state.modal.type === 'tochka-reconcile'){
       overlay.innerHTML = renderTochkaReconcileModal(state.modal);
     } else if(state.modal.type === 'cash-close'){
@@ -23762,6 +24118,7 @@
     else if(state.modal.type === 'quick-shift'){ attachQuickShiftModalEvents(overlay); }
     else if(state.modal.type === 'quick-manager-shift'){ attachQuickManagerShiftModalEvents(overlay); }
     else if(state.modal.type === 'quick-master-shift'){ attachQuickMasterShiftModalEvents(overlay); }
+    else if(state.modal.type === 'helper-shift'){ attachHelperShiftModalEvents(overlay); }
     else if(state.modal.type === 'close-month'){ attachCloseMonthModalEvents(overlay); }
     else if(state.modal.type === 'quick-add-slot'){ attachQuickAddSlotModalEvents(overlay); }
     else if(state.modal.type === 'export'){ attachExportModalEvents(overlay); }
@@ -23795,6 +24152,9 @@
     else if(state.modal.type === 'content-post'){ attachContentPostModalEvents(overlay); }
     else if(state.modal.type === 'supplier-entry'){ attachSupplierModalEvents(overlay); }
     else if(state.modal.type === 'stock-receipt'){ attachStockReceiptModalEvents(overlay); }
+    else if(state.modal.type === 'stock-revision'){ attachStockRevisionModalEvents(overlay); }
+    else if(state.modal.type === 'stock-writeoff'){ attachStockWriteoffModalEvents(overlay); }
+    else if(state.modal.type === 'stock-item'){ attachStockItemModalEvents(overlay); }
     else if(state.modal.type === 'tochka-reconcile'){ attachTochkaReconcileModalEvents(overlay); }
     else if(state.modal.type === 'cash-close'){ attachCashCloseModalEvents(overlay); }
     else if(state.modal.type === 'cash-shift'){ attachCashShiftModalEvents(overlay); }
@@ -24001,7 +24361,7 @@
     const submit = ()=>{
       const val = input.value.trim();
       { const _left = loginLockLeft(); if(_left > 0){ errorEl.textContent = loginLockMsg(_left); errorEl.style.display = 'block'; input.value = ''; return; } }
-      const matchedRole = CODE_LOGIN_ROLES.find(r => val && val === state.roleCodes[r]);
+      const matchedRole = sharedCodeRoles().find(r => val && val === state.roleCodes[r]);
       if(matchedRole){
         recordLogin(true, matchedRole, '', 'общий пароль должности'); loginNoteOk();
         state.currentRole = matchedRole;
@@ -24063,6 +24423,15 @@
         state.loggedInMasterName = null;
         state.loggedInHostessName = null;
         state.loggedInManagerName = matchedManagerName;
+        const action = state.pendingAction;
+        state.pendingAction = null;
+        state.modal = null;
+        overlay.remove();
+        if(action) action(); else render();
+        return;
+      }
+      if(_pick && _pick.other){
+        loginAsOtherStaff(_pick);
         const action = state.pendingAction;
         state.pendingAction = null;
         state.modal = null;
@@ -24285,7 +24654,7 @@
       const val = input.value.trim();
       let ok = false;
       { const _left = loginLockLeft(); if(_left > 0){ errorEl.textContent = loginLockMsg(_left); errorEl.style.display = 'block'; input.value = ''; return; } }
-      if(val && val === state.roleCodes.owner){
+      if(val && ((sharedCodeRoles().includes('owner') && val === state.roleCodes.owner) || personalPwMatches(val).some(m=> m.role === 'owner'))){
         state.unlockedOwner = true;
         ok = true;
         recordLogin(true, 'owner', '', 'код руководителя'); loginNoteOk();
@@ -24312,7 +24681,9 @@
     // ассистент не видит и не меняет пароль руководителя. Старший администратор меняет только пароли ролей ниже своей.
     // у "Мастера" больше нет общего пароля — только личные, у каждого свой (ниже).
     const isOwnerRole = ['owner','assistant'].includes(state.currentRole);
-    const editableRoles = state.currentRole === 'owner' ? CODE_LOGIN_ROLES : (state.currentRole === 'assistant' ? CODE_LOGIN_ROLES.filter(r=>r !== 'owner') : ['hostess','manager','marketer']);
+    // общих паролей должностей больше нет — только запасной пароль руководителя, пока у него нет личного
+    const editableRoles = state.currentRole === 'owner' ? sharedCodeRoles() : [];
+    const noPw = state.unlockedAdmin ? staffWithoutPassword() : [];
     return `
       <div class="modal" style="max-width:420px;">
         <div class="modal-head">
@@ -24320,10 +24691,12 @@
           <button class="modal-close">×</button>
         </div>
         <div class="modal-body">
-          <div style="font-size:13px;color:var(--ink-soft);margin-top:-6px;">У каждой должности свой пароль. После входа видны только разделы, положенные этой роли.${!isOwnerRole ? ' Пароли старшего администратора, ассистента и руководителя меняют руководитель и ассистент.' : (state.currentRole==='assistant' ? ' Пароль руководителя может менять только руководитель.' : '')}</div>
+          <div style="font-size:13px;color:var(--ink-soft);margin-top:-6px;">После входа каждый видит только разделы своей должности.</div>
+          <div style="font-size:12.5px;background:#F2ECDD;border-radius:10px;padding:10px 12px;margin:8px 0;">Общих паролей должностей нет: каждый входит по своему личному паролю (список ниже), и в журнале входов видно, кто именно зашёл.</div>
+          ${noPw.length ? `<div style="font-size:12.5px;background:#FBE3DD;border-radius:10px;padding:10px 12px;margin:8px 0;">⚠ Без личного пароля — не смогут войти: <b>${noPw.map(escapeHtml).join(', ')}</b>. Впишите им пароли ниже и нажмите «Сохранить».</div>` : ''}
           ${editableRoles.map(r=>`
             <div class="field">
-              <label>${ROLE_LABELS[r]}</label>
+              <label>🔐 Запасной пароль руководителя <span style="font-weight:400;color:var(--ink-soft);font-size:11px;">— работает всегда, даже если с личным паролем что-то случится. Видите и меняете его только вы, пустым оставить нельзя. Запишите его в надёжное место.</span></label>
               <input type="password" autocomplete="new-password" class="role-code-input" data-role="${r}" placeholder="${escapeHtml(state.roleCodes[r])}" value="${escapeHtml(state.roleCodes[r])}">
             </div>
           `).join('')}
@@ -24345,8 +24718,254 @@
     `;
   }
 
+  // ===================== ДОЛЖНОСТИ И СОТРУДНИКИ =====================
+  // Справочник должностей: у каждой — свой уровень доступа в приложении (одна из ролей ROLES или «без входа»).
+  // Мастера, администраторы и менеджеры живут как раньше (staff-roster + личные пароли по трём группам) — на них
+  // завязаны графики, зарплата и мероприятия. Сотрудники остальных должностей (старший администратор, ассистент,
+  // маркетолог, SMM, уборщица и любые новые) хранятся здесь же, в 'staff-positions', со своим личным паролем.
+  const STAFF_ACCESS_LEVELS = [
+    ['master','Мастер — свои мероприятия и зарплата'], ['hostess','Администратор — смены, расписание, гости'],
+    ['manager','Менеджер — продажи, заявки, своя ЗП'], ['marketer','Маркетолог'], ['smm','SMM'],
+    ['assistant','Ассистент — доступы, справочник, юрлица'], ['admin','Старший администратор — склад, закупки, корректировки ЗП'],
+    ['owner','Руководитель — всё'], ['none','Без входа в приложение (только учёт)'],
+  ];
+  const STAFF_ROSTER_ACCESS = ['master','hostess','manager'];
+  const STAFF_DEFAULT_POSITIONS = [
+    ['pos-owner','Руководитель','owner'], ['pos-senior-admin','Старший администратор','admin'], ['pos-assistant','Ассистент','assistant'],
+    ['pos-marketer','Маркетолог','marketer'], ['pos-smm','SMM-специалист','smm'], ['pos-manager','Менеджер по продажам','manager'],
+    ['pos-b2b','B2B-менеджер','manager'], ['pos-hostess','Администратор','hostess'], ['pos-helper','Помощник администратора','none'],
+    ['pos-senior-master','Старший мастер','master'], ['pos-master','Мастер','master'], ['pos-guest-master','Привлечённый мастер','master'],
+    ['pos-cleaner','Уборщица','none'],
+  ];
+  function staffPosData(){
+    if(!state.staffPos || typeof state.staffPos !== 'object') state.staffPos = {};
+    const d = state.staffPos;
+    if(!Array.isArray(d.positions) || !d.positions.length) d.positions = STAFF_DEFAULT_POSITIONS.map(([id,name,access])=>({id,name,access}));
+    if(!d.people || typeof d.people !== 'object') d.people = {};       // ключ — имя в нижнем регистре: {name, pos:[id,…]}
+    if(!d.passwords || typeof d.passwords !== 'object') d.passwords = {}; // пароли сотрудников «прочих» должностей: {имя: пароль}
+    return d;
+  }
+  async function loadStaffPositions(){
+    try{ const r = await window.storage.get('staff-positions', true); state.staffPos = r ? JSON.parse(r.value) : {}; }catch(e){ state.staffPos = {}; }
+    staffPosData();
+  }
+  async function saveStaffPositions(){ await storageSetWithRetry('staff-positions', JSON.stringify(staffPosData())); }
+  const spKey = n=> String(n||'').trim().toLowerCase();
+  function staffPositionById(id){ return staffPosData().positions.find(p=>p.id===id) || null; }
+  function staffAccessLabel(a){ const x = STAFF_ACCESS_LEVELS.find(l=>l[0]===a); return x ? x[1].split(' — ')[0] : a; }
+  // должности человека: сохранённые, а если их нет — по старым отметкам мастер/админ/менеджер
+  function staffPositionsOf(name){
+    const d = staffPosData(), rec = d.people[spKey(name)];
+    const r = staffRolesOf(name);
+    let ids = rec && Array.isArray(rec.pos) ? rec.pos.filter(id=> staffPositionById(id)) : [];
+    // сохранённые должности должны совпадать с фактическими группами (их могли поменять в старом окне «Сотрудники»)
+    STAFF_ROSTER_ACCESS.forEach(acc=>{
+      const has = ids.some(id=> staffPositionById(id).access === acc);
+      if(r[acc] && !has){ const def = d.positions.find(p=>p.access===acc && p.id === ({master:'pos-master',hostess:'pos-hostess',manager:'pos-manager'})[acc]) || d.positions.find(p=>p.access===acc); if(def) ids.push(def.id); }
+      if(!r[acc] && has) ids = ids.filter(id=> staffPositionById(id).access !== acc);
+    });
+    return ids;
+  }
+  // сотрудники «прочих» должностей (не мастер/админ/менеджер) — активные
+  function staffOtherPeople(){
+    const d = staffPosData();
+    return Object.values(d.people).filter(p=> p && p.name && !p.fired && (p.pos||[]).some(id=>{ const ps = staffPositionById(id); return ps && !STAFF_ROSTER_ACCESS.includes(ps.access); })).map(p=>p.name);
+  }
+  function staffEveryone(){
+    const out = [], seen = new Set();
+    [...staffEditPeople(), ...staffOtherPeople()].forEach(n=>{ const k = spKey(n); if(n && !seen.has(k)){ seen.add(k); out.push(n); } });
+    return out.sort((a,b)=>a.localeCompare(b,'ru'));
+  }
+  function staffPositionsLabel(name){ return staffPositionsOf(name).map(id=> staffPositionById(id).name).join(' · '); }
+  // доступ «прочей» должности (первая из них с входом); null — нет входа
+  function staffOtherAccess(name){
+    for(const id of staffPositionsOf(name)){ const p = staffPositionById(id); if(p && !STAFF_ROSTER_ACCESS.includes(p.access) && p.access !== 'none') return p.access; }
+    return null;
+  }
+  // к какой зарплате относится корректировка на это имя
+  function salaryAdjKind(name){
+    const k = spKey(name); if(!k) return 'master';
+    if(HOSTESS_LIST.some(h=> spKey(h) === k)) return 'hostess';
+    if((state.hostsList||[]).some(h=> spKey(h) === k)) return 'master';
+    if(MANAGER_LIST.some(h=> spKey(h) === k)) return 'manager';
+    const rec = staffPosData().people[k];
+    if(rec && (rec.pos||[]).length && (rec.pos||[]).every(id=>{ const p = staffPositionById(id); return p && !STAFF_ROSTER_ACCESS.includes(p.access); })) return 'other';
+    return 'master'; // бывшие мастера и старые записи — как раньше
+  }
+  function managerAdjSum(ym, name){
+    return (state.salaryAdjustments||[]).filter(a=> adjEffDate(a) && adjEffDate(a).startsWith(ym) && spKey(a.masterName) === spKey(name)).reduce((s,a)=> s + (Number(a.amount)||0), 0);
+  }
+  function managerAdjustmentsHtml(){
+    const c = state.managerSalaryCursor; if(!c) return '';
+    const ym = c.getFullYear() + '-' + String(c.getMonth()+1).padStart(2,'0');
+    const isOwner = state.currentRole === 'owner';
+    const me = spKey(state.loggedInManagerName);
+    const list = (state.salaryAdjustments||[]).filter(a=> adjEffDate(a) && adjEffDate(a).startsWith(ym) && salaryAdjKind(a.masterName) === 'manager' && (isOwner || spKey(a.masterName) === me))
+      .sort((a,b)=> adjEffDate(a).localeCompare(adjEffDate(b)));
+    if(!list.length) return '';
+    return `<div class="analytics-section"><h4 style="margin-top:0;">Корректировки ЗП: ${formatMoney(list.reduce((s,a)=>s+(Number(a.amount)||0),0))}</h4>
+      <div style="font-size:11.5px;color:var(--ink-soft);margin-bottom:6px;">Доплаты и удержания — уже учтены в сумме «к выдаче»${isOwner ? ' и в ЗП менеджеров в прибыли' : ''}.</div>
+      ${list.map(a=>`<div class="stat-row"><div class="stat-label" style="width:120px;">${escapeHtml(formatDateText(adjEffDate(a)))}</div>${isOwner ? `<div style="width:140px;font-weight:600;">${escapeHtml(a.masterName||'')}</div>` : ''}<div style="flex:1;font-size:12.5px;">${escapeHtml(a.comment||'')}</div><div style="font-family:var(--font-mono);font-size:12.5px;color:${a.amount>=0?'var(--status-green)':'var(--status-red)'};">${a.amount>=0?'+':''}${formatMoney(a.amount)}</div></div>`).join('')}
+    </div>`;
+  }
+  function otherStaffAdjustmentsHtml(ym){
+    const rows = {};
+    (state.salaryAdjustments||[]).filter(a=> adjEffDate(a) && adjEffDate(a).startsWith(ym) && salaryAdjKind(a.masterName) === 'other').forEach(a=>{
+      const n = (a.masterName||'').trim(); (rows[n] = rows[n] || []).push(a);
+    });
+    const names = Object.keys(rows).sort((a,b)=>a.localeCompare(b,'ru'));
+    if(!names.length) return '';
+    return `<div class="analytics-section"><h4>Прочие сотрудники — корректировки за месяц</h4>
+      <div style="font-size:11.5px;color:var(--ink-soft);margin-bottom:6px;">Старший администратор, ассистент, маркетолог и другие должности без автоматического расчёта ЗП: доплаты и удержания — к их окладу.</div>
+      ${names.map(n=>{ const s = rows[n].reduce((t,a)=>t+(Number(a.amount)||0),0); return `<div class="stat-row"><div style="flex:1;font-weight:600;">${escapeHtml(n)} <span style="font-weight:400;color:var(--ink-soft);font-size:11.5px;">${escapeHtml(staffPositionsLabel(n))}</span></div><div style="font-family:var(--font-mono);font-size:13px;font-weight:700;color:${s>=0?'var(--status-green)':'var(--status-red)'};">${s>=0?'+':''}${formatMoney(s)}</div></div>`; }).join('')}
+    </div>`;
+  }
+
+  // ---------- вход по личному паролю для «прочих» должностей ----------
+  function otherPwMatches(v){
+    const d = staffPosData(), out = [];
+    Object.entries(d.passwords||{}).forEach(([name, pw])=>{
+      if(!pw || pwNorm(pw) !== v) return;
+      const acc = staffOtherAccess(name);
+      if(acc) out.push({ role: acc, name, other: true });
+    });
+    return out;
+  }
+  // общих паролей должностей больше нет: каждый входит по личному. Единственное исключение — запасной пароль
+  // руководителя, пока у руководителя нет своего личного (иначе можно запереть себя снаружи).
+  function personalOwnerExists(){
+    const d = staffPosData();
+    return Object.entries(d.passwords||{}).some(([n,pw])=> pw && staffOtherAccess(n) === 'owner' && !((d.people[spKey(n)]||{}).fired));
+  }
+  // запасной пароль руководителя работает ВСЕГДА (даже когда есть личный) — чтобы руководитель не мог потерять вход.
+  // Видит и меняет его только руководитель, пустым сделать нельзя.
+  function sharedCodeRoles(){ return ['owner']; }
+  function staffOwnerPeople(){ return staffEveryone().filter(n=> staffPositionsOf(n).some(id=> (staffPositionById(id)||{}).access === 'owner')); }
+  // сотрудники с входом, у которых ещё нет личного пароля
+  function staffWithoutPassword(){
+    const saved = n=> state.masterPersonalPasswords[n] || state.hostessPersonalPasswords[n] || state.managerPersonalPasswords[n] || staffPosData().passwords[n];
+    return staffEveryone().filter(n=>{ const acc = staffPositionsOf(n).map(id=> (staffPositionById(id)||{}).access); return acc.some(a=> a && a !== 'none') && !saved(n); });
+  }
+  function loginAsOtherStaff(pick){
+    recordLogin(true, pick.role, pick.name, 'личный пароль'); loginNoteOk();
+    state.currentRole = pick.role;
+    state.unlocked = true;
+    state.unlockedAdmin = ['assistant','admin','owner'].includes(pick.role);
+    state.unlockedOwner = pick.role === 'owner';
+    state.loggedInMasterName = null; state.loggedInHostessName = null; state.loggedInManagerName = null;
+    state.loggedInStaffName = pick.name; state.loggedInStaffRole = pick.role;
+  }
+
+  // ---------- блок «Сотрудники и должности» в настройках доступа ----------
+  function staffCanManagePositions(){ return ['owner','assistant'].includes(state.currentRole); }
+  function staffPositionsForPicker(){
+    const isOwner = state.currentRole === 'owner';
+    return staffPosData().positions.filter(p=> isOwner || p.access !== 'owner');
+  }
+  function staffPosSelectHtml(name, idx, cur){
+    const opts = staffPositionsForPicker();
+    return `<select class="staff-pos-sel" data-name="${escapeHtml(name)}" data-idx="${idx}" style="flex:1;min-width:0;font-size:12.5px;padding:4px 6px;">
+      ${idx > 0 ? `<option value="">${cur ? '— убрать вторую должность' : '+ вторая должность'}</option>` : ''}
+      ${opts.map(p=>`<option value="${p.id}" ${p.id===cur?'selected':''}>${escapeHtml(p.name)}</option>`).join('')}
+    </select>`;
+  }
+  function renderStaffPositionsAdmin(){
+    if(!staffCanManagePositions()) return '';
+    const d = staffPosData();
+    const isOwner = state.currentRole === 'owner';
+    const used = id=> staffEveryone().some(n=> staffPositionsOf(n).includes(id));
+    return `<details style="margin:10px 0 4px;" ${state._posOpen ? 'open' : ''} id="staff-pos-details">
+      <summary style="cursor:pointer;font-size:13px;font-weight:600;">🗂 Должности и уровни доступа (${d.positions.length})</summary>
+      <div style="font-size:11.5px;color:var(--ink-soft);margin:6px 0 8px;">Уровень доступа решает, что человек видит, войдя по своему паролю. Мастер / Администратор / Менеджер — ещё и группа для графиков и расчёта ЗП.</div>
+      ${d.positions.map(p=>{ const locked = p.access === 'owner'; /* должность руководителя не переименовать, не понизить и не удалить */ return `<div style="display:flex;gap:6px;align-items:center;margin-bottom:6px;">
+        <input type="text" class="pos-name" data-id="${p.id}" value="${escapeHtml(p.name)}" style="flex:1;min-width:0;font-size:12.5px;" ${locked?'disabled':''}>
+        <select class="pos-access" data-id="${p.id}" style="width:44%;font-size:12px;" ${locked?'disabled':''}>${STAFF_ACCESS_LEVELS.filter(l=> isOwner || l[0] !== 'owner' || p.access === 'owner').map(l=>`<option value="${l[0]}" ${l[0]===p.access?'selected':''}>${escapeHtml(l[1])}</option>`).join('')}</select>
+        ${!locked && !used(p.id) ? `<button type="button" class="btn btn-ghost pos-del" data-id="${p.id}" title="Удалить должность" style="padding:2px 8px;">×</button>` : '<span style="width:30px;"></span>'}
+      </div>`; }).join('')}
+      <div style="display:flex;gap:6px;align-items:center;margin-top:8px;">
+        <input type="text" id="pos-new-name" placeholder="Новая должность, например: Бариста" style="flex:1;min-width:0;font-size:12.5px;">
+        <select id="pos-new-access" style="width:44%;font-size:12px;">${STAFF_ACCESS_LEVELS.filter(l=> isOwner || l[0] !== 'owner').map(l=>`<option value="${l[0]}" ${l[0]==='none'?'selected':''}>${escapeHtml(l[1])}</option>`).join('')}</select>
+        <button type="button" class="btn" id="pos-add">Добавить</button>
+      </div>
+    </details>
+    <div style="display:flex;gap:6px;align-items:center;margin:10px 0 12px;flex-wrap:wrap;">
+      <input type="text" id="staff-new-name" placeholder="Имя нового сотрудника" style="flex:1;min-width:140px;font-size:13px;">
+      <select id="staff-new-pos" style="flex:1;min-width:140px;font-size:12.5px;">${staffPositionsForPicker().map(p=>`<option value="${p.id}" ${p.id==='pos-master'?'selected':''}>${escapeHtml(p.name)}</option>`).join('')}</select>
+      <button type="button" class="btn btn-primary" id="staff-add">＋ Добавить сотрудника</button>
+    </div>`;
+  }
+  // меняет должности человека: группы мастер/админ/менеджер — через старый механизм, остальное — в staff-positions
+  async function setStaffPositions(name, ids){
+    const d = staffPosData();
+    ids = [...new Set(ids.filter(id=> staffPositionById(id)))];
+    const flags = { master:false, hostess:false, manager:false };
+    ids.forEach(id=>{ const a = staffPositionById(id).access; if(STAFF_ROSTER_ACCESS.includes(a)) flags[a] = true; });
+    const k = spKey(name);
+    const cur = staffRolesOf(name);
+    if(cur.master !== flags.master || cur.hostess !== flags.hostess || cur.manager !== flags.manager){
+      const rows = staffAllRows({ [k]: flags });
+      if(!rows.some(r=> spKey(r.name) === k)) rows.push({ orig:'', name, roles: flags });
+      await applyStaffEdit(rows);
+    }
+    d.people[k] = { name: name.trim(), pos: ids };
+    if(!staffOtherAccess(name)) delete d.passwords[Object.keys(d.passwords).find(n=> spKey(n)===k) || name];
+    await saveStaffPositions();
+  }
+  function attachStaffPositionsAdmin(overlay, stashPw){
+    const rerender = ()=>{ stashPw && stashPw(); overlay.remove(); state.modal = {type:'code-settings'}; render(); };
+    const det = overlay.querySelector('#staff-pos-details'); if(det) det.addEventListener('toggle', ()=>{ state._posOpen = det.open; });
+    overlay.querySelectorAll('.pos-name').forEach(inp=> inp.onchange = async ()=>{ const p = staffPositionById(inp.dataset.id); const v = inp.value.trim(); if(!p || !v) return; p.name = v; await saveStaffPositions(); rerender(); });
+    overlay.querySelectorAll('.pos-access').forEach(sel=> sel.onchange = async ()=>{
+      const p = staffPositionById(sel.dataset.id); if(!p) return;
+      if(p.access === 'owner' || (sel.value === 'owner' && state.currentRole !== 'owner')){ sel.value = p.access; showToast('Доступ руководителя меняет только руководитель', 'error'); return; }
+      const holders = staffEveryone().filter(n=> staffPositionsOf(n).includes(p.id));
+      const wasRoster = STAFF_ROSTER_ACCESS.includes(p.access), nowRoster = STAFF_ROSTER_ACCESS.includes(sel.value);
+      if(holders.length && (wasRoster || nowRoster) && p.access !== sel.value){
+        if(!confirm('У должности «' + p.name + '» есть сотрудники (' + holders.join(', ') + '). Они перейдут на новый уровень доступа' + (wasRoster ? ' и пропадут из списков «' + staffAccessLabel(p.access) + '» (графики, выбор ведущего)' : '') + '. Продолжить?')){ sel.value = p.access; return; }
+      }
+      const before = holders.map(n=> [n, staffPositionsOf(n)]);
+      p.access = sel.value;
+      for(const [n, ids] of before) await setStaffPositions(n, ids);
+      await saveStaffPositions(); recordAction('Должность «' + p.name + '»: доступ ' + staffAccessLabel(p.access)); rerender();
+    });
+    overlay.querySelectorAll('.pos-del').forEach(b=> b.onclick = async ()=>{ const d = staffPosData(); d.positions = d.positions.filter(p=>p.id!==b.dataset.id); await saveStaffPositions(); rerender(); });
+    const add = overlay.querySelector('#pos-add');
+    if(add) add.onclick = async ()=>{
+      const name = overlay.querySelector('#pos-new-name').value.trim(); if(!name){ showToast('Впишите название должности', 'error'); return; }
+      const d = staffPosData();
+      if(d.positions.some(p=> spKey(p.name) === spKey(name))){ showToast('Такая должность уже есть', 'error'); return; }
+      d.positions.push({ id: 'pos-' + uid(), name, access: overlay.querySelector('#pos-new-access').value });
+      state._posOpen = true;
+      await saveStaffPositions(); recordAction('Добавлена должность', name); rerender();
+    };
+    const addP = overlay.querySelector('#staff-add');
+    if(addP) addP.onclick = async ()=>{
+      const name = overlay.querySelector('#staff-new-name').value.trim();
+      if(!name){ showToast('Впишите имя', 'error'); return; }
+      if(staffEveryone().some(n=> spKey(n) === spKey(name))){ showToast('Сотрудник с таким именем уже есть — добавьте фамилию или инициал', 'error'); return; }
+      addP.disabled = true;
+      try{ await setStaffPositions(name, [overlay.querySelector('#staff-new-pos').value]); }catch(e){ console.error(e); showToast('Не удалось сохранить', 'error'); addP.disabled = false; return; }
+      recordAction('Добавлен сотрудник', name + ' — ' + staffPositionsLabel(name));
+      rerender(); showToast('«' + name + '» добавлен(а). Задайте личный пароль и нажмите «Сохранить».');
+    };
+    overlay.querySelectorAll('.staff-pos-sel').forEach(sel=> sel.onchange = async ()=>{
+      const n = sel.dataset.name, idx = Number(sel.dataset.idx);
+      const ids = staffPositionsOf(n).slice();
+      if(sel.value) ids[idx] = sel.value; else ids.splice(idx, 1);
+      const clean = ids.filter(Boolean);
+      const hadOwner = staffPositionsOf(n).some(id=> (staffPositionById(id)||{}).access === 'owner');
+      const keepsOwner = clean.some(id=> (staffPositionById(id)||{}).access === 'owner');
+      if(hadOwner && !keepsOwner && (state.currentRole !== 'owner' || staffOwnerPeople().length <= 1)){ showToast(state.currentRole !== 'owner' ? 'Должность руководителя меняет только руководитель' : 'Это единственный руководитель — сначала добавьте должность «Руководитель» другому человеку', 'error'); rerender(); return; }
+      if(!clean.length){ showToast('Должна остаться хотя бы одна должность. Чтобы закрыть доступ — «Уволить».', 'error'); rerender(); return; }
+      sel.disabled = true;
+      try{ await setStaffPositions(n, clean); }catch(e){ console.error(e); showToast('Не удалось сохранить', 'error'); }
+      recordAction('Должность изменена', n + ' — ' + staffPositionsLabel(n));
+      rerender();
+    });
+  }
+
   // единый список сотрудников: имя + личный пароль (должность — мелким серым текстом), уволенные — отдельно
-  const PW_ROLE_LABEL = { master:'мастер', hostess:'администратор', manager:'менеджер' };
+  const PW_ROLE_LABEL = { master:'мастер', hostess:'администратор', manager:'менеджер', marketer:'маркетолог', smm:'SMM', assistant:'ассистент', admin:'старший администратор', owner:'руководитель' };
   // пароль сравниваем без случайных пробелов, без учёта регистра и «ё/е» — частая причина «пароль не подходит» с телефона
   const pwNorm = v=> String(v||'').replace(/\s+/g,'').toLowerCase().replace(/ё/g,'е');
   function personalPwMatches(val){
@@ -24355,8 +24974,10 @@
     [['master', state.masterPersonalPasswords], ['hostess', state.hostessPersonalPasswords], ['manager', state.managerPersonalPasswords]].forEach(([role, obj])=>{
       Object.keys(obj||{}).forEach(name=>{ if(obj[name] && pwNorm(obj[name]) === v && !out.some(m=> m.role === role && m.name === name)) out.push({ role, name }); });
     });
+    try{ otherPwMatches(v).forEach(m=>{ if(!out.some(x=> x.role === m.role && x.name === m.name)) out.push(m); }); }catch(e){}
     // точное совпадение (с регистром) — впереди
-    out.sort((a,b)=>{ const ea = ({master:state.masterPersonalPasswords, hostess:state.hostessPersonalPasswords, manager:state.managerPersonalPasswords})[a.role][a.name] === String(val).trim(); const eb = ({master:state.masterPersonalPasswords, hostess:state.hostessPersonalPasswords, manager:state.managerPersonalPasswords})[b.role][b.name] === String(val).trim(); return (eb?1:0) - (ea?1:0); });
+    const pwOf = m=> m.other ? (staffPosData().passwords[m.name]) : (({master:state.masterPersonalPasswords, hostess:state.hostessPersonalPasswords, manager:state.managerPersonalPasswords})[m.role]||{})[m.name];
+    out.sort((a,b)=>{ const ea = pwOf(a) === String(val).trim(); const eb = pwOf(b) === String(val).trim(); return (eb?1:0) - (ea?1:0); });
     return out;
   }
   function personalPwPick(val){
@@ -24377,33 +24998,42 @@
   }
   function renderStaffPasswordsBlock(isOwnerRole){
     const draft = (state._pwDraft && Date.now() - (state._pwDraftTs||0) < 120000) ? state._pwDraft : null;
-    const saved = n=> state.masterPersonalPasswords[n] || state.hostessPersonalPasswords[n] || state.managerPersonalPasswords[n] || '';
-    const people = staffEditPeople().slice().sort((a,b)=>a.localeCompare(b,'ru'));
+    const saved = n=> state.masterPersonalPasswords[n] || state.hostessPersonalPasswords[n] || state.managerPersonalPasswords[n] || staffPosData().passwords[n] || '';
+    const canPos = staffCanManagePositions();
+    // ассистент не видит людей с доступом руководителя (иначе мог бы поменять им пароль и войти под ними)
+    const people = staffEveryone().filter(n=> state.currentRole === 'owner' || !staffPositionsOf(n).some(id=> (staffPositionById(id)||{}).access === 'owner'));
     const arch = (state.staffArchive||[]);
     return `
       <div style="border-top:1px solid var(--line);margin-top:8px;padding-top:14px;">
         <div style="display:flex;align-items:center;gap:8px;margin-bottom:4px;"><div style="font-size:13px;font-weight:600;flex:1;">Сотрудники и личные пароли</div><button type="button" class="btn btn-ghost" id="btn-pw-toggle-all" style="padding:3px 10px;font-size:12px;">👁 Показать пароли</button></div>
-        <div style="font-size:12px;color:var(--ink-soft);margin-bottom:10px;">Один пароль на человека — по нему он входит в своё. Пароль не должен повторяться у разных людей. ${isOwnerRole ? 'Кнопка «Уволить» закрывает доступ и убирает человека из списков и будущих графиков; вся прошлая история (мероприятия, зарплата) остаётся.' : ''}</div>
+        ${renderStaffPositionsAdmin()}<div style="font-size:12px;color:var(--ink-soft);margin-bottom:10px;">Один пароль на человека — по нему он входит в своё. Пароль не должен повторяться у разных людей. ${isOwnerRole ? 'Кнопка «Уволить» закрывает доступ и убирает человека из списков и будущих графиков; вся прошлая история (мероприятия, зарплата) остаётся.' : ''}</div>
         ${people.map(n=>{
           const dv = draft && draft[n] !== undefined ? draft[n] : saved(n);
           const twin = saved(n) ? people.find(o=> o !== n && saved(o) && pwNorm(saved(o)) === pwNorm(saved(n))) : null;
           return `<div class="field" style="margin-bottom:8px;">${twin ? `<div style="font-size:11.5px;color:var(--danger);margin-bottom:2px;">⚠ Такой же пароль у «${escapeHtml(twin)}» — придумайте разные, иначе при входе путаются люди.</div>` : ''}
-            <label>${escapeHtml(n)} <span style="font-weight:400;color:var(--ink-soft);font-size:11px;">${escapeHtml(staffRolesLabel(staffRolesOf(n)))}</span></label>
+            <label>${escapeHtml(n)} <span style="font-weight:400;color:var(--ink-soft);font-size:11px;">${escapeHtml(staffPositionsLabel(n) || 'без должности')}${(()=>{ const ids = staffPositionsOf(n); const acc = [...new Set(ids.map(id=> (staffPositionById(id)||{}).access))]; return acc.length === 1 && acc[0] === 'none' ? ' · без входа' : ''; })()}</span></label>
+            ${canPos ? (()=>{ const ids = staffPositionsOf(n); return `<div style="display:flex;gap:6px;margin-bottom:4px;">${staffPosSelectHtml(n, 0, ids[0]||'')}${staffPosSelectHtml(n, 1, ids[1]||'')}</div>`; })() : ''}
             <div style="display:flex;gap:6px;"><input type="password" autocomplete="new-password" class="staff-pw-input" data-name="${escapeHtml(n)}" placeholder="без личного пароля" value="${escapeHtml(dv)}" style="flex:1;"><button type="button" class="btn btn-ghost staff-pw-gen" data-name="${escapeHtml(n)}" title="Сгенерировать новый пароль" style="padding:4px 8px;font-size:13px;">🎲</button>
-            ${isOwnerRole ? `<button type="button" class="btn btn-ghost staff-fire-btn" data-name="${escapeHtml(n)}" title="Сотрудник уволился" style="padding:4px 10px;font-size:12px;color:var(--danger);">Уволить</button>` : ''}</div>
+            ${isOwnerRole && !staffPositionsOf(n).some(id=> (staffPositionById(id)||{}).access === 'owner') ? `<button type="button" class="btn btn-ghost staff-fire-btn" data-name="${escapeHtml(n)}" title="Сотрудник уволился" style="padding:4px 10px;font-size:12px;color:var(--danger);">Уволить</button>` : ''}</div>
           </div>`;
         }).join('')}
         ${arch.length ? `<details style="margin-top:10px;"><summary style="cursor:pointer;font-size:12.5px;font-weight:600;">Уволенные (${arch.length})</summary>
-          <div style="margin-top:6px;">${arch.map((x,i)=>`<div style="display:flex;align-items:center;gap:8px;font-size:12.5px;padding:3px 0;"><span style="flex:1;">${escapeHtml(x.name)} <span style="color:var(--ink-soft);font-size:11px;">· ${escapeHtml(staffRolesLabel(x.roles||{}))} · с ${escapeHtml(formatDateText(x.date))}</span></span>${isOwnerRole ? `<button type="button" class="btn btn-ghost staff-restore-btn" data-idx="${i}" style="padding:2px 8px;font-size:12px;">Вернуть</button>` : ''}</div>`).join('')}</div></details>` : ''}
+          <div style="margin-top:6px;">${arch.map((x,i)=>`<div style="display:flex;align-items:center;gap:8px;font-size:12.5px;padding:3px 0;"><span style="flex:1;">${escapeHtml(x.name)} <span style="color:var(--ink-soft);font-size:11px;">· ${escapeHtml((x.pos && x.pos.length ? x.pos.map(id=> (staffPositionById(id)||{}).name).filter(Boolean).join(' · ') : staffRolesLabel(x.roles||{})))} · с ${escapeHtml(formatDateText(x.date))}</span></span>${isOwnerRole ? `<button type="button" class="btn btn-ghost staff-restore-btn" data-idx="${i}" style="padding:2px 8px;font-size:12px;">Вернуть</button>` : ''}</div>`).join('')}</div></details>` : ''}
       </div>`;
   }
   function staffAllRows(overrides){
     return staffEditPeople().map(n=>({ orig:n, name:n, roles: (overrides && overrides[n.toLowerCase()]) || staffRolesOf(n) }));
   }
   async function fireStaffMember(name){
+    if(staffPositionsOf(name).some(id=> (staffPositionById(id)||{}).access === 'owner')){
+      // руководителя уволить нельзя (ни ассистенту, ни самому себе) — иначе можно потерять доступ к приложению
+      throw new Error('owner-protected');
+    }
     const k = name.trim().toLowerCase();
     const roles = staffRolesOf(name);
-    await applyStaffEdit(staffAllRows({ [k]: {master:false, hostess:false, manager:false} }));
+    const posIds = staffPositionsOf(name);
+    if(roles.master || roles.hostess || roles.manager) await applyStaffEdit(staffAllRows({ [k]: {master:false, hostess:false, manager:false} }));
+    { const d = staffPosData(); if(d.people[k]) d.people[k] = { ...d.people[k], fired: true }; Object.keys(d.passwords).forEach(n=>{ if(spKey(n) === k) delete d.passwords[n]; }); await saveStaffPositions(); }
     // будущие смены этого человека (с сегодняшнего дня) снимаем; прошлые не трогаем
     const today = todayStr();
     let ch = false;
@@ -24427,15 +25057,20 @@
       if(nl.length !== state.masterShifts[d].length){ if(nl.length) state.masterShifts[d] = nl; else delete state.masterShifts[d]; ch = true; }
     });
     if(ch) await saveMasterShifts();
-    state.staffArchive = [...(state.staffArchive||[]).filter(x=>(x.name||'').toLowerCase() !== k), { name, roles, date: today }];
+    state.staffArchive = [...(state.staffArchive||[]).filter(x=>(x.name||'').toLowerCase() !== k), { name, roles, pos: posIds, date: today }];
     await storageSetWithRetry('staff-archive', JSON.stringify(state.staffArchive));
     recordAction('Сотрудник уволен', name);
   }
   async function restoreStaffMember(idx){
     const x = (state.staffArchive||[])[idx]; if(!x) return;
-    const rows = staffAllRows();
-    rows.push({ orig:'', name:x.name, roles: x.roles && (x.roles.master||x.roles.hostess||x.roles.manager) ? x.roles : {master:true, hostess:false, manager:false} });
-    await applyStaffEdit(rows);
+    if(Array.isArray(x.pos) && x.pos.some(id=> staffPositionById(id))){
+      const d = staffPosData(); if(d.people[spKey(x.name)]) delete d.people[spKey(x.name)].fired;
+      await setStaffPositions(x.name, x.pos);
+    } else {
+      const rows = staffAllRows();
+      rows.push({ orig:'', name:x.name, roles: x.roles && (x.roles.master||x.roles.hostess||x.roles.manager) ? x.roles : {master:true, hostess:false, manager:false} });
+      await applyStaffEdit(rows);
+    }
     state.staffArchive = state.staffArchive.filter((_,i)=>i!==idx);
     await storageSetWithRetry('staff-archive', JSON.stringify(state.staffArchive));
     recordAction('Сотрудник возвращён', x.name);
@@ -24443,12 +25078,13 @@
 
   function attachCodeSettingsModalEvents(overlay){
     const stashPw = ()=>{ state._pwDraft = {}; state._pwDraftTs = Date.now(); overlay.querySelectorAll('.staff-pw-input').forEach(i=>{ state._pwDraft[i.dataset.name] = i.value; }); };
+    try{ attachStaffPositionsAdmin(overlay, stashPw); }catch(e){ console.error(e); }
     overlay.querySelectorAll('.staff-fire-btn').forEach(btn=> btn.onclick = async ()=>{
       const n = btn.dataset.name;
       if(!window.confirm('Уволить «' + n + '»?\n\n• личный пароль перестанет работать\n• человек уберётся из списков и будущих графиков\n• вся прошлая история (мероприятия, зарплата, графики) сохранится\n\nЕго можно будет вернуть из списка «Уволенные».')) return;
       stashPw(); if(state._pwDraft) delete state._pwDraft[n];
       btn.disabled = true;
-      try{ await fireStaffMember(n); }catch(e){ console.error(e); showToast('Не удалось, попробуйте ещё раз', 'error'); btn.disabled = false; return; }
+      try{ await fireStaffMember(n); }catch(e){ console.error(e); showToast(e && e.message === 'owner-protected' ? 'Руководителя уволить нельзя' : 'Не удалось, попробуйте ещё раз', 'error'); btn.disabled = false; return; }
       overlay.remove(); state.modal = {type:'code-settings'}; render();
       showToast('«' + n + '» уволен(а): доступ закрыт');
     });
@@ -24492,7 +25128,7 @@
       if(anyEmpty) return;
 
       const pwInputs = [...overlay.querySelectorAll('.staff-pw-input')];
-      const usedValues = new Set(Object.values(newCodes).map(pwNorm));
+      const usedValues = new Set(sharedCodeRoles().map(r=> newCodes[r]).filter(Boolean).map(pwNorm));
       let duplicateFound = '';
       const pwByName = {};
       pwInputs.forEach(inp=>{
@@ -24509,11 +25145,13 @@
       const shown = new Set(pwInputs.map(i=>i.dataset.name.toLowerCase()));
       const keepOld = obj=> Object.fromEntries(Object.entries(obj||{}).filter(([n])=>!shown.has(n.toLowerCase())));
       const newMasterPasswords = keepOld(state.masterPersonalPasswords), newHostessPasswords = keepOld(state.hostessPersonalPasswords), newManagerPasswords = keepOld(state.managerPersonalPasswords);
+      const newOtherPasswords = keepOld(staffPosData().passwords);
       Object.entries(pwByName).forEach(([n,v])=>{
         const r = staffRolesOf(n);
         if(r.master) newMasterPasswords[n] = v;
         if(r.hostess) newHostessPasswords[n] = v;
         if(r.manager) newManagerPasswords[n] = v;
+        if(staffOtherAccess(n)) newOtherPasswords[n] = v;
       });
 
       state.roleCodes = newCodes;
@@ -24526,6 +25164,8 @@
         await storageSetWithRetry('hostess-passwords', JSON.stringify(state.hostessPersonalPasswords));
         state.managerPersonalPasswords = newManagerPasswords;
         await storageSetWithRetry('manager-passwords', JSON.stringify(state.managerPersonalPasswords));
+        staffPosData().passwords = newOtherPasswords;
+        await saveStaffPositions();
       }
       recordAction("Пароли сохранены");
       state.modal = null;
@@ -25160,6 +25800,7 @@
     state.salaryAdjustments.filter(a=> adjEffDate(a) && adjEffDate(a).startsWith(ym) && !isAdjMirroredToEvent(a)).forEach(a=>{
       const name = (a.masterName||'').trim();
       const isHostess = HOSTESS_LIST.some(h=>h.toLowerCase()===name.toLowerCase());
+      if(!isHostess && ['manager','other'].includes(salaryAdjKind(name))) return;
       add(name, Number(a.amount)||0, isHostess ? 'hostess' : 'master');
     });
     Object.entries(hostessBaseSalaryFor(ym)).forEach(([n,v])=> add(n, v.h1+v.h2, 'hostess'));
@@ -25219,7 +25860,7 @@
     const canon = v=>{ const h=(state.hostsList||[]).find(x=>x.toLowerCase()===(v||'').trim().toLowerCase()); return h||(v||'').trim(); };
     const isHost = n=> HOSTESS_LIST.some(h=>h.toLowerCase()===(n||'').trim().toLowerCase());
     (state.expenses||[]).forEach(e=>{
-      if(e.category!=='Зарплата' || e.netProfitRef || e.safeTransfer) return;
+      if(e.category!=='Зарплата' || e.netProfitRef || e.safeTransfer || e.helperShiftId) return;
       const who = (e.master||'').trim();
       if(!who || isHost(who)) return;
       const inMonth = e.salaryPayYm ? e.salaryPayYm===ym : (e.date && e.date.startsWith(ym));
@@ -26294,6 +26935,7 @@
     }
     npHostessSalary += hostessBaseTotalFor(monthYm);
     npHostessSalary += npHostessAdjustments;
+    try{ npHostessSalary += helperPayTotalForMonth(monthYm); }catch(e){}
     const npHostessBonusTotal = Object.values((state.hostessBonuses && state.hostessBonuses[monthYm]) || {}).reduce((s,b)=> s + (Number((b&&b.amount)||0)), 0);
     npHostessSalary += npHostessBonusTotal;
     const npManual = (state.netProfitManual && state.netProfitManual[monthYm]) || {};
@@ -26323,7 +26965,7 @@
       {label:'Прочие расходы (Книга)', amount: npOtherLedgerCost, breakdown: npExpenseBreakdown.otherLedger},
       {label:'ЗП мастеров (выдано + будущие записи)', amount: npMastersSalary, breakdown: computeMastersCashSalary(monthYm).rows},
       {label:'ЗП админов', amount: npHostessSalary, breakdown: npStaffBreakdown.hostess},
-      {label:'ЗП менеджеров', amount: npManagerSalary, breakdown: computeManagersPayForMonth(monthYm).rows.map(r=>({name: r.name + (r.edited ? ' (изменено вручную)' : ' (авто)'), amount: r.amount}))},
+      {label:'ЗП менеджеров', amount: npManagerSalary, breakdown: computeManagersPayForMonth(monthYm).rows.map(r=>({name: r.name + (r.edited ? ' (изменено вручную)' : ' (авто)') + (r.adj ? ' · корр. ' + (r.adj>0?'+':'') + formatMoney(r.adj) : ''), amount: r.amount}))},
       {label:'Аренда', amount: npRent},
       ...npStaffList.map(s=>({label: s.name||'Сотрудник', amount: Number(s.amount)||0})),
       ...npCustomList.map(c=>({label: c.name||'Статья расхода', amount: Number(c.amount)||0})),
@@ -26752,6 +27394,23 @@
     });
     const productList = Object.entries(productCounts).filter(([k,v])=>v>0).sort((a,b)=>b[1]-a[1]);
     const maxProduct = Math.max(1, ...productList.map(x=>x[1]));
+    // средний размер группы: только состоявшиеся мероприятия с гостями (без отменённых, маркетинга и ещё пустых/будущих)
+    const avgGroupFor = (monthsBack)=>{
+      const today = todayStr();
+      const endD = new Date(cursor.getFullYear(), cursor.getMonth()+1, 0);
+      const startD = new Date(cursor.getFullYear(), cursor.getMonth() - (monthsBack-1), 1);
+      const from = fmtDate(startD), to = fmtDate(endD) < today ? fmtDate(endD) : today;
+      const res = {};
+      state.events.forEach(e=>{
+        if(!e.date || e.date < from || e.date > to || e.status === 'cancelled' || e.status === 'marketing') return;
+        const g = Number(e.guests)||0; if(g <= 0) return;
+        const p = (e.product && PRODUCTS.includes(e.product)) ? e.product : 'Без категории';
+        const r = res[p] = res[p] || { n:0, g:0 }; r.n++; r.g += g;
+      });
+      return res;
+    };
+    const avgGroup1 = avgGroupFor(1), avgGroup3 = avgGroupFor(3), avgGroup6 = avgGroupFor(6);
+    const avgTxt = (r)=> r && r.n ? String(Math.round(r.g/r.n*10)/10).replace('.', ',') : '—';
 
     // по направлениям (вид мероприятия / название)
     const directionCounts = {};
@@ -27011,6 +27670,7 @@
       const name = (x.masterName||'').trim();
       if(!name) return;
       if(HOSTESS_LIST.some(h=>h.toLowerCase()===name.toLowerCase())) return;
+      if(['manager','other'].includes(salaryAdjKind(name))) return; // менеджерам — в «ЗП менеджеров», прочим — отдельным блоком ниже
       adjustmentsByMaster[name] = (adjustmentsByMaster[name]||0) + (Number(x.amount)||0);
       if(!masterAdjustmentDetails[name]) masterAdjustmentDetails[name] = [];
       masterAdjustmentDetails[name].push({ date: adjEffDate(x), comment: x.comment||'', amount: Number(x.amount)||0 });
@@ -27172,7 +27832,7 @@
         shiftDefsForDate(dateStr).forEach(s=>{
           if(s.senior) return;
           const entry = normalizeShiftEntry(dayShifts[s.key], s);
-          if(entry && entry.name){
+          if(entry && entry.name && !(dateStr >= ADMIN_PAY_V2_FROM && isSeniorAdminName(entry.name))){
             hostessShiftCounts[entry.name] = (hostessShiftCounts[entry.name]||0) + 1;
             totalHostessShiftsAll += 1;
           }
@@ -27556,6 +28216,8 @@
           `;}).join('');
           })()}
         </div>
+        ${helperSalaryMonthHtml(monthYmForItemSales)}
+        ${otherStaffAdjustmentsHtml(monthYmForItemSales)}
         <div class="analytics-section">
           <h4>Все корректировки ЗП за месяц: ${formatMoney(allSalaryAdjustmentsThisMonth.reduce((s,a)=>s+a.amount,0))}</h4>
           <div style="font-size:11.5px;color:var(--ink-soft);font-family:var(--font-mono);margin-bottom:8px;">Все доплаты/удержания за месяц в одном месте — и мастерам, и админам, без необходимости открывать каждого по отдельности.</div>
@@ -27587,7 +28249,7 @@
         </div>`}
         <div class="analytics-section">
           <h4>Зарплата админов за месяц: ${formatMoney(totalHostessSalary)}</h4>
-          <div style="font-size:11.5px;color:var(--ink-soft);font-family:var(--font-mono);margin-bottom:8px;">По ставкам за смену: будни — ${formatMoney(HOSTESS_WEEKDAY_RATE)}, выходные — ${formatMoney(HOSTESS_WEEKEND_RATE)}, плюс переработка (раньше/позже стандартного времени) — ${formatMoney(HOSTESS_EXTRA_HOUR_RATE)}/час. Считается по «Графику хостес» в карточках дней.</div>
+          <div style="font-size:11.5px;color:var(--ink-soft);font-family:var(--font-mono);margin-bottom:8px;">${monthYmForItemSales >= ADMIN_PAY_V2_FROM.slice(0,7) ? `Оклад: администратор — ${formatMoney(HOSTESS_BASE_SALARY)}, старший администратор — ${formatMoney(SENIOR_ADMIN_BASE_SALARY)} в месяц (по половине за 1–15 и 16–конец, если в этой половине есть смены). График 4/2: 1-й админ 12–21, 2-й админ / старший 13–22. Пришёл раньше или ушёл позже — доплата по ставке оклада: ${formatMoney(ADMIN_EXTRA_RATE)}/ч админу, ${formatMoney(SENIOR_EXTRA_RATE)}/ч старшему (оклад ÷ ≈162 рабочих часа в месяце).` : `По ставкам за смену: будни — ${formatMoney(HOSTESS_WEEKDAY_RATE)}, выходные — ${formatMoney(HOSTESS_WEEKEND_RATE)}, плюс переработка (раньше/позже стандартного времени) — ${formatMoney(HOSTESS_EXTRA_HOUR_RATE)}/час.`} Считается по графику админов в карточках дней.</div>
           ${hostessSalaryList.length ? hostessSalaryList.map(([h,pay])=>`
             <details class="np-staff-breakdown">
               <summary style="cursor:pointer;list-style:none;" class="stat-row">
@@ -27712,14 +28374,14 @@
 `;
     const analyticsPanel_guests = `      <div class="analytics-section">
         <h4>По продуктам</h4>
-        <div style="font-size:11.5px;color:var(--ink-soft);font-family:var(--font-mono);margin-bottom:8px;">В скобках — среднее количество гостей на мероприятие этого продукта.</div>
-        ${productList.map(([p,c])=>`
+        <div style="font-size:11.5px;color:var(--ink-soft);font-family:var(--font-mono);margin-bottom:8px;">Число — мероприятий за месяц. Справа — средний размер группы (чел. на мероприятие): за этот месяц, за 3 и за 6 месяцев. Считаются только прошедшие мероприятия с гостями — без отменённых, маркетинга и будущих, на которые ещё не записались.</div>
+        ${(()=>{ const names = Array.from(new Set([...productList.map(x=>x[0]), ...Object.keys(avgGroup6)])); return names.map(p=>{ const c = productCounts[p]||0; return `
           <div class="stat-row">
             <div class="stat-label">${escapeHtml(prodLabel(p))}</div>
             <div class="stat-bar-track"><div class="stat-bar-fill" style="width:${Math.round(c/maxProduct*100)}%;background:var(--ink);"></div></div>
-            <div class="stat-count">${c} <span style="color:var(--ink-soft);font-weight:400;">(~${c>0?Math.round(productGuests[p]/c*10)/10:0} чел.)</span></div>
-          </div>
-        `).join('')}
+            <div class="stat-count" style="width:auto;white-space:nowrap;">${c} <span style="color:var(--ink-soft);font-weight:400;font-size:11.5px;">· ср. ${avgTxt(avgGroup1[p])} / ${avgTxt(avgGroup3[p])} / ${avgTxt(avgGroup6[p])} чел.${avgGroup6[p] ? ' <span title="мероприятий в расчёте за 6 мес.">(' + avgGroup6[p].n + ' мер.)</span>' : ''}</span></div>
+          </div>`; }).join(''); })()}
+        <div style="font-size:11px;color:var(--ink-soft);margin-top:4px;">ср. месяц / 3 мес. / 6 мес.</div>
       </div>
 
 
@@ -28607,9 +29269,11 @@
         if(entry && entry.name && norm(entry.name)===norm(name)){
           const extra = shiftExtraHours(raw, sd);
           const full = dateStr >= FULLDAY_FROM;
-          const extraTxt = extra>0 ? ` + ${extra} ч сверх × ${formatMoney(HOSTESS_EXTRA_HOUR_RATE)}` : '';
+          const _rate = adminExtraRate(dateStr, entry.name, sd);
+          const extraTxt = extra>0 ? ` + ${extra%1===0?extra:extra.toFixed(1)} ч сверх × ${formatMoney(_rate)}` : '';
+          const _noCalc = sd.senior && dateStr < ADMIN_PAY_V2_FROM;
           const text = full
-            ? `${sd.senior?'старший админ':'смена'} ${entry.start}–${entry.end}${sd.senior?' (без расчёта)':extraTxt}`
+            ? `${adminIsSenior(entry.name, sd)?'старший админ':'смена'} ${entry.start}–${entry.end}${_noCalc?' (без расчёта)':extraTxt}`
             : `смена ${entry.start}–${entry.end} · ${weekend?'выходной':'будни'} ${formatMoney(rate)}${extraTxt}`;
           rows.push({date:dateStr, half:d<=15?'H1':'H2', text, pay: hostessShiftPay(dateStr, raw, sd, rate)});
         }
@@ -28621,8 +29285,8 @@
     {
       const bk = Object.keys(hostessBaseSalaryFor(ym)).find(n=>norm(n)===norm(name));
       if(bk){ const bv = hostessBaseSalaryFor(ym)[bk];
-        if(bv.h1) rows.push({date:ym+'-01', half:'H1', text:'оклад за 1–15 (40 000 ₽ в месяц пополам)', pay:bv.h1});
-        if(bv.h2) rows.push({date:ym+'-16', half:'H2', text:'оклад за 16 – конец (40 000 ₽ в месяц пополам)', pay:bv.h2});
+        if(bv.h1) rows.push({date:ym+'-01', half:'H1', text:`оклад за 1–15 (${formatMoney(bv.h1*2)} в месяц пополам)`, pay:bv.h1});
+        if(bv.h2) rows.push({date:ym+'-16', half:'H2', text:`оклад за 16 – конец (${formatMoney(bv.h2*2)} в месяц пополам)`, pay:bv.h2});
       }
     }
     rows.sort((a,b)=>a.date.localeCompare(b.date));
@@ -29686,7 +30350,7 @@
               <input type="time" id="shift-actual-end" value="${entry.end}">
             </div>
           </div>
-          <div style="font-size:12px;color:var(--ink-soft);">${shiftDef.senior ? 'Старший админ: только отметка в графике, оплата здесь не считается. Время — для информации. ' : ''}Стандарт: ${shiftDef.start}–${shiftDef.end}. Если попросили выйти раньше или задержаться — переработка оплачивается по ${formatMoney(HOSTESS_EXTRA_HOUR_RATE)}/час сверх обычной ставки за смену.</div>
+          <div style="font-size:12px;color:var(--ink-soft);">${shiftDef.senior && shiftDate < ADMIN_PAY_V2_FROM ? 'Старший админ: только отметка в графике, оплата здесь не считается. Время — для информации. ' : ''}Стандарт: ${shiftDef.start}–${shiftDef.end}. Если попросили выйти раньше или задержаться — переработка оплачивается по ${shiftDate >= ADMIN_PAY_V2_FROM ? formatMoney(ADMIN_EXTRA_RATE) + ' (админ) / ' + formatMoney(SENIOR_EXTRA_RATE) + ' (старший)' : formatMoney(HOSTESS_EXTRA_HOUR_RATE)}/час сверх обычной ставки за смену.</div>
           <div id="shift-extra-preview" style="font-size:13px;font-weight:600;color:var(--status-blue);"></div>
           <div style="font-size:11.5px;color:var(--ink-soft);">Это действие не требует кода доступа.</div>
           <div class="modal-actions">
@@ -29715,9 +30379,11 @@
     };
 
     const updatePreview = ()=>{
-      const extra = shiftDef.senior ? 0 : shiftExtraHours({ start: startInput.value, end: endInput.value }, shiftDef);
+      const _nm = selectEl.value === '__custom__' ? ((overlay.querySelector('#shift-name-custom')||{}).value||'') : selectEl.value;
+      const extra = (shiftDef.senior && shiftDate < ADMIN_PAY_V2_FROM) ? 0 : shiftExtraHours({ start: startInput.value, end: endInput.value }, shiftDef);
+      const _r = adminExtraRate(shiftDate, _nm, shiftDef);
       previewEl.textContent = extra > 0
-        ? `+${extra%1===0?extra:extra.toFixed(1)} ч сверх нормы → доплата ${formatMoney(extra*HOSTESS_EXTRA_HOUR_RATE)}`
+        ? `+${extra%1===0?extra:extra.toFixed(1)} ч сверх нормы → доплата ${formatMoney(Math.round(extra*_r))} (${formatMoney(_r)}/ч)`
         : '';
     };
     startInput.addEventListener('input', updatePreview);
@@ -30443,11 +31109,458 @@
     };
   }
 
+  // ===================== СКЛАД: постоянные (штучные) и переменные материалы =====================
+  // Постоянные — списываются сами по техкартам: прошедшее мероприятие × число гостей (или изделий по форматам).
+  // Переменные (краски, воск, отдушки, шпаклёвка…) — по мероприятиям не списываются; на ревизии вписывают фактический остаток,
+  // расход за период считается как «было + приход − стало».
+  // Остаток не хранится счётчиком, а каждый раз пересчитывается: последняя ревизия + приходы − списания по мероприятиям − ручные списания.
+  // Поэтому если у мероприятия поменяли число гостей или формат — остаток поправится сам, ничего не задвоится.
+  const STOCK_DEFAULT_ITEMS = [
+    // ---- постоянные (штучно) ----
+    ['piece','Холсты','Холст 30×40','шт',112], ['piece','Холсты','Холст 30×30','шт',112], ['piece','Холсты','Холст 20×20','шт',60],
+    ['piece','Холсты','Холст 10×15','шт',35], ['piece','Холсты','Холст круг 30 см','шт',250], ['piece','Холсты','Холст 40×50','шт',185],
+    ['piece','Холсты','Холст 60×40','шт',215],
+    ['piece','Артборды','Артборд с подсветкой 25 см','шт',1200], ['piece','Артборды','Артборд с подсветкой 30 см','шт',1567],
+    ['piece','Артборды','Артборд с подсветкой 35 см','шт',1933], ['piece','Артборды','Артборд с подсветкой 40 см','шт',2300],
+    ['piece','Бумага и рамки','Бумага для акварели А3','лист',50], ['piece','Бумага и рамки','Бумага для акварели А4','лист',25],
+    ['piece','Бумага и рамки','Бумага для акварели А5','лист',12], ['piece','Бумага и рамки','Рамка А3','шт',280],
+    ['piece','Бумага и рамки','Рамка А4','шт',150], ['piece','Бумага и рамки','Рамка А5','шт',90],
+    ['piece','Ёмкости и основы','Стаканчик 250 мл','шт',50], ['piece','Ёмкости и основы','Стаканчик 600 мл','шт',47],
+    ['piece','Ёмкости и основы','МДФ 10 мм, белый','шт',150], ['piece','Ёмкости и основы','Ткань хлопок 50×75 см','шт',170],
+    ['piece','Ёмкости и основы','Баночка для свечи','шт',50], ['piece','Ёмкости и основы','Фитиль','шт',10],
+    ['piece','Ёмкости и основы','Флакон для диффузора 50 мл','шт',60], ['piece','Ёмкости и основы','Палочки для диффузора','шт',3],
+    ['piece','Ёмкости и основы','Атомайзер 10 мл','шт',14], ['piece','Ёмкости и основы','Шоппер хлопковый','шт',150],
+    ['piece','Ёмкости и основы','Неваляшка-шкатулка 13 см','шт',250],
+    ['piece','Упаковка','Пакет крафтовый','шт',20], ['piece','Упаковка','Коробка подарочная (свечи, духи)','шт',50],
+    ['piece','Упаковка','Одноразовый стакан крафт','шт',5],
+    // ---- переменные (остаток вписывают на ревизии) ----
+    ['bulk','Краски и покрытия','Краски акриловые','мл',2], ['bulk','Краски и покрытия','Краски акриловые по ткани','мл',3],
+    ['bulk','Краски и покрытия','Краска по стеклу','мл',3], ['bulk','Краски и покрытия','Жидкая поталь','мл',4],
+    ['bulk','Фактура','Шпаклёвка','кг',115], ['bulk','Фактура','Штукатурка «Ривьера»','кг',0], ['bulk','Фактура','Гипс Г-16','кг',130],
+    ['bulk','Фактура','Гипс для своего литья','кг',80],
+    ['bulk','Свечи и ароматы','Соевый воск','кг',380], ['bulk','Свечи и ароматы','Отдушки','г',8.3],
+    ['bulk','Свечи и ароматы','База ММБ','мл',0], ['bulk','Свечи и ароматы','Спирт','мл',0],
+    ['bulk','Расходники','Клеевые стержни','шт',8], ['bulk','Расходники','Малярный скотч','рулон',90],
+    ['bulk','Расходники','Перчатки','пара',5], ['bulk','Расходники','Пластиковые рюмки','шт',3],
+    ['bulk','Расходники','Наклейки','шт',5], ['bulk','Расходники','Кондитерские мешки','шт',3],
+    ['bulk','Расходники','Наждачная бумага','лист',12], ['bulk','Расходники','Лента атласная','м',0],
+    ['bulk','Расходники','Бумага А4/А5','лист',1],
+    ['bulk','Продукты для МК','Вино для рисования','л',0], ['bulk','Продукты для МК','Растворимый кофе','г',0],
+  ];
+  const stNorm = s=> String(s||'').toLowerCase().replace(/ё/g,'е').replace(/(\d)\s*[xх×]\s*(\d)/g,'$1×$2').replace(/\s+/g,' ').trim();
+
+  // нормы расхода постоянных материалов по техкартам: на 1 изделие (если в мероприятии указаны форматы) или на 1 гостя
+  function stockNormsForEvent(e){
+    const t = stNorm(e.title);
+    if(!t) return null;
+    if(/смол|керамик|лепк|гончарн/.test(t)) return { own:true, label:'материалы мастера' };
+    const pair = /свидан/.test(t);
+    const lunch = /ланч/.test(t);
+    // opts: [ключ варианта, {материал: кол-во на 1}], def — какой вариант брать, если форматы не указаны
+    const R = (label, opts, def, pairFactor)=>({ label, opts, def, pairFactor: pairFactor || 1 });
+    let r = null;
+    if(/дофаминов\S* ваз/.test(t)) r = R('Дофаминовая ваза', [['600', {'Стаканчик 600 мл':1}], ['250', {'Стаканчик 250 мл':1}]], /600/.test(t) ? '600' : '250');
+    else if(/панно/.test(t)) r = R('Панно-ваза', [['*', {'Стаканчик 250 мл':2, 'МДФ 10 мм, белый':1, 'Ткань хлопок 50×75 см':1}]], '*');
+    else if(/подсветк|луна/.test(t)) r = R('Картина с подсветкой', ['25','30','35','40'].map(s=>[s, {['Артборд с подсветкой '+s+' см']:1}]), (t.match(/(25|30|35|40) ?см/)||[])[1] || '30', 0.5);
+    else if(/скорост/.test(t)) r = R('Фактура скорости', [['круг', {'Холст круг 30 см':1, 'Пакет крафтовый':1}], ['40×50', {'Холст 40×50':1, 'Пакет крафтовый':1}], ['60×40', {'Холст 60×40':1, 'Пакет крафтовый':1}], ['30×40', {'Холст 30×40':1, 'Пакет крафтовый':1}]], /круг/.test(t) ? 'круг' : (/40×50/.test(t) ? '40×50' : (/60×40/.test(t) ? '60×40' : '30×40')), 0.5);
+    else if(/кофе|кофейн/.test(t) || /вином/.test(t)){
+      const coffee = /кофе|кофейн/.test(t);
+      r = R(coffee ? 'Кофейная живопись' : 'Рисование вином', ['А3','А4','А5'].map(s=>{ const m = {['Бумага для акварели '+s]:1, ['Рамка '+s]:1}; if(coffee) m['Одноразовый стакан крафт'] = 1; return [stNorm(s), m]; }), (t.match(/а[345]/)||[])[0] || 'а4');
+    }
+    else if(/дух|парфюм/.test(t)){
+      const box = lunch ? {} : {'Коробка подарочная (свечи, духи)':1};
+      r = R('Авторские духи', [['3', {'Атомайзер 10 мл':3, ...box}], ['2', {'Атомайзер 10 мл':2, ...box}], ['1', {'Атомайзер 10 мл':1, ...box}]], lunch ? '1' : ((t.match(/([123]) (аромат|флакон)/)||[])[1] || '3'));
+    }
+    else if(/диффуз/.test(t)) r = R('Свеча и диффузор', [['*', {'Баночка для свечи':1, 'Фитиль':1, 'Флакон для диффузора 50 мл':1, 'Палочки для диффузора':3, 'Коробка подарочная (свечи, духи)':1}]], '*');
+    else if(/свеч/.test(t) && !/мандарин|носок|спил|композиц|шишк/.test(t)){
+      const n = /(2 свеч|свечи 2|две свеч|2 шт)/.test(t) ? 2 : 1;
+      r = R(n === 2 ? 'Свечи 2 шт' : 'Свеча', [['*', {'Баночка для свечи':n, 'Фитиль':n, 'Коробка подарочная (свечи, духи)':n}]], '*');
+    }
+    else if(/шоппер/.test(t)) r = R('Роспись шоппера', [['*', {'Шоппер хлопковый':1, 'Пакет крафтовый':1}]], '*');
+    else if(/роспись одежд|одежд/.test(t)) r = R('Роспись одежды', [['*', {'Пакет крафтовый':1}]], '*');
+    else if(/неваляш/.test(t)) r = R('Неваляшка', [['*', {'Неваляшка-шкатулка 13 см':1}]], '*');
+    else if(/(акрил|аффирмац|фактурн|дофаминов|портрет|pinterest|коты|неонов|бранч|картин|живопис|рисован|карта желаний)/.test(t) && !/скетч|быстрые портреты/.test(t)){
+      const sizes = ['30×40','30×30','20×20','10×15'];
+      const inTitle = sizes.find(s=> t.includes(s));
+      r = R('Картина на холсте', sizes.map(s=>[s, {['Холст '+s]:1, 'Пакет крафтовый':1}]), inTitle || (/бранч/.test(t) ? '30×30' : (lunch ? '20×20' : '30×40')));
+    }
+    if(!r) return null;
+    const pick = key=> (r.opts.find(o=>o[0]===key) || r.opts[0])[1];
+    const lines = {};
+    const add = (m, k)=> Object.entries(m).forEach(([n,q])=>{ lines[n] = Math.round(((lines[n]||0) + q*k) * 100) / 100; });
+    const fm = eventFormatItems(e);
+    let assumed = false;
+    if(fm.length){
+      fm.forEach(x=>{
+        const o = stNorm(x.opt);
+        const opt = r.opts.find(op=> op[0] !== '*' && o.includes(op[0])) || r.opts.find(op=>op[0]===r.def) || r.opts[0];
+        add(opt[1], Number(x.n)||0);
+      });
+    } else {
+      const g = Number(e.guests) || 0;
+      if(g <= 0) return { label:r.label, lines:{}, noGuests:true };
+      add(pick(r.def), g * (pair ? r.pairFactor : 1));
+      assumed = r.opts.length > 1;
+    }
+    return { label: r.label + (assumed ? ' (формат не указан — взят «' + r.def + '»)' : ''), lines, assumed };
+  }
+  function stockEventCounts(e){ return e && e.date && e.status !== 'cancelled' && e.status !== 'marketing'; }
+
+  // ---------- загрузка / сохранение ----------
+  async function loadStockData(){
+    const rd = async (k)=>{ try{ const r = await window.storage.get(k, true); const v = r ? JSON.parse(r.value) : []; return Array.isArray(v) ? v : []; }catch(e){ return []; } };
+    state.stockItems = await rd('stock-items');
+    state.stockRevisions = await rd('stock-revisions');
+    state.stockWriteoffs = await rd('stock-writeoffs');
+    state._stockItemsBaseline = JSON.parse(JSON.stringify(state.stockItems));
+    state._stockRevisionsBaseline = JSON.parse(JSON.stringify(state.stockRevisions));
+    state._stockWriteoffsBaseline = JSON.parse(JSON.stringify(state.stockWriteoffs));
+    if(!state.stockItems.length){
+      let seeded = false; try{ seeded = !!(await window.storage.get('stock-items-seeded-v1', true)); }catch(e){}
+      if(!seeded){
+        state.stockItems = STOCK_DEFAULT_ITEMS.map(([kind,cat,name,unit,price])=>({ id: uid(), kind, category:cat, name, unit, price, minStock:0 }));
+        await saveStockItems();
+        try{ await window.storage.set('stock-items-seeded-v1', JSON.stringify({date: todayStr()}), true); }catch(e){}
+      }
+    }
+  }
+  async function saveStockItems(){ await saveCollectionMerged('stock-items', state.stockItems, state._stockItemsBaseline, (a)=>{ state.stockItems = a; state._stockItemsBaseline = JSON.parse(JSON.stringify(a)); }); }
+  async function saveStockRevisions(){ await saveCollectionMerged('stock-revisions', state.stockRevisions, state._stockRevisionsBaseline, (a)=>{ state.stockRevisions = a; state._stockRevisionsBaseline = JSON.parse(JSON.stringify(a)); }); }
+  async function saveStockWriteoffs(){ await saveCollectionMerged('stock-writeoffs', state.stockWriteoffs, state._stockWriteoffsBaseline, (a)=>{ state.stockWriteoffs = a; state._stockWriteoffsBaseline = JSON.parse(JSON.stringify(a)); }); }
+  function stockCanEdit(){ return ['admin','owner'].includes(state.currentRole); }
+
+  // ---------- расчёт остатков ----------
+  // ревизия от даты D: after=true — пересчитали вечером, после мероприятий этого дня (их уже не списываем)
+  function stockAfterRev(date, rev){ return rev.after === false ? date >= rev.date : date > rev.date; }
+  function stockRevSort(a,b){ return (a.date||'').localeCompare(b.date||'') || (a.ts||0)-(b.ts||0); }
+  function stockLastRevFor(itemId, beforeRev){
+    const revs = (state.stockRevisions||[]).filter(r=> r.counts && r.counts[itemId] !== undefined && r.counts[itemId] !== null && r.counts[itemId] !== '').sort(stockRevSort);
+    if(beforeRev){ const i = revs.findIndex(r=>r.id===beforeRev.id); return i > 0 ? revs[i-1] : null; }
+    return revs[revs.length-1] || null;
+  }
+  function stockEventUsage(fromRev, toDate){
+    // списание постоянных материалов по прошедшим мероприятиям после ревизии fromRev и до toDate включительно
+    const map = {}, evs = [];
+    state.events.forEach(e=>{
+      if(!stockEventCounts(e) || e.date > toDate || (fromRev && !stockAfterRev(e.date, fromRev))) return;
+      const n = stockNormsForEvent(e);
+      if(!n || n.own || !n.lines) return;
+      Object.entries(n.lines).forEach(([k,q])=>{ const key = stNorm(k); map[key] = (map[key]||0) + q; });
+    });
+    return map;
+  }
+  function stockReceiptsFor(item, fromRev, toDate){
+    const key = stNorm(item.name);
+    return (state.stockReceipts||[]).filter(r=> stNorm(r.material) === key && r.date && r.date <= toDate && (!fromRev || stockAfterRev(r.date, fromRev))).reduce((s,r)=> s + (Number(r.qty)||0), 0);
+  }
+  function stockWriteoffsFor(item, fromRev, toDate){
+    return (state.stockWriteoffs||[]).filter(w=> w.itemId === item.id && w.date && w.date <= toDate && (!fromRev || stockAfterRev(w.date, fromRev))).reduce((s,w)=> s + (Number(w.qty)||0), 0);
+  }
+  const stR = v=> Math.round(v*100)/100;
+  // остаток на дату (по умолчанию — сегодня). Для переменных: последняя ревизия + приходы − списания (расход по мероприятиям не считаем)
+  function stockBalance(item, toDate){
+    toDate = toDate || todayStr();
+    const rev = stockLastRevFor(item.id);
+    if(!rev) return { started:false, stock:null };
+    const base = Number(rev.counts[item.id]) || 0;
+    const rc = stockReceiptsFor(item, rev, toDate);
+    const wo = stockWriteoffsFor(item, rev, toDate);
+    const used = item.kind === 'piece' ? (stockEventUsage(rev, toDate)[stNorm(item.name)] || 0) : 0;
+    return { started:true, rev, base, receipts: rc, writeoffs: wo, used, stock: stR(base + rc - wo - used) };
+  }
+  function stockNeedAhead(days){
+    const today = todayStr(), to = addDaysIso(today, days);
+    const map = {};
+    state.events.forEach(e=>{
+      if(!stockEventCounts(e) || e.date <= today || e.date > to) return;
+      const n = stockNormsForEvent(e); if(!n || n.own || !n.lines) return;
+      Object.entries(n.lines).forEach(([k,q])=>{ const key = stNorm(k); map[key] = (map[key]||0) + q; });
+    });
+    return map;
+  }
+  // расход переменного материала между двумя последними ревизиями
+  function stockBulkUsage(item){
+    const last = stockLastRevFor(item.id); if(!last) return null;
+    const prev = stockLastRevFor(item.id, last); if(!prev) return null;
+    const was = Number(prev.counts[item.id])||0, now = Number(last.counts[item.id])||0;
+    const rc = stockReceiptsFor(item, prev, last.date) - (last.after === false ? (state.stockReceipts||[]).filter(r=> stNorm(r.material)===stNorm(item.name) && r.date === last.date).reduce((s,r)=>s+(Number(r.qty)||0),0) : 0);
+    const wo = stockWriteoffsFor(item, prev, last.date);
+    const used = stR(was + rc - wo - now);
+    let guests = 0;
+    state.events.forEach(e=>{ if(stockEventCounts(e) && e.date <= last.date && stockAfterRev(e.date, prev) && !(last.after === false && e.date === last.date)) guests += Number(e.guests)||0; });
+    return { used, from: prev.date, to: last.date, guests, perGuest: guests > 0 ? stR(used / guests) : null };
+  }
+  // прошедшие мероприятия после самой ранней ревизии, для которых нет техкарты — чтобы админ видел, что не списалось
+  function stockUnmatchedEvents(){
+    const revs = (state.stockRevisions||[]).slice().sort(stockRevSort);
+    if(!revs.length) return [];
+    const today = todayStr();
+    return state.events.filter(e=> stockEventCounts(e) && e.date <= today && stockAfterRev(e.date, revs[0]) && (Number(e.guests)||0) > 0 && !stockNormsForEvent(e))
+      .sort((a,b)=> b.date.localeCompare(a.date));
+  }
+
+  // ---------- вкладка «Склад» ----------
+  function renderWarehouseTab(){
+    const items = (state.stockItems||[]).slice();
+    const canEdit = stockCanEdit();
+    const revs = (state.stockRevisions||[]).slice().sort(stockRevSort);
+    const lastRev = revs[revs.length-1];
+    const need30 = stockNeedAhead(30);
+    const unit = it=> it.unit ? ' ' + escapeHtml(it.unit) : '';
+    const num = v=> (v===null || v===undefined) ? '—' : String(stR(v)).replace('.', ',');
+    const byCat = (kind)=>{ const out = {}; items.filter(i=>i.kind===kind).sort((a,b)=> (a.category||'').localeCompare(b.category||'','ru') || a.name.localeCompare(b.name,'ru')).forEach(i=>{ (out[i.category||'Без категории'] = out[i.category||'Без категории'] || []).push(i); }); return out; };
+    let lowCount = 0, buyList = [];
+    const pieceRows = Object.entries(byCat('piece')).map(([cat, list])=> `<div class="host-group-label" style="padding:12px 4px 4px;">${escapeHtml(cat)}</div>` + list.map(it=>{
+      const b = stockBalance(it);
+      const need = need30[stNorm(it.name)] || 0;
+      const min = Number(it.minStock)||0;
+      const toBuy = b.started ? Math.max(0, Math.ceil(need + min - b.stock)) : 0;
+      if(toBuy > 0) buyList.push({ it, toBuy });
+      const low = b.started && (b.stock <= 0 || (min > 0 && b.stock < min));
+      if(low) lowCount++;
+      const col = !b.started ? 'var(--ink-soft)' : (b.stock <= 0 ? 'var(--status-red)' : (low ? '#8A5A1E' : 'inherit'));
+      return `<div class="proc-row proc-row-6">
+        <div data-label="Материал" style="font-weight:500;">${escapeHtml(it.name)}${canEdit ? ` <button class="btn btn-ghost st-item-edit" data-id="${it.id}" style="padding:0 6px;font-size:11px;">✎</button>` : ''}</div>
+        <div data-label="Остаток" style="font-family:var(--font-mono);color:${col};font-weight:600;">${b.started ? num(b.stock) + unit(it) : 'нет ревизии'}</div>
+        <div data-label="Списано по МК" style="font-family:var(--font-mono);">${b.started ? num(b.used) + unit(it) : '—'}</div>
+        <div data-label="Мин." style="font-family:var(--font-mono);color:var(--ink-soft);">${min > 0 ? num(min) + unit(it) : '—'}</div>
+        <div data-label="Нужно на 30 дн." style="font-family:var(--font-mono);">${need > 0 ? num(need) + unit(it) : '—'}</div>
+        <div data-label="Докупить" style="font-family:var(--font-mono);font-weight:700;color:${toBuy>0?'var(--status-red)':'var(--ink-soft)'};">${toBuy > 0 ? toBuy + unit(it) : '—'}</div>
+      </div>`;
+    }).join('')).join('');
+    const bulkRows = Object.entries(byCat('bulk')).map(([cat, list])=> `<div class="host-group-label" style="padding:12px 4px 4px;">${escapeHtml(cat)}</div>` + list.map(it=>{
+      const b = stockBalance(it);
+      const u = stockBulkUsage(it);
+      const min = Number(it.minStock)||0;
+      const low = b.started && (b.stock <= 0 || (min > 0 && b.stock < min));
+      if(low) lowCount++;
+      if(low) buyList.push({ it, toBuy: null });
+      return `<div class="proc-row proc-row-6">
+        <div data-label="Материал" style="font-weight:500;">${escapeHtml(it.name)}${canEdit ? ` <button class="btn btn-ghost st-item-edit" data-id="${it.id}" style="padding:0 6px;font-size:11px;">✎</button>` : ''}</div>
+        <div data-label="На ревизии" style="font-family:var(--font-mono);">${b.started ? num(b.base) + unit(it) + `<div style="font-size:10.5px;color:var(--ink-soft);">${escapeHtml(formatDateText(b.rev.date))}</div>` : 'нет ревизии'}</div>
+        <div data-label="+ приход − списано" style="font-family:var(--font-mono);color:${low?'var(--status-red)':'inherit'};font-weight:600;">${b.started ? num(b.stock) + unit(it) : '—'}</div>
+        <div data-label="Мин." style="font-family:var(--font-mono);color:var(--ink-soft);">${min > 0 ? num(min) + unit(it) : '—'}</div>
+        <div data-label="Расход за период" style="font-family:var(--font-mono);">${u ? num(u.used) + unit(it) + `<div style="font-size:10.5px;color:var(--ink-soft);">${escapeHtml(formatDateText(u.from))} → ${escapeHtml(formatDateText(u.to))}</div>` : '<span style="color:var(--ink-soft);font-size:11.5px;">после 2-й ревизии</span>'}</div>
+        <div data-label="На гостя" style="font-family:var(--font-mono);">${u && u.perGuest !== null ? num(u.perGuest) + unit(it) : '—'}</div>
+      </div>`;
+    }).join('')).join('');
+    // недостачи последней ревизии (только постоянные: там известен ожидаемый остаток)
+    const diffs = lastRev && lastRev.expected ? Object.entries(lastRev.expected).map(([id, exp])=>{
+      const it = items.find(i=>i.id===id); if(!it) return null;
+      const fact = Number(lastRev.counts[id]); if(isNaN(fact)) return null;
+      const d = stR(fact - exp); if(Math.abs(d) < 0.01) return null;
+      return { it, exp, fact, d, sum: Math.round(d * (Number(it.price)||0)) };
+    }).filter(Boolean) : [];
+    const lossSum = diffs.filter(x=>x.d<0).reduce((s,x)=>s+x.sum,0);
+    const unmatched = stockUnmatchedEvents();
+    const woRecent = (state.stockWriteoffs||[]).slice().sort((a,b)=>(b.date||'').localeCompare(a.date||'')).slice(0,15);
+    return `
+      <div class="analytics-summary">
+        <div class="summary-card"><div class="num" style="font-size:20px;">${lastRev ? escapeHtml(formatDateText(lastRev.date)) : '—'}</div><div class="label">ПОСЛЕДНЯЯ РЕВИЗИЯ</div></div>
+        <div class="summary-card ${lowCount>0?'red':''}"><div class="num">${lowCount}</div><div class="label">ЗАКОНЧИЛИСЬ ИЛИ НИЖЕ МИНИМУМА</div></div>
+        <div class="summary-card ${lossSum<0?'red':''}"><div class="num">${formatMoney(lossSum)}</div><div class="label">НЕДОСТАЧА НА ПОСЛЕДНЕЙ РЕВИЗИИ</div></div>
+      </div>
+      ${!lastRev ? `<div class="analytics-section" style="background:#FFF6E5;border-radius:10px;padding:12px 14px;font-size:13px;">Склад начнёт считаться после первой ревизии: пересчитайте материалы и внесите остатки кнопкой «📋 Провести ревизию». С этого дня постоянные материалы будут списываться сами по прошедшим мероприятиям.</div>` : ''}
+      ${canEdit ? `<div style="display:flex;gap:8px;flex-wrap:wrap;margin:0 0 14px;">
+        <button class="btn btn-primary" id="st-revision">📋 Провести ревизию</button>
+        <button class="btn" id="st-receipt">➕ Приход</button>
+        <button class="btn" id="st-writeoff">🗑 Списать вручную (брак, на нужды студии)</button>
+        <button class="btn btn-ghost" id="st-item-add">＋ Новый материал</button>
+        ${buyList.length ? `<button class="btn btn-ghost" id="st-copy-buy">📋 Скопировать список закупки</button>` : ''}
+      </div>` : ''}
+      <div class="analytics-section">
+        <h4>Постоянные материалы — списываются сами по техкартам</h4>
+        <div style="font-size:11.5px;color:var(--ink-soft);margin-bottom:8px;">Остаток = ревизия + приходы − списано по прошедшим мероприятиям − ручные списания. «Нужно на 30 дн.» — по уже стоящим в расписании мероприятиям; «Докупить» — чтобы хватило на них и остался минимум.</div>
+        <div class="proc-row head proc-row-6"><div>Материал</div><div>Остаток</div><div>Списано по МК</div><div>Мин.</div><div>Нужно на 30 дн.</div><div>Докупить</div></div>
+        ${pieceRows || '<div class="host-empty">Нет материалов</div>'}
+      </div>
+      <div class="analytics-section">
+        <h4>Переменные материалы — остаток вписывают на ревизии</h4>
+        <div style="font-size:11.5px;color:var(--ink-soft);margin-bottom:8px;">По мероприятиям не списываются: расход за период = было на прошлой ревизии + приход − осталось сейчас. «На гостя» — этот расход, делённый на всех гостей за период: видно, если краски или воск уходят быстрее обычного.</div>
+        <div class="proc-row head proc-row-6"><div>Материал</div><div>На ревизии</div><div>+ приход − списано</div><div>Мин.</div><div>Расход за период</div><div>На гостя</div></div>
+        ${bulkRows || '<div class="host-empty">Нет материалов</div>'}
+      </div>
+      ${diffs.length ? `<div class="analytics-section"><h4>Расхождения на ревизии ${escapeHtml(formatDateText(lastRev.date))}</h4>
+        <div style="font-size:11.5px;color:var(--ink-soft);margin-bottom:8px;">Сколько должно было остаться по учёту и сколько насчитали. Минус — недостача (брак не списали, взяли без отметки, ошибка в числе гостей).</div>
+        ${diffs.map(x=>`<div style="display:flex;gap:10px;font-size:13px;padding:3px 0;"><span style="flex:1;">${escapeHtml(x.it.name)}</span><span style="font-family:var(--font-mono);color:var(--ink-soft);">ждали ${num(x.exp)} · факт ${num(x.fact)}</span><span style="font-family:var(--font-mono);width:120px;text-align:right;font-weight:600;color:${x.d<0?'var(--status-red)':'var(--status-green,#3A7D44)'};">${x.d>0?'+':''}${num(x.d)}${unit(x.it)}${x.sum?' · '+formatMoney(x.sum):''}</span></div>`).join('')}
+      </div>` : ''}
+      ${unmatched.length ? `<details class="analytics-section"><summary style="cursor:pointer;font-weight:600;">⚠ Мероприятия без техкарты — ничего не списалось (${unmatched.length})</summary>
+        <div style="font-size:11.5px;color:var(--ink-soft);margin:6px 0;">Для этих названий нет нормы расхода. Если на них уходили холсты, баночки и т. п. — спишите вручную или напишите, какие материалы у этого продукта, норму добавят.</div>
+        ${unmatched.slice(0,60).map(e=>`<div style="font-size:12.5px;padding:2px 0;">${escapeHtml(formatDateText(e.date))} · ${escapeHtml(e.title||'')} · ${Number(e.guests)||0} гост.</div>`).join('')}
+      </details>` : ''}
+      ${woRecent.length ? `<details class="analytics-section"><summary style="cursor:pointer;font-weight:600;">Ручные списания (последние ${woRecent.length})</summary>
+        ${woRecent.map(w=>{ const it = items.find(i=>i.id===w.itemId); return `<div style="display:flex;gap:8px;font-size:12.5px;padding:3px 0;align-items:center;"><span style="flex:1;">${escapeHtml(formatDateText(w.date))} · ${escapeHtml(it?it.name:'?')} — ${num(w.qty)}${it?unit(it):''} · ${escapeHtml(w.reason||'')}${w.by?' · '+escapeHtml(w.by):''}</span>${canEdit?`<button class="btn btn-ghost st-wo-del" data-id="${w.id}" style="padding:2px 8px;font-size:11.5px;">удалить</button>`:''}</div>`; }).join('')}
+      </details>` : ''}
+      ${revs.length ? `<details class="analytics-section"><summary style="cursor:pointer;font-weight:600;">История ревизий (${revs.length})</summary>
+        ${revs.slice().reverse().map(r=>`<div style="display:flex;gap:8px;font-size:12.5px;padding:3px 0;align-items:center;"><span style="flex:1;">${escapeHtml(formatDateText(r.date))} ${r.after===false?'(утром, до МК)':'(вечером, после МК)'} · ${Object.keys(r.counts||{}).length} позиций${r.by?' · '+escapeHtml(r.by):''}</span>${state.currentRole==='owner'?`<button class="btn btn-ghost st-rev-del" data-id="${r.id}" style="padding:2px 8px;font-size:11.5px;">удалить</button>`:''}</div>`).join('')}
+      </details>` : ''}
+      <details class="analytics-section"><summary style="cursor:pointer;font-weight:600;">Нормы списания по техкартам</summary>
+        <div style="font-size:12.5px;line-height:1.6;margin-top:6px;">
+          На 1 гостя, а если в мероприятии указаны форматы (например, «20×20 — 3, 30×40 — 5») — на каждое изделие:<br>
+          • Картины на холсте (акрил, аффирмации, фактурные, дофаминовые, бранч): холст нужного размера + пакет крафтовый. Без формата: 30×40, на арт-ланче 20×20, на бранче 30×30.<br>
+          • Фактура скорости: холст 30×40 (круг 30, 40×50, 60×40 — по формату) + пакет. Картина с подсветкой: артборд 25/30/35/40 см. На арт-свидании — 1 на пару.<br>
+          • Рисование вином: бумага + рамка А3/А4/А5; кофейная живопись — то же + стакан крафт.<br>
+          • Дофаминовая ваза: стаканчик 250 или 600 мл. Панно-ваза: 2 стаканчика 250 мл, МДФ, ткань.<br>
+          • Свеча: баночка, фитиль, коробка (2 свечи — по 2). Свеча и диффузор: + флакон и 3 палочки.<br>
+          • Авторские духи: 3 атомайзера + коробка (по формату 1/2/3), на арт-ланче 1 атомайзер.<br>
+          • Роспись шоппера: шоппер + пакет; одежды: пакет. Неваляшка: неваляшка 13 см.<br>
+          • Керамика, гончарный круг и смола — материалы мастера, со склада студии не списываются.
+        </div>
+      </details>
+    `;
+  }
+  function attachWarehouseEvents(){
+    const on = (id, fn)=>{ const b = document.getElementById(id); if(b) b.onclick = fn; };
+    on('st-revision', ()=>{ state.modal = { type:'stock-revision' }; render(); });
+    on('st-writeoff', ()=>{ state.modal = { type:'stock-writeoff' }; render(); });
+    on('st-item-add', ()=>{ state.modal = { type:'stock-item', item:{ id: uid(), kind:'piece', category:'', name:'', unit:'шт', price:'', minStock:0 }, isNew:true }; render(); });
+    on('st-receipt', ()=>{ state.modal = {type:'stock-receipt', isNew:true, receipt:{ id: uid(), date: todayStr(), material:'', qty:'', unit:'', supplierName:'', amount:'', notes:'', expenseId:'' }}; render(); });
+    on('st-copy-buy', async ()=>{
+      const need30 = stockNeedAhead(30), lines = [];
+      (state.stockItems||[]).forEach(it=>{ const b = stockBalance(it); if(!b.started) return; const min = Number(it.minStock)||0;
+        if(it.kind === 'piece'){ const k = Math.max(0, Math.ceil((need30[stNorm(it.name)]||0) + min - b.stock)); if(k > 0) lines.push('• ' + it.name + ' — ' + k + ' ' + (it.unit||'')); }
+        else if(b.stock <= 0 || (min > 0 && b.stock < min)) lines.push('• ' + it.name + ' — заканчивается (осталось ' + b.stock + ' ' + (it.unit||'') + ')'); });
+      const text = 'Закупка на склад (' + formatDateText(todayStr()) + '):\n' + lines.join('\n');
+      try{ await navigator.clipboard.writeText(text); showToast('Список скопирован'); }catch(e){ prompt('Скопируйте список:', text); }
+    });
+    document.querySelectorAll('.st-item-edit').forEach(b=> b.onclick = ()=>{ const it = (state.stockItems||[]).find(x=>x.id===b.dataset.id); if(it){ state.modal = { type:'stock-item', item:{...it}, isNew:false }; render(); } });
+    document.querySelectorAll('.st-wo-del').forEach(b=> b.onclick = async ()=>{ if(!confirm('Удалить это списание? Количество вернётся на остаток.')) return; state.stockWriteoffs = state.stockWriteoffs.filter(w=>w.id!==b.dataset.id); await saveStockWriteoffs(); render(); });
+    document.querySelectorAll('.st-rev-del').forEach(b=> b.onclick = async ()=>{ if(!confirm('Удалить эту ревизию? Остатки пересчитаются от предыдущей.')) return; state.stockRevisions = state.stockRevisions.filter(r=>r.id!==b.dataset.id); await saveStockRevisions(); recordAction('Склад: ревизия удалена'); render(); });
+  }
+
+  // ---------- окно ревизии ----------
+  function renderStockRevisionModal(){
+    const items = (state.stockItems||[]).slice().sort((a,b)=> (a.kind===b.kind?0:(a.kind==='piece'?-1:1)) || (a.category||'').localeCompare(b.category||'','ru') || a.name.localeCompare(b.name,'ru'));
+    let lastKind = null, lastCat = null;
+    return `<div class="modal" style="max-width:560px;">
+      <div class="modal-head"><h3>📋 Ревизия склада</h3><button class="modal-close">×</button></div>
+      <div class="modal-body">
+        <div class="row2">
+          <div class="field"><label>Дата пересчёта</label><input type="date" id="sr-date" value="${todayStr()}"></div>
+          <div class="field"><label>Когда считали</label><select id="sr-after"><option value="1">вечером, после мероприятий дня</option><option value="0">утром, до мероприятий</option></select></div>
+        </div>
+        <div style="font-size:12px;color:var(--ink-soft);margin-bottom:10px;">Впишите, сколько реально лежит. Пустое поле — эту позицию не пересчитывали, её остаток не меняется. Серым — сколько должно быть по учёту.</div>
+        ${items.map(it=>{
+          let head = '';
+          if(it.kind !== lastKind){ lastKind = it.kind; lastCat = null; head += `<div style="font-weight:700;margin:14px 0 4px;">${it.kind==='piece'?'Постоянные (штучно)':'Переменные (остаток)'}</div>`; }
+          if(it.category !== lastCat){ lastCat = it.category; head += `<div style="font-size:11.5px;color:var(--ink-soft);margin:8px 0 2px;text-transform:uppercase;letter-spacing:.04em;">${escapeHtml(it.category||'')}</div>`; }
+          const b = stockBalance(it);
+          return head + `<div style="display:flex;align-items:center;gap:8px;padding:3px 0;">
+            <div style="flex:1;font-size:13px;">${escapeHtml(it.name)}${b.started ? `<span style="color:var(--ink-soft);font-size:11.5px;"> · по учёту ${String(b.stock).replace('.',',')} ${escapeHtml(it.unit||'')}</span>` : ''}</div>
+            <input type="number" class="sr-count" data-id="${it.id}" min="0" step="${it.kind==='piece'?'1':'0.01'}" inputmode="decimal" style="width:90px;" placeholder="${escapeHtml(it.unit||'')}">
+          </div>`;
+        }).join('')}
+      </div>
+      <div class="modal-actions"><span></span><div style="display:flex;gap:8px;"><button class="btn btn-ghost" id="sr-cancel">Отмена</button><button class="btn btn-primary" id="sr-save">Сохранить ревизию</button></div></div>
+    </div>`;
+  }
+  function attachStockRevisionModalEvents(overlay){
+    overlay.querySelector('#sr-cancel').onclick = ()=>{ state.modal = null; overlay.remove(); };
+    overlay.querySelector('#sr-save').onclick = async ()=>{
+      const date = overlay.querySelector('#sr-date').value;
+      const after = overlay.querySelector('#sr-after').value === '1';
+      if(!date){ showToast('Укажите дату', 'error'); return; }
+      const counts = {}, expected = {};
+      overlay.querySelectorAll('.sr-count').forEach(inp=>{
+        const v = inp.value.trim().replace(',', '.'); if(v === '') return;
+        const n = Number(v); if(isNaN(n) || n < 0) return;
+        counts[inp.dataset.id] = n;
+        const it = state.stockItems.find(x=>x.id===inp.dataset.id);
+        if(it && it.kind === 'piece'){
+          // ожидаемый остаток на момент пересчёта (для утренней ревизии — без мероприятий этого дня)
+          const b = stockBalance(it, after ? date : addDaysIso(date, -1));
+          if(b.started) expected[it.id] = b.stock;
+        }
+      });
+      if(!Object.keys(counts).length){ showToast('Не вписано ни одного остатка', 'error'); return; }
+      const by = state.loggedInHostessName || state.loggedInManagerName || ROLE_LABELS[state.currentRole] || '';
+      state.stockRevisions.push({ id: uid(), date, after, counts, expected, by, ts: Date.now() });
+      await saveStockRevisions();
+      recordAction('Склад: ревизия ' + formatDateText(date) + ' (' + Object.keys(counts).length + ' позиций)');
+      state.modal = null; overlay.remove(); render();
+      showToast('Ревизия сохранена');
+    };
+  }
+  // ---------- ручное списание ----------
+  function renderStockWriteoffModal(){
+    const items = (state.stockItems||[]).slice().sort((a,b)=> a.name.localeCompare(b.name,'ru'));
+    return `<div class="modal" style="max-width:440px;">
+      <div class="modal-head"><h3>🗑 Списать со склада</h3><button class="modal-close">×</button></div>
+      <div class="modal-body">
+        <div class="field"><label>Материал</label><select id="sw-item">${items.map(it=>`<option value="${it.id}">${escapeHtml(it.name)}${it.unit?' ('+escapeHtml(it.unit)+')':''}</option>`).join('')}</select></div>
+        <div class="row2">
+          <div class="field"><label>Количество</label><input type="number" id="sw-qty" min="0" step="0.01" inputmode="decimal"></div>
+          <div class="field"><label>Дата</label><input type="date" id="sw-date" value="${todayStr()}"></div>
+        </div>
+        <div class="field"><label>Причина</label><select id="sw-reason"><option>Брак</option><option>На нужды студии (декор, съёмка)</option><option>Мероприятие без техкарты</option><option>Выездное / заказ</option><option>Другое</option></select></div>
+        <div class="field"><label>Комментарий</label><input type="text" id="sw-note" placeholder="Необязательно"></div>
+      </div>
+      <div class="modal-actions"><span></span><div style="display:flex;gap:8px;"><button class="btn btn-ghost" id="sw-cancel">Отмена</button><button class="btn btn-primary" id="sw-save">Списать</button></div></div>
+    </div>`;
+  }
+  function attachStockWriteoffModalEvents(overlay){
+    overlay.querySelector('#sw-cancel').onclick = ()=>{ state.modal = null; overlay.remove(); };
+    overlay.querySelector('#sw-save').onclick = async ()=>{
+      const qty = Number(String(overlay.querySelector('#sw-qty').value).replace(',', '.'));
+      const date = overlay.querySelector('#sw-date').value;
+      if(!date || !(qty > 0)){ showToast('Укажите количество и дату', 'error'); return; }
+      const note = overlay.querySelector('#sw-note').value.trim();
+      const reason = overlay.querySelector('#sw-reason').value + (note ? ': ' + note : '');
+      const by = state.loggedInHostessName || state.loggedInManagerName || ROLE_LABELS[state.currentRole] || '';
+      const itemId = overlay.querySelector('#sw-item').value;
+      state.stockWriteoffs.push({ id: uid(), itemId, qty, date, reason, by, ts: Date.now() });
+      await saveStockWriteoffs();
+      const it = state.stockItems.find(x=>x.id===itemId);
+      recordAction('Склад: списано ' + qty + ' ' + ((it&&it.unit)||'') + ' — ' + (it?it.name:''), reason);
+      state.modal = null; overlay.remove(); render();
+    };
+  }
+  // ---------- карточка материала ----------
+  function renderStockItemModal(){
+    const it = state.modal.item;
+    const cats = [...new Set((state.stockItems||[]).map(i=>i.category).filter(Boolean))];
+    return `<div class="modal" style="max-width:440px;">
+      <div class="modal-head"><h3>${state.modal.isNew ? 'Новый материал' : 'Материал'}</h3><button class="modal-close">×</button></div>
+      <div class="modal-body">
+        <div class="field"><label>Название</label><input type="text" id="si-name" value="${escapeHtml(it.name||'')}"></div>
+        <div class="field"><label>Как учитывать</label><select id="si-kind"><option value="piece" ${it.kind==='piece'?'selected':''}>постоянный — списывать поштучно</option><option value="bulk" ${it.kind==='bulk'?'selected':''}>переменный — вписывать остаток на ревизии</option></select></div>
+        <div class="row2">
+          <div class="field"><label>Ед. изм.</label><input type="text" id="si-unit" value="${escapeHtml(it.unit||'')}"></div>
+          <div class="field"><label>Цена за ед., ₽</label><input type="number" id="si-price" value="${it.price===''||it.price===undefined?'':it.price}" min="0" step="0.1"></div>
+        </div>
+        <div class="row2">
+          <div class="field"><label>Минимальный остаток</label><input type="number" id="si-min" value="${Number(it.minStock)||''}" min="0" step="0.1"></div>
+          <div class="field"><label>Группа</label><input type="text" id="si-cat" value="${escapeHtml(it.category||'')}" list="si-cats"><datalist id="si-cats">${cats.map(c=>`<option value="${escapeHtml(c)}">`).join('')}</datalist></div>
+        </div>
+        <div style="font-size:11.5px;color:var(--ink-soft);">Автосписание по мероприятиям идёт по названию из норм техкарт — если переименовать, например, «Холст 30×40», он перестанет списываться сам.</div>
+      </div>
+      <div class="modal-actions"><div>${!state.modal.isNew ? '<button class="btn-danger" id="si-del">Удалить</button>' : '<span></span>'}</div><div style="display:flex;gap:8px;"><button class="btn btn-ghost" id="si-cancel">Отмена</button><button class="btn btn-primary" id="si-save">Сохранить</button></div></div>
+    </div>`;
+  }
+  function attachStockItemModalEvents(overlay){
+    overlay.querySelector('#si-cancel').onclick = ()=>{ state.modal = null; overlay.remove(); };
+    overlay.querySelector('#si-save').onclick = async ()=>{
+      const it = state.modal.item;
+      const name = overlay.querySelector('#si-name').value.trim();
+      if(!name){ showToast('Укажите название', 'error'); return; }
+      const upd = { ...it, name, kind: overlay.querySelector('#si-kind').value, unit: overlay.querySelector('#si-unit').value.trim(),
+        price: overlay.querySelector('#si-price').value === '' ? '' : Number(overlay.querySelector('#si-price').value),
+        minStock: Number(overlay.querySelector('#si-min').value) || 0, category: overlay.querySelector('#si-cat').value.trim() };
+      const i = state.stockItems.findIndex(x=>x.id===it.id);
+      if(i >= 0) state.stockItems[i] = upd; else state.stockItems.push(upd);
+      await saveStockItems();
+      state.modal = null; overlay.remove(); render();
+    };
+    const del = overlay.querySelector('#si-del');
+    if(del) del.onclick = async ()=>{ if(!confirm('Удалить материал со склада?')) return; state.stockItems = state.stockItems.filter(x=>x.id!==state.modal.item.id); await saveStockItems(); state.modal = null; overlay.remove(); render(); };
+  }
+
   // ---------- Закупки: остатки/прогноз + база поставщиков (старший администратор + руководитель) ----------
   function renderProcurementView(){
-    const tab = state.procurementTab || 'stock';
+    const tab = state.procurementTab || 'warehouse';
     const subTabsHtml = `
       <div class="cert-subtabs proc-subtabs">
+        <button data-proctab="warehouse" class="${tab==='warehouse'?'active':''}">🏬 Склад</button>
         <button data-proctab="stock" class="${tab==='stock'?'active':''}">Остатки и прогноз</button>
         <button data-proctab="receipts" class="${tab==='receipts'?'active':''}">Приход на склад</button>
         <button data-proctab="suppliers" class="${tab==='suppliers'?'active':''}">Поставщики</button>
@@ -30455,7 +31568,8 @@
       </div>
     `;
     let body;
-    if(tab==='suppliers') body = renderProcurementSuppliersTab();
+    if(tab==='warehouse') body = renderWarehouseTab();
+    else if(tab==='suppliers') body = renderProcurementSuppliersTab();
     else if(tab==='receipts') body = renderProcurementReceiptsTab();
     else if(tab==='budget') body = renderProcurementBudgetTab();
     else body = renderProcurementStockTab();
@@ -30755,6 +31869,7 @@
   }
 
   function attachProcurementEvents(){
+    try{ attachWarehouseEvents(); }catch(e){ console.error(e); }
     document.querySelectorAll('.proc-subtabs button').forEach(b=>{
       b.onclick = ()=>{ state.procurementTab = b.dataset.proctab; render(); };
     });
@@ -30845,7 +31960,7 @@
             <div class="field">
               <label>Материал</label>
               <input type="text" id="rc-material" value="${escapeHtml(r.material||'')}" placeholder="Например: Глина" list="rc-material-options">
-              <datalist id="rc-material-options">${state.materialsCatalog.map(m=>`<option value="${escapeHtml(m.name)}">`).join('')}</datalist>
+              <datalist id="rc-material-options">${[...new Set([...(state.stockItems||[]).map(i=>i.name), ...state.materialsCatalog.map(m=>m.name)])].map(n=>`<option value="${escapeHtml(n)}">`).join('')}</datalist>
             </div>
           </div>
           <div class="row2">
@@ -30909,7 +32024,7 @@
     }
     [materialInput, supplierInput, qtyInput].forEach(el=> el.addEventListener('input', suggestAmount));
     materialInput.addEventListener('input', ()=>{
-      const match = state.materialsCatalog.find(m=>m.name.trim().toLowerCase()===materialInput.value.trim().toLowerCase());
+      const match = (state.stockItems||[]).find(m=>m.name.trim().toLowerCase()===materialInput.value.trim().toLowerCase()) || state.materialsCatalog.find(m=>m.name.trim().toLowerCase()===materialInput.value.trim().toLowerCase());
       if(match && match.unit && !unitInput.value) unitInput.value = match.unit;
     });
     suggestAmount();
@@ -31936,6 +33051,7 @@
     }
     npHostessSalary += hostessBaseTotalFor(ym);
     npHostessSalary += npHostessAdjustments;
+    try{ npHostessSalary += helperPayTotalForMonth(ym); }catch(e){}
     npHostessSalary += Object.values((state.hostessBonuses && state.hostessBonuses[ym]) || {}).reduce((s,b)=> s + (Number((b&&b.amount)||0)), 0);
     const npManagerSalary = computeManagersPayForMonth(ym).total;
 
@@ -32835,6 +33951,166 @@
     return parts.join(' → ');
   }
 
+  // ===================== ПОМОЩНИКИ АДМИНИСТРАТОРА =====================
+  // Без входа в приложение. Старший администратор (и руководитель/ассистент) ставит их на авралы: дата, имя, часы.
+  // ЗП — 150 ₽/час, выдаётся день в день кнопкой «Выдать» (создаётся расход «Зарплата» с пометкой helperShiftId).
+  // Хранится в 'helper-shifts': { 'ГГГГ-ММ-ДД': [ {id, name, start, end, paidExpenseId} ] }.
+  const HELPER_RATE = 150;
+  function helperCanEdit(){ return ['admin','owner','assistant'].includes(state.currentRole); }
+  function helperShiftsOn(dateStr){ return ((state.helperShifts||{})[dateStr] || []).slice().sort((a,b)=> (a.start||'').localeCompare(b.start||'')); }
+  function helperHours(sh){
+    const m = t=>{ const [h,mi] = String(t||'').split(':').map(Number); return (h||0)*60 + (mi||0); };
+    let d = m(sh.end) - m(sh.start); if(d < 0) d += 24*60;
+    return Math.round(d / 60 * 100) / 100;
+  }
+  function helperPay(sh){ return Math.round(helperHours(sh) * HELPER_RATE); }
+  function helperPaidExpense(sh){ return sh.paidExpenseId ? (state.expenses||[]).find(e=> e.id === sh.paidExpenseId) : null; }
+  function helperNamesList(){
+    const fromStaff = (typeof staffEveryone === 'function' ? staffEveryone() : []).filter(n=> (typeof staffPositionsLabel === 'function' ? staffPositionsLabel(n) : '').toLowerCase().includes('помощник'));
+    const fromShifts = []; Object.values(state.helperShifts||{}).forEach(arr=> (arr||[]).forEach(s=>{ if(s.name) fromShifts.push(s.name); }));
+    return [...new Set([...fromStaff, ...fromShifts.reverse()])].slice(0, 30);
+  }
+  const hhmm = t=> String(t||'').replace(/^0(\d):/, '$1:').replace(/:00$/, '');
+  function helperShortLine(dateStr){ return helperShiftsOn(dateStr).map(s=> s.name + ' ' + hhmm(s.start) + '–' + hhmm(s.end)).join(', '); }
+  function helperPayTotalForMonth(ym){
+    let t = 0; Object.entries(state.helperShifts||{}).forEach(([d,arr])=>{ if(d.startsWith(ym)) (arr||[]).forEach(s=>{ t += helperPay(s); }); });
+    return t;
+  }
+  async function saveHelperShifts(){
+    return await saveMapMerged('helper-shifts', state.helperShifts, state._helperShiftsBaseline, (finalMap)=>{
+      state.helperShifts = finalMap;
+      state._helperShiftsBaseline = JSON.parse(JSON.stringify(finalMap));
+    });
+  }
+  async function loadHelperShifts(){
+    try{ const r = await window.storage.get('helper-shifts', true); state.helperShifts = r ? JSON.parse(r.value) : {}; }catch(e){ state.helperShifts = {}; }
+    if(!state.helperShifts || typeof state.helperShifts !== 'object') state.helperShifts = {};
+    state._helperShiftsBaseline = JSON.parse(JSON.stringify(state.helperShifts));
+  }
+  function renderHelperShiftBlock(dateStr){
+    const list = helperShiftsOn(dateStr);
+    const can = helperCanEdit();
+    if(!list.length && !can) return '';
+    return `
+      <div class="shift-block">
+        <div class="shift-block-title">Помощники администратора${can ? ` · ${HELPER_RATE} ₽/ч` : ''}</div>
+        ${list.length ? list.map(s=>{
+          const paid = helperPaidExpense(s);
+          return `<div class="shift-row" style="flex-wrap:wrap;">
+            <span class="shift-time">${escapeHtml(hhmm(s.start))}–${escapeHtml(hhmm(s.end))}</span>
+            <span class="shift-name">${escapeHtml(s.name)}${can ? ` <span style="color:var(--ink-soft);font-size:11.5px;">· ${String(helperHours(s)).replace('.',',')} ч · ${formatMoney(helperPay(s))}</span>` : ''}</span>
+            ${can ? (paid ? `<span style="font-size:11.5px;color:var(--status-green);font-weight:600;">✓ выдано</span>` : `<button class="btn btn-ghost helper-pay-btn" data-date="${dateStr}" data-id="${s.id}" style="padding:2px 8px;font-size:11.5px;">💵 Выдать ${formatMoney(helperPay(s))}</button>`) : ''}
+            ${can ? `<button class="shift-edit-btn helper-edit-btn" data-date="${dateStr}" data-id="${s.id}">✎</button>` : ''}
+          </div>`;
+        }).join('') : `<div class="shift-row"><span class="shift-name empty">не назначены</span></div>`}
+        ${can ? `<button class="btn btn-ghost helper-add-btn" data-date="${dateStr}" style="margin-top:4px;font-size:12.5px;padding:4px 10px;">＋ Поставить помощника</button>` : ''}
+      </div>`;
+  }
+  function attachHelperShiftBlockEvents(overlay, dateStr){
+    overlay.querySelectorAll('.helper-add-btn').forEach(b=> b.onclick = (ev)=>{ ev.stopPropagation(); overlay.remove(); state.modal = { type:'helper-shift', date: b.dataset.date, shift: null }; render(); });
+    overlay.querySelectorAll('.helper-edit-btn').forEach(b=> b.onclick = (ev)=>{ ev.stopPropagation(); const s = helperShiftsOn(b.dataset.date).find(x=>x.id===b.dataset.id); if(!s) return; overlay.remove(); state.modal = { type:'helper-shift', date: b.dataset.date, shift: {...s} }; render(); });
+    overlay.querySelectorAll('.helper-pay-btn').forEach(b=> b.onclick = (ev)=>{
+      ev.stopPropagation();
+      const d = b.dataset.date;
+      const s = ((state.helperShifts||{})[d]||[]).find(x=>x.id===b.dataset.id); if(!s) return;
+      const amount = helperPay(s);
+      const label = `${formatDateText(d)} · ${hhmm(s.start)}–${hhmm(s.end)} (${String(helperHours(s)).replace('.',',')} ч × ${HELPER_RATE} ₽)`;
+      showSalaryPayPopup(s.name, label, amount, async (source)=>{
+        const exp = { id: uid(), date: todayStr(), category: 'Зарплата', direction: '', master: s.name, source, amount,
+          responsible: feedWho(), eventId: '', comment: `Помощник администратора: ${s.name} · ${label}`, helperShiftId: s.id, helperShiftDate: d };
+        state.expenses.push(exp);
+        await saveExpenses();
+        const cur = ((state.helperShifts||{})[d]||[]).find(x=>x.id===s.id);
+        if(cur){ cur.paidExpenseId = exp.id; await saveHelperShifts(); }
+        recordAction('ЗП помощнику выдана', `${s.name} · ${label} · ${formatMoney(amount)} · ${source}`);
+        state.modal = { type:'day', date: d }; render();
+      });
+    });
+  }
+  function renderHelperShiftModal(){
+    const { date, shift } = state.modal;
+    const s = shift || { name:'', start: '13:00', end: '21:00' };
+    const paid = shift ? helperPaidExpense(shift) : null;
+    const names = helperNamesList();
+    return `<div class="modal" style="max-width:400px;">
+      <div class="modal-head"><h3>${shift ? 'Смена помощника' : 'Поставить помощника'}</h3><button class="modal-close">×</button></div>
+      <div class="modal-body">
+        <div style="font-size:12.5px;color:var(--ink-soft);margin-top:-6px;">${escapeHtml(formatDateText(date))} · ${HELPER_RATE} ₽/час, выдача в тот же день</div>
+        ${paid ? `<div style="font-size:12.5px;background:#E6F2E8;border-radius:8px;padding:8px 10px;margin:8px 0;">✓ ЗП за эту смену выдана (${formatMoney(paid.amount)}). Чтобы поменять часы, сначала отмените выдачу.</div>` : ''}
+        <div class="field"><label>Имя</label><input type="text" id="hs-name" list="hs-names" value="${escapeHtml(s.name)}" ${paid?'disabled':''} placeholder="Имя помощника"><datalist id="hs-names">${names.map(n=>`<option value="${escapeHtml(n)}">`).join('')}</datalist></div>
+        <div class="row2">
+          <div class="field"><label>С</label><input type="time" id="hs-start" value="${escapeHtml(s.start)}" ${paid?'disabled':''}></div>
+          <div class="field"><label>До</label><input type="time" id="hs-end" value="${escapeHtml(s.end)}" ${paid?'disabled':''}></div>
+        </div>
+        <div id="hs-sum" style="font-size:13px;font-weight:600;margin-bottom:6px;"></div>
+        ${!shift ? `<label style="display:flex;align-items:center;gap:6px;font-size:12.5px;"><input type="checkbox" id="hs-repeat"> Повторить на этот день недели до конца месяца</label>` : ''}
+        <div class="modal-actions">
+          <div>${shift ? (paid ? `<button class="btn-danger" id="hs-unpay">Отменить выдачу</button>` : `<button class="btn-danger" id="hs-del">Удалить смену</button>`) : '<span></span>'}</div>
+          <div style="display:flex;gap:8px;"><button class="btn btn-ghost" id="hs-cancel">Отмена</button>${paid ? '' : '<button class="btn btn-primary" id="hs-save">Сохранить</button>'}</div>
+        </div>
+      </div>
+    </div>`;
+  }
+  function attachHelperShiftModalEvents(overlay){
+    const { date, shift } = state.modal;
+    const back = ()=>{ overlay.remove(); state.modal = { type:'day', date }; render(); };
+    overlay.querySelector('#hs-cancel').onclick = back;
+    const upd = ()=>{ const st = overlay.querySelector('#hs-start').value, en = overlay.querySelector('#hs-end').value; const el = overlay.querySelector('#hs-sum'); if(st && en){ const t = { start: st, end: en }; el.textContent = String(helperHours(t)).replace('.',',') + ' ч × ' + HELPER_RATE + ' ₽ = ' + formatMoney(helperPay(t)); } };
+    overlay.querySelector('#hs-start').oninput = upd; overlay.querySelector('#hs-end').oninput = upd; upd();
+    const save = overlay.querySelector('#hs-save');
+    if(save) save.onclick = async ()=>{
+      if(!helperCanEdit()){ back(); return; }
+      const name = overlay.querySelector('#hs-name').value.trim();
+      const start = overlay.querySelector('#hs-start').value, end = overlay.querySelector('#hs-end').value;
+      if(!name || !start || !end){ showToast('Укажите имя и часы', 'error'); return; }
+      if(helperHours({start,end}) <= 0 || helperHours({start,end}) > 14){ showToast('Проверьте часы смены', 'error'); return; }
+      if(!state.helperShifts) state.helperShifts = {};
+      const dates = [date];
+      const rep = overlay.querySelector('#hs-repeat');
+      if(rep && rep.checked){ const d0 = parseDate(date); for(let d = new Date(d0.getTime()+7*86400000); d.getMonth()===d0.getMonth(); d = new Date(d.getTime()+7*86400000)) dates.push(fmtDate(d)); }
+      dates.forEach(ds=>{
+        const arr = (state.helperShifts[ds] || []).slice();
+        if(shift && ds === date){ const i = arr.findIndex(x=>x.id===shift.id); if(i>=0) arr[i] = { ...arr[i], name, start, end }; else arr.push({ id: uid(), name, start, end }); }
+        else arr.push({ id: uid(), name, start, end });
+        state.helperShifts[ds] = arr;
+      });
+      await saveHelperShifts();
+      recordAction('Помощник администратора', `${name} · ${dates.map(formatDateText).join(', ')} · ${start}–${end}`);
+      back();
+    };
+    const del = overlay.querySelector('#hs-del');
+    if(del) del.onclick = async ()=>{
+      if(!confirm('Удалить смену помощника?')) return;
+      state.helperShifts[date] = (state.helperShifts[date]||[]).filter(x=>x.id!==shift.id);
+      if(!state.helperShifts[date].length) delete state.helperShifts[date];
+      await saveHelperShifts(); recordAction('Смена помощника удалена', `${shift.name} · ${formatDateText(date)}`); back();
+    };
+    const unpay = overlay.querySelector('#hs-unpay');
+    if(unpay) unpay.onclick = async ()=>{
+      if(!confirm('Отменить выдачу? Расход удалится и сумма вернётся в кассу.')) return;
+      state.expenses = state.expenses.filter(e=> e.id !== shift.paidExpenseId);
+      await saveExpenses();
+      const cur = (state.helperShifts[date]||[]).find(x=>x.id===shift.id); if(cur){ delete cur.paidExpenseId; await saveHelperShifts(); }
+      recordAction('Выдача ЗП помощнику отменена', `${shift.name} · ${formatDateText(date)}`); back();
+    };
+  }
+  // блок для вкладки «Зарплата»
+  function helperSalaryMonthHtml(ym){
+    const by = {};
+    Object.entries(state.helperShifts||{}).forEach(([d,arr])=>{ if(!d.startsWith(ym)) return; (arr||[]).forEach(s=>{
+      const r = by[s.name] = by[s.name] || { shifts:0, hours:0, sum:0, paid:0, unpaid:[] };
+      r.shifts++; r.hours += helperHours(s); r.sum += helperPay(s);
+      const p = helperPaidExpense(s); if(p) r.paid += Number(p.amount)||0; else if(d <= todayStr()) r.unpaid.push(d);
+    }); });
+    const names = Object.keys(by).sort((a,b)=>a.localeCompare(b,'ru'));
+    if(!names.length) return '';
+    const tot = names.reduce((s,n)=>s+by[n].sum,0);
+    return `<div class="analytics-section"><h4>Помощники администратора: ${formatMoney(tot)}</h4>
+      <div style="font-size:11.5px;color:var(--ink-soft);margin-bottom:6px;">${HELPER_RATE} ₽/час по сменам из календаря, выдача в день смены. В прибыли — в строке ЗП администраторов.</div>
+      ${names.map(n=>{ const r = by[n]; return `<div class="stat-row"><div style="flex:1;font-weight:600;">${escapeHtml(n)} <span style="font-weight:400;color:var(--ink-soft);font-size:11.5px;">смен: ${r.shifts} · ${String(Math.round(r.hours*100)/100).replace('.',',')} ч</span>${r.unpaid.length ? `<div style="font-size:11.5px;color:var(--status-red);">не выдано за ${r.unpaid.map(formatDateText).join(', ')}</div>` : ''}</div><div style="font-family:var(--font-mono);font-size:12.5px;text-align:right;">${formatMoney(r.sum)}<div style="font-size:11px;color:var(--ink-soft);">выдано ${formatMoney(r.paid)}</div></div></div>`; }).join('')}
+    </div>`;
+  }
+
   function renderShiftBlock(dateStr){
     const dayShifts = state.hostessShifts[dateStr] || {};
     return `
@@ -32844,8 +34120,9 @@
         ${shiftDefsForDate(dateStr).map(s=>{
           const raw = dayShifts[s.key];
           const entry = normalizeShiftEntry(raw, s);
-          const extra = (entry && !s.senior) ? shiftExtraHours(raw, s) : 0;
-          const actualLabel = entry && !s.senior && (entry.start !== s.start || entry.end !== s.end) ? ` (факт: ${entry.start}–${entry.end})` : '';
+          const _calc = entry && (!s.senior || dateStr >= ADMIN_PAY_V2_FROM);
+          const extra = _calc ? shiftExtraHours(raw, s) : 0;
+          const actualLabel = _calc && (entry.start !== s.start || entry.end !== s.end) ? ` (факт: ${entry.start}–${entry.end})` : '';
           return `
             <div class="shift-row">
               <span class="shift-time">${s.label}</span>
@@ -33019,6 +34296,7 @@
           ` : ''}
           ${renderShiftBlock(dateStr)}
           ${renderMasterShiftBlock(dateStr)}
+          ${renderHelperShiftBlock(dateStr)}
           ${renderManagerShiftBlock(dateStr)}
           ${renderDaysOffBlock(dateStr)}
           ${!isAll ? `<div style="font-size:12px;color:var(--ink-soft);font-family:var(--font-mono);margin-top:-8px;display:flex;align-items:center;gap:6px;">
@@ -33138,6 +34416,7 @@
         render();
       };
     });
+    try{ attachHelperShiftBlockEvents(overlay); }catch(e){ console.error(e); }
     overlay.querySelectorAll('.master-shift-edit-btn').forEach(btn=>{
       btn.onclick = (ev)=>{
         ev.stopPropagation();
