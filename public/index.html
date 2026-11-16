@@ -1609,7 +1609,7 @@
   // нужные холсты/глину/флаконы. Направление определяется по ключевым словам в названии (названия в базе
   // бывают разные: «Керамика», «Арт-свидание керамика», «Керамика ЛАНЧ» …). Справочник хранится в 'event-formats',
   // его можно править в «🎨 Форматы». Стартовый набор — из листа «Частники» таблицы направлений.
-  const DEFAULT_EVENT_FORMATS = [{"id": "resin", "name": "Эпоксидная смола", "keys": ["смол"], "exclude": [], "options": ["Картина", "Часы", "Сервировочное блюдо", "Поднос", "Этажерка", "Подстаканники", "Украшения"]}, {"id": "wheel", "name": "Гончарный круг", "keys": ["гончарн", "круг"], "exclude": [], "options": ["Кружка 450 г", "Миска 550 г"]}, {"id": "dvase", "name": "Дофаминовая ваза", "keys": ["дофаминовая ваза", "дофаминовые вазы"], "exclude": [], "options": ["250 мл", "600 мл"]}, {"id": "ceram", "name": "Керамика (лепка)", "keys": ["керамик", "лепк"], "exclude": ["смол"], "options": ["Классика 350 г", "Мини 220 г", "Украшения"]}, {"id": "moon", "name": "Фактурная картина с подсветкой", "keys": ["подсветк", "фактурная луна"], "exclude": [], "options": ["25 см", "30 см", "35 см", "40 см"]}, {"id": "wine", "name": "Рисование вином / кофе", "keys": ["рисование вином", "этюд вином", "кофейн"], "exclude": [], "options": ["А3 с рамкой", "А4 с рамкой", "А5 с рамкой"]}, {"id": "canvas", "name": "Картина на холсте", "keys": ["акрил", "аффирмац", "фактурн", "дофаминов", "портрет", "pinterest", "коты", "неонов"], "exclude": ["скетч", "быстрые портреты", "бранч"], "options": ["30×40", "30×30", "20×20", "10×15"]}, {"id": "perfume", "name": "Авторские духи", "keys": ["дух", "парфюм"], "exclude": [], "options": ["1 аромат", "2 аромата", "3 аромата по 10 мл"]}];
+  const DEFAULT_EVENT_FORMATS = [{"id": "resin", "name": "Эпоксидная смола", "keys": ["смол"], "exclude": [], "options": ["Часы 30 см", "Часы 40 см", "Картина 30 см", "Картина 40 см", "Ёлочные игрушки (5 шт)", "Бамбуковая доска + 4 подставки", "Сервировочное блюдо 35×24", "Этажерка 2 яруса", "Этажерка 3 яруса", "Квадрат 30×30", "Прямоугольник 30×40", "Подстаканник маленький", "Подстаканник «новый цветок»", "Брошь", "Бамбуковая доска", "Винница и подстаканники", "Винница, 2 подстаканника и пиала", "Менажница 25 см", "Менажница 20 см", "Винный столик", "Блюдо 30×20", "Антистресс-картина"]}, {"id": "wheel", "name": "Гончарный круг", "keys": ["гончарн", "круг"], "exclude": [], "options": ["Кружка 450 г", "Миска 550 г"]}, {"id": "dvase", "name": "Дофаминовая ваза", "keys": ["дофаминовая ваза", "дофаминовые вазы"], "exclude": [], "options": ["250 мл", "600 мл"]}, {"id": "ceram", "name": "Керамика (лепка)", "keys": ["керамик", "лепк"], "exclude": ["смол"], "options": ["Классика 350 г", "Мини 220 г", "Украшения"]}, {"id": "moon", "name": "Фактурная картина с подсветкой", "keys": ["подсветк", "фактурная луна"], "exclude": [], "options": ["25 см", "30 см", "35 см", "40 см"]}, {"id": "wine", "name": "Рисование вином / кофе", "keys": ["рисование вином", "этюд вином", "кофейн"], "exclude": [], "options": ["А3 с рамкой", "А4 с рамкой", "А5 с рамкой"]}, {"id": "canvas", "name": "Картина на холсте", "keys": ["акрил", "аффирмац", "фактурн", "дофаминов", "портрет", "pinterest", "коты", "неонов"], "exclude": ["скетч", "быстрые портреты", "бранч"], "options": ["30×40", "30×30", "20×20", "10×15"]}, {"id": "perfume", "name": "Авторские духи", "keys": ["дух", "парфюм"], "exclude": [], "options": ["1 аромат", "2 аромата", "3 аромата по 10 мл"]}];
   function eventFormatsCatalog(){ return (Array.isArray(state.eventFormats) && state.eventFormats.length) ? state.eventFormats : DEFAULT_EVENT_FORMATS; }
   function eventFormatFamily(title){
     const t = String(title||'').toLowerCase().replace(/ё/g,'е');
@@ -2775,7 +2775,7 @@
   }
   function renderScheduleRecsPanel(){
     if(!(state.currentRole === 'admin' || state.currentRole === 'owner' || state.currentRole === 'assistant')) return '';
-    const canEditRecs = state.currentRole === 'admin' || state.currentRole === 'owner';
+    const canEditRecs = ['admin','owner','assistant'].includes(state.currentRole);
     const cur = state.cursor;
     const ym = cur.getFullYear()+'-'+pad(cur.getMonth()+1);
     const r = computeScheduleRecs(ym);
@@ -2893,7 +2893,7 @@
   }
   function renderLoadAdvicePanel(){
     if(!(state.currentRole === 'admin' || state.currentRole === 'owner' || state.currentRole === 'assistant')) return '';
-    const canEdit = state.currentRole === 'admin' || state.currentRole === 'owner';
+    const canEdit = ['admin','owner','assistant'].includes(state.currentRole);
     if(!state.loadWeekStart) state.loadWeekStart = loadDefaultStart();
     const L = computeLoad(state.loadWeekStart);
     const addN = L.rows.filter(r=>r.verdict === 'add').length;
@@ -4213,6 +4213,8 @@
     await migrateFulldayShiftsOnce();
     await autoDeductCanvasesForPastPaintingEvents();
     await autoApplyMaterialRulesForPastEvents();
+    await autoApplyKeywordPayRules();
+    await migrateCatalogCosts20261116();
     await autoApplyCatalogCostForPastEvents();
     // ускорение входа: независимые проверки идут параллельно, а служебное (резервная копия, push-напоминания)
     // — уже после того, как приложение открылось, в фоне. Раньше всё это шло по очереди и задерживало экран входа.
@@ -4644,6 +4646,107 @@
     if(ch) await saveEvents();
   }
 
+  // ===== Автоматические выплаты мастерам за изделия (с 1 ноября 2026) =====
+  // 1) Керамика и гончарный круг (всё, что isCeramicsEvent, кроме смолы): за каждое изделие (кол-во изделий,
+  //    а если не указано — гостей) 300 ₽ — Василене (в зарплату через «Кому платить»), 150 ₽ — материалы студии.
+  // 2) Эпоксидная смола: мастер сам закупает материалы. По изделиям из «формата» мероприятия ведущему (Ольга/Наташа)
+  //    начисляется ЗП (поле «оплата мастера», ставится вручную = сумма ЗП по таблице) + себестоимость материалов
+  //    отдельной строкой «Кому платить: ведущий». Данные — таблица «РЕВИЗИЯ СП» → лист «Смола».
+  // Строки пересчитываются при каждом входе (если поменяли кол-во изделий, формат или ведущего — суммы обновятся).
+  // Для таких мероприятий статьи расхода из «Видов мероприятий» не применяются, чтобы не заплатить дважды.
+  const KEYWORD_PAY_FROM = '2026-11-01';
+  const CERAMICS_PAY_LINES = [
+    { name: 'Керамика: изделие — Василена', policy: 'master', rate: 300, payee: 'Василена' },
+    { name: 'Керамика: изделие — студия', policy: 'studio', rate: 150 },
+  ];
+  // изделие: [ЗП Ольга, ЗП Наташа, себес Ольга, себес Наташа]; null — этот мастер изделие не делает
+  const RESIN_ITEMS = {
+    'Часы 30 см':[950,850,1500,1600], 'Часы 40 см':[1100,1050,1800,1850],
+    'Картина 30 см':[900,500,600,1000], 'Картина 40 см':[1150,700,850,1300],
+    'Ёлочные игрушки (5 шт)':[850,600,650,900], 'Бамбуковая доска + 4 подставки':[1100,850,900,1150],
+    'Сервировочное блюдо 35×24':[1000,800,800,1000], 'Этажерка 2 яруса':[800,1150,2050,1700], 'Этажерка 3 яруса':[900,1550,2500,1850],
+    'Квадрат 30×30':[900,700,800,1000], 'Прямоугольник 30×40':[1000,600,900,1300],
+    'Подстаканник маленький':[250,350,350,380], 'Подстаканник «новый цветок»':[null,400,null,500],
+    'Брошь':[250,null,200,null], 'Бамбуковая доска':[800,null,750,null],
+    'Винница и подстаканники':[750,null,1500,null], 'Винница, 2 подстаканника и пиала':[750,null,1900,null],
+    'Менажница 25 см':[null,800,null,1500], 'Менажница 20 см':[null,0,null,1000], 'Винный столик':[null,900,null,1800],
+    'Блюдо 30×20':[900,null,700,null], 'Антистресс-картина':[null,800,null,1300]
+  };
+  function isCeramicsPayEvent(e){ const t = String(e && e.title || '').toLowerCase(); return isCeramicsEvent(t) && !t.includes('смол'); }
+  function isResinPayEvent(e){ return String(e && e.title || '').toLowerCase().includes('смол'); }
+  function resinMasterIdx(host){ const h = String(host||'').toLowerCase(); return h.includes('ольг') ? 0 : (h.includes('наташ') ? 1 : -1); }
+  function keywordPayRuleFor(e){
+    if(!e || !e.date || e.date < KEYWORD_PAY_FROM) return null;
+    if(isCeramicsPayEvent(e)) return 'ceramics';
+    if(isResinPayEvent(e) && resinMasterIdx(e.host) >= 0 && eventFormatItems(e).length) return 'resin';
+    return null;
+  }
+  // разово: в керамике с 1 ноября убираем старые автоматические строки и ручные выплаты Василене (копия — в materialsItemsBefore20261116)
+  async function cleanupCeramicsPayOnce(){
+    try{
+      const flag = await window.storage.get('migration-ceramics-pay-20261116', true);
+      if(flag) return;
+      let ch = false;
+      state.events.forEach(e=>{
+        if(!e.date || e.date < KEYWORD_PAY_FROM || !isCeramicsPayEvent(e) || !Array.isArray(e.materialsItems) || !e.materialsItems.length) return;
+        const keep = e.materialsItems.filter(m=>{
+          const tag = String(m.autoRuleTag||'');
+          if(tag.startsWith('autorule:') && !tag.startsWith('autorule:kw:')) return false;
+          if(m.source==='master' && String(m.payTo||'').trim().toLowerCase()==='василена') return false;
+          return true;
+        });
+        if(keep.length !== e.materialsItems.length){ e.materialsItemsBefore20261116 = e.materialsItems; e.materialsItems = keep; ch = true; }
+      });
+      if(ch) await saveEvents();
+      await window.storage.set('migration-ceramics-pay-20261116', '1', true);
+    }catch(err){ console.warn('ceramics pay cleanup', err); }
+  }
+  function syncAutoLine(e, tag, line){
+    const i = e.materialsItems.findIndex(m=>m.autoRuleTag === tag);
+    if(!line){ if(i >= 0){ e.materialsItems.splice(i,1); return true; } return false; }
+    const next = { ...line, autoRuleTag: tag };
+    if(i < 0){ e.materialsItems.push(next); return true; }
+    const cur = e.materialsItems[i];
+    if(cur.cost === next.cost && cur.qty === next.qty && (cur.payTo||'') === (next.payTo||'') && cur.name === next.name) return false;
+    e.materialsItems[i] = { ...cur, ...next }; return true;
+  }
+  async function autoApplyKeywordPayRules(){
+    await cleanupCeramicsPayOnce();
+    const today = todayStr();
+    let ch = false;
+    state.events.forEach(e=>{
+      if(!e.date || e.date > today) return;
+      if(e.status==='cancelled' || e.status==='marketing') return;
+      const kind = keywordPayRuleFor(e);
+      if(!kind) return;
+      if(!Array.isArray(e.materialsItems)) e.materialsItems = [];
+      if(kind === 'ceramics'){
+        const items = (e.itemsCount!==undefined && e.itemsCount!==null && !isNaN(e.itemsCount) && Number(e.itemsCount) > 0) ? Number(e.itemsCount) : (Number(e.guests)||0);
+        CERAMICS_PAY_LINES.forEach(l=>{
+          const tag = 'autorule:kw:' + l.name.toLowerCase();
+          const line = items > 0 ? (l.policy === 'master'
+            ? { name: l.name, cost: items*l.rate, qty: items, source: 'master', payTo: l.payee }
+            : { name: l.name, cost: items*l.rate, qty: items, source: 'studio' }) : null;
+          if(syncAutoLine(e, tag, line)) ch = true;
+        });
+      } else {
+        const mi = resinMasterIdx(e.host);
+        let zp = 0, sebes = 0, cnt = 0; const missing = [];
+        eventFormatItems(e).forEach(f=>{
+          const row = RESIN_ITEMS[f.opt]; const n = Number(f.n)||0;
+          if(!row || row[mi] === null || row[mi+2] === null){ missing.push(f.opt); return; }
+          zp += row[mi]*n; sebes += row[mi+2]*n; cnt += n;
+        });
+        const line = sebes > 0 ? { name: 'Смола: материалы мастера по таблице (' + cnt + ' изд.)', cost: sebes, qty: cnt, source: 'master', payTo: e.host.trim() } : null;
+        if(syncAutoLine(e, 'autorule:resin-sebes', line)) ch = true;
+        const note = missing.length ? 'нет в таблице «Смола» для этого мастера: ' + missing.join(', ') : '';
+        if(e.resinPayNote !== note){ e.resinPayNote = note; ch = true; }
+        if(cnt > 0 && (e.masterPay !== zp || e.masterPayAuto !== false)){ e.masterPay = zp; e.masterPayAuto = false; ch = true; }
+      }
+    });
+    if(ch) await saveEvents();
+  }
+
   async function autoApplyMaterialRulesForPastEvents(){
     // для видов мероприятий со статьями расхода материалов (настраивается в "Виды мероприятий", может быть несколько статей на вид) —
     // после того как мероприятие прошло, каждая статья сама добавляется строкой в его себестоимость.
@@ -4659,6 +4762,7 @@
       const title = (e.title||'').trim().toLowerCase();
       const matchedType = typesWithRules.find(t=>t.name.trim().toLowerCase() === title);
       if(!matchedType) return;
+      if(keywordPayRuleFor(e)) return; // такие мероприятия оплачиваются по правилу из KEYWORD_PAY_RULES
       const guests = (e.guests!==undefined && e.guests!==null && !isNaN(e.guests)) ? Number(e.guests) : 0;
       if(guests <= 0) return;
       if(!Array.isArray(e.materialsItems)) e.materialsItems = [];
@@ -6493,6 +6597,88 @@
   }
   // один раз при переходе на график «полный день»: очищаем смены с 1 ноября 2026 (старые 12–17 / 17–22),
   // чтобы владелица расставила их заново; копия удалённого сохраняется на случай, если что-то понадобится вернуть
+  // ===== Себестоимость по техкартам (расчёт 16.11.2026, таблица «ПРОДУКТЫ СП» → лист «Себестоимость — расчёт») =====
+  // Разово вносит себестоимость на гостя в «📚 Мероприятия и ведущие» и варианты в справочник «Себес».
+  // Цены (поле «цена») и всё остальное не трогаем. Арт-свидания — на одного гостя (себестоимость на пару ÷ 2).
+  const CATALOG_COSTS_20261116 = {
+    'Керамика (лепка из глины)':450, 'Гончарный круг':450, 'Панно-ваза':580, 'Дофаминовая ваза':140,
+    'Свободный акрил (рисование акрилом)':210, 'Картина-аффирмация':230, '3D-аффирмации':210, 'Фактурные картины':210,
+    'Фактурная луна с подсветкой':1380, 'Фактура скорости':190, 'Фактурный бранч':230, 'Ботанический барельеф':400,
+    'Дофаминовая картина':190, 'Рисование вином':430, 'Этюд вином «Греческий образ»':420, 'Кофейная живопись':370,
+    'Портреты в стиле Pinterest':210, 'Коты-мемы':210, 'Неоновая арт-вечеринка':300, 'Флюид-арт «Мишки»':250,
+    'Роспись одежды':80, 'Роспись неваляшки':300, 'Роспись значков':100, 'Роспись брелоков':100, 'Роспись гипсовых фигур':200,
+    'Изготовление свечи':310, 'Свеча и диффузор':400, 'Авторские духи (авторский парфюм)':240,
+    'Тафтинг (создание ковра, в т.ч. на девичнике)':1050, 'Ковровая вышивка':100,
+    'Винная дегустация':600, 'Пивная дегустация':600, 'Картина желаний (карта желаний)':200, 'Аквагрим':5,
+    'Рисование питомцев в абстрактном стиле':210, 'Венки':700,
+    'Арт-ланч «Керамика»':450, 'Арт-ланч «Авторские духи»':90, 'Арт-ланч «Картина акрилом»':110,
+    'Арт-свидание «Керамика»':450, 'Арт-свидание «Гончарный круг»':450, 'Арт-свидание «Свободный акрил»':210,
+    'Арт-свидание «Картина-аффирмация»':230, 'Арт-свидание «Фактурная картина»':210, 'Арт-свидание «Фактурная луна с подсветкой»':1350,
+    'Арт-свидание «Фактура скорости»':100, 'Арт-свидание «Авторские духи»':240, 'Арт-свидание «Свечи и диффузоры»':400,
+    'Арт-свидание «Тафтинг»':530
+  };
+  const SEBES_COSTS_20261116 = [
+    ['Керамика обычное (группа)',450],['Керамика Круг',450],['Керамика ЛАНЧ',450],['Керамика значки/фигурки/украшения',450],
+    ['Керамика марафон/парк "Вокруг света"',450],['Керамика мини тарелки/кофейные чашки',450],['Керамика доплата за 2-е изделие',450],
+    ['Акрил/Аффирмации/Фактурные 30×30',210],['Акрил/Аффирмации/Фактурные 20×20',110],['Акрил/Аффирмации/Фактурные 10×15',70],
+    ['Свободный акрил 30×40/30×30',210],['Свободный акрил 20×20',110],['Свободный акрил 10×15',70],
+    ['Картина-аффирмация 30×40/30×30',230],['Картина-аффирмация 20×20',130],['Картина-аффирмация 10×15',90],
+    ['3Д аффирмации',210],['3Д аффирмации 20×20',120],['Фактурная картина 30×40/30×30',210],['Фактурная картина 20×20',120],
+    ['Фактурная луна 25 см',1380],['Фактурная луна 30 см',1810],['Фактурная луна 35 см',2240],['Фактурная луна 40 см',2690],
+    ['Фактура скорости 30×40',190],['Фактура скорости круг 30 см',310],['Фактура скорости 40×50',300],['Фактура скорости 60×40',350],
+    ['Фактурный бранч',230],['Панно-ваза',580],
+    ['Дофаминовая ваза 250 мл',140],['Дофаминовая ваза 600 мл',170],
+    ['Дофаминовая картина',190],['Дофаминовая картина 20×20',120],['Дофаминовая картина 10×15',80],
+    ['Неваляшка малая (гипс)',300],['Роспись одежды (наш шоппер)',230],['Роспись одежды (чужая одежда)',80],
+    ['Рисование вином А3',430],['Рисование вином А4',250],['Рисование вином А5',160],['Рисование вином А5-6 без рамки',70],
+    ['Этюд вином А3',420],['Этюд вином А4',250],['Этюд вином А5',160],
+    ['Кофейная живопись А3',370],['Кофейная живопись А4',220],['Кофейная живопись А5',140],
+    ['Свеча 1 шт',310],['Свечи 2 шт',610],['Свеча 200 мл',390],['Свеча и диффузор',400],
+    ['Духи 3 флакона',240],['Духи 2 флакона',180],['Духи 1 флакон',130],['Духи ЛАНЧ (1 флакон)',90],['Акрил ЛАНЧ 20×20',110],
+    ['Смола (антистресс) 30×40',1300],
+    ['НГ: венок',700],['НГ: композиция со свечой',410],['НГ: композиция в металлическом кашпо',480],['НГ: композиция на спиле',370],
+    ['НГ: свеча в мандарине',340],['НГ: свеча в вязаном носке',310],['НГ: роспись спилов',160],['НГ: ваза из шишек',170],
+    ['НГ: карта желаний',200],['НГ: 3Д-аффирмация на 2027 год',230],['НГ: роспись бутылок-светильников',190],
+    ['НГ: картины в гипсовых рамках',180],['НГ: роспись гипсовых игрушек',120],['НГ: конфетница с мандаринами',160]
+  ];
+  const SEBES_REMOVE_20261116 = ['Неваляшка большая (пластик)']; // неваляшки 22 см больше не делаем
+  async function migrateCatalogCosts20261116(){
+    try{
+      const flag = await window.storage.get('migration-catalog-costs-20261116-v2', true);
+      if(flag) return;
+      if(Array.isArray(state.eventCatalog)){
+        let ch = false;
+        const map = {}; Object.keys(CATALOG_COSTS_20261116).forEach(k=>{ map[normName(k)] = CATALOG_COSTS_20261116[k]; });
+        state.eventCatalog = state.eventCatalog.map(c=>{
+          const v = map[normName(c.title)];
+          if(v === undefined || Number(c.cost) === v) return c;
+          ch = true; return {...c, cost: v};
+        });
+        // смола: материалы закупает мастер (идут ему в зарплату по таблице) — строка «по справочнику» на студию не нужна
+        state.eventCatalog = state.eventCatalog.map(c=>{ if(String(c.title||'').toLowerCase().includes('смол') && c.cost !== null && c.cost !== undefined && c.cost !== ''){ ch = true; return {...c, cost:null}; } return c; });
+        if(ch) await saveEventCatalog();
+      }
+      // формат «Эпоксидная смола»: варианты = изделия из таблицы «Смола» (по ним считается оплата мастеру)
+      try{
+        const resinOpts = (DEFAULT_EVENT_FORMATS.find(f=>f.id==='resin')||{}).options || [];
+        if(Array.isArray(state.eventFormats) && state.eventFormats.length){
+          const fi = state.eventFormats.findIndex(f=>f.id==='resin' || (f.keys||[]).includes('смол'));
+          if(fi >= 0){ state.eventFormats[fi] = {...state.eventFormats[fi], options: resinOpts.slice()}; await saveEventFormats(); }
+        }
+      }catch(err){}
+      if(Array.isArray(state.materialsCatalog)){
+        const rm = new Set(SEBES_REMOVE_20261116.map(normName));
+        let list = state.materialsCatalog.filter(m=>!rm.has(normName(m.name)));
+        SEBES_COSTS_20261116.forEach(([name, cost])=>{
+          const i = list.findIndex(m=>normName(m.name)===normName(name));
+          if(i >= 0) list[i] = {...list[i], cost}; else list.push({name, cost});
+        });
+        state.materialsCatalog = list;
+        await saveMaterialsCatalog();
+      }
+      await window.storage.set('migration-catalog-costs-20261116-v2', '1', true);
+    }catch(e){ console.warn('catalog costs 2026-11-16', e); }
+  }
   async function migrateFulldayShiftsOnce(){
     try{
       const flag = await window.storage.get('migration-fullday-shifts-v1', true);
@@ -7770,7 +7956,7 @@
   function roleCanSeeReference(role){ return ['owner','admin','assistant','manager','marketer','hostess'].includes(role); }
   const refUI = { cat:'priv', q:'', key:null, vi:0, n:5, qty:1, openGroups:{}, extras:{}, customName:'', customSum:'', discVal:'', discUnit:'rub', date:'', panel:null, logKey:null, brief:null, bN:6, bSum:'', bMode:'guest', bCat:'all', bFit:true };
   const REF_DEFAULT_PREPAY = 2000; // предоплата в рублях: 2 000 или 5 000
-  function refCanEdit(){ return state.currentRole === 'owner'; }
+  function refCanEdit(){ return ['owner','assistant'].includes(state.currentRole); }
   function refOverrideKey(catId, itemName, varLabel, ti){ return catId + '|' + itemName + '|' + varLabel + '|' + ti; }
   // цены с учётом правок руководителя (state.refOverrides) — исходная цена из таблицы хранится в t.base
   function refEffVariant(cat, item, v){
@@ -11136,6 +11322,7 @@
     if(isAdminNoRefundsConversion && state.certView === 'conversion') state.convTab = 'clients';
     if(state.certView==='salary-adj' && !['owner','admin'].includes(state.currentRole)) state.certView='certificates';
     if(state.certView==='manager-salary' && !['owner','manager'].includes(state.currentRole)) state.certView='certificates';
+    if(state.certView==='dismiss-calc' && state.currentRole!=='assistant') state.certView='certificates';
     const subTabsHtml = `
       <div class="cert-subtabs">
         ${!hideRefundsConversion ? `<button data-certview="conversion" class="${state.certView==='conversion'?'active':''}" style="${state.currentRole==='manager'?'font-weight:700;':''}">📈 Конверсия</button>` : ''}
@@ -11143,6 +11330,7 @@
         ${!isHostessLimited ? `<button data-certview="kp" class="${state.certView==='kp'?'active':''}">🖼 КП</button>` : ''}
         <button data-certview="certificates" class="${state.certView==='certificates'?'active':''}">Сертификаты</button>
         ${(!isHostessLimited && ['owner','admin'].includes(state.currentRole)) ? `<button data-certview="salary-adj" class="${state.certView==='salary-adj'?'active':''}">Корректировки ЗП</button>` : ''}
+        ${state.currentRole==='assistant' ? `<button data-certview="dismiss-calc" class="${state.certView==='dismiss-calc'?'active':''}">💼 Расчёт уволенного менеджера</button>` : ''}
         ${(!isHostessLimited && ['owner','manager'].includes(state.currentRole)) ? `<button data-certview="manager-salary" class="${state.certView==='manager-salary'?'active':''}">${state.currentRole==='owner' ? 'ЗП менеджеров' : '💰 Моя ЗП'}</button>` : ''}
         ${!hideRefundsConversion ? `<button data-certview="refunds" class="${state.certView==='refunds'?'active':''}">Возвраты</button>` : ''}
         ${!isHostessLimited ? `<button data-certview="legal" class="${state.certView==='legal'?'active':''}">🏢 Юрлица</button>` : ''}
@@ -11181,6 +11369,10 @@
     }
     if(state.certView === 'manager-salary'){
       return subTabsHtml + renderManagerSalaryView();
+    }
+    if(state.certView === 'dismiss-calc' && state.currentRole === 'assistant'){
+      if(!state.dc.loaded && !state.dc._loading){ state.dc._loading = true; dcLoad().then(()=>{ if(state.view==='certificates' && state.certView==='dismiss-calc') render(); }); }
+      return subTabsHtml + dcBoxHtml();
     }
     return subTabsHtml + renderCertificatesListView();
   }
@@ -14134,7 +14326,7 @@
       </div>
       <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;background:#EEF0E4;border-radius:12px;padding:9px 12px;margin:0 0 12px;font-size:13.5px;">
         <span>👤 Ответственный за юрлица: <b>${escapeHtml(legalResponsible())}</b> <span style="color:var(--ink-soft);font-size:12px;">— все задачи по реквизитам, договорам, счетам и актам ставятся на него</span></span>
-        ${state.currentRole === 'owner' ? '<button class="btn btn-ghost" id="lg-resp-edit" style="margin-left:auto;padding:4px 10px;font-size:12.5px;">✎ Указать имя</button>' : ''}
+        ${['owner','assistant'].includes(state.currentRole) ? '<button class="btn btn-ghost" id="lg-resp-edit" style="margin-left:auto;padding:4px 10px;font-size:12.5px;">✎ Указать имя</button>' : ''}
       </div>
       ${navHtml}
       ${renderLegalDocsControlHtml(period)}
@@ -24116,10 +24308,11 @@
   }
 
   function renderCodeSettingsModal(){
-    const isOwnerRole = state.currentRole === 'owner';
-    // ассистент/админ видят и меняют только пароли ролей ниже своей (хостес/менеджер) — не могут поднять себе или друг другу уровень.
+    // руководитель и ассистент управляют доступами: пароли ролей, сотрудники (имена, должности, увольнение), личные пароли.
+    // ассистент не видит и не меняет пароль руководителя. Старший администратор меняет только пароли ролей ниже своей.
     // у "Мастера" больше нет общего пароля — только личные, у каждого свой (ниже).
-    const editableRoles = isOwnerRole ? CODE_LOGIN_ROLES : ['hostess','manager','marketer'];
+    const isOwnerRole = ['owner','assistant'].includes(state.currentRole);
+    const editableRoles = state.currentRole === 'owner' ? CODE_LOGIN_ROLES : (state.currentRole === 'assistant' ? CODE_LOGIN_ROLES.filter(r=>r !== 'owner') : ['hostess','manager','marketer']);
     return `
       <div class="modal" style="max-width:420px;">
         <div class="modal-head">
@@ -24127,7 +24320,7 @@
           <button class="modal-close">×</button>
         </div>
         <div class="modal-body">
-          <div style="font-size:13px;color:var(--ink-soft);margin-top:-6px;">У каждой должности свой пароль. После входа видны только разделы, положенные этой роли.${!isOwnerRole ? ' Пароли администратора/ассистента/руководителя может менять только руководитель.' : ''}</div>
+          <div style="font-size:13px;color:var(--ink-soft);margin-top:-6px;">У каждой должности свой пароль. После входа видны только разделы, положенные этой роли.${!isOwnerRole ? ' Пароли старшего администратора, ассистента и руководителя меняют руководитель и ассистент.' : (state.currentRole==='assistant' ? ' Пароль руководителя может менять только руководитель.' : '')}</div>
           ${editableRoles.map(r=>`
             <div class="field">
               <label>${ROLE_LABELS[r]}</label>
@@ -32864,6 +33057,8 @@
                 ${isAll ? `<div class="host" style="display:flex;align-items:center;gap:6px;">${spaceBadge(getSpace(e.spaceId),'sm')}${escapeHtml(getSpace(e.spaceId).name)} · ${escapeHtml(allHostNamesDisplay(e))}${e.product?' · '+escapeHtml(e.product):''}${showsDishesAndRental(e.status)&&e.dishes?' · 🍽 '+(e.dishes==='needed'?'нужна посуда':'без посуды'):''}${rentalSuffix(e)}${legalSuffix(e)}</div>` : `<div class="host">${escapeHtml(allHostNamesDisplay(e))}${e.product?' · '+escapeHtml(e.product):''}${showsDishesAndRental(e.status)&&e.dishes?' · 🍽 '+(e.dishes==='needed'?'нужна посуда':'без посуды'):''}${rentalSuffix(e)}${legalSuffix(e)}</div>`}
                 ${openSlot ? `<div class="notes" style="color:var(--status-cyan);">🙋 ${available.length ? 'Свободны: '+escapeHtml(available.join(', ')) : 'Пока никто не откликнулся'}</div>` : ''}
                 ${eventFormatText(e) ? `<div class="notes notes-full" style="color:#7E4E1E;font-weight:600;">🎨 ${escapeHtml(eventFormatText(e))}</div>` : (eventFormatRequired(e) && state.currentRole !== 'master' ? '<div class="notes" style="color:var(--danger);">🎨 формат не указан</div>' : '')}
+                ${e.resinPayNote && ['owner','admin','assistant','manager'].includes(state.currentRole) ? `<div class="notes" style="color:var(--danger);">💸 ${escapeHtml(e.resinPayNote)}</div>` : ''}
+                ${isResinPayEvent(e) && e.date >= KEYWORD_PAY_FROM && e.date <= todayStr() && e.status !== 'cancelled' && !eventFormatItems(e).length && ['owner','admin','assistant','manager'].includes(state.currentRole) ? '<div class="notes" style="color:var(--danger);">💸 смола: укажите изделия в формате — по ним считается оплата мастеру</div>' : ''}
                 ${isPrivateEventStatus(e.status) && e.ageCategory ? `<div class="notes${state.currentRole==='master'?' notes-full':''}">🎂 ${escapeHtml(e.ageCategory)}</div>` : ''}
                 ${isPrivateEventStatus(e.status) && e.foodInfo ? `<div class="notes${state.currentRole==='master'?' notes-full':''}" title="${escapeHtml(e.foodInfo)}">🍕 ${escapeHtml(e.foodInfo)}</div>` : ''}
                 ${e.notes ? `<div class="notes${state.currentRole==='master'?' notes-full':''}" title="${escapeHtml(e.notes)}">💬 ${escapeHtml(e.notes)}</div>` : ''}
