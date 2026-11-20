@@ -1704,6 +1704,68 @@
     .daily-alert-item{ white-space:nowrap; flex:none; font-size:12px; }
     .analytics-section{ padding:12px; }
   }
+
+  /* меню «⚙ Ещё» в шапке — редкие настройки не занимают место каждый день */
+  .hdr-more{ position:relative; }
+  .hdr-more > summary{ list-style:none; cursor:pointer; }
+  .hdr-more > summary::-webkit-details-marker{ display:none; }
+  .hdr-more[open] > summary{ background:var(--ink); color:var(--white); border-color:var(--ink); }
+  .hdr-more-panel{ position:absolute; right:0; top:calc(100% + 6px); z-index:600; background:var(--white); border:1px solid rgba(0,0,0,.1); border-radius:14px; box-shadow:0 10px 30px rgba(0,0,0,.14); padding:6px; display:flex; flex-direction:column; gap:2px; min-width:230px; }
+  .hdr-more-panel .lock-btn{ border:none; background:none; text-align:left; justify-content:flex-start; width:100%; padding:9px 12px; font-size:13px; }
+  .hdr-more-panel .lock-btn:hover{ background:#FFF6E3; }
+  @media (max-width: 640px){ .hdr-more-panel{ right:auto; left:0; } }
+
+  @media (max-width: 640px){
+    /* телефон: месяц — одной строкой, залы — лентой с прокруткой вбок, кнопка выхода — короче */
+    .global-month-bar .gm-label{ display:none; }
+    .global-month-bar{ flex-wrap:nowrap !important; padding:6px 8px !important; gap:6px !important; }
+    .global-month-bar select{ min-width:0; }
+    .space-tabs{ flex-wrap:nowrap; overflow-x:auto; scrollbar-width:none; margin-bottom:14px; padding-bottom:2px; }
+    .space-tabs::-webkit-scrollbar{ display:none; }
+    .space-tabs .space-tab{ flex:none; }
+    #gm-today{ white-space:nowrap; font-size:12px; padding:5px 8px !important; }
+    #gm-year{ min-width:72px; padding:5px 4px !important; }
+    #gm-month{ padding:5px 4px !important; }
+    /* обозначения статусов и залов — одной лентой, не занимают пол-экрана над календарём */
+    .status-legend{ flex-wrap:nowrap; overflow-x:auto; gap:12px; scrollbar-width:none; margin-bottom:6px; }
+    .status-legend::-webkit-scrollbar{ display:none; }
+    .status-legend .item{ flex:none; font-size:11px; }
+  }
+
+  /* ⚡ быстрые действия на странице «Сегодня» */
+  .qa-panel{ background:var(--white); border:1px solid rgba(0,0,0,.08); border-radius:16px; box-shadow:var(--card-shadow); padding:12px 14px; margin:0 0 18px; }
+  .qa-title{ font-size:11px; font-family:var(--font-mono); text-transform:uppercase; letter-spacing:.06em; color:var(--ink-soft); margin-bottom:8px; }
+  .qa-row{ display:grid; grid-template-columns:repeat(auto-fill,minmax(170px,1fr)); gap:8px; }
+  .qa-btn{ border:1px solid rgba(0,0,0,.1); background:#FBF8F2; border-radius:12px; padding:12px 12px; font-size:14px; text-align:left; cursor:pointer; font-family:var(--font-body); color:var(--ink); }
+  .qa-btn:hover{ background:#FFF2D6; border-color:#E8B84B; }
+  @media (max-width:640px){ .qa-row{ grid-template-columns:1fr 1fr; } .qa-btn{ font-size:13px; padding:11px 10px; } }
+  .today-card[data-today-ev]:hover{ box-shadow:0 4px 16px rgba(0,0,0,.08); }
+
+  /* календарь месяца — компактно, как раньше: каждая строка в клетке в одну линию, весь месяц помещается на экран.
+     Полный текст — при наведении (подсказка) и в окне дня по клику на клетку. Правило «без троеточий» остаётся
+     для всех остальных разделов. */
+  .cal-cell .cal-evt-chip, .cal-cell .cal-evt-chip .evt-title, .cal-cell .cal-hostess, .cal-cell .cal-manager,
+  .cal-cell .cal-dayoff-line, .cal-cell .cal-offsite{
+    white-space:nowrap !important; overflow:hidden !important; text-overflow:ellipsis !important; overflow-wrap:normal !important; word-break:normal !important;
+  }
+  .cal-cell .cal-evt-chip{ align-items:baseline !important; }
+  .cal-cell .cal-evt-chip .evt-title{ flex:1 1 auto; }
+  .cal-cell .cal-evt-chip .evt-fill{ flex:none; margin-left:auto !important; }
+  .cal-cell .cal-events{ overflow:hidden !important; }
+
+  /* сверка маркетинга */
+  .mk-sum-grid > div{ display:flex; justify-content:space-between; gap:12px; padding:5px 0; border-bottom:1px dashed var(--line); font-size:13px; }
+  .mk-sum-grid > div b{ font-family:var(--font-mono); white-space:nowrap; }
+  .mk-sum-grid > div.tot{ border-bottom:none; border-top:1px solid var(--line-strong); margin-top:2px; padding-top:8px; font-weight:600; }
+  .mk-sum-grid > div.tot span{ font-weight:400; }
+  .mk-sum-grid > div.mut{ color:var(--ink-soft); font-size:12px; border-bottom:none; }
+  .mk-recon{ margin-top:10px; background:#FFF6E6; border:1px solid #EBC98A; border-radius:12px; padding:10px 12px; }
+  .mk-recon-h{ font-weight:600; font-size:13px; margin-bottom:6px; }
+  .mk-recon-row{ display:grid; grid-template-columns:110px 190px 1fr auto; gap:8px; font-size:12px; padding:4px 0; border-bottom:1px dashed rgba(0,0,0,.08); }
+  .mk-recon-row .k{ color:var(--status-red); font-size:11px; }
+  .mk-recon-note{ font-size:11.5px; color:var(--ink-soft); margin-top:6px; line-height:1.45; }
+  .mk-recon-ok{ margin-top:8px; font-size:12.5px; color:var(--status-green); }
+  @media (max-width:640px){ .mk-recon-row{ grid-template-columns:1fr 1fr; } }
 </style>
 </head>
 <body>
@@ -2465,7 +2527,7 @@
   // брони. "Маркетинг" (промо-съёмки), "Слот" (открытый слот, ещё не забронирован) и "Отменено" — нет,
   // там либо нет гостя-покупателя, либо мероприятие могли сразу создать отменённым
   const EVENT_STATUSES_NEEDING_LEAD = ['confirmed','tentative','offsite'];
-  const MARKETING_DIRECTIONS = ['Офлайн маркетинг','Блогеры','Листовки','Розыгрыши','Рассылки','Гео-сервисы','Бартер','Партнёрства','Съёмки','Изделия'];
+  const MARKETING_DIRECTIONS = ['Офлайн маркетинг','Блогеры','Листовки','Розыгрыши','Рассылки','Гео-сервисы','Бартер','Партнёрства','Съёмки','Изделия','Прочее'];
   const isItemsMarketingDirection = d => (d||'').trim().toLowerCase() === 'изделия';
 
   // ---------- Электронный подарочный сертификат (генератор изображения) ----------
@@ -3928,12 +3990,14 @@
   // свой главный раздел первым, не листая вбок. Для ролей, не упомянутых здесь (владелица), порядок
   // не меняется — у них и так есть доступ ко всему, менять привычную раскладку смысла нет.
   const NAV_PRIORITY_BY_ROLE = {
-    hostess: ['prep','reference','certificates','analytics','calendar','host'],
-    master: ['masters','analytics','my-orders','matreq','calendar','host'],
-    manager: ['certificates','reference','marketing','book','calendar','host','analytics'],
-    assistant: ['certificates','reference','marketing','book','calendar','host','analytics'],
-    admin: ['certificates','prep','reference','marketing','book','procurement','calendar','host','analytics'],
-    marketer: ['marketing','reference','analytics','certificates','calendar','host'],
+    // первым стоит раздел, куда сотрудник попадает после входа, дальше — по частоте ежедневного использования
+    hostess: ['calendar','prep','cashbox','certificates','print','tufting','reference','book','analytics','host'],
+    master: ['host','masters','analytics','my-orders','matreq','reportsfeed','calendar'],
+    manager: ['certificates','calendar','reference','planprogress','prep','marketing','book','host','analytics'],
+    assistant: ['calendar','certificates','book','cashbox','reference','prep','marketing','host','analytics'],
+    admin: ['calendar','prep','cashbox','book','procurement','certificates','masters','reference','marketing','host','analytics'],
+    marketer: ['marketing','calendar','reference','planprogress','analytics','certificates','host'],
+    owner: ['calendar','analytics','book','cashbox','certificates','procurement','marketing','prep','reference','host','masters'],
     smm: ['marketing','reportsfeed','calendar','host'],
   };
   const DEFAULT_ROLE_CODES = { hostess:'1111', master:'2222', manager:'3333', marketer:'6666', smm:'7777', assistant:'4444', admin:'5555', owner:'0000' };
@@ -8106,6 +8170,7 @@
           <button class="btn btn-ghost" id="btn-today-back">← К расписанию</button>
           <button class="btn btn-primary" id="btn-today-print">🖨 Печать</button>
         </div>
+        ${todayQuickActionsHtml()}
         <h1 class="today-title">${escapeHtml(dLabel)}</h1>
         <div class="today-subtitle">${evts.length} мероприяти${evts.length===1?'е':(evts.length>=2&&evts.length<=4?'я':'й')} на сегодня</div>
         ${evts.length === 0 ? `<div class="today-empty">Сегодня мероприятий нет</div>` : evts.map(e=>{
@@ -8115,7 +8180,7 @@
           const remain = agreed - price;
           const missing = missingDocs(e);
           return `
-            <div class="today-card">
+            <div class="today-card" data-today-ev="${e.id}" style="cursor:pointer;" title="Открыть карточку мероприятия">
               <div class="today-card-head">
                 <div class="today-status-dot" style="background:${statusColor(e.status)};"></div>
                 <div class="today-time">${eventStartLabel(e)}</div>
@@ -8159,6 +8224,79 @@
     if(backBtn) backBtn.onclick = ()=>{ state.view = 'calendar'; render(); };
     const printBtn = document.getElementById('btn-today-print');
     if(printBtn) printBtn.onclick = ()=>{ window.print(); };
+    document.querySelectorAll('[data-qa]').forEach(b=> b.onclick = ()=> runTodayQuickAction(b.dataset.qa));
+    document.querySelectorAll('[data-today-ev]').forEach(c=> c.onclick = (ev)=>{
+      if(ev.target.closest('a,button,input')) return;
+      const e = state.events.find(x=> x.id === c.dataset.todayEv); if(!e) return;
+      if(state.currentRole === 'master'){ if(isMyEventForReport(e)){ state.modal = {type:'quick-report', event:{...e}, keepAll:true}; render(); } return; }
+      state.modal = {type:'event', event:{...e}, isNew:false, keepAll:true}; render();
+    });
+  }
+  // ⚡ быстрые действия на странице «Сегодня» — то, что сотрудник делает каждый день, в один клик
+  function todayQuickActionsList(){
+    const role = state.currentRole;
+    const A = [];
+    const add = (key, label, ok)=>{ if(ok) A.push([key, label]); };
+    const v = (x)=> canAccessView(x);
+    if(role === 'master'){
+      add('report', '📝 Сдать отчёт', true);
+      add('matreq', '🧺 Заказать материалы', v('matreq') || true);
+      add('mysalary', '💰 Моя зарплата', true);
+      add('myorders', '📦 Мои заказы', true);
+      return A;
+    }
+    if(role === 'smm' || role === 'marketer'){
+      add('content', '🗓 Контент-план', v('marketing'));
+      add('lead', '⚡ Заявка', role === 'marketer' && typeof qlRoleAllowed === 'function' && qlRoleAllowed(role));
+      return A;
+    }
+    add('cash-accept', '📥 Принять кассу', v('cashbox') && ['hostess','admin','owner','assistant'].includes(role));
+    add('cash-close', '🌙 Закрыть смену', v('cashbox') && ['hostess','admin','owner','assistant'].includes(role));
+    add('event', '➕ Мероприятие на сегодня', !['hostess'].includes(role));
+    add('lead', '⚡ Заявка', typeof qlRoleAllowed === 'function' && qlRoleAllowed(role));
+    add('income', '➕ Доход', v('book'));
+    add('expense', '➖ Расход', v('book') && role !== 'hostess');
+    add('cert', '🎁 Продать сертификат', v('certificates'));
+    add('prep', '🤝 Частники', v('prep'));
+    add('print', '🖨 На печать', v('print'));
+    add('outreach', '🎉 Поздравления', role === 'manager' || role === 'assistant');
+    add('missing', '📝 Несданные отчёты', ['owner','admin'].includes(role));
+    add('purchase', '📦 Закупки', v('procurement'));
+    return A;
+  }
+  function todayQuickActionsHtml(){
+    const A = todayQuickActionsList();
+    if(!A.length) return '';
+    return `<div class="qa-panel no-print"><div class="qa-title">⚡ Быстрые действия</div><div class="qa-row">${A.map(([k,l])=> `<button class="qa-btn" data-qa="${k}">${l}</button>`).join('')}</div></div>`;
+  }
+  function runTodayQuickAction(k){
+    const clickAfter = (id)=> setTimeout(()=>{ const b = document.getElementById(id); if(b) b.click(); }, 60);
+    const go = (view, extra)=>{ state.view = view; Object.assign(state, extra||{}); render(); };
+    switch(k){
+      case 'cash-accept': go('cashbox'); clickAfter('btn-cash-accept'); break;
+      case 'cash-close': go('cashbox'); clickAfter('btn-cash-close'); break;
+      case 'income': go('book', {bookView:'incomes'}); clickAfter('btn-add-income'); break;
+      case 'expense': go('book', {bookView:'expenses'}); clickAfter('btn-add-expense'); break;
+      case 'cert': go('certificates', {certView:'certificates'}); clickAfter('btn-add-cert'); break;
+      case 'prep': go('prep', {prepTab:'today'}); break;
+      case 'print': go('print'); break;
+      case 'outreach': go('certificates', {certView:'outreach'}); break;
+      case 'purchase': go('procurement'); break;
+      case 'content': go('marketing', {marketingView:'content'}); break;
+      case 'matreq': go('matreq'); break;
+      case 'mysalary': go('analytics'); break;
+      case 'myorders': go('my-orders'); break;
+      case 'lead': if(typeof openQuickLead === 'function') openQuickLead(); break;
+      case 'missing': case 'report': state.modal = {type:'missing-reports'}; render(); break;
+      case 'event': {
+        const sp = state.activeSpaceId && state.activeSpaceId !== 'all' ? state.activeSpaceId : state.spaces[0].id;
+        requireUnlock(()=>{
+          state.modal = {type:'event', isNew:true, keepAll:true, event:{ id: uid(), spaceId: sp, date: todayStr(), time:'18:00', duration:120, guests:null, itemsCount:null, itemsCountAuto:true, masterPay:null, masterPayAuto:true, additionalHosts:[], guestName:'', price:null, agreedPrice:null, materialsItems:[], pickupItems:[], payments:[], title:'', product:'', host:'', dishes:'', dishesWasher:'', rentalBefore:0, rentalAfter:0, payerType:'individual', companyName:'', documents:{contract:false,paymentOrder:false,act:false}, masterReport:null, notes:'', availableMasters:[] }};
+          render();
+        });
+        break;
+      }
+    }
   }
 
   // ===== Напоминания по деньгам и работе с гостями =====
@@ -8276,16 +8414,17 @@
 
     // закончились отслеживаемые материалы
     const outOfStock = state.materialsCatalog.filter(m=>m.trackStock && (m.stock===undefined||m.stock===null||m.stock<=0));
-    if(outOfStock.length > 0) alerts.push({icon:'🧱', text:`Закончился материал: ${outOfStock.map(m=>m.name).join(', ')}`, view: roleCanAccessProcurement(state.currentRole) ? 'procurement' : undefined});
+    const seesStock = roleCanAccessProcurement(state.currentRole); // склад важен тем, кто закупает; мастерам, SMM и админам смены — шум
+    if(seesStock && outOfStock.length > 0) alerts.push({icon:'🧱', text:`Закончился материал: ${outOfStock.map(m=>m.name).join(', ')}`, view: roleCanAccessProcurement(state.currentRole) ? 'procurement' : undefined});
 
     // склад: закончились или ниже минимума (только после первой ревизии)
     try{
       const lowW = (state.stockItems||[]).filter(it=>{ const b = stockBalance(it); return b.started && (b.stock <= 0 || (Number(it.minStock)>0 && b.stock < Number(it.minStock))); });
-      if(lowW.length > 0) alerts.push({icon:'🏬', text:`Склад: заканчивается ${lowW.slice(0,6).map(m=>m.name).join(', ')}${lowW.length>6?' и ещё '+(lowW.length-6):''}`, view: roleCanAccessProcurement(state.currentRole) ? 'procurement' : undefined});
+      if(seesStock && lowW.length > 0) alerts.push({icon:'🏬', text:`Склад: заканчивается ${lowW.slice(0,6).map(m=>m.name).join(', ')}${lowW.length>6?' и ещё '+(lowW.length-6):''}`, view: roleCanAccessProcurement(state.currentRole) ? 'procurement' : undefined});
     }catch(e){}
     // остаток ниже заданного минимума (но ещё не закончился)
     const belowMinStock = state.materialsCatalog.filter(m=>m.trackStock && m.minStock>0 && m.stock!==undefined && m.stock!==null && m.stock>0 && m.stock<m.minStock);
-    if(belowMinStock.length > 0) alerts.push({icon:'📉', text:`Ниже минимального остатка: ${belowMinStock.map(m=>m.name).join(', ')}`, view: roleCanAccessProcurement(state.currentRole) ? 'procurement' : undefined});
+    if(seesStock && belowMinStock.length > 0) alerts.push({icon:'📉', text:`Ниже минимального остатка: ${belowMinStock.map(m=>m.name).join(', ')}`, view: roleCanAccessProcurement(state.currentRole) ? 'procurement' : undefined});
 
     // несданные отчёты мастеров за последние 14 дней — и не раньше даты, с которой отчёты вообще обязательны
     // (см. REPORTS_REQUIRED_FROM), иначе этот баннер задним числом нагнал бы весь сентябрь
@@ -8293,7 +8432,7 @@
     const cutoffStr = fmtDate(cutoff) > REPORTS_REQUIRED_FROM ? fmtDate(cutoff) : REPORTS_REQUIRED_FROM;
     const missingReportsList = state.events.filter(e=> e.host && e.host.trim() && e.date && e.date>=cutoffStr && e.date<=today && !hasMasterReport(e) && (state.currentRole!=='master' || isMyEventForReport(e)));
     const missingReports = missingReportsList.length;
-    if(missingReports > 0 && reportsRequiredNow() && !['manager','assistant'].includes(state.currentRole)) alerts.push({icon:'📝', text: state.currentRole==='master' ? `Не сдано ваших отчётов за 2 недели: ${missingReports}` : `Не сдано отчётов за 2 недели: ${missingReports}`, missingReports:true});
+    if(missingReports > 0 && reportsRequiredNow() && ['owner','admin','master'].includes(state.currentRole)) alerts.push({icon:'📝', text: state.currentRole==='master' ? `Не сдано ваших отчётов за 2 недели: ${missingReports}` : `Не сдано отчётов за 2 недели: ${missingReports}`, missingReports:true});
 
     // новые пожелания гостей к расписанию — видят старший администратор, руководитель и ассистент
     if(WISH_MANAGE_ROLES.includes(state.currentRole)){
@@ -8520,6 +8659,13 @@
     // SMM / съёмка — сразу в контент-план
     if(state.currentRole === 'smm' && state.unlocked && !state._smmLanded){ state._smmLanded = true; state.view = 'marketing'; state.marketingView = 'content'; }
     if(state.currentRole !== 'smm') state._smmLanded = false;
+    if(state.currentRole === 'marketer' && state.unlocked && !state._mktLanded){ state._mktLanded = true; state.view = 'marketing'; }
+    if(state.currentRole !== 'marketer') state._mktLanded = false;
+    if(state.currentRole === 'master' && state.unlocked && state.loggedInMasterName && state._masterLandedFor !== state.loggedInMasterName){
+      state._masterLandedFor = state.loggedInMasterName;
+      state.view = 'host'; state.activeHost = state.loggedInMasterName;
+    }
+    if(state.currentRole !== 'master') state._masterLandedFor = null;
   }
   function renderNavButtonsOrdered(role){
     const buttons = [];
@@ -8594,7 +8740,7 @@
     const isNow = (y === nowY && m === new Date().getMonth());
     return `
       <div class="global-month-bar no-print" style="position:sticky;top:0;z-index:40;box-shadow:0 2px 6px rgba(0,0,0,.06);display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin:0 0 12px;padding:8px 12px;background:var(--paper-2);border:1px solid var(--line);border-radius:var(--radius);">
-        <span style="font-size:12px;color:var(--ink-soft);">Месяц для всех разделов:</span>
+        <span class="gm-label" style="font-size:12px;color:var(--ink-soft);">Месяц для всех разделов:</span>
         <button class="btn btn-ghost" id="gm-prev" title="Предыдущий месяц" style="padding:4px 10px;">‹</button>
         <select id="gm-month" style="padding:5px 8px;border:1px solid var(--line-strong);border-radius:var(--radius);background:var(--white);font-family:var(--font-body);">
           ${MONTHS.map((nm,i)=>`<option value="${i}" ${i===m?'selected':''}>${escapeHtml(nm.charAt(0).toUpperCase()+nm.slice(1))}</option>`).join('')}
@@ -8633,22 +8779,27 @@
             <div id="global-search-results" style="display:none; position:absolute; top:calc(100% + 4px); left:0; right:0; background:var(--white); border:1px solid var(--line-strong); border-radius:var(--radius); box-shadow:0 8px 24px rgba(0,0,0,0.12); max-height:360px; overflow-y:auto; z-index:500;"></div>
           </div>
           <div class="view-switch">${renderNavButtonsOrdered(role)}</div>
-          <button class="lock-btn no-print" id="btn-today-view">📋 Сегодня</button>
+          <button class="lock-btn no-print" id="btn-today-view" title="Мероприятия на сегодня и быстрые действия: касса, доход, сертификат, заявка…">⚡ Сегодня</button>
           ${role ? `<button class="lock-btn no-print" id="btn-changes">🕓 Изменения</button>` : ''}
-          <button class="lock-btn no-print" id="btn-push-toggle">${state.pushEnabled ? '🔔 Уведомления включены' : '🔕 Включить уведомления'}</button>
+          ${role ? `<details class="hdr-more no-print" id="hdr-more">
+            <summary class="lock-btn">⚙ Ещё</summary>
+            <div class="hdr-more-panel">
+              ${roleCanEditEventCatalog(role) ? `<button class="lock-btn" id="btn-event-catalog">📚 Каталог МК</button>` : ''}
+              ${roleCanEditEventCatalog(role) ? `<button class="lock-btn" id="btn-event-formats">🎨 Форматы</button>` : ''}
+              ${isAdminLevel ? `
+              <button class="lock-btn" id="btn-hosts-list">💰 Тарифы мастеров</button>
+              <button class="lock-btn" id="btn-materials-catalog">🧱 Себес</button>
+              <button class="lock-btn" id="btn-event-types">📋 Виды мероприятий</button>
+              <button class="lock-btn" id="btn-role-settings">🔑 Настройки доступа</button>
+              <button class="lock-btn" id="btn-export">${exportBtnLabel()}</button>
+              ` : ''}
+              ${role === 'owner' ? `<button class="lock-btn ${state.view==='bizsettings'?'unlocked':''}" id="btn-biz-settings">⚙ Настройки бизнеса</button>` : ''}
+              <button class="lock-btn" id="btn-push-toggle">${state.pushEnabled ? '🔔 Уведомления включены' : '🔕 Включить уведомления'}</button>
+            </div>
+          </details>` : ''}
           <button class="lock-btn ${role?'unlocked':''}" id="btn-lock">
             ${role ? '👤 '+((state.loggedInMasterName || state.loggedInHostessName || state.loggedInManagerName) ? escapeHtml(state.loggedInMasterName || state.loggedInHostessName || state.loggedInManagerName) : ROLE_LABELS[role])+' — выйти' : '🔒 Войти'}
           </button>
-          ${roleCanEditEventCatalog(role) ? `<button class="lock-btn no-print" id="btn-event-catalog">📚 Каталог МК</button>` : ''}
-          ${roleCanEditEventCatalog(role) ? `<button class="lock-btn no-print" id="btn-event-formats">🎨 Форматы</button>` : ''}
-          ${isAdminLevel ? `
-          <button class="lock-btn" id="btn-role-settings">⚙ Настройки доступа</button>
-          <button class="lock-btn" id="btn-export">${exportBtnLabel()}</button>
-          <button class="lock-btn" id="btn-event-types">📋 Виды мероприятий</button>
-          <button class="lock-btn" id="btn-hosts-list">💰 Тарифы мастеров</button>
-          <button class="lock-btn" id="btn-materials-catalog">🧱 Себес</button>
-          ` : ''}
-          ${role === 'owner' ? `<button class="lock-btn no-print ${state.view==='bizsettings'?'unlocked':''}" id="btn-biz-settings">⚙ Настройки бизнеса</button>` : ''}
         </div>
       </div>
       ${alerts.length ? `
@@ -10072,12 +10223,13 @@
           ` : ''}
         </div>
       </div>
+      ${(!state.marketingSpendShowAll && !bloggersOnly) ? marketingReconcileHtml(ym) : ''}
       <div class="cert-subtabs" style="margin-bottom:12px;">
         <button data-msfilter="all" class="${!bloggersOnly?'active':''}">Все направления</button>
         <button data-msfilter="bloggers" class="${bloggersOnly?'active':''}">🎥 Блогеры</button>
       </div>
       <div class="cert-toolbar">
-        <div style="font-size:12px;color:var(--ink-soft);font-family:var(--font-mono);">Записей: ${items.length} · Сумма: ${formatMoney(totalAmount)}</div>
+        <div style="font-size:12px;color:var(--ink-soft);font-family:var(--font-mono);">Записей: ${items.length} · Сумма трат: ${formatMoney(totalAmount)}</div>
         <button class="btn btn-primary" id="btn-add-marketing-spend">+ Добавить трату${bloggersOnly?' на блогера':''}</button>
       </div>
       ${items.length === 0 ? `<div class="host-empty">${bloggersOnly ? 'Трат на блогеров пока нет' : (state.marketingSpendShowAll ? 'Трат пока нет' : 'В этом месяце трат нет')}</div>` : (()=>{
@@ -10154,7 +10306,9 @@
       .filter(e=> e.status!=='marketing' && inPeriod(e.date))
       .reduce((s,e)=> s + eventMarketingGuestsMaterialsCost(e), 0);
 
-    const totalSpendPeriod = spendInPeriod.reduce((s,m)=>s+(Number(m.amount)||0), 0) + marketingEventsCost + marketingGuestsMaterialsInPeriod;
+    const mktParts = marketingCostParts(inPeriod);
+    const totalSpendPeriod = mktParts.money; // та же сумма, что «Маркетинг» в Чистой прибыли
+    const totalSpendWithMaterials = mktParts.money + mktParts.promoMaterials; // полная стоимость промо — для окупаемости
     const totalRevenuePeriod = state.events
       .filter(e=> inPeriod(e.date))
       .reduce((s,e)=> s + eventRevenueForecast(e), 0);
@@ -10292,8 +10446,8 @@
       <div class="analytics-section">
         <h4>Общая картина — ${periodLabel}</h4>
         <div class="stat-row"><div class="stat-label">Потрачено на маркетинг</div><div style="flex:1;font-family:var(--font-mono);font-size:13px;">${formatMoney(totalSpendPeriod)}</div></div>
-        ${marketingEventsCost>0 ? `<div style="font-size:11px;color:var(--ink-soft);margin:-4px 0 4px 10px;">из них за мероприятия-маркетинг (съёмки/розыгрыши и т.п.): ЗП ${formatMoney(marketingEventsSalary)}${marketingEventsMaterials>0?` + материалы ${formatMoney(marketingEventsMaterials)}`:''}</div>` : ''}
-        ${marketingGuestsMaterialsInPeriod>0 ? `<div style="font-size:11px;color:var(--ink-soft);margin:-4px 0 4px 10px;">из них себестоимость блогеров/гостей по маркетинг-сертификату на обычных мероприятиях: ${formatMoney(marketingGuestsMaterialsInPeriod)}</div>` : ''}
+        <div style="font-size:11px;color:var(--ink-soft);margin:-4px 0 4px 10px;line-height:1.5;">Книга «Маркетинг» ${formatMoney(Math.round(mktParts.ledger))}${mktParts.items ? ' + изделия (доплаты мастерам) ' + formatMoney(Math.round(mktParts.items)) : ''}${mktParts.evPay ? ' + ЗП за промо-мероприятия ' + formatMoney(Math.round(mktParts.evPay)) : ''} — та же сумма, что «Маркетинг» в «Чистой прибыли».</div>
+        ${mktParts.promoMaterials>0 ? `<div class="stat-row"><div class="stat-label">+ материалы на промо</div><div style="flex:1;font-family:var(--font-mono);font-size:13px;color:var(--ink-soft);">${formatMoney(Math.round(mktParts.promoMaterials))} — промо-мероприятия${mktParts.guestMat ? ' и блогеры/гости по маркетинг-сертификату' : ''}; в прибыли они в строке «Материалы». Полная стоимость маркетинга: ${formatMoney(Math.round(totalSpendWithMaterials))}</div></div>` : ''}
         <div class="stat-row"><div class="stat-label">Доля от выручки студии</div><div style="flex:1;font-family:var(--font-mono);font-size:13px;">${spendPctOfRevenue!==null ? spendPctOfRevenue.toFixed(1)+'%' : '— (выручки за этот период пока нет)'}</div></div>
         ${marketingCertsValue>0 ? `<div class="stat-row"><div class="stat-label">+ маркетинговые сертификаты (услугами)</div><div style="flex:1;font-family:var(--font-mono);font-size:13px;color:var(--ink-soft);">${formatMoney(marketingCertsValue)} · ${marketingCertsInPeriod.length} шт. — деньги не платились, но это тоже часть промо-бюджета</div></div>` : ''}
         <div class="stat-row"><div class="stat-label">Пришли по маркетинговому сертификату</div><div style="flex:1;font-family:var(--font-mono);font-size:13px;">${marketingRedemptionsInPeriod.length>0 ? marketingRedemptionsInPeriod.length+' раз' : '— (пока никто не воспользовался)'}</div></div>
@@ -11870,6 +12024,13 @@
     if(nextBtn) nextBtn.onclick = ()=>{ state.marketingSpendCursor = new Date(state.marketingSpendCursor.getFullYear(), state.marketingSpendCursor.getMonth()+1, 1); render(); };
     const todayBtn = document.getElementById('ms-today');
     if(todayBtn) todayBtn.onclick = ()=>{ state.marketingSpendCursor = new Date(); render(); };
+    const reconBtn = document.getElementById('mk-recon-fix');
+    if(reconBtn) reconBtn.onclick = async ()=>{
+      const c = state.marketingSpendCursor; const ymR = c.getFullYear() + '-' + pad(c.getMonth()+1);
+      reconBtn.disabled = true; reconBtn.textContent = '⏳ Свожу…';
+      await marketingReconcileFix(ymR);
+      render();
+    };
     const toggleAllBtn = document.getElementById('ms-toggle-all');
     if(toggleAllBtn) toggleAllBtn.onclick = ()=>{ state.marketingSpendShowAll = !state.marketingSpendShowAll; render(); };
     document.querySelectorAll('[data-msfilter]').forEach(btn=>{
@@ -16405,7 +16566,10 @@
   }
   function outreachDueList(){
     const today = todayStr();
-    return (state.birthdayOutreach||[]).filter(o=> (o.status||'in_progress')==='in_progress' && o.writeDate && o.writeDate <= today);
+    // поздравлять имеет смысл только пока ДР не прошёл: записи, у которых срок написать прошёл больше 14 дней назад,
+    // в «нужно написать» и счётчики не попадают (иначе «просрочено 600» висело бы вечно) — они видны в режиме «Все»
+    const from = shiftDateStr(today, -14);
+    return (state.birthdayOutreach||[]).filter(o=> (o.status||'in_progress')==='in_progress' && o.writeDate && o.writeDate <= today && o.writeDate >= from);
   }
   function outreachDueCount(){ return outreachDueList().length; }
   // фиксируем автора/время смены статуса — для контроля, кто и когда отработал запись; возврат в
@@ -20664,7 +20828,7 @@
         ${row('Материалы: себестоимость мероприятий', mon(np.npMaterialsCost))}
         ${row('Материалы: закупки в Книге', mon(expCat('Материалы')), 'закупки и расход — разные вещи, тут разница нормальна')}
         ${row('Маркетинг: в расчёте прибыли', mon(np.npMarketingCost))}
-        ${row('Маркетинг: оплачено в Книге', mon(expCat('Маркетинг')), 'в расчёте прибавлена ещё ЗП мастеров на маркетинговых мероприятиях')}
+        ${row('Маркетинг: оплачено в Книге', mon(expCat('Маркетинг')), 'в расчёте прибыли к этому прибавлены изделия для маркетинга и ЗП за промо-мероприятия (их вычли из «ЗП мастеров», чтобы не задвоить)')}
         ${row('Прочие расходы Книги (в расчёте прибыли)', mon(np.npOtherLedgerCost))}
       </div>
       ${block('Возможные дубли в расходах (одна дата, сумма, категория, комментарий)', expDups.length, expDups.map(g=> g.map(e=> `<div class="stat-row" style="font-size:12.5px;"><div style="flex:1;">${escapeHtml(formatDateText(e.date))} · ${escapeHtml(mon(num(e.amount)))} · ${escapeHtml(e.category||'')} · ${escapeHtml(e.source||'')}<div style="color:var(--ink-soft);font-size:11.5px;">${escapeHtml((e.comment||''))}</div></div></div>`).join('') + '<hr style="border:none;border-top:1px dashed var(--line);margin:6px 0;">').join(''), false)}
@@ -23337,6 +23501,13 @@
       showConfirmDeletePopup(`Удалить этот расход?${hasLink ? ' Он также уберётся из себестоимости привязанного мероприятия.' : ' Действие необратимо.'}`, async ()=>{
         const expToDelete = state.modal.expense;
         state.expenses = state.expenses.filter(x=>x.id !== expToDelete.id);
+        { // удалили маркетинговый расход в Книге — убираем и саму трату из «Маркетинг → Траты» (это одни и те же деньги)
+          const sp = (state.marketingSpend||[]).find(m=> m.expenseId === expToDelete.id);
+          if(sp){
+            if(sp.eventId){ const ev = state.events.find(e=> e.id === sp.eventId); if(ev && Array.isArray(ev.materialsItems)){ ev.materialsItems = ev.materialsItems.filter(mi=> mi.msRef !== sp.id); await saveEvents(); } }
+            state.marketingSpend = state.marketingSpend.filter(m=> m.id !== sp.id); await saveMarketingSpend();
+          }
+        }
         for(const rid of (expToDelete.receiptIds||[])){ await deleteAttachedPhoto('expense-photo-'+rid); }
         if(expToDelete.eventId){
           const ev = state.events.find(e=>e.id===expToDelete.eventId);
@@ -23455,6 +23626,12 @@
       const idx = state.expenses.findIndex(x=>x.id===updated.id);
       if(idx >= 0) state.expenses[idx] = keepExtraFields(updated, state.expenses[idx]); else state.expenses.push(updated);
       await saveExpenses();
+      { // трата из «Маркетинг → Траты», связанная с этим расходом, получает ту же сумму и дату — чтобы разделы не расходились
+        const sp = (state.marketingSpend||[]).find(m=> m.expenseId === updated.id);
+        if(sp && updated.category === 'Маркетинг' && (Number(sp.amount) !== Number(updated.amount) || sp.date !== updated.date)){
+          sp.amount = Number(updated.amount)||0; sp.date = updated.date; await saveMarketingSpend();
+        }
+      }
       recordAction("Расход сохранён");
       state.modal = null; overlay.remove();
       // чтобы запись не «пропадала»: показываем тот месяц, в котором расход реально отображается (зарплата 1–2 числа относится к прошлому месяцу),
@@ -24980,6 +25157,11 @@
       };
     });
 
+    const hdrMore = document.getElementById('hdr-more');
+    if(hdrMore){
+      hdrMore.querySelectorAll('.hdr-more-panel button').forEach(b=> b.addEventListener('click', ()=>{ hdrMore.open = false; }));
+      if(!window.__hdrMoreOutside){ window.__hdrMoreOutside = true; document.addEventListener('click', (ev)=>{ const m = document.getElementById('hdr-more'); if(m && m.open && !m.contains(ev.target)) m.open = false; }); }
+    }
     const pushToggleBtn = document.getElementById('btn-push-toggle');
     if(pushToggleBtn) pushToggleBtn.onclick = async ()=>{
       pushToggleBtn.disabled = true;
@@ -27272,6 +27454,101 @@
     const rows = Object.entries(map).map(([name,amount])=>({name,amount})).sort((a,b)=>b.amount-a.amount);
     return { total: rows.reduce((s,r)=>s+r.amount,0), rows };
   }
+  // ===== ЕДИНЫЙ РАСЧЁТ РАСХОДОВ НА МАРКЕТИНГ — одна формула для всех разделов =====
+  // Раньше разделы считали по-разному: «Маркетинг → Траты» — по своему журналу, «Чистая прибыль» — по Книге
+  // + ЗП промо-мероприятий (которая ещё и сидела второй раз в «ЗП мастеров»), «Статистика» — журнал + материалы,
+  // «Сводка по годам» — только Книга, панель «📣 Маркетинг» — только материалы промо-мероприятий.
+  // Теперь везде одно и то же:
+  //   ДЕНЬГИ НА МАРКЕТИНГ = оплачено в Книге с категорией «Маркетинг» (траты из «Маркетинг → Траты» попадают туда сами)
+  //                       + доплаты мастерам за изделия для маркетинга (направление «Изделия» — выдаются с зарплатой)
+  //                       + ЗП мастеров за мероприятия со статусом «Маркетинг» (съёмки, розыгрыши).
+  // Справочно — материалы на промо (материалы промо-мероприятий и доля на блогеров/гостей по маркетинг-сертификату):
+  // в прибыли они уже внутри «Материалов» (закупки по Книге), поэтому в сумму «Маркетинг» не добавляются.
+  function marketingCostParts(inP){
+    const today = todayStr();
+    const num = v=> (v!==undefined && v!==null && v!=='' && !isNaN(v)) ? Number(v) : 0;
+    const ledgerRows = (state.expenses||[]).filter(e=> e.category === 'Маркетинг' && !e.netProfitRef && !e.safeTransfer && inP(e.date));
+    const ledger = ledgerRows.reduce((s,e)=> s + num(e.amount), 0);
+    const items = (state.salaryAdjustments||[]).filter(a=> a.msRef && inP(a.date)).reduce((s,a)=> s + num(a.amount), 0);
+    const mEv = (state.events||[]).filter(e=> e.status === 'marketing' && inP(e.date));
+    const evPay = mEv.reduce((s,e)=> s + eventTotalMasterPay(e), 0);
+    const evPayPast = mEv.filter(e=> e.date <= today).reduce((s,e)=> s + eventTotalMasterPay(e), 0);
+    const evMat = mEv.reduce((s,e)=> s + eventMaterialsCostExclMarketingSpend(e), 0);
+    const guestMat = (state.events||[]).filter(e=> e.status !== 'marketing' && e.status !== 'cancelled' && inP(e.date)).reduce((s,e)=> s + eventMarketingGuestsMaterialsCost(e), 0);
+    const journal = (state.marketingSpend||[]).filter(m=> inP(m.date)).reduce((s,m)=> s + num(m.amount), 0);
+    return { ledger, items, evPay, evPayPast, evMat, guestMat, journal,
+      money: ledger + items + evPay, promoMaterials: evMat + guestMat, viaSalary: evPayPast + items, events: mEv.length };
+  }
+  function marketingCostForMonth(ym){ return marketingCostParts(d=> !!d && d.startsWith(ym)); }
+  // сверка «Маркетинг → Траты» ↔ «Книга»: что разошлось за месяц
+  function marketingReconcile(ym){
+    const issues = [];
+    const expById = new Map((state.expenses||[]).map(e=> [e.id, e]));
+    const linked = new Set();
+    (state.marketingSpend||[]).forEach(m=>{
+      if(m.direction === 'Изделия') return;
+      const ex = m.expenseId ? expById.get(m.expenseId) : null;
+      if(ex) linked.add(ex.id);
+      const inMonth = (m.date||'').startsWith(ym) || (ex && (ex.date||'').startsWith(ym));
+      if(!inMonth) return;
+      if(!ex) issues.push({ kind:'noexp', m });
+      else if(ex.category !== 'Маркетинг') issues.push({ kind:'recat', m, ex });
+      else if(Math.round(Number(ex.amount)||0) !== Math.round(Number(m.amount)||0) || ex.date !== m.date) issues.push({ kind:'diff', m, ex });
+    });
+    (state.expenses||[]).filter(e=> e.category === 'Маркетинг' && !e.netProfitRef && !e.safeTransfer && (e.date||'').startsWith(ym) && !linked.has(e.id))
+      .forEach(ex=> issues.push({ kind:'manual', ex }));
+    (state.marketingSpend||[]).filter(m=> m.direction === 'Изделия' && (m.date||'').startsWith(ym)).forEach(m=>{
+      const a = (state.salaryAdjustments||[]).find(x=> x.id === m.adjId);
+      if(!a) issues.push({ kind:'noadj', m });
+      else if(Math.round(Number(a.amount)||0) !== Math.round(Number(m.amount)||0) || a.date !== m.date) issues.push({ kind:'adjdiff', m, a });
+    });
+    return issues;
+  }
+  async function marketingReconcileFix(ym){
+    const issues = marketingReconcile(ym);
+    let changedSpend = false, changedAdj = false;
+    for(const it of issues){
+      if(it.kind === 'noexp'){ it.m.expenseId = await syncMarketingSpendExpense(it.m); changedSpend = true; }
+      else if(it.kind === 'diff'){ it.m.amount = Number(it.ex.amount)||0; it.m.date = it.ex.date; changedSpend = true; } // Книга главнее: её сверяют с выпиской
+      else if(it.kind === 'manual'){
+        state.marketingSpend.push({ id: uid(), date: it.ex.date, direction: 'Прочее', socialNetwork: '', bloggerName: '', bloggerHandle: '', reach: null,
+          amount: Number(it.ex.amount)||0, comment: (it.ex.comment || 'Внесено в Книге').replace(/^Маркетинг:\s*/, ''), expenseId: it.ex.id, eventId: '', itemsMaster: '', adjId: '' });
+        changedSpend = true;
+      }
+      else if(it.kind === 'adjdiff'){ it.a.amount = Number(it.m.amount)||0; it.a.date = it.m.date; changedAdj = true; }
+      else if(it.kind === 'noadj' && it.m.itemsMaster){
+        const a = { id: uid(), date: it.m.date, masterName: it.m.itemsMaster, amount: Number(it.m.amount)||0, eventId: '', comment: it.m.comment ? 'Маркетинг: изделия — ' + it.m.comment : 'Маркетинг: изделия', msRef: it.m.id, createdAt: new Date().toISOString() };
+        state.salaryAdjustments.push(a); it.m.adjId = a.id; changedAdj = true; changedSpend = true;
+      }
+    }
+    if(changedAdj) await saveSalaryAdjustments();
+    if(changedSpend) await saveMarketingSpend();
+    recordAction('Сверка маркетинга с Книгой');
+  }
+  function marketingReconcileHtml(ym){
+    const issues = marketingReconcile(ym);
+    const P = marketingCostForMonth(ym);
+    const label = { noexp:'нет в Книге', diff:'в Книге другая сумма/дата', recat:'в Книге перенесено в другую категорию', manual:'внесено в Книгу вручную, нет в Тратах', noadj:'изделия: нет доплаты мастеру', adjdiff:'изделия: доплата мастеру другая' };
+    const sumLine = `<div class="mk-sum-grid">
+        <div><span>Оплачено в Книге (категория «Маркетинг»)</span><b>${formatMoney(Math.round(P.ledger))}</b></div>
+        ${P.items ? `<div><span>Изделия для маркетинга — доплаты мастерам</span><b>${formatMoney(Math.round(P.items))}</b></div>` : ''}
+        ${P.evPay ? `<div><span>ЗП мастеров за промо-мероприятия (${P.events})</span><b>${formatMoney(Math.round(P.evPay))}</b></div>` : ''}
+        <div class="tot"><span>Расходы на маркетинг — эта же сумма в «Чистой прибыли», «Статистике», «Сводке по годам» и «Показателях»</span><b>${formatMoney(Math.round(P.money))}</b></div>
+        ${P.promoMaterials ? `<div class="mut"><span>справочно: материалы на промо (в прибыли — в строке «Материалы»)</span><b>${formatMoney(Math.round(P.promoMaterials))}</b></div>` : ''}
+      </div>`;
+    const issuesHtml = issues.length ? `
+      <div class="mk-recon">
+        <div class="mk-recon-h">⚠ Траты и Книга расходятся: ${issues.length} ${pluralRu(issues.length,'запись','записи','записей')}</div>
+        ${issues.slice(0,20).map(it=>{
+          const d = it.m || it.ex; const ex = it.ex;
+          return `<div class="mk-recon-row"><span>${formatDateText((d&&d.date)||'')}</span><span>${formatMoney(Number((it.m||it.ex).amount)||0)}${it.kind==='diff' ? ' → в Книге ' + formatMoney(Number(ex.amount)||0) + (ex.date!==it.m.date ? ', ' + formatDateText(ex.date) : '') : ''}${it.kind==='recat' ? ' → «' + escapeHtml(ex.category||'') + '»' : ''}</span><span>${escapeHtml((it.m && (it.m.direction + (it.m.comment ? ' · ' + it.m.comment : ''))) || (ex && ex.comment) || '')}</span><span class="k">${label[it.kind]}</span></div>`;
+        }).join('')}
+        ${issues.some(i=> i.kind !== 'recat') ? `<button class="btn btn-primary" id="mk-recon-fix" style="margin-top:8px;">🔧 Свести: Книга главная</button>
+        <div class="mk-recon-note">Что сделает: трату без записи в Книге — внесёт в Книгу; разную сумму/дату — возьмёт из Книги (её сверяют с выпиской); расход, внесённый в Книгу вручную, — добавит в Траты с направлением «Прочее» (направление потом можно поменять).${issues.some(i=>i.kind==='recat') ? ' Записи, которые в Книге перенесены в другую категорию, не трогаю — решите сами: вернуть в Книге категорию «Маркетинг» или удалить трату.' : ''}</div>` : ''}
+      </div>` : `<div class="mk-recon-ok">✓ Траты и Книга совпадают</div>`;
+    return `<div class="analytics-section mk-sum">${sumLine}${issuesHtml}</div>`;
+  }
+
   function computeMastersCashSalary(ym){
     const byName = {};
     const add = (name, amount)=>{ const n=(name||'').trim(); if(!n||!amount) return; byName[n]=(byName[n]||0)+amount; };
@@ -27319,6 +27596,7 @@
     });
     const marketingEventsTotal = evtsM.filter(e=> e.status==='marketing').reduce((s,e)=> s + eventTotalMasterPay(e), 0);
     bucket(marketingMap, 'Съёмки/промо-мероприятия (ЗП мастеров)', marketingEventsTotal);
+    bucket(marketingMap, 'Изделия для маркетинга (доплаты мастерам)', marketingCostForMonth(ym).items);
     const guestsCostTotal = evtsM.filter(e=> e.status!=='marketing').reduce((s,e)=> s + eventMarketingGuestsMaterialsCost(e), 0);
 
     // "Прочие расходы (Книга)" — та же выборка, что и в npOtherLedgerCost, укрупнённо по категории
@@ -28671,10 +28949,11 @@
         // расходы по месяцу — только уже открытые везде категории (не то, что скрыто в "Чистой прибыли")
         const mMaterialsCost = mEvts.reduce((s,e)=> s + eventMaterialsCost(e), 0);
         // компенсация за материалы считается по дате расхода (может отличаться от месяца самого мероприятия), поэтому перебираем все мероприятия, а не только mEvts
-        const mMastersSalary = mEvts.reduce((s,e)=> s + eventTotalMasterPay(e), 0)
+        // ЗП за промо-мероприятия и доплаты за изделия для маркетинга — в колонке «Маркетинг» (единая формула), здесь их не считаем
+        const mMastersSalary = mEvts.filter(e=> e.status !== 'marketing').reduce((s,e)=> s + eventTotalMasterPay(e), 0)
           + state.itemSales.filter(x=>x.date && x.date.startsWith(ym)).reduce((s,x)=> s + Math.round(((x.revenue!==undefined&&x.revenue!==null&&!isNaN(x.revenue))?Number(x.revenue):0) * itemMasterPct(x.date) / 100), 0)
           + state.orders.filter(x=>x.date && x.date.startsWith(ym)).reduce((s,x)=> s + orderTotalMasterShare(x), 0)
-          + state.salaryAdjustments.filter(a=>adjEffDate(a) && adjEffDate(a).startsWith(ym)).reduce((s,a)=> s + (Number(a.amount)||0), 0);
+          + state.salaryAdjustments.filter(a=> !a.msRef && adjEffDate(a) && adjEffDate(a).startsWith(ym)).reduce((s,a)=> s + (Number(a.amount)||0), 0);
         let mHostessSalary = hostessBaseTotalFor(ym);
         {
           const daysInM = new Date(year, mIdx+1, 0).getDate();
@@ -28696,7 +28975,7 @@
             mHostessSalary += Object.values(hostessDishesBonusesForDate(dateStr, dayShifts)).reduce((s,v)=>s+v,0);
           }
         }
-        const mMarketingCost = state.expenses.filter(e=>e.date && e.date.startsWith(ym) && e.category==='Маркетинг').reduce((s,e)=> s + ((e.amount!==undefined&&e.amount!==null&&!isNaN(e.amount))?Number(e.amount):0), 0);
+        const mMarketingCost = marketingCostForMonth(ym).money;
         const mManual = (yearSummaryManualData[ym]) || {};
         return {
           label: MONTHS[mIdx].charAt(0).toUpperCase()+MONTHS[mIdx].slice(1),
@@ -28861,9 +29140,8 @@
     const npMaterialsCost = computeMaterialsLedger(monthYm).total;
     const npMarketingMaterialsCost = evts.filter(e=> e.status==='marketing').reduce((s,e)=> s + eventMaterialsCostExclMarketingSpend(e), 0);
     const npMarketingMasterPay = evts.filter(e=> e.status==='marketing').reduce((s,e)=> s + eventTotalMasterPay(e), 0);
-    const npMarketingCost = state.expenses
-      .filter(e=> e.date && e.date.startsWith(monthYm) && e.category === 'Маркетинг')
-      .reduce((s,e)=> s + ((e.amount!==undefined&&e.amount!==null&&!isNaN(e.amount))?Number(e.amount):0), 0) + npMarketingMasterPay;
+    const npMktParts = marketingCostForMonth(monthYm);
+    const npMarketingCost = npMktParts.money;
     // остальные категории из "Книги → Расходы" (Инвентарь, Декор, Логистика и т.п., включая свои) —
     // "Аренда"/"Зарплата" туда не входят: для них уже есть ручное поле "Аренда" и автосчёт ЗП ниже, те же
     // суммы задвоились бы. Расходы, привязанные к конкретному мероприятию, тоже не берём — они уже в "Материалы" выше.
@@ -28899,7 +29177,10 @@
     const npHostessAdjustments = state.salaryAdjustments
       .filter(a=> adjEffDate(a) && adjEffDate(a).startsWith(monthYm) && !isAdjMirroredToEvent(a) && HOSTESS_LIST.some(h=>h.toLowerCase()===(a.masterName||'').trim().toLowerCase()))
       .reduce((s,a)=> s + (Number(a.amount)||0), 0);
-    const npMastersSalary = computeMastersCashSalary(monthYm).total;
+    // ЗП за промо-мероприятия и доплаты за изделия для маркетинга выдаются вместе с зарплатой (Книга → Зарплата),
+    // но в отчёте это расход на маркетинг — вычитаем их из «ЗП мастеров», иначе они считались бы дважды
+    const npMastersSalaryCash = computeMastersCashSalary(monthYm).total;
+    const npMastersSalary = Math.max(0, npMastersSalaryCash - npMktParts.viaSalary);
     // зп хостес — по графику смен (будни/выходные + переработка), как и в разделе "ЗП хостес", плюс
     // корректировки на имя админа и премия, вписанная владельцем вручную (state.hostessBonuses) — то же,
     // что фактически увидит админ в своей «Моя зарплата», иначе эти расходы нигде не попадали бы в прибыль
@@ -28955,7 +29236,7 @@
       {label:'Материалы (по Книге)', amount: npMaterialsCost, breakdown: npExpenseBreakdown.materials},
       {label:'Маркетинг', amount: npMarketingCost, breakdown: npExpenseBreakdown.marketing},
       {label:'Прочие расходы (Книга)', amount: npOtherLedgerCost, breakdown: npExpenseBreakdown.otherLedger},
-      {label:'ЗП мастеров (выдано + будущие записи)', amount: npMastersSalary, breakdown: computeMastersCashSalary(monthYm).rows},
+      {label:'ЗП мастеров (выдано + будущие записи)', amount: npMastersSalary, breakdown: computeMastersCashSalary(monthYm).rows.concat(npMktParts.viaSalary ? [{name:'− перенесено в «Маркетинг» (промо-мероприятия, изделия)', amount: -Math.min(npMktParts.viaSalary, npMastersSalaryCash)}] : [])},
       {label:'ЗП админов', amount: npHostessSalary, breakdown: npStaffBreakdown.hostess},
       {label:'ЗП менеджеров', amount: npManagerSalary, breakdown: computeManagersPayForMonth(monthYm).rows.map(r=>({name: r.name + (r.edited ? ' (изменено вручную)' : ' (авто)') + (r.adj ? ' · корр. ' + (r.adj>0?'+':'') + formatMoney(r.adj) : ''), amount: r.amount}))},
       {label:'Аренда', amount: npRent},
@@ -29230,10 +29511,17 @@
       .map(e=>({ ...e, _cost: eventMaterialsCost(e) }))
       .sort((a,b)=> (b.date||'').localeCompare(a.date||''));
     const marketingTotalSpend = marketingEventsThisYear.reduce((s,e)=>s+e._cost, 0);
+    const mktYearRows = [];
+    for(let mi=0; mi<12; mi++){ const k = summaryYear + '-' + pad(mi+1); const P = marketingCostForMonth(k); if(P.money || P.promoMaterials) mktYearRows.push([MONTHS[mi], P]); }
+    const mktYearTotal = mktYearRows.reduce((s,[,P])=> s + P.money, 0);
     const analyticsPanel_marketing = `
       <div class="analytics-section">
-        <div style="font-size:22px;font-family:var(--font-display);font-weight:600;margin-bottom:4px;">${formatMoney(marketingTotalSpend)}</div>
-        <div style="font-size:12px;color:var(--ink-soft);margin-bottom:14px;">Всего потрачено на мероприятия со статусом «Маркетинг» за ${summaryYear} год. Расходы попадают сюда, когда в «Книге → Расходы» их привязывают к конкретному мероприятию.</div>
+        <div style="font-size:22px;font-family:var(--font-display);font-weight:600;margin-bottom:4px;">${formatMoney(Math.round(mktYearTotal))}</div>
+        <div style="font-size:12px;color:var(--ink-soft);margin-bottom:10px;">Расходы на маркетинг за ${summaryYear} год — Книга «Маркетинг» + изделия для маркетинга + ЗП за промо-мероприятия. По каждому месяцу это та же сумма, что «Маркетинг» в «Чистой прибыли».</div>
+        ${mktYearRows.map(([mn,P])=> `<div class="stat-row"><div class="stat-label" style="text-transform:capitalize;">${mn}</div><div style="flex:1;font-family:var(--font-mono);font-size:13px;text-align:right;">${formatMoney(Math.round(P.money))}${P.promoMaterials ? ` <span style="color:var(--ink-soft);font-size:11px;">+ материалы на промо ${formatMoney(Math.round(P.promoMaterials))}</span>` : ''}</div></div>`).join('')}
+      </div>
+      <div class="analytics-section">
+        <h4 style="margin-top:0;">Промо-мероприятия (статус «Маркетинг») — материалы ${formatMoney(marketingTotalSpend)}</h4>
         ${marketingEventsThisYear.length === 0 ? '<div style="color:var(--ink-soft);font-size:13px;">За этот год маркетинговых мероприятий не было.</div>' : marketingEventsThisYear.map(e=>`
           <div class="stat-row">
             <div class="stat-label">${escapeHtml(e.date ? e.date.slice(8,10)+'.'+e.date.slice(5,7) : '')} · ${escapeHtml(e.title||'без названия')}</div>
@@ -35985,7 +36273,7 @@
     const npHostessAdjustments = state.salaryAdjustments
       .filter(a=> adjEffDate(a) && adjEffDate(a).startsWith(ym) && !isAdjMirroredToEvent(a) && HOSTESS_LIST.some(h=>h.toLowerCase()===(a.masterName||'').trim().toLowerCase()))
       .reduce((s,a)=> s + (Number(a.amount)||0), 0);
-    const npMastersSalary = computeMastersCashSalary(ym).total;
+    const npMastersSalary = Math.max(0, computeMastersCashSalary(ym).total - marketingCostForMonth(ym).viaSalary);
 
     let npHostessSalary = 0;
     {
@@ -36022,9 +36310,8 @@
     // одной строкой «Прочие расходы». С 19.11.2026 расходы, привязанные к мероприятию (eventId), тоже берём:
     // материалы в прибыли считаются по Книге, а не по себестоимости мероприятий, — раньше такие расходы
     // (продукты, декор, логистика на конкретное мероприятие) не попадали в прибыль вовсе.
-    const npMarketingCost = state.expenses
-      .filter(e=> e.date && e.date.startsWith(ym) && e.category === 'Маркетинг')
-      .reduce((s,e)=> s + ((e.amount!==undefined&&e.amount!==null&&!isNaN(e.amount))?Number(e.amount):0), 0) + npMarketingMasterPay;
+    const npMktParts = marketingCostForMonth(ym);
+    const npMarketingCost = npMktParts.money;
     // "Материалы" (поставки/приёмка сырья) тоже не берём — та же себестоимость уже учтена в npMaterialsCost
     // выше (через materialsItems каждого мероприятия); иначе расход на материалы задвоится.
     // "Сейф" — служебная категория для перемещений наличных между кассой и сейфом (раздел "Касса"),
