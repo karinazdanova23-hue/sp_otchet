@@ -1017,6 +1017,22 @@
   .mday-chip{ border:1px solid var(--line-strong); background:var(--white); border-radius:14px; padding:1px 8px; font:inherit; font-size:12.5px; cursor:pointer; display:inline-flex; gap:5px; align-items:center; }
   .mday-chip:hover{ border-color:var(--ink); background:#FFF8DC; }
   .mday-badge{ font-size:11px; color:var(--ink-soft); white-space:nowrap; }
+  .refund-row.yc-row{ display:flex !important; grid-template-columns:none !important; align-items:flex-start; gap:14px; flex-wrap:wrap; }
+  .yc-who{ flex:0 0 300px; min-width:0; } .yc-info{ flex:1 1 300px; min-width:0; font-size:12.5px; line-height:1.5; } .yc-row .reason{ flex:0 0 auto; }
+  .yc-name{ font-weight:700; font-size:14px; } .yc-bd{ font-size:12.5px; margin:2px 0; } .yc-ph{ font-size:12px; } .yc-ph a{ color:inherit; }
+  .yc-dim{ color:var(--ink-soft); font-size:11.5px; font-weight:400; } .yc-cm{ font-size:12px; color:#6B5B3E; }
+  .yc-tag{ display:inline-block; background:#EEF0E4; color:#4E5733; border-radius:8px; padding:0 7px; margin:0 4px 2px 0; font-size:11px; }
+  .yc-st{ border:1px solid var(--line-strong); background:var(--bg, var(--white)); color:var(--fg, var(--ink)); border-radius:14px; padding:4px 11px; font:inherit; font-size:12px; cursor:pointer; opacity:.75; }
+  .yc-st.on{ opacity:1; outline:2px solid var(--fg, var(--ink)); font-weight:700; }
+  @media (max-width:720px){ .yc-who{ flex-basis:100%; } }
+  .ev-rep-btn{ border:1px solid var(--line-strong); background:var(--white); border-radius:12px; padding:5px 12px; font:inherit; font-size:13px; cursor:pointer; margin-right:8px; white-space:nowrap; }
+  .ev-rep-btn.has{ background:#EEF0E4; border-color:#B9C99A; color:#3F4A26; font-weight:600; } .ev-rep-btn.has:hover{ background:#E2E7D2; }
+  .ev-rep-btn.has span{ font-weight:700; } .ev-rep-btn.has span.low{ color:var(--status-red); }
+  .ev-rep-btn.none{ cursor:default; color:var(--ink-soft); background:transparent; border-style:dashed; } .ev-rep-btn.none.late{ color:#B4532A; border-color:#EBC5BD; }
+  .ev-rep-modal{ background:var(--paper, #FBF7EF); width:100%; max-width:640px; max-height:92vh; overflow-y:auto; border-radius:18px; box-shadow:0 20px 60px rgba(0,0,0,.35); }
+  .ev-rep-head{ display:flex; align-items:center; gap:8px; padding:12px 16px; border-bottom:1px solid var(--line); position:sticky; top:0; background:inherit; z-index:1; border-radius:18px 18px 0 0; }
+  .ev-rep-x{ border:none; background:none; font-size:22px; cursor:pointer; color:var(--ink-soft); }
+  .ev-rep-body{ padding:12px 16px 16px; } .ev-rep-body .rf-card{ margin:0; }
   .mday-grp{ font-size:11.5px; font-weight:700; color:var(--ink-soft); margin:10px 0 5px; }
   .mday-over{ margin:8px 18px 0; background:#FBEDEA; border:1px solid #EBC5BD; color:#7A2E22; border-radius:10px; padding:7px 12px; font-size:12.5px; }
   .mday-tplbtn{ border:1px solid var(--line-strong); background:var(--white); border-radius:10px; font:inherit; font-size:11px; padding:2px 8px; cursor:pointer; text-transform:none; letter-spacing:0; font-weight:600; }
@@ -13678,6 +13694,16 @@
         if(freshInput){ freshInput.focus(); const v = freshInput.value; freshInput.value=''; freshInput.value = v; }
       };
     }
+    const ycSort = document.getElementById('yc-sort'); if(ycSort) ycSort.onchange = ()=>{ state.outreachSort = ycSort.value; render(); };
+    document.querySelectorAll('[data-yc-st]').forEach(b=> b.onclick = ()=>{ state.outreachStatusF = b.dataset.ycSt; render(); });
+    const ycArc = document.getElementById('yc-archive'); if(ycArc) ycArc.onclick = ()=> openOutreachArchive();
+    const ycImp = document.getElementById('yc-import');
+    if(ycImp) ycImp.onchange = async ()=>{
+      const f = ycImp.files && ycImp.files[0]; if(!f) return;
+      try{ const r = await importYclientsBase(f); showToast(`База загружена: ${r.count} клиентов${r.added && r.added !== r.count ? ', новых ' + r.added : ''}${r.legacy ? '. Старый список убран в архив' : ''}`); }
+      catch(e){ showGapWarningBanner('Не удалось загрузить: ' + (e && e.message ? e.message : e)); }
+      render();
+    };
     const btnOutreachDue = document.getElementById('btn-outreach-due');
     if(btnOutreachDue) btnOutreachDue.onclick = ()=>{ state.outreachViewMode = 'due'; render(); };
     const btnOutreachRebalance = document.getElementById('btn-outreach-rebalance');
@@ -17391,105 +17417,194 @@
     };
   }
 
+  // ===== 🎉 Поздравления: база клиентов из YClients (выгрузка .xls) — без сроков, просто список =====
+  // Загружается кнопкой «📥 Загрузить базу из YClients» и хранится в birthday-outreach (как раньше), записи с src:'yc'.
+  // Персональные данные в код приложения не зашиваются — только в хранилище студии.
+  function ycDigits(v){ let d = String(v==null?'':v).replace(/\D/g,''); if(d.length === 11 && d[0] === '8') d = '7' + d.slice(1); if(d.length === 10) d = '7' + d; return d; }
+  function ycDate(v){
+    if(v === null || v === undefined || v === '') return '';
+    if(v instanceof Date && !isNaN(v)) return fmtDate(v);
+    if(typeof v === 'number' && v > 20000 && v < 80000){ const d = new Date(Math.round((v - 25569) * 86400000)); return d.toISOString().slice(0,10); }
+    const s = String(v).trim();
+    let m = s.match(/^(\d{1,2})[-./](\d{1,2})[-./](\d{4})/); if(m) return `${m[3]}-${pad(+m[2])}-${pad(+m[1])}`;
+    m = s.match(/^(\d{4})-(\d{2})-(\d{2})/); if(m) return `${m[1]}-${m[2]}-${m[3]}`;
+    m = s.match(/^(\d{1,2})[-./](\d{1,2})$/); if(m) return `0000-${pad(+m[2])}-${pad(+m[1])}`;
+    return '';
+  }
+  // ближайший день рождения (от сегодня): { iso, days, age }
+  function ycNextBirthday(bd){
+    if(!bd || bd.length < 10) return null;
+    const mm = +bd.slice(5,7), dd = +bd.slice(8,10); if(!mm || !dd) return null;
+    const t = parseDate(todayStr()); let y = t.getFullYear();
+    let d = new Date(y, mm-1, dd); if(d < t) d = new Date(++y, mm-1, dd);
+    const days = Math.round((d - t) / 86400000);
+    const by = +bd.slice(0,4); const age = by > 1900 ? y - by : null;
+    // «было N дней назад» — если ДР был совсем недавно (до 10 дней), показываем и это
+    const prev = new Date(y-1, mm-1, dd); const ago = Math.round((t - prev) / 86400000);
+    return { iso: fmtDate(d), days, age, ago: ago <= 10 ? ago : null };
+  }
+  async function importYclientsBase(file){
+    const XLSX = await cpLoadXlsxLib();
+    const buf = await file.arrayBuffer();
+    const wb = XLSX.read(buf, { type:'array', cellDates:true });
+    const ws = wb.Sheets[wb.SheetNames[0]];
+    const rows = XLSX.utils.sheet_to_json(ws, { header:1, raw:true, defval:'' });
+    const hi = rows.findIndex(r=> r.some(c=> /^имя$/i.test(String(c).trim())) && r.some(c=> /телефон/i.test(String(c))));
+    if(hi < 0) throw new Error('Не нашёл строку заголовков (Имя, Телефон…). Это выгрузка клиентов из YClients?');
+    const H = rows[hi].map(x=> String(x).trim().toLowerCase());
+    const col = (re)=> H.findIndex(h=> re.test(h));
+    const C = { name: col(/^имя$/), phone: col(/^телефон$/), email: col(/^email$|почта/), cats: col(/категор/), bd: col(/^дата рождения$/),
+      spent: col(/^потратил/), paid: col(/^оплатил/), gender: col(/^пол$/), last: col(/последний визит/), first: col(/первый визит/), visits: col(/количество посещений|визитов/),
+      comment: col(/^комментарий$/), phone2: col(/доп.*телефон/), mailing: col(/рассыл/), bdForm: col(/ваша дата рождения/), source: col(/откуда узнали/) };
+    const get = (r, k)=> C[k] >= 0 ? r[C[k]] : '';
+    const num = (v)=>{ const n = Number(String(v).replace(/\s/g,'').replace(',','.')); return isFinite(n) ? n : 0; };
+    const items = [];
+    rows.slice(hi+1).forEach(r=>{
+      const name = String(get(r,'name')||'').trim(); const phone = ycDigits(get(r,'phone'));
+      if(!name && !phone) return;
+      items.push({ src:'yc', name, phone, phone2: ycDigits(get(r,'phone2')), email: String(get(r,'email')||'').trim(), categories: String(get(r,'cats')||'').trim(),
+        birthDate: ycDate(get(r,'bd')), birthDateForm: ycDate(get(r,'bdForm')), spent: num(get(r,'spent')), paid: num(get(r,'paid')), gender: String(get(r,'gender')||'').trim(),
+        lastVisit: String(get(r,'last')||'').slice(0,16), firstVisit: String(get(r,'first')||'').slice(0,16), visits: num(get(r,'visits')),
+        ycComment: String(get(r,'comment')||'').trim(), source: String(get(r,'source')||'').trim(), mailing: String(get(r,'mailing')||'').trim() });
+    });
+    if(!items.length) throw new Error('В файле не нашлось клиентов.');
+    // склейка: по телефону (или имени, если телефона нет) — статус, заметки и «Купили» у уже загруженных сохраняются
+    const keyOf = (o)=> o.phone || ('n:' + String(o.name||'').toLowerCase());
+    const old = (state.birthdayOutreach||[]);
+    const prevYc = new Map(old.filter(o=> o.src === 'yc').map(o=> [keyOf(o), o]));
+    const seen = new Set(); const merged = [];
+    items.forEach(it=>{ const k = keyOf(it); if(seen.has(k)) return; seen.add(k); const p = prevYc.get(k);
+      merged.push(p ? { ...p, ...it, id: p.id, status: p.status || 'in_progress' } : { ...it, id: uid(), status:'in_progress', importedAt: new Date().toISOString() }); });
+    // клиенты из прошлой загрузки, которых нет в новом файле, остаются (с пометкой), если по ним уже работали
+    old.filter(o=> o.src === 'yc' && !seen.has(keyOf(o)) && (o.status && o.status !== 'in_progress')).forEach(o=> merged.push({ ...o, notInLastImport:true }));
+    // старый список (инстаграм-аккаунты со сроками) — один раз откладываем в архив и убираем из раздела
+    const legacy = old.filter(o=> o.src !== 'yc');
+    if(legacy.length){ try{
+      let prev = []; try{ const r = await window.storage.get('birthday-outreach-archive', true); if(r && r.value) prev = (JSON.parse(r.value)||{}).items || []; }catch(e){}
+      const ids = new Set(legacy.map(o=> o.id)); const items = [...prev.filter(o=> !ids.has(o.id)), ...legacy];
+      await storageSetWithRetry('birthday-outreach-archive', JSON.stringify({ archivedAt: new Date().toISOString(), items }));
+    }catch(e){} }
+    state.birthdayOutreach = merged;
+    await saveBirthdayOutreach();
+    recordAction('Поздравления: загружена база из YClients', `Клиентов: ${items.length}${legacy.length ? ', старый список (' + legacy.length + ') убран в архив' : ''}`);
+    return { count: merged.length, added: merged.filter(o=> !prevYc.has(keyOf(o))).length, legacy: legacy.length };
+  }
+
+  // 🗂 архив старого списка поздравлений (инстаграм-аккаунты со сроками) — только просмотр
+  async function openOutreachArchive(){
+    document.querySelectorAll('#yc-arc-overlay').forEach(x=> x.remove());
+    const wrap = document.createElement('div'); wrap.id = 'yc-arc-overlay'; wrap.className = 'ts-overlay';
+    wrap.innerHTML = `<div class="ev-rep-modal"><div class="ev-rep-head"><b>🗂 Архив старого списка</b><span style="flex:1;"></span><button type="button" class="ev-rep-x" title="Закрыть">×</button></div>
+      <div class="ev-rep-body"><div class="yc-dim">Загружаю…</div></div></div>`;
+    document.body.appendChild(wrap);
+    const close = ()=> wrap.remove();
+    wrap.onclick = (x)=>{ if(x.target === wrap) close(); };
+    wrap.querySelector('.ev-rep-x').onclick = close;
+    let items = [], at = '';
+    try{ const r = await window.storage.get('birthday-outreach-archive', true); if(r && r.value){ const d = JSON.parse(r.value)||{}; items = d.items || []; at = d.archivedAt || ''; } }catch(e){}
+    // если база ещё не загружалась — старый список пока в разделе, показываем его же
+    const live = (state.birthdayOutreach||[]).filter(o=> o.src !== 'yc');
+    if(live.length){ const ids = new Set(items.map(o=> o.id)); items = [...items, ...live.filter(o=> !ids.has(o.id))]; }
+    const body = wrap.querySelector('.ev-rep-body');
+    if(!items.length){ body.innerHTML = '<div class="host-empty">Архив пуст — старый список ещё не переносился.</div>'; return; }
+    const stKey = (o)=> o.status || (o.written ? 'written' : 'in_progress');
+    const counts = {}; items.forEach(o=>{ const k = stKey(o); counts[k] = (counts[k]||0) + 1; });
+    let q = '', stF = '';
+    const hay = (o)=> [o.instagram, o.name, o.phone, o.birthDateLabel, o.whoseBirthday, o.message, o.note, o.writeDate, outreachStatusMeta(stKey(o)).label].join(' ').toLowerCase();
+    const row = (o)=>{ const m = outreachStatusMeta(stKey(o)); const url = o.profileUrl || (o.instagram ? 'https://instagram.com/' + String(o.instagram).replace(/^@/,'') : '');
+      return `<div style="border:1px solid var(--line);border-radius:10px;padding:8px 10px;margin-bottom:6px;font-size:13px;line-height:1.45;">
+        <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
+          <b>${url ? `<a href="${escapeHtml(url)}" target="_blank" rel="noopener">${escapeHtml(o.instagram || o.name || url)}</a>` : escapeHtml(o.instagram || o.name || '—')}</b>
+          ${o.birthDateLabel ? `<span>🎂 ${escapeHtml(o.birthDateLabel)}</span>` : ''}
+          ${o.whoseBirthday && o.whoseBirthday !== 'свой' ? `<span class="yc-dim">· ДР: ${escapeHtml(o.whoseBirthday)}</span>` : ''}
+          <span style="margin-left:auto;background:${m.bg};color:${m.fg};border-radius:999px;padding:1px 9px;font-size:12px;">${escapeHtml(m.label)}</span></div>
+        ${o.message ? `<div class="yc-dim">💬 ${escapeHtml(o.message)}</div>` : ''}
+        ${o.note ? `<div class="yc-dim">📝 ${escapeHtml(o.note)}</div>` : ''}
+        ${o.writeDate ? `<div class="yc-dim">Срок написать: ${escapeHtml(/^\d{4}-\d\d-\d\d$/.test(o.writeDate) ? formatDateText(o.writeDate) : o.writeDate)}${o.boughtRevenue ? ' · купили на ' + Number(o.boughtRevenue).toLocaleString('ru-RU') + ' ₽' : ''}</div>` : ''}
+      </div>`; };
+    const draw = ()=>{
+      const list = items.filter(o=> (!stF || stKey(o) === stF) && (!q || hay(o).includes(q)));
+      body.innerHTML = `<div class="yc-dim" style="margin-bottom:8px;">Только просмотр · ${items.length} записей${at ? ' · в архиве с ' + new Date(at).toLocaleDateString('ru-RU') : ''}</div>
+        <input type="search" id="yc-arc-q" placeholder="Поиск: инстаграм, дата, сообщение…" value="${escapeHtml(q)}" style="width:100%;box-sizing:border-box;border:1px solid var(--line-strong);border-radius:8px;padding:7px 10px;font:inherit;font-size:13px;margin-bottom:8px;">
+        <div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:10px;">
+          <button class="yc-st ${!stF?'on':''}" data-arc-st="">Все · ${items.length}</button>
+          ${OUTREACH_STATUSES.filter(s=> counts[s.key]).map(s=> `<button class="yc-st ${stF===s.key?'on':''}" data-arc-st="${s.key}" style="--bg:${s.bg};--fg:${s.fg};">${escapeHtml(s.label)} · ${counts[s.key]}</button>`).join('')}</div>
+        ${list.length ? list.map(row).join('') : '<div class="host-empty">Ничего не найдено</div>'}`;
+      const qi = body.querySelector('#yc-arc-q');
+      qi.oninput = ()=>{ q = qi.value.trim().toLowerCase(); const pos = qi.selectionStart; draw(); const n = body.querySelector('#yc-arc-q'); n.focus(); try{ n.setSelectionRange(pos,pos); }catch(e){} };
+      body.querySelectorAll('[data-arc-st]').forEach(b=> b.onclick = ()=>{ stF = b.dataset.arcSt; draw(); });
+    };
+    draw();
+  }
+
   function renderOutreachView(){
-    const today = todayStr();
-    const all = state.birthdayOutreach || [];
-    const query = (state.outreachSearchQuery||'').trim().toLowerCase();
-
-    function matchesQuery(o){
-      if(!query) return true;
-      const hay = [o.instagram, o.profileUrl, o.whoseBirthday, o.note, o.message, o.birthDateLabel].join(' ').toLowerCase();
-      return hay.includes(query);
-    }
-
-    let list;
-    const grouped = !query;
-    if(query){
-      list = all.filter(matchesQuery).sort((a,b)=> (a.writeDate||'').localeCompare(b.writeDate||''));
-    } else if(state.outreachViewMode === 'all'){
-      list = all.slice().sort((a,b)=> (a.writeDate||'').localeCompare(b.writeDate||''));
-    } else {
-      list = outreachDueList().sort((a,b)=> (a.writeDate||'').localeCompare(b.writeDate||''));
-    }
-
-    const overdue = outreachOverdueCount();
-    const todayCnt = outreachTodayCount();
-    const statusCounts = outreachStatusCounts();
-
-    function row(o){
-      const status = o.status || 'in_progress';
-      const meta = outreachStatusMeta(status);
-      const isOverdue = status==='in_progress' && o.writeDate && o.writeDate < today;
-      const isToday = status==='in_progress' && o.writeDate === today;
-      const dimmed = status!=='in_progress' && status!=='bought';
-      return `
-        <div class="refund-row" data-outreach-id="${o.id}" style="${dimmed?'opacity:0.6;':''}${status==='bought'?'border-left:3px solid var(--status-green);':(isOverdue?'border-left:3px solid var(--status-red);':(isToday?'border-left:3px solid var(--status-blue);':''))}">
-          <div class="cell" style="flex:0 0 90px;">${formatOutreachDate(o.writeDate)}${isOverdue?' <span style="color:var(--status-red);font-size:10px;">просрочено</span>':''}</div>
-          <div class="cell" style="flex:0 0 170px;">
-            <a href="${escapeHtml(o.profileUrl||'#')}" target="_blank" rel="noopener" style="font-weight:600;">${escapeHtml(o.instagram||'—')}</a>
-            <div style="font-size:11px;color:var(--ink-soft);">ДР: ${escapeHtml(o.whoseBirthday||'—')}${o.birthDateLabel?' · '+escapeHtml(o.birthDateLabel):''}</div>
-          </div>
-          <div class="cell" style="flex:1;">
-            <div style="font-size:13px;">${escapeHtml(o.message||'')}</div>
-            ${o.note ? `<div style="font-size:11px;color:var(--ink-soft);">${escapeHtml(o.note)}</div>` : ''}
-            ${o.writtenBy ? `<div style="font-size:11px;color:var(--ink-soft);">${escapeHtml(o.writtenBy)}${o.writtenAt?', '+formatDateText(o.writtenAt.slice(0,10)):''}</div>` : ''}
-            ${status==='bought' ? `<div style="font-size:11px;color:var(--status-green);font-weight:600;">🛍 ${escapeHtml(linkedEventLabel(o.boughtEventId))}${o.boughtRevenue!==undefined&&o.boughtRevenue!==null?' · '+formatMoney(o.boughtRevenue):''}</div>` : ''}
-          </div>
-          <div class="reason">
-            <select class="outreach-status-select" data-id="${o.id}" style="background:${meta.bg};color:${meta.fg};border:1px solid ${meta.fg};border-radius:4px;padding:5px 8px;font-size:11.5px;font-weight:600;cursor:pointer;">
-              ${OUTREACH_STATUSES.map(s=>`<option value="${s.key}" ${status===s.key?'selected':''}>${escapeHtml(s.label)}</option>`).join('')}
-            </select>
-          </div>
+    const all = (state.birthdayOutreach || []).filter(o=> o.src === 'yc');
+    const legacyCnt = (state.birthdayOutreach || []).filter(o=> o.src !== 'yc').length;
+    const q = (state.outreachSearchQuery||'').trim().toLowerCase().replace(/ё/g,'е');
+    const qd = q.replace(/\D/g,'');
+    const sort = state.outreachSort || 'bd';
+    const stF = state.outreachStatusF || '';
+    const counts = {}; OUTREACH_STATUSES.forEach(s=> counts[s.key] = 0); all.forEach(o=> counts[o.status||'in_progress']++);
+    const hay = (o)=> [o.name, o.phone, o.phone2, o.email, o.categories, o.ycComment, o.source, o.note, o.writtenBy].join(' ').toLowerCase().replace(/ё/g,'е');
+    let list = all.filter(o=> (!stF || (o.status||'in_progress') === stF) && (!q || q.split(/\s+/).every(t=> hay(o).includes(t)) || (qd.length >= 4 && (o.phone||'').includes(qd))));
+    const nb = new Map(list.map(o=> [o.id, ycNextBirthday(o.birthDate)]));
+    const sorters = {
+      bd: (a,b)=> ((nb.get(a.id)||{days:999}).days - (nb.get(b.id)||{days:999}).days) || String(a.name).localeCompare(String(b.name),'ru'),
+      name: (a,b)=> String(a.name).localeCompare(String(b.name),'ru'),
+      spent: (a,b)=> (b.spent||0) - (a.spent||0),
+      visits: (a,b)=> (b.visits||0) - (a.visits||0),
+      last: (a,b)=> String(b.lastVisit||'').localeCompare(String(a.lastVisit||'')),
+    };
+    list.sort(sorters[sort] || sorters.bd);
+    const canImport = ['owner','manager','assistant'].includes(state.currentRole);
+    const bdText = (o)=>{ const n = nb.get(o.id); if(!o.birthDate) return '<span style="color:var(--ink-soft);">ДР не указан</span>';
+      const d = parseDate(n ? n.iso : todayStr()); const lbl = `${d.getDate()} ${RU_MONTHS_GEN[d.getMonth()]}`;
+      const when = !n ? '' : (n.days === 0 ? ' · <b style="color:#B4532A;">сегодня 🎉</b>' : (n.ago !== null && n.ago > 0 && n.ago <= 10 ? ` · был ${n.ago} дн. назад` : ` · через ${n.days} дн.`));
+      return `🎂 <b>${lbl}</b>${n && n.age ? ` · ${n.days === 0 ? 'исполняется' : 'исполнится'} ${n.age}` : ''}${when}`; };
+    const row = (o)=>{
+      const status = o.status || 'in_progress'; const meta = outreachStatusMeta(status);
+      const wa = o.phone ? `https://wa.me/${o.phone}` : ''; const tg = o.phone ? `https://t.me/+${o.phone}` : '';
+      const phoneFmt = o.phone && o.phone.length === 11 ? `+${o.phone[0]} ${o.phone.slice(1,4)} ${o.phone.slice(4,7)}-${o.phone.slice(7,9)}-${o.phone.slice(9)}` : (o.phone || '');
+      const formDiff = o.birthDateForm && o.birthDate && o.birthDateForm.slice(5) !== o.birthDate.slice(5);
+      return `<div class="refund-row yc-row" data-outreach-id="${o.id}" style="${status==='bought'?'border-left:3px solid var(--status-green);':''}${o.notInLastImport?'opacity:.7;':''}">
+        <div class="cell yc-who">
+          <div class="yc-name">${escapeHtml(o.name || '—')}${o.gender ? ` <span class="yc-dim">${escapeHtml(o.gender)}</span>` : ''}</div>
+          <div class="yc-bd">${bdText(o)}${formDiff ? ` <span class="yc-dim" title="В анкете гость указал другую дату">· в анкете ${escapeHtml(lgDateDots(o.birthDateForm))}</span>` : ''}</div>
+          <div class="yc-ph">${o.phone ? `<a href="tel:+${o.phone}">${escapeHtml(phoneFmt)}</a> · <a href="${wa}" target="_blank" rel="noopener">WhatsApp</a> · <a href="${tg}" target="_blank" rel="noopener">Telegram</a>` : '<span class="yc-dim">нет телефона</span>'}</div>
         </div>
-      `;
-    }
-
-    let listHtml;
-    if(grouped){
-      const groups = {};
-      list.forEach(o=>{ (groups[o.writeDate] = groups[o.writeDate] || []).push(o); });
-      const dates = Object.keys(groups).sort();
-      listHtml = foldGroupsHtml('out' + (state.outreachViewMode === 'all' ? 'A' : 'D'), dates.map(d=>{
-        const items = groups[d];
-        const pending = items.filter(o=>(o.status||'in_progress')==='in_progress').length;
-        return {
-          id: d,
-          title: `<span style="color:${d<today&&pending>0?'var(--status-red)':'inherit'};">${formatOutreachDate(d)}${d===today?' · сегодня':(d<today?' · просрочено':'')}</span>`,
-          meta: `в процессе: ${pending} из ${items.length}${(d>=today&&pending>OUTREACH_DAILY_LIMIT)?` · <span style="color:var(--status-red);font-weight:600;">больше лимита ${OUTREACH_DAILY_LIMIT}</span>`:''}`,
-          html: items.map(row).join(''),
-          open: pending > 0 && d <= today
-        };
-      }));
-    } else {
-      listHtml = `<div class="cert-list">${list.map(row).join('')}</div>`;
-    }
-
+        <div class="cell yc-info">
+          ${o.categories ? `<div>${o.categories.split(/,\s*/).filter(Boolean).map(c=> `<span class="yc-tag">${escapeHtml(c)}</span>`).join('')}</div>` : ''}
+          <div class="yc-dim">Потратил(а) ${formatMoney(o.spent||0)} · визитов ${o.visits||0}${o.lastVisit ? ' · последний ' + escapeHtml(lgDateDots(String(o.lastVisit).slice(0,10))) : ''}${o.source ? ' · ' + escapeHtml(o.source) : ''}</div>
+          ${o.ycComment ? `<div class="yc-cm" title="${escapeHtml(o.ycComment)}">💬 ${escapeHtml(o.ycComment.length > 160 ? o.ycComment.slice(0,160) + '…' : o.ycComment)}</div>` : ''}
+          ${o.writtenBy ? `<div class="yc-dim">${escapeHtml(meta.label)}: ${escapeHtml(o.writtenBy)}${o.writtenAt ? ', ' + formatDateText(o.writtenAt.slice(0,10)) : ''}</div>` : ''}
+          ${status==='bought' ? `<div style="font-size:11.5px;color:var(--status-green);font-weight:600;">🛍 ${escapeHtml(linkedEventLabel(o.boughtEventId))}${o.boughtRevenue!==undefined&&o.boughtRevenue!==null?' · '+formatMoney(o.boughtRevenue):''}</div>` : ''}
+          ${o.notInLastImport ? `<div class="yc-dim">нет в последней выгрузке</div>` : ''}
+        </div>
+        <div class="reason">
+          <select class="outreach-status-select" data-id="${o.id}" style="background:${meta.bg};color:${meta.fg};border:1px solid ${meta.fg};border-radius:4px;padding:5px 8px;font-size:11.5px;font-weight:600;cursor:pointer;">
+            ${OUTREACH_STATUSES.map(s=>`<option value="${s.key}" ${status===s.key?'selected':''}>${escapeHtml(s.label)}</option>`).join('')}
+          </select>
+        </div>
+      </div>`; };
+    const sumBought = all.filter(o=> o.status === 'bought').reduce((s,o)=> s + (Number(o.boughtRevenue)||0), 0);
     return `
-      <div style="font-size:12px;color:var(--ink-soft);margin-bottom:10px;">Лимит: ${OUTREACH_PER_HOUR} сообщения в час, ${OUTREACH_WORK_FROM}:00–${OUTREACH_WORK_TO}:00 → до ${OUTREACH_DAILY_LIMIT} в день. Сегодня в плане: ${todayCnt + overdue} из ${OUTREACH_DAILY_LIMIT}${(todayCnt+overdue)>OUTREACH_DAILY_LIMIT?' — больше лимита, нажмите «Пересчитать сроки»':''}.</div>
-      <div class="analytics-summary" style="margin-bottom:12px;">
-        <div class="summary-card" style="border-left:4px solid ${todayCnt>0?'var(--status-blue)':'var(--status-green)'};"><div class="num">${todayCnt}</div><div class="label">Сегодня нужно написать</div></div>
-        <div class="summary-card" style="border-left:4px solid ${overdue>0?'var(--status-red)':'var(--status-green)'};"><div class="num" style="color:${overdue>0?'var(--status-red)':'inherit'};">${overdue}</div><div class="label">Просрочено</div></div>
-        <div class="summary-card"><div class="num">${all.length}</div><div class="label">Всего в списке</div></div>
+      <div class="cert-toolbar" style="flex-wrap:wrap;gap:10px;">
+        <div style="font-size:12.5px;color:var(--ink-soft);">База клиентов для поздравлений с днём рождения — без сроков, просто список. Отмечайте статус, когда написали гостю.</div>
+        <button type="button" class="btn btn-ghost" id="yc-archive" style="margin-left:auto;">🗂 Архив старого списка</button>
+        ${canImport ? `<label class="btn ${all.length ? 'btn-ghost' : 'btn-primary'}" style="cursor:pointer;">📥 ${all.length ? 'Обновить базу из YClients' : 'Загрузить базу из YClients'}<input type="file" id="yc-import" accept=".xls,.xlsx,.csv" style="display:none;"></label>` : ''}
       </div>
-      <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:20px;">
-        ${OUTREACH_STATUSES.map(s=>`
-          <div style="background:${s.bg};color:${s.fg};border-radius:6px;padding:8px 14px;font-size:12px;">
-            <div style="font-size:18px;font-weight:700;line-height:1.1;">${statusCounts[s.key]||0}</div>
-            <div style="font-size:11px;">${escapeHtml(s.label)}</div>
-          </div>
-        `).join('')}
+      ${!all.length ? `<div class="host-empty" style="text-align:left;line-height:1.6;">База пока не загружена. ${canImport ? 'Нажмите «📥 Загрузить базу из YClients» и выберите выгрузку клиентов (.xls).' : 'Попросите руководителя или менеджера загрузить выгрузку клиентов из YClients.'}${legacyCnt ? `<br><span class="yc-dim">Старый список (${legacyCnt} записей с инстаграмами) после загрузки уйдёт в архив.</span>` : ''}</div>` : `
+      <div style="display:flex;gap:8px;flex-wrap:wrap;margin:6px 0 12px;">
+        <button class="yc-st ${!stF?'on':''}" data-yc-st="">Все · ${all.length}</button>
+        ${OUTREACH_STATUSES.map(s=> `<button class="yc-st ${stF===s.key?'on':''}" data-yc-st="${s.key}" style="--bg:${s.bg};--fg:${s.fg};">${escapeHtml(s.label)} · ${counts[s.key]||0}</button>`).join('')}
+        ${sumBought ? `<span style="font-size:12.5px;color:var(--status-green);font-weight:600;align-self:center;">🛍 купили на ${formatMoney(sumBought)}</span>` : ''}
       </div>
-      <div class="cert-toolbar">
-        <div style="display:flex;gap:8px;">
-          <button class="btn ${state.outreachViewMode==='due'?'btn-primary':'btn-ghost'}" id="btn-outreach-due" style="font-size:12px;">Нужно написать</button>
-          <button class="btn ${state.outreachViewMode==='all'?'btn-primary':'btn-ghost'}" id="btn-outreach-all" style="font-size:12px;">Весь список</button>
-          <button class="btn btn-ghost" id="btn-outreach-rebalance" style="font-size:12px;" title="Разложить сроки так, чтобы в день было не больше ${OUTREACH_DAILY_LIMIT} сообщений">⏱ Пересчитать сроки</button>
-        </div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:12px;">
+        <input type="text" id="outreach-search" value="${escapeHtml(state.outreachSearchQuery||'')}" placeholder="🔎 Имя, телефон, категория, комментарий…" style="flex:1;min-width:220px;max-width:380px;padding:8px 12px;border:1px solid var(--line-strong);border-radius:12px;font:inherit;font-size:13.5px;">
+        <select id="yc-sort" style="padding:7px 10px;border-radius:10px;">${[['bd','по ближайшему ДР'],['name','по имени'],['spent','по сумме трат'],['visits','по визитам'],['last','по последнему визиту']].map(([k,l])=> `<option value="${k}" ${sort===k?'selected':''}>Сортировка: ${l}</option>`).join('')}</select>
+        <span class="yc-dim">Показано: ${list.length}</span>
       </div>
-      <div class="field" style="max-width:300px;margin-bottom:14px;">
-        <input type="text" id="outreach-search" value="${escapeHtml(state.outreachSearchQuery||'')}" placeholder="Поиск по инстаграму, имени, тексту…">
-      </div>
-      ${list.length ? listHtml : `<div class="host-empty">${query?'Ничего не найдено':'Список пуст'}</div>`}
+      ${list.length ? `<div class="cert-list">${list.map(row).join('')}</div>` : `<div class="host-empty">Ничего не найдено</div>`}`}
     `;
   }
 
@@ -17501,7 +17616,7 @@
     return `
       <div class="modal">
         <div class="modal-head">
-          <h3>🛍 Купили — ${escapeHtml(outreach.instagram||'')}</h3>
+          <h3>🛍 Купили — ${escapeHtml(outreach.instagram||outreach.name||'')}</h3>
           <button class="modal-close">×</button>
         </div>
         <div class="modal-body">
@@ -17584,7 +17699,7 @@
       const leadEntry = {
         id: outreach.leadId || uid(),
         requestDate: outreach.writeDate || dateVal,
-        contact: outreach.instagram || '',
+        contact: outreach.instagram || [outreach.name, outreach.phone ? '+' + outreach.phone : ''].filter(Boolean).join(' '),
         eventMonth: monthLabel,
         source: 'Поздравление с ДР',
         product: (ev && ev.product) || LEAD_PRODUCTS[0],
@@ -17610,7 +17725,7 @@
       outreach.boughtDate = dateVal;
       await saveBirthdayOutreach();
 
-      recordAction('Поздравление с ДР отмечено «Купили»', outreach.instagram);
+      recordAction('Поздравление с ДР отмечено «Купили»', outreach.instagram || outreach.name);
       state.modal = null; overlay.remove(); render();
     };
   }
@@ -39421,11 +39536,52 @@
     };
   }
 
+  // ---- 📝 кнопка «Отчёт мастера» в карточке мероприятия: открывает отчёт целиком (как в ленте — с фото, реакциями, комментариями) ----
+  function evReportBtnHtml(ev){
+    if(!ev || !ev.id || !canAccessView('reportsfeed')) return '';
+    const e = (state.events||[]).find(x=> x.id === ev.id) || ev;
+    if(['cancelled','slot','marketing'].includes(e.status)) return '';
+    if(hasMasterReport(e)){
+      const r = Number(e.masterReport.rating) || 0;
+      return `<button type="button" class="ev-rep-btn has" data-ev-report="${escapeHtml(e.id)}" title="Открыть отчёт мастера">📝 Отчёт мастера${r ? ` <span class="${r < 5 ? 'low' : ''}">★${r}</span>` : ''}</button>`;
+    }
+    const past = e.date && e.date <= todayStr();
+    return `<button type="button" class="ev-rep-btn none${past ? ' late' : ''}" disabled title="${past ? 'Мастер ещё не сдал отчёт по этому МК' : 'Отчёт появится после мастер-класса'}">📝 ${past ? 'Отчёта мастера нет' : 'Отчёт — после МК'}</button>`;
+  }
+  function openEventReport(eid){
+    const e = (state.events||[]).find(x=> x.id === eid);
+    if(!e || !hasMasterReport(e)) return;
+    document.querySelectorAll('#ev-report-overlay').forEach(x=> x.remove());
+    const wrap = document.createElement('div'); wrap.id = 'ev-report-overlay'; wrap.className = 'ts-overlay';
+    wrap.innerHTML = `<div class="ev-rep-modal"><div class="ev-rep-head"><b>📝 Отчёт мастера</b><span style="flex:1;"></span>
+        <button type="button" class="btn btn-ghost" id="ev-rep-feed" style="font-size:12px;padding:4px 10px;">Все отчёты →</button><button type="button" class="ev-rep-x" title="Закрыть">×</button></div>
+      <div class="ev-rep-body">
+        ${(!feedIdentity() && feedNameEditable()) ? `<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:10px;padding:8px 10px;border:1px dashed var(--line-strong);border-radius:10px;">
+          <span style="font-size:13px;">Как вас подписывать?</span><input type="text" id="ev-rep-name" placeholder="Ваше имя" maxlength="40" style="flex:1;min-width:140px;border:1px solid var(--line-strong);border-radius:8px;padding:6px 9px;font:inherit;font-size:13px;">
+          <button type="button" class="btn btn-ghost" id="ev-rep-name-save" style="padding:5px 10px;">Сохранить</button></div>` : ''}
+        ${renderFeedCard(e)}</div></div>`;
+    document.body.appendChild(wrap);
+    const ns = wrap.querySelector('#ev-rep-name-save');
+    if(ns) ns.onclick = async ()=>{ const v = (wrap.querySelector('#ev-rep-name').value || '').trim().slice(0, 40); if(!v) return;
+      state.feedDisplayName[state.currentRole] = v; try{ await personalStorageSet('feed-display-name-' + state.currentRole, v); }catch(err){}
+      openEventReport(eid); };
+    const close = ()=> wrap.remove();
+    wrap.onclick = (x)=>{ if(x.target === wrap) close(); };
+    wrap.querySelector('.ev-rep-x').onclick = close;
+    loadFeedDisplayName();
+    const card = wrap.querySelector('[data-rf-card]'); if(card) bindFeedCard(card);
+    const mv = wrap.querySelector('.rf-move'); if(mv){ const h = mv.onclick; mv.onclick = ()=>{ close(); h && h(); }; }
+    wrap.querySelector('#ev-rep-feed').onclick = ()=>{ close(); const d = parseDate(e.date); state.reportsFeedCursor = new Date(d.getFullYear(), d.getMonth(), 1); state.modal = null; state.view = 'reportsfeed'; render(); };
+  }
+  if(!window.__evRepInit){ window.__evRepInit = true;
+    document.addEventListener('click', (x)=>{ const b = x.target.closest && x.target.closest('[data-ev-report]'); if(!b) return; x.preventDefault(); x.stopPropagation(); openEventReport(b.dataset.evReport); }, true);
+  }
   function renderEventModal(ev, isNew){
     return `
       <div class="modal">
         <div class="modal-head">
           <h3>${isNew ? 'Новое мероприятие' : 'Мероприятие'}</h3>
+          ${!isNew ? `<span style="flex:1;"></span>${evReportBtnHtml(ev)}` : ''}
           <button class="modal-close">×</button>
         </div>
         <div class="modal-body">
