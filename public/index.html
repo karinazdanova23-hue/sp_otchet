@@ -1892,6 +1892,52 @@
   .mk-recon-note{ font-size:11.5px; color:var(--ink-soft); margin-top:6px; line-height:1.45; }
   .mk-recon-ok{ margin-top:8px; font-size:12.5px; color:var(--status-green); }
   @media (max-width:640px){ .mk-recon-row{ grid-template-columns:1fr 1fr; } }
+
+  /* ✅ чек-лист смены администратора */
+  .acl-wrap{ max-width:900px; margin:0 auto; padding:0 16px 40px; }
+  .acl-sub{ font-size:12px; color:var(--ink-soft); }
+  .acl-ok{ color:var(--status-green); font-size:12px; }
+  .acl-who{ color:var(--ink); background:#EEF0E4; border-radius:6px; padding:0 5px; font-weight:600; }
+  .acl-bad{ color:var(--danger); font-size:12px; font-weight:600; }
+  .acl-top{ background:var(--white); border:1px solid var(--line-strong); border-radius:12px; padding:12px 14px; margin-bottom:14px; }
+  .acl-progress{ height:8px; background:var(--paper); border-radius:6px; overflow:hidden; margin:10px 0 6px; }
+  .acl-progress > div{ height:100%; background:var(--accent); transition:width .3s; }
+  .acl-block{ background:var(--white); border:1px solid var(--line); border-radius:12px; padding:10px 12px; margin-bottom:12px; }
+  .acl-block-h{ font-weight:700; font-size:15px; margin-bottom:6px; display:flex; gap:8px; align-items:baseline; }
+  .acl-ev{ border-left:3px solid var(--accent-2); padding-left:10px; margin:8px 0 12px; }
+  .acl-ev-h{ font-weight:600; font-size:13px; margin-bottom:4px; }
+  .acl-row{ display:flex; gap:10px; align-items:flex-start; padding:8px 0; border-top:1px solid var(--line); }
+  .acl-row:first-of-type{ border-top:none; }
+  .acl-check{ flex:none; width:28px; height:28px; border-radius:8px; border:2px solid var(--line-strong); background:var(--white); font-size:16px; font-weight:800; cursor:pointer; color:#fff; line-height:1; }
+  .acl-check:disabled{ cursor:default; }
+  .acl-done .acl-check{ background:var(--accent); border-color:var(--accent); }
+  .acl-notdone .acl-check{ background:var(--danger); border-color:var(--danger); }
+  .acl-overdue .acl-check{ border-color:var(--danger); }
+  .acl-done .acl-text{ color:var(--ink-soft); text-decoration:line-through; text-decoration-color:rgba(0,0,0,.25); }
+  .acl-body{ flex:1; min-width:0; }
+  .acl-text{ font-size:14px; line-height:1.35; }
+  .acl-hint{ font-size:12px; color:#6B4A1E; background:#FBEFD9; border-radius:6px; padding:3px 7px; margin-top:4px; display:inline-block; }
+  .acl-meta{ margin-top:3px; }
+  .acl-tag{ font-size:10.5px; background:var(--paper); border-radius:6px; padding:1px 6px; color:var(--ink-soft); }
+  .acl-extra{ font-size:12.5px; background:var(--paper); border-radius:8px; padding:7px 9px; margin-top:6px; line-height:1.5; }
+  .acl-extra textarea, .acl-form textarea, .acl-form input[type=text]{ width:100%; border:1px solid var(--line-strong); border-radius:8px; padding:7px 9px; font:inherit; font-size:13px; background:var(--white); margin-bottom:6px; }
+  .acl-rem{ display:flex; justify-content:space-between; gap:8px; align-items:center; flex-wrap:wrap; padding:3px 0; }
+  .acl-actions{ display:flex; gap:4px; flex:none; flex-wrap:wrap; justify-content:flex-end; max-width:150px; }
+  .acl-mini-btn{ border:1px solid var(--line); background:transparent; border-radius:8px; padding:3px 7px; font-size:11.5px; cursor:pointer; color:var(--ink-soft); }
+  .acl-mini-btn:hover{ background:var(--paper); color:var(--ink); }
+  .btn.acl-mini{ font-size:12px; padding:5px 10px; }
+  .acl-form{ border:1px dashed var(--line-strong); border-radius:10px; padding:10px; margin:8px 0; background:#FCFAF4; }
+  .acl-form-row{ display:flex; gap:8px; flex-wrap:wrap; align-items:center; margin-top:6px; font-size:12.5px; }
+  .acl-form-row label{ display:flex; gap:6px; align-items:center; flex-wrap:wrap; }
+  .acl-form select, .acl-form input[type=time], .acl-form input[type=number]{ border:1px solid var(--line-strong); border-radius:6px; padding:4px 6px; font:inherit; font-size:12.5px; background:var(--white); }
+  .acl-f-once{ font-size:12.5px; display:flex; gap:6px; align-items:center; margin-top:6px; }
+  .acl-add{ border:1px dashed var(--line-strong); background:transparent; border-radius:8px; padding:6px 10px; font-size:12.5px; cursor:pointer; color:var(--ink-soft); margin-top:6px; width:100%; }
+  .acl-add:hover{ background:var(--paper); }
+  .acl-table{ width:100%; border-collapse:collapse; background:var(--white); border-radius:12px; overflow:hidden; font-size:13px; }
+  .acl-table th, .acl-table td{ padding:7px 9px; border-bottom:1px solid var(--line); text-align:center; }
+  .acl-table th{ font-size:11.5px; color:var(--ink-soft); font-weight:600; background:var(--paper); }
+  .acl-table tr:hover td{ background:#FCFAF4; }
+  @media (max-width:600px){ .acl-actions{ max-width:90px; } .acl-wrap{ padding:0 8px 40px; } }
 </style>
 </head>
 <body>
@@ -4133,13 +4179,13 @@
   // не меняется — у них и так есть доступ ко всему, менять привычную раскладку смысла нет.
   const NAV_PRIORITY_BY_ROLE = {
     // первым стоит раздел, куда сотрудник попадает после входа, дальше — по частоте ежедневного использования
-    hostess: ['calendar','prep','cashbox','certificates','print','tufting','reference','book','analytics','host'],
+    hostess: ['adminshift','calendar','prep','cashbox','certificates','print','tufting','reference','book','analytics','host'],
     master: ['host','masters','analytics','my-orders','matreq','reportsfeed','calendar'],
-    manager: ['certificates','calendar','reference','planprogress','prep','marketing','book','host','analytics'],
-    assistant: ['calendar','certificates','book','cashbox','reference','prep','marketing','masters','host','analytics'],
-    admin: ['calendar','prep','cashbox','book','procurement','certificates','masters','reference','marketing','host','analytics'],
+    manager: ['certificates','adminshift','calendar','reference','planprogress','prep','marketing','book','host','analytics'],
+    assistant: ['calendar','adminshift','certificates','book','cashbox','reference','prep','marketing','masters','host','analytics'],
+    admin: ['calendar','adminshift','prep','cashbox','book','procurement','certificates','masters','reference','marketing','host','analytics'],
     marketer: ['marketing','calendar','masters','reference','planprogress','analytics','certificates','host'],
-    owner: ['calendar','summary','analytics','book','cashbox','certificates','procurement','marketing','prep','reference','host','masters'],
+    owner: ['calendar','summary','adminshift','analytics','book','cashbox','certificates','procurement','marketing','prep','reference','host','masters'],
     smm: ['marketing','masters','reportsfeed','calendar','host'],
   };
   const DEFAULT_ROLE_CODES = { hostess:'1111', master:'2222', manager:'3333', marketer:'6666', smm:'7777', assistant:'4444', admin:'5555', owner:'0000' };
@@ -4196,6 +4242,7 @@
     if(view==='my-orders') return !!ctx.master;
     if(view==='matreq') return !roleCanAccessProcurement(role);
     if(view==='reportsfeed') return true; // лента отчётов — для всех сотрудников (после входа)
+    if(view==='adminshift') return ['hostess','admin','owner','assistant','manager'].includes(role); // ✅ чек-листы админов и менеджеров
     if(view==='reference') return roleCanSeeReference(role);
     if(view==='planprogress') return roleCanSeePlanProgress(role);
     if(view==='print') return roleCanAccessPrint(role);
@@ -4214,7 +4261,7 @@
     ['calendar','По пространствам'], ['host','По ведущим'], ['masters','🎨 График мастеров'], ['analytics','Аналитика / 💰 Моя зарплата'],
     ['reference','📖 Справочник'], ['planprogress','🎯 План'], ['prep','🤝 Частники'], ['print','🖨 На печать'], ['tufting','🧶 Тафтинг'],
     ['certificates','Для менеджеров / Сертификаты'], ['marketing','Маркетинг'], ['book','Книга'], ['cashbox','💵 Касса'],
-    ['procurement','📦 Закупки'], ['reportsfeed','💬 Отчёты'], ['summary','📊 Сводка'],
+    ['procurement','📦 Закупки'], ['reportsfeed','💬 Отчёты'], ['summary','📊 Сводка'], ['adminshift','✅ Чек-листы'],
   ];
   function blockAccessCfg(){
     if(!state.blockAccess || typeof state.blockAccess !== 'object') state.blockAccess = {};
@@ -4481,6 +4528,22 @@
       const v = mst ? JSON.parse(mst.value) : null;
       state.masterShiftTpl = (v && Array.isArray(v.items)) ? v : { items:[] };
     }catch(e){ state.masterShiftTpl = { items:[] }; }
+    try{
+      const acm = await window.storage.get('admin-checklist-marks', true);
+      const v = acm ? JSON.parse(acm.value) : [];
+      state.adminChecklistMarks = Array.isArray(v) ? v : [];
+    }catch(e){ state.adminChecklistMarks = []; }
+    state._adminChecklistMarksBaseline = JSON.parse(JSON.stringify(state.adminChecklistMarks));
+    try{
+      const act = await window.storage.get('admin-checklist-template', true);
+      const v = act ? JSON.parse(act.value) : null;
+      state.adminChecklistTpl = (v && Array.isArray(v.items)) ? v : null;
+    }catch(e){ state.adminChecklistTpl = null; }
+    try{
+      const mct = await window.storage.get('manager-checklist-template', true);
+      const v = mct ? JSON.parse(mct.value) : null;
+      state.managerChecklistTpl = (v && Array.isArray(v.items)) ? v : null;
+    }catch(e){ state.managerChecklistTpl = null; }
 
     // состав администраторов/менеджеров, изменённый руководителем в «Настройках доступа → Сотрудники»
     try{
@@ -5806,6 +5869,7 @@
   const SAVE_RETRY_BY_KEY = {
     'schedule-wishes': ()=>saveScheduleWishes(),
     'master-day-tasks': ()=>saveMasterDayTasks(),
+    'admin-checklist-marks': ()=>saveAdminChecklistMarks(),
     'reference-overrides': ()=>saveRefOverrides(),
     'reference-settings': ()=>saveRefSettings(),
     'load-settings': ()=>saveLoadSettings(),
@@ -8273,6 +8337,8 @@
       html += renderMastersScheduleView();
     } else if(state.view === 'bizsettings'){
       html += renderBizSettingsView();
+    } else if(state.view === 'adminshift'){
+      html += renderAdminShiftView();
     }
     app.innerHTML = html;
     attachHeaderEvents();
@@ -8296,6 +8362,7 @@
     else if(state.view === 'summary'){ attachSummaryEvents(); }
     else if(state.view === 'masters'){ attachMastersScheduleEvents(); }
     else if(state.view === 'bizsettings'){ attachBizSettingsEvents(); }
+    else if(state.view === 'adminshift'){ attachAdminShiftEvents(); }
 
     try{ installListSearch(); }catch(e){ console.error('list search failed', e); }
     if(state.modal){ renderModal(); }
@@ -8771,6 +8838,7 @@
       if(nf > 0) alerts.push({icon:'🎨', text:`Не указан формат (холст / граммовка / флаконы): ${nf}`, formats:true});
     }
     try{ const ca = controlAlert(); if(ca) alerts.unshift(ca); }catch(e){ console.error(e); }
+    try{ const aa = aclAlert(); if(aa) alerts.unshift(aa); }catch(e){}
     try{
       const rm = computeReminders();
       if(rm.total > 0) alerts.push({icon:'🔔', text:`Напоминания: ${[rm.payouts.length?`выплаты ${rm.payouts.length}`:'', rm.unpaid.length?`недоплаты ${rm.unpaid.length}`:'', rm.certs.length?`сертификаты ${rm.certs.length}`:'', rm.leads.length?`заявки ${rm.leads.length}`:''].filter(Boolean).join(', ')}`, reminders:true});
@@ -8978,6 +9046,8 @@
     // SMM / съёмка — сразу в контент-план
     if(state.currentRole === 'smm' && state.unlocked && !state._smmLanded){ state._smmLanded = true; state.view = 'marketing'; state.marketingView = 'content'; }
     if(state.currentRole !== 'smm') state._smmLanded = false;
+    if(state.currentRole === 'hostess' && state.unlocked && !state._aclLanded && canAccessView('adminshift')){ state._aclLanded = true; state.view = 'adminshift'; state.aclDate = todayStr(); }
+    if(state.currentRole !== 'hostess') state._aclLanded = false;
     if(state.currentRole === 'marketer' && state.unlocked && !state._mktLanded){ state._mktLanded = true; state.view = 'marketing'; }
     if(state.currentRole !== 'marketer') state._mktLanded = false;
     if(state.currentRole === 'master' && state.unlocked && state.loggedInMasterName && state._masterLandedFor !== state.loggedInMasterName){
@@ -8991,6 +9061,10 @@
     buttons.push({key:'calendar', html: `<button data-view="calendar" class="${state.view==='calendar'?'active':''}">По пространствам</button>`});
     buttons.push({key:'host', html: `<button data-view="host" class="${state.view==='host'?'active':''}">По ведущим</button>`});
     buttons.push({key:'masters', html: `<button data-view="masters" class="${state.view==='masters'?'active':''}">🎨 График мастеров</button>`});
+    if(canAccessViewBase('adminshift', role)){
+      const an = aclOverdueOwn(role); const albl = role === 'manager' ? '✅ Чек-лист дня' : (['hostess','admin'].includes(role) ? '✅ Чек-лист смены' : '✅ Чек-листы');
+      buttons.push({key:'adminshift', html: `<button data-view="adminshift" class="${state.view==='adminshift'?'active':''}">${albl}${an ? ' <span style="background:var(--danger);color:#fff;border-radius:9px;padding:0 6px;font-size:11px;">'+an+'</span>' : ''}</button>`});
+    }
     if(roleCanAccessAnalytics(role) || state.loggedInMasterName || state.loggedInHostessName){
       buttons.push({key:'analytics', html: `<button data-view="analytics" class="${state.view==='analytics'?'active':''}">${(state.loggedInMasterName || state.loggedInHostessName) ? '💰 Моя зарплата' : 'Аналитика'}</button>`});
     }
@@ -9183,6 +9257,7 @@
           ${offsiteDay.length ? `<div class="cal-offsite" title="${escapeHtml(offsiteDay.map(e=>(e.time||'')+' '+(e.title||'')).join('\n'))}">🚐 ВЫЕЗД${offsiteDay.length>1?' ×'+offsiteDay.length:''} ${escapeHtml(offsiteDay[0].time||'')}</div>` : ''}
           ${hostessLine ? `<div class="cal-hostess" title="Админ: ${escapeHtml(hostessLine)}">🧑 ${escapeHtml(hostessLine)}</div>` : ''}
           ${hostessGap ? `<div class="cal-hostess" style="color:#b71c1c;font-weight:600;" title="В этот день меньше двух человек: нужно два админа или админ + старший">⚠ админов: ${hostessCoverageCount(dStr)} из 2</div>` : ''}
+          ${inMonth ? aclCalBadge(dStr) : ''}
           ${masterLine ? `<div class="cal-hostess" style="color:var(--accent);" title="Мастера: ${escapeHtml(masterLine)}">🎨 ${escapeHtml(masterLine)}</div>` : ''}
           ${helperLine ? `<div class="cal-hostess" style="color:#6B4E9B;" title="Помощник администратора: ${escapeHtml(helperLine)}">🤝 ${escapeHtml(helperLine)}</div>` : ''}
           ${managerLine ? `<div class="cal-manager" title="Менеджер: ${escapeHtml(managerLine)}">👔 ${escapeHtml(managerLine)}</div>` : ''}
@@ -22853,7 +22928,7 @@
       if(b) b.onclick = ()=>{ state.modal = {type:'cash-shift', kind}; render(); };
     });
     const closeBtn = document.getElementById('btn-cash-close');
-    if(closeBtn) closeBtn.onclick = ()=>{ state.modal = {type:'cash-close'}; render(); };
+    if(closeBtn) closeBtn.onclick = ()=> aclConfirmBeforeCashClose(()=>{ state.modal = {type:'cash-close'}; render(); });
     const collectBtn = document.getElementById('btn-cash-collect');
     if(collectBtn) collectBtn.onclick = ()=>{ state.modal = {type:'cash-collect'}; render(); };
     document.querySelectorAll('[data-collection-del]').forEach(b=>{
@@ -38989,6 +39064,549 @@
   function msMyName(){
     try{ const n = controlMyName(); if(n) return n; }catch(e){}
     return state.loggedInMasterName || '';
+  }
+
+
+  // ===================== ✅ ЧЕК-ЛИСТ СМЕНЫ АДМИНИСТРАТОРА =====================
+  // По «Регламенту смены администратора» (v1.0, октябрь 2026). Все пункты равнозначные, фото не требуется.
+  // Чек-лист общий на день: галочку ставит любой админ на смене, видно — кто и во сколько.
+  // Пункты «по каждому МК» создаются сами под каждое мероприятие дня (Художественная, Мастерская, Лекторий).
+  // Хранение: admin-checklist-template — шаблон { items:[{ id, block, text, hint, time, offset, days, auto, since, removedFrom }] }
+  //             (пока руководитель ничего не менял — берётся стандартный шаблон из регламента);
+  //           admin-checklist-marks — отметки, разовые задачи, скрытия на день и передачи смены (kind:'note').
+  // Править, добавлять и удалять пункты прямо в чек-листе может только руководитель.
+  const ACL_BLOCKS = [
+    { key:'open',    icon:'🌅', label:'Открытие смены' },
+    { key:'event',   icon:'🎨', label:'По каждому мастер-классу' },
+    { key:'during',  icon:'🔄', label:'В течение смены' },
+    { key:'close',   icon:'🌙', label:'Закрытие смены' },
+    { key:'evening', icon:'✉️', label:'Вечером после смены' },
+    { key:'weekly',  icon:'📅', label:'Еженедельные' },
+  ];
+  const ACL_FROM = '2026-11-24'; // с этого дня чек-лист идёт в контроль, значки календаря и аналитику
+  const ACL_SPACES = ['s1','s2','s3']; // Лофт — у своего администратора, Выезд — не в доме
+  const ACL_DEFAULT_ITEMS = [
+    { id:'o1',  block:'open', text:'Открыть пространства (Художественная, Мастерская, Лекторий), включить свет: основной, стафф, коридор дома' },
+    { id:'o2',  block:'open', text:'Пересчитать кассу и зафиксировать в отчёте', auto:'cash-accept', hint:'Касса → «📥 Принять кассу» — пункт отметится сам' },
+    { id:'o3',  block:'open', text:'Проверить расписание на день и занятость залов, подготовить список мероприятий', auto:'events-today' },
+    { id:'o4',  block:'open', text:'Прочитать передачу смены от напарника и задачи от старшего администратора', auto:'handover-read' },
+    { id:'o5',  block:'open', text:'Переодеться, надеть браслет и бейдж с именем' },
+    { id:'o6',  block:'open', text:'Проветрить помещения — окна ИЛИ кондиционер, одновременно нельзя' },
+    { id:'o7',  block:'open', text:'Чистая зона ресепшена и пол, мусорные пакеты в вёдрах' },
+    { id:'o8',  block:'open', text:'Наполнить кувшины с водой, поставить чайник' },
+    { id:'o9',  block:'open', text:'Проверить запас туалетной бумаги, чая, сахара, конфет — о нехватке сообщить старшему администратору' },
+    { id:'o10', block:'open', text:'Проверить наличие расходников в кабинетах и уборной' },
+    { id:'o11', block:'open', text:'Поставить на зарядку колонку и лампы' },
+    { id:'o12', block:'open', text:'Включить фоновую музыку через Алису и гирлянды на зеркалах Лектория и Мастерской', hint:'Гирлянды — в статичном режиме, не мигают' },
+    { id:'e1',  block:'event', offset:30,  text:'Подготовить зал: скатерти, фартуки, посуда, раздаточный материал, проектор' },
+    { id:'e2',  block:'event', offset:25,  text:'Мастер пришёл', hint:'Если за 25 минут до начала мастера нет — позвонить ему и сообщить старшему администратору' },
+    { id:'e3',  block:'event', offset:15,  text:'Подготовить бейджи с именами ведущего и гостей' },
+    { id:'e4',  block:'event', offset:0,   text:'Встретить гостей и отметить их в ЮК' },
+    { id:'e5',  block:'event', offset:0,   text:'Помочь гостям снять верхнюю одежду' },
+    { id:'e6',  block:'event', offset:-10, text:'Представиться, рассадить гостей, спросить о фото и напитках' },
+    { id:'e7',  block:'event', offset:-20, text:'Принять оплату, если гости не оплатили заранее' },
+    { id:'e8',  block:'event', offset:-60, text:'Сделать фото — только с разрешения гостей' },
+    { id:'d1',  block:'during', text:'Переадресовывать звонки менеджеру по продажам' },
+    { id:'d2',  block:'during', text:'Ответить гостям в мессенджерах: переносы, отмены, организационные вопросы' },
+    { id:'d3',  block:'during', text:'Подготовить подарочные сертификаты (если есть заказы)' },
+    { id:'d4',  block:'during', text:'Отправить гостям уведомления о готовности керамики' },
+    { id:'d5',  block:'during', text:'Выдача изделий: спросить кодовые слова, найти и презентовать изделие, отметить выдачу в приложении' },
+    { id:'d6',  block:'during', text:'Сверить чеки за день', auto:'tochka', hint:'Касса → «🌙 Закрыть смену» → сумма по терминалу Точки — пункт отметится сам' },
+    { id:'c1',  block:'close', text:'Убрать все пространства: посуда чистая, мусор собран в пакеты' },
+    { id:'c2',  block:'close', text:'Вынести мусор в контейнерный бак (органический — обязательно)' },
+    { id:'c3',  block:'close', text:'Пересчитать кассу, сфотографировать и отправить в рабочий чат', auto:'cash-close', hint:'Касса → «🌙 Закрыть смену · сверка» — пункт отметится сам' },
+    { id:'c4',  block:'close', text:'Закрыть окна во всём доме, включая общий коридор и туалет; выключить кондиционер' },
+    { id:'c5',  block:'close', text:'Выключить всё из розеток и свет во всём доме — кроме кофемашины и не наших помещений' },
+    { id:'c6',  block:'close', text:'Убрать ключи в ключницу на кодовом замке', hint:'Ключница лежит в ящике комода в коридоре. Код — у старшего администратора' },
+    { id:'c7',  block:'close', text:'Закрыть двери: Мастерская, Лекторий, Художественная, задний и передний выход; включить сигнализацию; закрыть основную деревянную дверь' },
+    { id:'v1',  block:'evening', text:'Написать мастерам напоминание о мастер-классах на завтра — с рабочего Telegram', auto:'masters-tomorrow' },
+    { id:'v2',  block:'evening', text:'Передать смену напарнику: что не успела и важная информация', auto:'handover-write' },
+    { id:'v3',  block:'evening', text:'Передать информацию администратору Лофта — если есть что передать' },
+  ];
+  // ---- 💼 чек-лист менеджера ----
+  const MGR_BLOCKS = [
+    { key:'mstart', icon:'☀️', label:'Начало дня' },
+    { key:'meve',   icon:'🕡', label:'Вечерняя сверка · ЮКлиент и приложение (18:30)' },
+    { key:'mclose', icon:'🌙', label:'Закрытие дня' },
+  ];
+  const MGR_DEFAULT_ITEMS = [
+    { id:'m1', block:'mstart', text:'Открыть задачи — проверить список задач: есть ли срочные заявки' },
+    { id:'m2', block:'mstart', text:'Ответить на заявки в Инстаграм и Макс' },
+    { id:'m3', block:'mstart', text:'Ответить на заявки в Телеграм и ВК' },
+    { id:'m4', block:'mstart', text:'Проверить мероприятия сегодня: ЮКлиент сходится с приложением', auto:'events-all' },
+    { id:'m5', block:'mstart', text:'У всех мероприятий сегодня указан понятный остаток оплаты' },
+    { id:'n1', block:'meve', time:'18:30', text:'Сверить мероприятия (ЮКлиент и приложение)' },
+    { id:'n2', block:'meve', time:'18:30', text:'Сверить гостей (ЮКлиент и приложение)' },
+    { id:'k1', block:'mclose', text:'Сверить Точку и «Книгу» доходов в приложении' },
+    { id:'k2', block:'mclose', text:'Вбить записи на расписание в приложение' },
+    { id:'k3', block:'mclose', text:'Пройтись по всем соцсетям: все заявки внесены в приложение' },
+    { id:'k4', block:'mclose', text:'Проверить, все ли выполнены задачи по клиентам' },
+    { id:'k5', block:'mclose', text:'Написать всем «до точки» — чтобы никто не ждал ответа по критичным вопросам до завтра' },
+  ];
+  const ACL_LISTS = {
+    admin:   { key:'admin',   label:'🗝 Администраторы', title:'Чек-лист смены администратора', tplKey:'admin-checklist-template',   stateKey:'adminChecklistTpl',   blocks: ACL_BLOCKS, defaults: ACL_DEFAULT_ITEMS, roles:['hostess','admin','owner','assistant'], push:['admin'] },
+    manager: { key:'manager', label:'💼 Менеджеры',      title:'Чек-лист дня менеджера',        tplKey:'manager-checklist-template', stateKey:'managerChecklistTpl', blocks: MGR_BLOCKS, defaults: MGR_DEFAULT_ITEMS, roles:['manager','owner','assistant'], push:['owner'] },
+  };
+  const aclListsForRole = (role)=> Object.values(ACL_LISTS).filter(l=> l.roles.includes(role)).map(l=> l.key);
+  function aclCurList(){ const ls = aclListsForRole(state.currentRole); return ls.includes(state.aclList) ? state.aclList : (ls[0] || 'admin'); }
+  const aclIdPfx = (list)=> list === 'manager' ? 'mgr|' : '';
+  const aclMarkOf = (m, list)=> (m.list || 'admin') === list;
+  const ACL_DAYS = [['all','Каждый день'],['weekday','Будни'],['weekend','Выходные'],['1','Пн'],['2','Вт'],['3','Ср'],['4','Чт'],['5','Пт'],['6','Сб'],['0','Вс']];
+  const aclCanView = ()=> aclListsForRole(state.currentRole).includes('admin');
+  const aclCanEdit = ()=> state.currentRole === 'owner';
+  const aclCanControl = ()=> ['owner','admin','assistant'].includes(state.currentRole);
+  const aclCanSee = (list)=> aclListsForRole(state.currentRole).includes(list);
+  // имя того, кто ставит галочку: личный вход (админ, менеджер, ассистент, СА, руководитель) → подпись в ленте → должность
+  function aclMe(){
+    let n = ''; try{ n = controlMyName() || ''; }catch(e){}
+    if(!n){ try{ const id = feedIdentity(); n = (id && id.name) || ''; }catch(e){} }
+    const role = ROLE_LABELS[state.currentRole] || state.currentRole || '—';
+    return n ? (['assistant','owner','admin'].includes(state.currentRole) ? n + ' (' + role.toLowerCase() + ')' : n) : role;
+  }
+  const aclMin = (t)=>{ const m = String(t||'').match(/^(\d{1,2}):(\d{2})/); return m ? Number(m[1])*60 + Number(m[2]) : null; };
+  const aclHM = (m)=>{ m = Math.max(0, Math.min(23*60+59, Math.round(m))); return pad(Math.floor(m/60)) + ':' + pad(m%60); };
+  const aclTs = (iso)=>{ if(!iso) return ''; const d = new Date(iso); return pad(d.getHours()) + ':' + pad(d.getMinutes()); };
+  function aclTpl(list){
+    const L = ACL_LISTS[list || 'admin']; const t = state[L.stateKey];
+    return (t && Array.isArray(t.items)) ? t : { items: L.defaults.map(x=> ({ ...x })), isDefault:true };
+  }
+  function aclDaysMatch(days, ds){
+    const w = parseDate(ds).getDay();
+    if(!days || days === 'all') return true;
+    if(days === 'weekday') return w >= 1 && w <= 5;
+    if(days === 'weekend') return w === 0 || w === 6;
+    return String(w) === String(days);
+  }
+  function aclTplItemsFor(ds, list){
+    return aclTpl(list).items.filter(it=> it && it.id && String(it.text||'').trim() && (!it.since || ds >= it.since) && (!it.removedFrom || ds < it.removedFrom) && aclDaysMatch(it.days, ds));
+  }
+  function aclDayEvents(ds, allSpaces){
+    return (state.events||[]).filter(e=> e && e.date === ds && e.status !== 'cancelled' && e.time && (allSpaces ? e.spaceId !== 's5' : ACL_SPACES.includes(e.spaceId))
+      && !(typeof isOpenMasterSlot === 'function' && isOpenMasterSlot(e)) && !(typeof isUnassignedSlotProposal === 'function' && isUnassignedSlotProposal(e)))
+      .sort((a,b)=> String(a.time).localeCompare(String(b.time)));
+  }
+  function aclHostsOf(e){
+    let names = [];
+    try{ names = eventHostsWithPay(e).map(h=> h.name); }catch(err){}
+    if(!names.length) names = String(e.host||'').split(/[,;]/);
+    return [...new Set(names.map(n=> String(n||'').trim()).filter(Boolean))];
+  }
+  // кто на смене и границы рабочего дня админов
+  function aclShiftPeople(ds, list){
+    if(list === 'manager'){ const n = String((state.managerShifts||{})[ds] || '').trim(); return n ? [{ name:n, start:'', end:'' }] : []; }
+    const s = (state.hostessShifts||{})[ds] || {}; const out = [];
+    try{ shiftDefsForDate(ds).forEach(def=>{ const en = normalizeShiftEntry(s[def.key], def); if(en && en.name) out.push({ name: en.name, start: en.start, end: en.end, senior: !!def.senior }); }); }catch(e){}
+    return out;
+  }
+  function aclBounds(ds){
+    const p = aclShiftPeople(ds);
+    const st = p.map(x=> aclMin(x.start)).filter(x=> x !== null), en = p.map(x=> aclMin(x.end)).filter(x=> x !== null);
+    return { start: st.length ? Math.min(...st) : 12*60, end: en.length ? Math.max(...en) : 22*60 };
+  }
+  function aclDueMin(t){
+    if(t.time && aclMin(t.time) !== null) return aclMin(t.time);
+    const b = aclBounds(t.ds);
+    if(t.block === 'event' && t.event){ const s = aclMin(t.event.time); if(s !== null) return s - (Number(t.offset)||0); }
+    if(t.block === 'open') return b.start + 30;
+    if(t.block === 'mstart') return 11*60;
+    if(t.block === 'meve') return 18*60 + 30;
+    if(t.block === 'mclose') return 21*60;
+    if(t.block === 'evening') return 23*60 + 30;
+    return b.end;
+  }
+  function aclDue(t){ return new Date(t.ds + 'T' + aclHM(aclDueMin(t)) + ':00'); }
+  function aclNote(ds){ return (state.adminChecklistMarks||[]).find(m=> m && m.kind === 'note' && m.ds === ds && !m.deleted) || null; }
+  function aclPrevNote(ds){
+    return (state.adminChecklistMarks||[]).filter(m=> m && m.kind === 'note' && !m.deleted && m.ds < ds && String(m.text||'').trim())
+      .sort((a,b)=> b.ds.localeCompare(a.ds))[0] || null;
+  }
+  // автоотметка: null или { by, at, via } — кто сделал действие в другом разделе
+  function aclAutoDone(kind, ds){
+    const cs = (state.cashShifts||[]).filter(x=> x && x.date === ds).sort((a,b)=> String(a.ts||'').localeCompare(String(b.ts||'')));
+    const rec = (x, via)=> x ? { by: x.by || '', at: x.ts || '', via } : null;
+    if(kind === 'cash-accept') return rec(cs.find(x=> x.type === 'accept' || x.type === 'check'), 'касса');
+    if(kind === 'cash-close') return rec(cs.find(x=> x.closeReport || x.type === 'close' || x.type === 'handover'), 'закрытие кассы');
+    if(kind === 'tochka') return rec(cs.find(x=> x.closeReport && x.tochkaFact !== null && x.tochkaFact !== undefined), 'сверка Точки');
+    if(kind === 'handover-write'){ const n = aclNote(ds); return (n && (String(n.text||'').trim() || n.nothing)) ? { by: n.by || '', at: n.at || '', via:'передача смены' } : null; }
+    return null;
+  }
+  // все пункты дня: шаблон (+ по каждому МК) и разовые задачи; отметки лежат в admin-checklist-marks под тем же id
+  function aclTasks(ds, list){
+    list = list || 'admin'; const pf = aclIdPfx(list);
+    const marks = (state.adminChecklistMarks||[]).filter(m=> m && m.ds === ds && m.kind !== 'note' && aclMarkOf(m, list));
+    const byId = new Map(marks.map(m=> [m.id, m]));
+    const out = []; const evs = list === 'admin' ? aclDayEvents(ds) : [];
+    const push = (base)=>{
+      const m = byId.get(base.id) || {};
+      if(m.hidden) return;
+      const auto = base.auto ? aclAutoDone(base.auto, ds) : null;
+      const manual = !!m.done;
+      out.push({ ...base, list, done: manual || (!!auto && !m.notDone), autoDone: !!auto, manual,
+        doneBy: manual ? (m.doneBy||'') : (auto ? auto.by : ''), doneAt: manual ? (m.doneAt||'') : (auto ? auto.at : ''), doneVia: !manual && auto ? auto.via : '',
+        notDone: !!m.notDone && !m.done, reason: m.reason || '', notDoneBy: m.notDoneBy || '', notDoneAt: m.notDoneAt || '',
+        undoneBy: m.undoneBy || '', undoneAt: m.undoneAt || '' });
+    };
+    aclTplItemsFor(ds, list).forEach(it=>{
+      if(it.block === 'event') evs.forEach(e=> push({ id: ds + '|' + it.id + '|' + e.id, ds, itemId: it.id, eventId: e.id, event: e, block:'event', text: it.text, hint: it.hint || '', offset: it.offset, time: '', auto: it.auto || '', tpl: it }));
+      else push({ id: pf + ds + '|' + it.id, ds, itemId: it.id, block: it.block, text: it.text, hint: it.hint || '', time: it.time || '', auto: it.auto || '', tpl: it });
+    });
+    marks.filter(m=> m.custom && !m.deleted && String(m.text||'').trim()).forEach(m=> push({ id: m.id, ds, block: m.block || ACL_LISTS[list].blocks[0].key, text: m.text, hint: m.hint || '', time: m.time || '', custom: true }));
+    return out;
+  }
+  function aclStatus(t){ if(t.done) return 'done'; if(t.notDone) return 'notdone'; return aclDue(t) < new Date() ? 'overdue' : 'open'; }
+  function aclStats(ds, list){
+    const ts = aclTasks(ds, list); const r = { total: ts.length, done:0, notdone:0, overdue:0, open:0 };
+    ts.forEach(t=> r[aclStatus(t)]++); return r;
+  }
+  function aclUpsertMark(task, patch){
+    const arr = state.adminChecklistMarks || []; const i = arr.findIndex(m=> m.id === task.id);
+    if(i >= 0) state.adminChecklistMarks = arr.map((m,j)=> j === i ? { ...m, ...patch } : m);
+    else state.adminChecklistMarks = [...arr, { id: task.id, ds: task.ds, list: task.list || 'admin', itemId: task.itemId || '', eventId: task.eventId || '', createdAt: new Date().toISOString(), ...patch }];
+  }
+  async function saveAdminChecklistMarks(){
+    await saveCollectionMerged('admin-checklist-marks', state.adminChecklistMarks||[], state._adminChecklistMarksBaseline||[], (finalArr)=>{
+      state.adminChecklistMarks = finalArr;
+      state._adminChecklistMarksBaseline = JSON.parse(JSON.stringify(finalArr));
+    });
+  }
+  async function saveAdminChecklistTpl(list){
+    const L = ACL_LISTS[list || 'admin']; const t = aclTpl(L.key); const { isDefault, ...clean } = t;
+    state[L.stateKey] = clean;
+    return await storageSetWithRetry(L.tplKey, JSON.stringify(clean));
+  }
+  // свежие отметки с сервера (два админа отмечают с разных телефонов)
+  function aclRefresh(force){
+    if(!force && Date.now() - (state._aclFreshAt||0) < 15000) return;
+    state._aclFreshAt = Date.now();
+    Promise.all([window.storage.get('admin-checklist-marks', true).catch(()=>null), window.storage.get('admin-checklist-template', true).catch(()=>null), window.storage.get('manager-checklist-template', true).catch(()=>null)]).then(([r, tp, mtp])=>{
+      let ch = false;
+      try{ if(r){ const v = JSON.parse(r.value); if(Array.isArray(v) && JSON.stringify(v) !== JSON.stringify(state.adminChecklistMarks)){ state.adminChecklistMarks = v; state._adminChecklistMarksBaseline = JSON.parse(JSON.stringify(v)); ch = true; } } }catch(e){}
+      try{ if(tp){ const v = JSON.parse(tp.value); if(v && Array.isArray(v.items) && JSON.stringify(v) !== JSON.stringify(state.adminChecklistTpl)){ state.adminChecklistTpl = v; ch = true; } } }catch(e){}
+      try{ if(mtp){ const v = JSON.parse(mtp.value); if(v && Array.isArray(v.items) && JSON.stringify(v) !== JSON.stringify(state.managerChecklistTpl)){ state.managerChecklistTpl = v; ch = true; } } }catch(e){}
+      const a = document.activeElement; const typing = a && /^(INPUT|TEXTAREA|SELECT)$/.test(a.tagName);
+      if(ch && state.view === 'adminshift' && !state.modal && !typing && !state.aclForm) render();
+    }).catch(()=>{});
+  }
+  // пункты, которые ещё не отмечены к закрытию кассы (сами кассовые пункты закроются вместе с кассой)
+  function aclOpenBeforeClose(ds){
+    return aclTasks(ds, 'admin').filter(t=> ['during','close'].includes(t.block) && !t.done && !t.notDone && !['cash-close','tochka'].includes(t.auto));
+  }
+  // свой чек-лист роли: админ смены и старший админ — админский, менеджер — менеджерский
+  function aclOwnList(role){ return ['hostess','admin'].includes(role) ? 'admin' : (role === 'manager' ? 'manager' : null); }
+  function aclOverdueOwn(role){ const l = aclOwnList(role); if(!l || todayStr() < ACL_FROM) return 0; try{ return aclStats(todayStr(), l).overdue; }catch(e){ return 0; } }
+  function aclAlert(){
+    const n = aclOverdueOwn(state.currentRole); if(!n) return null;
+    const l = aclOwnList(state.currentRole);
+    return { icon:'✅', text:`${l === 'manager' ? 'Чек-лист дня' : 'Чек-лист смены'}: просрочено ${n}`, view:'adminshift' };
+  }
+  function aclCalBadge(ds){
+    if(ds > todayStr() || ds < ACL_FROM) return '';
+    return ['admin','manager'].filter(aclCanSee).map(l=>{
+      const s = aclStats(ds, l); if(!s.total || !aclShiftPeople(ds, l).length) return '';
+      const bad = s.overdue + s.notdone; const ic = l === 'manager' ? '💼' : '📋';
+      return `<div class="cal-hostess" style="${bad ? 'color:#A3402F;font-weight:600;' : 'color:var(--ink-soft);'}" title="${l === 'manager' ? 'Чек-лист менеджера' : 'Чек-лист админов'}: выполнено ${s.done} из ${s.total}${s.notdone ? ', не сделано ' + s.notdone : ''}${s.overdue ? ', просрочено ' + s.overdue : ''}">${ic} ${s.done}/${s.total}</div>`;
+    }).join('');
+  }
+  function aclMastersTomorrow(ds){
+    const tom = addDaysIso(ds, 1); const by = new Map();
+    aclDayEvents(tom, true).forEach(e=> aclHostsOf(e).forEach(n=>{ const k = n.toLowerCase(); if(!by.has(k)) by.set(k, { name:n, evs:[] }); by.get(k).evs.push(e); }));
+    return { tom, list: [...by.values()] };
+  }
+  function aclReminderText(m, tom){
+    const d = parseDate(tom); const dd = pad(d.getDate()) + '.' + pad(d.getMonth()+1);
+    const first = m.name.split(/\s+/)[0];
+    return `${first}, добрый вечер! Напоминаем: завтра, ${dd}, ` + m.evs.map(e=> `в ${e.time} — мастер-класс «${e.title||'МК'}»`).join('; ') + `. Ждём вас 🤍`;
+  }
+
+  // ---------- вид ----------
+  function aclTaskForm(task, blockKey){
+    const L = ACL_LISTS[aclCurList()];
+    const it = task ? (task.tpl || task) : {};
+    const block = task ? task.block : blockKey;
+    const isEvent = block === 'event';
+    return `<div class="acl-form" data-acl-form="${escapeHtml(task ? task.id : 'new:' + blockKey)}">
+      <textarea id="acl-f-text" rows="2" placeholder="Что сделать">${escapeHtml(task ? task.text : '')}</textarea>
+      <input type="text" id="acl-f-hint" placeholder="Подсказка (необязательно): где лежит, как сделать" value="${escapeHtml(it.hint||'')}">
+      <div class="acl-form-row">
+        <label>Блок <select id="acl-f-block">${L.blocks.map(b=> `<option value="${b.key}" ${b.key===block?'selected':''}>${b.icon} ${escapeHtml(b.label)}</option>`).join('')}</select></label>
+        <label class="acl-f-when-ev" style="${isEvent?'':'display:none;'}">За сколько минут до начала МК <input type="number" id="acl-f-offset" value="${escapeHtml(String(it.offset ?? 15))}" style="width:70px;"> <span class="acl-sub">минус — после начала</span></label>
+        <label class="acl-f-when-tm" style="${isEvent?'display:none;':''}">К какому времени <input type="time" id="acl-f-time" value="${escapeHtml(it.time||'')}"> <span class="acl-sub">пусто — по блоку</span></label>
+        ${task && task.custom ? '' : `<label class="acl-f-days">Дни <select id="acl-f-days">${ACL_DAYS.map(([v,l])=> `<option value="${v}" ${String(it.days||'all')===v?'selected':''}>${l}</option>`).join('')}</select></label>`}
+      </div>
+      ${!task ? `<label class="acl-f-once" style="${isEvent?'display:none;':''}"><input type="checkbox" id="acl-f-once"> Только на ${escapeHtml(formatDateText(state.aclDate))} (в шаблон не попадёт)</label>` : ''}
+      ${task && !task.custom ? `<div class="acl-sub">Изменение попадёт в шаблон — во все дни, где есть этот пункт.</div>` : ''}
+      <div class="acl-form-row"><button class="btn btn-primary" data-acl-save>Сохранить</button><button class="btn btn-ghost" data-acl-cancel>Отмена</button></div>
+    </div>`;
+  }
+  function aclExtraHtml(t){
+    if(t.auto === 'events-today' || t.auto === 'events-all'){
+      const evs = aclDayEvents(t.ds, true);
+      if(!evs.length) return `<div class="acl-extra">На этот день мероприятий нет.</div>`;
+      return `<div class="acl-extra">${evs.map(e=>{ const sp = getSpace(e.spaceId) || {}; const hs = aclHostsOf(e);
+        return `<div>🕒 <b>${escapeHtml(e.time)}</b> · ${escapeHtml(sp.name||'')} · «${escapeHtml(e.title||'МК')}»${hs.length ? ' · ' + escapeHtml(hs.join(', ')) : ''}${Number(e.guests) ? ' · гостей: ' + escapeHtml(String(e.guests)) : ''}</div>`; }).join('')}</div>`;
+    }
+    if(t.auto === 'handover-read'){
+      const n = aclPrevNote(t.ds);
+      if(!n) return `<div class="acl-extra">Передачи смены пока нет.</div>`;
+      return `<div class="acl-extra"><div class="acl-sub">Передача от ${escapeHtml(n.by||'—')} · ${escapeHtml(formatDateText(n.ds))}</div><div style="white-space:pre-wrap;">${escapeHtml(n.text||'')}</div></div>`;
+    }
+    if(t.auto === 'masters-tomorrow'){
+      const { tom, list } = aclMastersTomorrow(t.ds);
+      if(!list.length) return `<div class="acl-extra">На ${escapeHtml(formatDateText(tom))} мастер-классов нет — писать некому.</div>`;
+      return `<div class="acl-extra">${list.map((m,i)=> `<div class="acl-rem"><div><b>${escapeHtml(m.name)}</b>: ${m.evs.map(e=> escapeHtml(e.time + ' «' + (e.title||'МК') + '»')).join(', ')}</div>
+        <button class="btn btn-ghost acl-mini" data-acl-copy="${escapeHtml(aclReminderText(m, tom))}">📋 Скопировать текст</button></div>`).join('')}</div>`;
+    }
+    if(t.auto === 'handover-write'){
+      const n = aclNote(t.ds) || {};
+      const leftovers = aclTasks(t.ds, 'admin').filter(x=> x.id !== t.id && !x.done && x.block !== 'evening').map(x=> '— ' + x.text + (x.event ? ' (' + x.event.time + ')' : ''));
+      const placeholder = 'Что не успела: …\nВажная информация: кто-то приедет за документами, села колонка, закончился размен, сколы на керамике…';
+      return `<div class="acl-extra">
+        <textarea id="acl-note" rows="4" placeholder="${escapeHtml(placeholder)}">${escapeHtml(n.text || '')}</textarea>
+        ${!n.text && leftovers.length ? `<button class="btn btn-ghost acl-mini" id="acl-note-fill">↧ Подставить неотмеченные пункты (${leftovers.length})</button>` : ''}
+        <div class="acl-form-row"><button class="btn btn-primary acl-mini" id="acl-note-save">Сохранить передачу</button><button class="btn btn-ghost acl-mini" id="acl-note-nothing">Передавать нечего</button>
+        ${n.by ? `<span class="acl-sub">${n.nothing && !n.text ? 'передавать нечего' : 'записала'}: ${escapeHtml(n.by)} · ${escapeHtml(aclTs(n.at))}</span>` : ''}</div>
+        <textarea id="acl-note-leftovers" style="display:none;">${escapeHtml(leftovers.join('\n'))}</textarea>
+      </div>`;
+    }
+    return '';
+  }
+  function aclRowHtml(t){
+    const st = aclStatus(t); const edit = aclCanEdit(); const f = state.aclForm || {};
+    if(f.type === 'edit' && f.id === t.id) return aclTaskForm(t);
+    const dueTxt = 'к ' + aclHM(aclDueMin(t));
+    const who = (n)=> `<b class="acl-who">${escapeHtml(n || '—')}</b>`;
+    const undone = t.undoneBy && !t.done ? ` <span class="acl-sub">· отметку снял(а) ${escapeHtml(t.undoneBy)} в ${escapeHtml(aclTs(t.undoneAt))}</span>` : '';
+    const meta = st === 'done' ? `<span class="acl-ok">✓ ${t.doneVia ? 'отмечено само (' + escapeHtml(t.doneVia) + ')' + (t.doneBy ? ' — сделал(а) ' + who(t.doneBy) : '') : 'отметил(а) ' + who(t.doneBy)}${t.doneAt ? ' в ' + escapeHtml(aclTs(t.doneAt)) : ''}</span>`
+      : st === 'notdone' ? `<span class="acl-bad">✕ не сделано${t.reason ? ': ' + escapeHtml(t.reason) : ''}</span> <span class="acl-sub">— отметил(а) ${who(t.notDoneBy)}${t.notDoneAt ? ' в ' + escapeHtml(aclTs(t.notDoneAt)) : ''}</span>`
+      : st === 'overdue' ? `<span class="acl-bad">просрочено · ${escapeHtml(dueTxt)}</span>${undone}` : `<span class="acl-sub">${escapeHtml(dueTxt)}</span>${undone}`;
+    return `<div class="acl-row acl-${st}" data-acl-id="${escapeHtml(t.id)}">
+      <button class="acl-check" data-acl-toggle="${escapeHtml(t.id)}" title="${t.done ? 'Снять отметку' : 'Отметить выполненным'}" ${t.done && !t.manual ? 'disabled' : ''}>${t.done ? '✓' : (t.notDone ? '✕' : '')}</button>
+      <div class="acl-body">
+        <div class="acl-text">${escapeHtml(t.text)}${t.custom ? ' <span class="acl-tag">разово</span>' : ''}</div>
+        ${t.hint ? `<div class="acl-hint">${escapeHtml(t.hint)}</div>` : ''}
+        <div class="acl-meta">${meta}</div>
+        ${aclExtraHtml(t)}
+        ${f.type === 'notdone' && f.id === t.id ? `<div class="acl-form-row"><input type="text" id="acl-reason" placeholder="Почему не получилось" style="flex:1;min-width:180px;"><button class="btn btn-primary acl-mini" data-acl-nd-save>Сохранить</button><button class="btn btn-ghost acl-mini" data-acl-cancel>Отмена</button></div>` : ''}
+        ${f.type === 'del' && f.id === t.id ? `<div class="acl-form-row acl-del-box">
+            ${t.custom ? `<button class="btn btn-primary acl-mini" data-acl-del-do="custom" style="background:var(--danger);border-color:var(--danger);">Удалить задачу</button>`
+              : `<button class="btn btn-primary acl-mini" data-acl-del-do="tpl" style="background:var(--danger);border-color:var(--danger);">Удалить из шаблона (с ${escapeHtml(formatDateText(t.ds))})</button>
+                 <button class="btn btn-ghost acl-mini" data-acl-del-do="day">Убрать только в этот день${t.event ? ' (этот МК)' : ''}</button>`}
+            <button class="btn btn-ghost acl-mini" data-acl-cancel>Отмена</button></div>` : ''}
+      </div>
+      <div class="acl-actions">
+        ${!t.done && !t.notDone ? `<button class="acl-mini-btn" data-acl-nd="${escapeHtml(t.id)}" title="Не получилось сделать">не сделано</button>` : ''}
+        ${t.notDone ? `<button class="acl-mini-btn" data-acl-reopen="${escapeHtml(t.id)}">вернуть</button>` : ''}
+        ${edit ? `<button class="acl-mini-btn" data-acl-edit="${escapeHtml(t.id)}" title="Редактировать">✎</button><button class="acl-mini-btn" data-acl-del="${escapeHtml(t.id)}" title="Удалить">🗑</button>` : ''}
+      </div>
+    </div>`;
+  }
+  function renderAdminShiftView(){
+    if(!state.aclDate) state.aclDate = todayStr();
+    aclRefresh(false);
+    const ds = state.aclDate; const tab = (state.aclTab === 'control' && aclCanControl()) ? 'control' : 'day';
+    const list = aclCurList(); const L = ACL_LISTS[list]; const lists = aclListsForRole(state.currentRole);
+    const listTabs = lists.length > 1 ? `<div style="display:flex;gap:6px;margin-bottom:8px;flex-wrap:wrap;">${lists.map(k=> `<button class="btn ${k===list?'btn-primary':'btn-ghost'}" data-acl-list="${k}" style="${k===list?'background:var(--accent);border-color:var(--accent);':''}">${escapeHtml(ACL_LISTS[k].label)}${(()=>{ const n = todayStr() >= ACL_FROM ? aclStats(todayStr(), k).overdue : 0; return n ? ' <span style="background:var(--danger);color:#fff;border-radius:9px;padding:0 6px;font-size:11px;">'+n+'</span>' : ''; })()}</button>`).join('')}</div>` : '';
+    const tabs = aclCanControl() ? `<div class="sub-tabs" style="display:flex;gap:6px;margin-bottom:12px;">
+      <button class="btn ${tab==='day'?'btn-primary':'btn-ghost'}" data-acl-tab="day">📋 Чек-лист дня</button>
+      <button class="btn ${tab==='control'?'btn-primary':'btn-ghost'}" data-acl-tab="control">📊 Контроль смен</button></div>` : '';
+    return `<div class="analytics-wrap acl-wrap">
+      <h2 style="font-family:var(--font-display);margin:18px 0 4px;">✅ ${escapeHtml(L.title)}</h2>
+      <div class="acl-sub" style="margin-bottom:12px;">${list === 'admin' ? 'По регламенту смены администратора. Галочку ставит любой админ на смене' : 'Ежедневные дела менеджера по продажам. Галочку ставит менеджер'}, ассистент может закрыть пункты при аврале — у каждой отметки видно, кто и во сколько её поставил. Не получилось — нажмите «не сделано» и напишите почему, ${list === 'admin' ? 'старший администратор' : 'руководитель'} получит уведомление.</div>
+      ${listTabs}
+      ${tabs}
+      ${tab === 'control' ? aclControlHtml(list) : aclDayHtml(ds, list)}
+    </div>`;
+  }
+  function aclDayHtml(ds, list){
+    const ts = aclTasks(ds, list); const s = aclStats(ds, list); const people = aclShiftPeople(ds, list); const f = state.aclForm || {};
+    const pct = s.total ? Math.round(s.done / s.total * 100) : 0;
+    const blocksHtml = ACL_LISTS[list].blocks.map(b=>{
+      const list = ts.filter(t=> t.block === b.key);
+      const addBtn = aclCanEdit() ? (f.type === 'add' && f.block === b.key ? aclTaskForm(null, b.key) : `<button class="acl-add" data-acl-add="${b.key}">＋ Добавить задачу</button>`) : '';
+      if(!list.length && !aclCanEdit()) return '';
+      let inner = '';
+      if(b.key === 'event'){
+        const evs = aclDayEvents(ds);
+        inner = evs.length ? evs.map(e=>{ const sp = getSpace(e.spaceId) || {}; const el = list.filter(t=> t.eventId === e.id); if(!el.length) return '';
+          const d = el.filter(t=> t.done).length;
+          return `<div class="acl-ev"><div class="acl-ev-h">🕒 ${escapeHtml(e.time)} · ${escapeHtml(sp.name||'')} · «${escapeHtml(e.title||'МК')}»${aclHostsOf(e).length ? ' · ' + escapeHtml(aclHostsOf(e).join(', ')) : ''} <span class="acl-sub">${d}/${el.length}</span></div>${el.map(aclRowHtml).join('')}</div>`; }).join('')
+          : `<div class="acl-sub" style="padding:6px 0;">В этот день нет мастер-классов в Художественной, Мастерской и Лектории.</div>`;
+      } else inner = list.sort((a,c)=> aclDueMin(a) - aclDueMin(c)).map(aclRowHtml).join('');
+      const d = list.filter(t=> t.done).length;
+      return `<div class="acl-block"><div class="acl-block-h">${b.icon} ${escapeHtml(b.label)} <span class="acl-sub">${list.length ? d + '/' + list.length : 'пусто'}</span></div>${inner}${addBtn}</div>`;
+    }).join('');
+    return `
+      <div class="acl-top">
+        <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
+          <button class="nav-btn" id="acl-prev">‹</button>
+          <b style="font-size:16px;min-width:150px;text-align:center;">${escapeHtml(formatDateText(ds))}</b>
+          <button class="nav-btn" id="acl-next">›</button>
+          ${ds !== todayStr() ? `<button class="today-btn" id="acl-today">сегодня</button>` : ''}
+        </div>
+        <div class="acl-sub" style="margin-top:6px;">На смене: ${people.length ? people.map(p=> escapeHtml(p.name + (p.senior ? ' (СА)' : '') + (p.start ? ' ' + p.start + '–' + p.end : ''))).join(' · ') : 'никто не назначен'}</div>
+        <div class="acl-progress"><div style="width:${pct}%;"></div></div>
+        <div class="acl-sub">Выполнено <b>${s.done}</b> из ${s.total}${s.overdue ? ` · <span class="acl-bad">просрочено ${s.overdue}</span>` : ''}${s.notdone ? ` · <span class="acl-bad">не сделано ${s.notdone}</span>` : ''}</div>
+      </div>
+      ${blocksHtml}
+      ${aclCanEdit() && !aclTpl(list).isDefault ? `<div class="acl-sub" style="margin-top:10px;">Шаблон изменён вами. <button class="acl-mini-btn" id="acl-reset-tpl">вернуть стандартный список</button></div>` : ''}`;
+  }
+  function aclControlHtml(list){
+    const c = state.cursor; const ym = c.getFullYear() + '-' + pad(c.getMonth()+1); const today = todayStr();
+    const days = []; for(let d = new Date(c.getFullYear(), c.getMonth(), 1); d.getMonth() === c.getMonth(); d.setDate(d.getDate()+1)){ const x = fmtDate(d); if(x <= today && x >= ACL_FROM && aclShiftPeople(x, list).length) days.push(x); }
+    const per = {}; const nd = []; const T = { total:0, done:0, notdone:0, overdue:0 };
+    const rows = days.slice().reverse().map(ds=>{
+      const ts = aclTasks(ds, list); if(!ts.length) return '';
+      const s = { total: ts.length, done:0, notdone:0, overdue:0, open:0 };
+      ts.forEach(t=>{ const st = aclStatus(t); s[st]++;
+        if(st === 'notdone') nd.push(t);
+        if(t.done && t.doneAt && t.doneBy){ const r = per[t.doneBy] = per[t.doneBy] || { n:0, onTime:0 }; r.n++; if(new Date(t.doneAt) <= new Date(aclDue(t).getTime() + 15*60000)) r.onTime++; }
+      });
+      ['total','done','notdone','overdue'].forEach(k=> T[k] += s[k]);
+      const pct = Math.round(s.done / s.total * 100);
+      return `<tr data-acl-goday="${ds}" style="cursor:pointer;"><td style="text-align:left;">${escapeHtml(formatDateText(ds))}</td><td style="text-align:left;">${escapeHtml(aclShiftPeople(ds, list).map(p=> p.name).join(', ') || '—')}</td>
+        <td class="${pct >= 90 ? 'acl-ok' : (pct < 60 ? 'acl-bad' : '')}"><b>${pct}%</b> <span class="acl-sub">${s.done}/${s.total}</span></td><td>${s.notdone || ''}</td><td>${s.overdue ? `<span class="acl-bad">${s.overdue}</span>` : ''}</td></tr>`;
+    }).join('');
+    const people = Object.entries(per).sort((a,b)=> b[1].n - a[1].n);
+    return `
+      <div class="acl-sub" style="margin-bottom:8px;">${escapeHtml(MONTHS[c.getMonth()])} ${c.getFullYear()} · месяц меняется в общей панели сверху. Нажмите на день — откроется его чек-лист.</div>
+      <div class="analytics-summary" style="margin-bottom:12px;">
+        <div class="summary-card"><div class="num" style="font-size:22px;">${T.total ? Math.round(T.done / T.total * 100) : 0}%</div><div class="label">выполнено за месяц</div></div>
+        <div class="summary-card"><div class="num" style="font-size:22px;">${T.notdone}</div><div class="label">не сделано (с причиной)</div></div>
+        <div class="summary-card"><div class="num" style="font-size:22px;">${T.overdue}</div><div class="label">не отмечено вовремя</div></div>
+      </div>
+      <table class="acl-table"><thead><tr><th style="text-align:left;">День</th><th style="text-align:left;">${list === 'manager' ? 'Менеджер' : 'Админы'}</th><th>Выполнено</th><th>Не сделано</th><th>Не отмечено</th></tr></thead><tbody>${rows || `<tr><td colspan="5" class="acl-sub">Пока нет данных за этот месяц. Контроль считается с ${escapeHtml(formatDateText(ACL_FROM))}, только по дням, где в графике стоит ${list === 'manager' ? 'менеджер' : 'админ'}.</td></tr>`}</tbody></table>
+      ${people.length ? `<div class="acl-block" style="margin-top:14px;"><div class="acl-block-h">👤 Кто отмечал</div>${people.map(([n,r])=> `<div class="stat-row"><div class="stat-label" style="flex:1;">${escapeHtml(n)}</div><div style="width:120px;font-size:12px;">отметок: ${r.n}</div><div style="width:150px;font-size:12px;">вовремя: ${Math.round(r.onTime / r.n * 100)}%</div></div>`).join('')}</div>` : ''}
+      ${nd.length ? `<div class="acl-block" style="margin-top:14px;"><div class="acl-block-h">✕ Не сделано — причины</div>${nd.sort((a,b)=> b.ds.localeCompare(a.ds)).map(t=> `<div class="stat-row" style="align-items:flex-start;"><div style="width:110px;font-size:12px;">${escapeHtml(formatDateText(t.ds))}</div><div style="flex:1;font-size:13px;"><b>${escapeHtml(t.text)}</b>${t.event ? ' <span class="acl-sub">(' + escapeHtml(t.event.time + ' «' + (t.event.title||'') + '»') + ')</span>' : ''}<div class="acl-bad">${escapeHtml(t.reason || 'без причины')} · ${escapeHtml(t.notDoneBy||'')}</div></div></div>`).join('')}</div>` : ''}`;
+  }
+  function aclFindTask(id){ return aclTasks(state.aclDate, aclCurList()).find(t=> t.id === id); }
+  function aclReadForm(){
+    const g = (id)=> document.getElementById(id);
+    return { text: (g('acl-f-text') && g('acl-f-text').value || '').trim(), hint: (g('acl-f-hint') && g('acl-f-hint').value || '').trim(),
+      block: g('acl-f-block') ? g('acl-f-block').value : 'during', offset: g('acl-f-offset') ? Number(g('acl-f-offset').value)||0 : 0,
+      time: g('acl-f-time') ? g('acl-f-time').value : '', days: g('acl-f-days') ? g('acl-f-days').value : 'all', once: !!(g('acl-f-once') && g('acl-f-once').checked) };
+  }
+  function attachAdminShiftEvents(){
+    const $ = (s)=> document.querySelector(s), $$ = (s)=> document.querySelectorAll(s);
+    const go = (d)=>{ state.aclDate = d; state.aclForm = null; render(); };
+    if($('#acl-prev')) $('#acl-prev').onclick = ()=> go(addDaysIso(state.aclDate, -1));
+    if($('#acl-next')) $('#acl-next').onclick = ()=> go(addDaysIso(state.aclDate, 1));
+    if($('#acl-today')) $('#acl-today').onclick = ()=> go(todayStr());
+    $$('[data-acl-list]').forEach(b=> b.onclick = ()=>{ state.aclList = b.dataset.aclList; state.aclForm = null; render(); });
+    $$('[data-acl-tab]').forEach(b=> b.onclick = ()=>{ state.aclTab = b.dataset.aclTab; state.aclForm = null; render(); });
+    $$('[data-acl-goday]').forEach(r=> r.onclick = ()=>{ state.aclTab = 'day'; go(r.dataset.aclGoday); });
+    $$('[data-acl-cancel]').forEach(b=> b.onclick = ()=>{ state.aclForm = null; render(); });
+    $$('[data-acl-toggle]').forEach(b=> b.onclick = async ()=>{
+      const t = aclFindTask(b.dataset.aclToggle); if(!t) return;
+      if(t.done && t.manual) aclUpsertMark(t, { done:false, doneBy:'', doneAt:'', undoneBy: aclMe(), undoneAt: new Date().toISOString() });
+      else aclUpsertMark(t, { done:true, doneBy: aclMe(), doneAt: new Date().toISOString(), notDone:false, reason:'', undoneBy:'', undoneAt:'' });
+      render(); await saveAdminChecklistMarks();
+    });
+    $$('[data-acl-nd]').forEach(b=> b.onclick = ()=>{ state.aclForm = { type:'notdone', id: b.dataset.aclNd }; render(); setTimeout(()=>{ const i = $('#acl-reason'); if(i) i.focus(); }, 30); });
+    const ndSave = $('[data-acl-nd-save]');
+    if(ndSave) ndSave.onclick = async ()=>{
+      const t = aclFindTask(state.aclForm && state.aclForm.id); if(!t) return;
+      const reason = ($('#acl-reason').value || '').trim();
+      if(!reason){ showGapWarningBanner('Напишите, почему не получилось — так старшему администратору проще помочь.'); return; }
+      aclUpsertMark(t, { notDone:true, reason, notDoneBy: aclMe(), notDoneAt: new Date().toISOString(), done:false, doneBy:'', doneAt:'' });
+      state.aclForm = null; render(); await saveAdminChecklistMarks();
+      try{ sendPushNotification(t.list === 'manager' ? 'Чек-лист менеджера: не сделано' : 'Чек-лист смены: не сделано', `${aclMe()}: ${t.text}${t.event ? ' (' + t.event.time + ')' : ''} — ${reason}`, ACL_LISTS[t.list || 'admin'].push); }catch(e){}
+      try{ recordAction('Чек-лист: не сделано', `${t.text} · ${reason}`); }catch(e){}
+    };
+    $$('[data-acl-reopen]').forEach(b=> b.onclick = async ()=>{ const t = aclFindTask(b.dataset.aclReopen); if(!t) return;
+      aclUpsertMark(t, { notDone:false, reason:'', notDoneBy:'', notDoneAt:'' }); render(); await saveAdminChecklistMarks(); });
+    // заметки к пунктам
+    $$('[data-acl-copy]').forEach(b=> b.onclick = async ()=>{
+      const txt = b.dataset.aclCopy;
+      try{ await navigator.clipboard.writeText(txt); b.textContent = '✓ Скопировано'; }
+      catch(e){ const ta = document.createElement('textarea'); ta.value = txt; document.body.appendChild(ta); ta.select(); try{ document.execCommand('copy'); b.textContent = '✓ Скопировано'; }catch(err){} ta.remove(); }
+      setTimeout(()=>{ if(b.isConnected) b.textContent = '📋 Скопировать текст'; }, 1800);
+    });
+    const saveNote = async (text, nothing)=>{
+      const ds = state.aclDate; const id = 'note|' + ds;
+      const arr = state.adminChecklistMarks || []; const i = arr.findIndex(m=> m.id === id);
+      const rec = { id, ds, kind:'note', text, nothing: !!nothing, by: aclMe(), at: new Date().toISOString() };
+      state.adminChecklistMarks = i >= 0 ? arr.map((m,j)=> j === i ? { ...m, ...rec } : m) : [...arr, rec];
+      render(); await saveAdminChecklistMarks();
+    };
+    if($('#acl-note-save')) $('#acl-note-save').onclick = ()=>{ const v = ($('#acl-note').value || '').trim(); if(!v){ showGapWarningBanner('Напишите, что передаёте, или нажмите «Передавать нечего».'); return; } saveNote(v, false); };
+    if($('#acl-note-nothing')) $('#acl-note-nothing').onclick = ()=> saveNote('', true);
+    if($('#acl-note-fill')) $('#acl-note-fill').onclick = ()=>{ const n = $('#acl-note'); n.value = 'Что не успела:\n' + $('#acl-note-leftovers').value + '\n\nВажная информация:\n'; n.focus(); };
+    // ---- редактирование (руководитель) ----
+    if(!aclCanEdit()) return;
+    $$('[data-acl-edit]').forEach(b=> b.onclick = ()=>{ state.aclForm = { type:'edit', id: b.dataset.aclEdit }; render(); });
+    $$('[data-acl-del]').forEach(b=> b.onclick = ()=>{ state.aclForm = { type:'del', id: b.dataset.aclDel }; render(); });
+    $$('[data-acl-add]').forEach(b=> b.onclick = ()=>{ state.aclForm = { type:'add', block: b.dataset.aclAdd }; render(); setTimeout(()=>{ const i = $('#acl-f-text'); if(i) i.focus(); }, 30); });
+    const blockSel = $('#acl-f-block');
+    if(blockSel) blockSel.onchange = ()=>{ const ev = blockSel.value === 'event';
+      $$('.acl-f-when-ev').forEach(x=> x.style.display = ev ? '' : 'none'); $$('.acl-f-when-tm').forEach(x=> x.style.display = ev ? 'none' : '');
+      $$('.acl-f-once').forEach(x=> x.style.display = ev ? 'none' : ''); };
+    const fSave = $('[data-acl-save]');
+    if(fSave) fSave.onclick = async ()=>{
+      const v = aclReadForm(); const f = state.aclForm || {};
+      if(!v.text){ showGapWarningBanner('Напишите текст задачи.'); return; }
+      const list = aclCurList();
+      const tpl = aclTpl(list); const items = tpl.items.map(x=> ({ ...x }));
+      const fields = { text: v.text, hint: v.hint, block: v.block, days: v.days };
+      if(v.block === 'event'){ fields.offset = v.offset; fields.time = ''; } else { fields.time = v.time; delete fields.offset; }
+      if(f.type === 'edit'){
+        const t = aclFindTask(f.id); if(!t) return;
+        if(t.custom){
+          aclUpsertMark(t, { text: v.text, hint: v.hint, block: v.block === 'event' ? 'during' : v.block, time: v.time });
+          state.aclForm = null; render(); await saveAdminChecklistMarks(); return;
+        }
+        const i = items.findIndex(x=> x.id === t.itemId); if(i < 0) return;
+        items[i] = { ...items[i], ...fields }; if(v.block !== 'event') delete items[i].offset;
+        state[ACL_LISTS[list].stateKey] = { items }; state.aclForm = null; render(); await saveAdminChecklistTpl(list);
+        try{ recordAction('Чек-лист: пункт изменён', v.text); }catch(e){}
+        return;
+      }
+      if(f.type === 'add'){
+        if(v.once && v.block !== 'event'){
+          const id = 'custom|' + aclIdPfx(list) + state.aclDate + '|' + uid();
+          state.adminChecklistMarks = [...(state.adminChecklistMarks||[]), { id, ds: state.aclDate, list, custom:true, block: v.block, text: v.text, hint: v.hint, time: v.time, author: aclMe(), createdAt: new Date().toISOString() }];
+          state.aclForm = null; render(); await saveAdminChecklistMarks(); return;
+        }
+        items.push({ id: 't' + uid(), ...fields, since: state.aclDate });
+        state[ACL_LISTS[list].stateKey] = { items }; state.aclForm = null; render(); await saveAdminChecklistTpl(list);
+        try{ recordAction('Чек-лист: пункт добавлен', v.text); }catch(e){}
+      }
+    };
+    $$('[data-acl-del-do]').forEach(b=> b.onclick = async ()=>{
+      const t = aclFindTask(state.aclForm && state.aclForm.id); if(!t) return; const mode = b.dataset.aclDelDo;
+      if(mode === 'custom'){ aclUpsertMark(t, { deleted:true }); state.aclForm = null; render(); await saveAdminChecklistMarks(); return; }
+      if(mode === 'day'){ aclUpsertMark(t, { hidden:true }); state.aclForm = null; render(); await saveAdminChecklistMarks(); return; }
+      const list = aclCurList();
+      const items = aclTpl(list).items.map(x=> x.id === t.itemId ? { ...x, removedFrom: t.ds } : { ...x });
+      state[ACL_LISTS[list].stateKey] = { items }; state.aclForm = null; render(); await saveAdminChecklistTpl(list);
+      try{ recordAction('Чек-лист: пункт удалён', t.text); }catch(e){}
+    });
+    if($('#acl-reset-tpl')) $('#acl-reset-tpl').onclick = async ()=>{
+      if(!confirmInline($('#acl-reset-tpl'))) return;
+      // не стираем историю: свои пункты выключаем с сегодняшнего дня, стандартные возвращаем
+      const list = aclCurList(); const L = ACL_LISTS[list];
+      const today = todayStr(); const cur = aclTpl(list).items;
+      const custom = cur.filter(x=> !L.defaults.some(d=> d.id === x.id)).map(x=> ({ ...x, removedFrom: x.removedFrom && x.removedFrom < today ? x.removedFrom : today }));
+      state[L.stateKey] = { items: [...L.defaults.map(x=> ({ ...x })), ...custom] }; render(); await saveAdminChecklistTpl(list);
+    };
+    function confirmInline(btn){ if(btn.dataset.sure) return true; btn.dataset.sure = '1'; btn.textContent = 'точно вернуть? нажмите ещё раз'; return false; }
+  }
+  // предупреждение перед закрытием кассы, если в чек-листе остались неотмеченные пункты
+  function aclConfirmBeforeCashClose(onGo){
+    let open = []; try{ open = aclCanView() ? aclOpenBeforeClose(todayStr()) : []; }catch(e){}
+    if(!open.length){ onGo(); return; }
+    const ov = document.createElement('div');
+    ov.className = 'modal-overlay'; ov.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.45);display:flex;align-items:center;justify-content:center;z-index:9999;padding:16px;';
+    ov.innerHTML = `<div style="background:var(--white);border-radius:12px;max-width:480px;width:100%;padding:18px 18px 14px;max-height:85vh;overflow:auto;">
+      <div style="font-weight:700;font-size:16px;margin-bottom:6px;">В чек-листе не отмечено: ${open.length}</div>
+      <div style="font-size:13px;color:var(--ink-soft);margin-bottom:8px;">Проверьте перед закрытием смены:</div>
+      <div style="font-size:13px;line-height:1.5;margin-bottom:12px;">${open.map(t=> '• ' + escapeHtml(t.text)).join('<br>')}</div>
+      <div style="display:flex;gap:8px;justify-content:flex-end;flex-wrap:wrap;">
+        <button class="btn btn-ghost" data-x="list">Открыть чек-лист</button>
+        <button class="btn btn-primary" data-x="go">Всё равно закрыть кассу</button></div></div>`;
+    document.body.appendChild(ov);
+    ov.querySelector('[data-x="list"]').onclick = ()=>{ ov.remove(); state.view = 'adminshift'; state.aclList = 'admin'; state.aclTab = 'day'; state.aclDate = todayStr(); render(); };
+    ov.querySelector('[data-x="go"]').onclick = ()=>{ ov.remove(); onGo(); };
+    ov.onclick = (e)=>{ if(e.target === ov) ov.remove(); };
   }
 
   // ===================== 🗓 ДЕНЬ МАСТЕРА НА СЛОТЕ =====================
