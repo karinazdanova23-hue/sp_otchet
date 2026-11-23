@@ -4249,16 +4249,23 @@
       };
     }catch(e){ console.error('prefetch', e); }
   }
+  // «чёрный ящик» загрузки: запоминает последний выполненный шаг loadData и время каждого шага
+  window.__ldTrace = []; window.__ldLast = null;
+  function __ldMark(n){ const t = Date.now(); if(window.__ldLast){ window.__ldLast.ms = t - window.__ldLast.at; } window.__ldLast = { step: n, at: t }; window.__ldTrace.push(window.__ldLast); }
   async function loadData(){
     prefetchLoadDataKeys();
     let spacesLoaded = false;
+    __ldMark(4255);
     try{
+      __ldMark(4256);
       const sp = await window.storage.get('spaces-config', true);
       if(sp){ state.spaces = JSON.parse(sp.value); spacesLoaded = true; }
     }catch(e){ /* данных ещё нет */ }
 
     let eventsLoaded = false;
+    __ldMark(4261);
     try{
+      __ldMark(4262);
       const ev = await window.storage.get('events', true);
       if(ev){ state.events = JSON.parse(ev.value); eventsLoaded = true; }
     }catch(e){ /* данных ещё нет */ }
@@ -4283,10 +4290,13 @@
     if(eventsLoaded){
       // подгружаем прошлый снимок ДО проверки — иначе проверке не с чем будет сравнивать
       try{
+        __ldMark(4286);
         const eis = await window.storage.get('events-integrity-snapshot', true);
         state.eventsIntegritySnapshot = eis ? JSON.parse(eis.value) : null;
       }catch(e){ state.eventsIntegritySnapshot = null; }
+      __ldMark(4289);
       try{
+        __ldMark(4290);
         const eia = await window.storage.get('events-integrity-alerts', true);
         state.eventsIntegrityAlerts = eia ? JSON.parse(eia.value) : [];
       }catch(e){ state.eventsIntegrityAlerts = []; }
@@ -4294,70 +4304,93 @@
       // иначе неудачная загрузка на этом устройстве выглядела бы как "все мероприятия пропали"
       try{ await checkEventsIntegrity(); }catch(e){ /* не критично для основной загрузки */ }
     }
+    __ldMark(4297);
     try{ await storageSetWithRetry('meta-version', DATA_VERSION); }catch(e){ /* не критично */ }
 
+    __ldMark(4299);
     try{
+      __ldMark(4300);
       const rc = await window.storage.get('role-codes', true);
       const parsed = rc ? JSON.parse(rc.value) : {};
       state.roleCodes = { ...DEFAULT_ROLE_CODES, ...parsed };
       if(!rc) await storageSetWithRetry('role-codes', JSON.stringify(state.roleCodes));
     }catch(e){ state.roleCodes = { ...DEFAULT_ROLE_CODES }; }
 
+    __ldMark(4306);
     try{
+      __ldMark(4307);
       const mp = await window.storage.get('master-passwords', true);
       state.masterPersonalPasswords = mp ? JSON.parse(mp.value) : {};
     }catch(e){ state.masterPersonalPasswords = {}; }
 
+    __ldMark(4311);
     try{
+      __ldMark(4312);
       const fp = await window.storage.get('sales-forecast-probs', true);
       state.forecastProbs = fp ? (JSON.parse(fp.value) || {}) : {};
     }catch(e){ state.forecastProbs = {}; }
 
+    __ldMark(4316);
     try{
+      __ldMark(4317);
       const pc = await window.storage.get('promo-codes', true);
       state.promoCodes = pc ? (JSON.parse(pc.value) || []) : [];
     }catch(e){ state.promoCodes = []; }
     state._promoBaseline = JSON.parse(JSON.stringify(state.promoCodes));
 
+    __ldMark(4322);
     try{
+      __ldMark(4323);
       const hp = await window.storage.get('hostess-passwords', true);
       state.hostessPersonalPasswords = hp ? JSON.parse(hp.value) : {};
     }catch(e){ state.hostessPersonalPasswords = {}; }
 
+    __ldMark(4327);
     try{
+      __ldMark(4328);
       const gp = await window.storage.get('manager-passwords', true);
       state.managerPersonalPasswords = gp ? JSON.parse(gp.value) : {};
     }catch(e){ state.managerPersonalPasswords = {}; }
 
+    __ldMark(4332);
     try{
+      __ldMark(4333);
       const et = await window.storage.get('event-types', true);
       if(et){ state.eventTypes = JSON.parse(et.value); }
       else { state.eventTypes = DEFAULT_EVENT_TYPES; await storageSetWithRetry('event-types', JSON.stringify(DEFAULT_EVENT_TYPES)); }
     }catch(e){ state.eventTypes = DEFAULT_EVENT_TYPES; }
     // один раз добавляем вид «Арт-свидание» (для слотов и расписания); если потом удалят — заново не возвращаем
     try{
+      __ldMark(4339);
       const flag = await window.storage.get('art-date-type-added', true);
       if(!flag){
         if(Array.isArray(state.eventTypes) && !state.eventTypes.some(t=>t.name==='Арт-свидание')){
           state.eventTypes = [...state.eventTypes, {name:'Арт-свидание', duration:120, materialRules:[]}];
+          __ldMark(4343);
           await window.storage.set('event-types', JSON.stringify(state.eventTypes), true);
         }
+        __ldMark(4345);
         await window.storage.set('art-date-type-added', '1', true);
       }
     }catch(e){}
 
+    __ldMark(4349);
     try{
+      __ldMark(4350);
       const hl = await window.storage.get('hosts-list', true);
       if(hl){ state.hostsList = JSON.parse(hl.value); }
       else { state.hostsList = DEFAULT_HOSTS_LIST; await storageSetWithRetry('hosts-list', JSON.stringify(DEFAULT_HOSTS_LIST)); }
     }catch(e){ state.hostsList = DEFAULT_HOSTS_LIST; }
 
+    __ldMark(4355);
     try{
+      __ldMark(4356);
       const sr2 = await window.storage.get('schedule-recs', true);
       state.scheduleRecs = sr2 ? JSON.parse(sr2.value) : DEFAULT_SCHEDULE_RECS.map(r=>({...r}));
     }catch(e){ state.scheduleRecs = DEFAULT_SCHEDULE_RECS.map(r=>({...r})); }
     // один раз добавляем виды/рекомендации для ноябрьского расписания: Акрил ЛАНЧ, Панно-ваза, Арт-свидание
     try{
+      __ldMark(4361);
       const flag2 = await window.storage.get('schedule-types-recs-v2', true);
       if(!flag2){
         const addTypes = [{name:'Акрил ЛАНЧ', duration:90}, {name:'Панно-ваза', duration:120}];
@@ -4368,22 +4401,28 @@
         let recsChanged = false;
         addRecs.forEach(r=>{ if(Array.isArray(state.scheduleRecs) && !state.scheduleRecs.some(x=>(x.title||'').toLowerCase()===r.title.toLowerCase())){ state.scheduleRecs = [...state.scheduleRecs, r]; recsChanged = true; } });
         if(recsChanged) await window.storage.set('schedule-recs', JSON.stringify(state.scheduleRecs), true);
+        __ldMark(4371);
         await window.storage.set('schedule-types-recs-v2', '1', true);
       }
     }catch(e){}
+    __ldMark(4374);
     try{
+      __ldMark(4375);
       const flag3 = await window.storage.get('schedule-types-recs-v3', true);
       if(!flag3){
         const NM='Керамика, кино и вино';
         if(Array.isArray(state.eventTypes) && !state.eventTypes.some(x=>x.name===NM)){
           const old = state.eventTypes.find(x=>x.name==='Кинопоказ');
           state.eventTypes = [...state.eventTypes, {name:NM, duration:(old&&old.duration)||150, materialRules:[]}];
+          __ldMark(4381);
           await window.storage.set('event-types', JSON.stringify(state.eventTypes), true);
         }
         if(Array.isArray(state.scheduleRecs) && !state.scheduleRecs.some(x=>x.title===NM)){
           state.scheduleRecs = state.scheduleRecs.map(x=> x.title==='Кинопоказ' ? {...x, title:NM} : x);
+          __ldMark(4385);
           await window.storage.set('schedule-recs', JSON.stringify(state.scheduleRecs), true);
         }
+        __ldMark(4387);
         await window.storage.set('schedule-types-recs-v3', '1', true);
       }
     }catch(e){}
@@ -4391,6 +4430,7 @@
     // один раз вносим утверждённый справочник: недостающие названия — в «Виды мероприятий» (длительность и статьи
     // расхода берём у прежнего вида), недостающих ведущих — в список мастеров, рекомендации по расписанию — на новые названия
     try{
+      __ldMark(4394);
       const flagCat = await window.storage.get('catalog-v1', true);
       if(!flagCat){
         if(Array.isArray(state.eventTypes)){
@@ -4420,33 +4460,42 @@
           });
           if(rc){ state.scheduleRecs = out; await window.storage.set('schedule-recs', JSON.stringify(state.scheduleRecs), true); }
         }
+        __ldMark(4423);
         await window.storage.set('catalog-v1', '1', true);
       }
     }catch(e){}
 
     // живой справочник «название → кто может вести» (правится в «📚 Мероприятия и ведущие»)
     try{
+      __ldMark(4429);
       const ec = await window.storage.get('event-catalog', true);
       if(ec){ state.eventCatalog = JSON.parse(ec.value); }
       else {
         state.eventCatalog = OFFICIAL_EVENT_CATALOG.map(([t,h])=>({title:t, hosts:[...h]}));
+        __ldMark(4433);
         await storageSetWithRetry('event-catalog', JSON.stringify(state.eventCatalog));
       }
       if(!Array.isArray(state.eventCatalog)) throw new Error('bad');
     }catch(e){ state.eventCatalog = OFFICIAL_EVENT_CATALOG.map(([t,h])=>({title:t, hosts:[...h]})); }
 
+    __ldMark(4438);
     try{
+      __ldMark(4439);
       const sw = await window.storage.get('schedule-wishes', true);
       state.scheduleWishes = sw ? JSON.parse(sw.value) : [];
     }catch(e){ state.scheduleWishes = []; }
     state._scheduleWishesBaseline = JSON.parse(JSON.stringify(state.scheduleWishes));
+    __ldMark(4443);
     try{
+      __ldMark(4444);
       const mdt = await window.storage.get('master-day-tasks', true);
       const v = mdt ? JSON.parse(mdt.value) : [];
       state.masterDayTasks = Array.isArray(v) ? v : [];
     }catch(e){ state.masterDayTasks = []; }
     state._masterDayTasksBaseline = JSON.parse(JSON.stringify(state.masterDayTasks));
+    __ldMark(4449);
     try{
+      __ldMark(4450);
       const mst = await window.storage.get('master-shift-template', true);
       const v = mst ? JSON.parse(mst.value) : null;
       state.masterShiftTpl = (v && Array.isArray(v.items)) ? v : { items:[] };
@@ -4454,6 +4503,7 @@
 
     // состав администраторов/менеджеров, изменённый руководителем в «Настройках доступа → Сотрудники»
     try{
+      __ldMark(4457);
       const sr = await window.storage.get('staff-roster', true);
       if(sr){
         const r = JSON.parse(sr.value);
@@ -4462,9 +4512,12 @@
         state.staffNotAdmins = Array.isArray(r.notAdmins) ? r.notAdmins : [];
       }
     }catch(e){}
+    __ldMark(4465);
     try{ await loadStaffPositions(); }catch(e){ state.staffPos = {}; }
 
+    __ldMark(4467);
     try{
+      __ldMark(4468);
       const sa = await window.storage.get('staff-archive', true);
       state.staffArchive = sa ? JSON.parse(sa.value) : [];
       if(!Array.isArray(state.staffArchive)) state.staffArchive = [];
@@ -4473,6 +4526,7 @@
     // свои категории расходов, которые кто-либо добавил прямо из формы расхода в "Книге" —
     // общие на всех (хранятся на сервере), в дополнение к базовому списку EXPENSE_CATEGORIES
     try{
+      __ldMark(4476);
       const cec = await window.storage.get('custom-expense-categories', true);
       state.customExpenseCategories = cec ? JSON.parse(cec.value) : [];
     }catch(e){ state.customExpenseCategories = []; }
@@ -4480,166 +4534,233 @@
     // свои направления маркетинга, добавленные прямо из формы траты — общие на всех (хранятся на
     // сервере), в дополнение к базовому списку MARKETING_DIRECTIONS
     try{
+      __ldMark(4483);
       const cmd = await window.storage.get('custom-marketing-directions', true);
       state.customMarketingDirections = cmd ? JSON.parse(cmd.value) : [];
     }catch(e){ state.customMarketingDirections = []; }
 
+    __ldMark(4487);
     try{
+      __ldMark(4488);
       const mpr = await window.storage.get('master-pay-rates', true);
       if(mpr){ state.masterPayRates = JSON.parse(mpr.value); }
       else { state.masterPayRates = DEFAULT_MASTER_PAY_RATES; await storageSetWithRetry('master-pay-rates', JSON.stringify(DEFAULT_MASTER_PAY_RATES)); }
     }catch(e){ state.masterPayRates = DEFAULT_MASTER_PAY_RATES; }
 
+    __ldMark(4493);
     try{
+      __ldMark(4494);
       const mpo = await window.storage.get('master-pay-overrides', true);
       state.masterPayOverrides = mpo ? JSON.parse(mpo.value) : {};
     }catch(e){ state.masterPayOverrides = {}; }
 
+    __ldMark(4498);
     try{
+      __ldMark(4499);
       const mc = await window.storage.get('materials-catalog', true);
       if(mc){ state.materialsCatalog = JSON.parse(mc.value); }
       else { state.materialsCatalog = DEFAULT_MATERIALS_CATALOG; await storageSetWithRetry('materials-catalog', JSON.stringify(DEFAULT_MATERIALS_CATALOG)); }
     }catch(e){ state.materialsCatalog = DEFAULT_MATERIALS_CATALOG; }
 
+    __ldMark(4504);
     try{
+      __ldMark(4505);
       const isv = await window.storage.get('item-sales', true);
       state.itemSales = isv ? JSON.parse(isv.value) : [];
     }catch(e){ state.itemSales = []; }
 
+    __ldMark(4509);
     try{
+      __ldMark(4510);
       const ord = await window.storage.get('orders', true);
       state.orders = ord ? JSON.parse(ord.value) : [];
     }catch(e){ state.orders = []; }
 
+    __ldMark(4514);
     try{
+      __ldMark(4515);
       const adj = await window.storage.get('salary-adjustments', true);
       state.salaryAdjustments = adj ? JSON.parse(adj.value) : [];
     }catch(e){ state.salaryAdjustments = []; }
 
+    __ldMark(4519);
     try{
+      __ldMark(4520);
       const plans = await window.storage.get('monthly-plans', true);
       state.monthlyPlans = plans ? JSON.parse(plans.value) : {};
     }catch(e){ state.monthlyPlans = {}; }
 
+    __ldMark(4524);
     try{
+      __ldMark(4525);
       const drs = await window.storage.get('daily-report-snapshots', true);
       state.dailyReportSnapshots = drs ? JSON.parse(drs.value) : {};
     }catch(e){ state.dailyReportSnapshots = {}; }
 
+    __ldMark(4529);
     try{
+      __ldMark(4530);
       const npm = await window.storage.get('net-profit-manual', true);
       state.netProfitManual = npm ? JSON.parse(npm.value) : {};
     }catch(e){ state.netProfitManual = {}; }
 
+    __ldMark(4534);
     try{
+      __ldMark(4535);
       const hb = await window.storage.get('hostess-bonuses', true);
       state.hostessBonuses = hb ? JSON.parse(hb.value) : {};
     }catch(e){ state.hostessBonuses = {}; }
 
+    __ldMark(4539);
     try{
+      __ldMark(4540);
       const ysm = await window.storage.get('year-summary-manual', true);
       state.yearSummaryManual = ysm ? JSON.parse(ysm.value) : {};
     }catch(e){ state.yearSummaryManual = {}; }
+    __ldMark(4543);
     try{
+      __ldMark(4544);
       const kps = await window.storage.get('kpi-settings', true);
       state.kpiSettings = kps ? JSON.parse(kps.value) : {};
     }catch(e){ state.kpiSettings = {}; }
     state._kpiSettingsBaseline = JSON.parse(JSON.stringify(state.kpiSettings || {}));
 
+    __ldMark(4549);
     try{
+      __ldMark(4550);
       const ll = await window.storage.get('login-log', true);
       state.loginLog = ll ? JSON.parse(ll.value) : [];
       if(!Array.isArray(state.loginLog)) state.loginLog = [];
     }catch(e){ state.loginLog = []; }
     state._loginLogBaseline = JSON.parse(JSON.stringify(state.loginLog));
 
+    __ldMark(4556);
     try{
+      __ldMark(4557);
       const al = await window.storage.get('audit-log', true);
       state.auditLog = al ? JSON.parse(al.value) : [];
     }catch(e){ state.auditLog = []; }
 
+    __ldMark(4561);
     try{
+      __ldMark(4562);
       const ptt = await window.storage.get('price-tier-templates', true);
       state.priceTierTemplates = ptt ? (JSON.parse(ptt.value) || {}) : {};
     }catch(e){ state.priceTierTemplates = {}; }
 
+    __ldMark(4566);
     try{
+      __ldMark(4567);
       const cm = await window.storage.get('closed-months', true);
       state.closedMonths = cm ? JSON.parse(cm.value) : [];
     }catch(e){ state.closedMonths = []; }
 
+    __ldMark(4571);
     try{
+      __ldMark(4572);
       const ms = await window.storage.get('marketing-spend', true);
       state.marketingSpend = ms ? JSON.parse(ms.value) : [];
     }catch(e){ state.marketingSpend = []; }
 
+    __ldMark(4576);
     try{
+      __ldMark(4577);
       const hd = await window.storage.get('history-daily', true);
       state.historyDaily = hd ? JSON.parse(hd.value) : [];
     }catch(e){ state.historyDaily = []; }
 
+    __ldMark(4581);
     try{
+      __ldMark(4582);
       const sup = await window.storage.get('suppliers', true);
       state.suppliers = sup ? JSON.parse(sup.value) : [];
     }catch(e){ state.suppliers = []; }
 
+    __ldMark(4586);
     try{
+      __ldMark(4587);
       const rc = await window.storage.get('stock-receipts', true);
       state.stockReceipts = rc ? JSON.parse(rc.value) : [];
     }catch(e){ state.stockReceipts = []; }
+    __ldMark(4590);
     try{ await loadFinanceAudit(); }catch(e){ state.financeAudit = []; }
+    __ldMark(4591);
     try{ await loadStockData(); }catch(e){ console.error('stock load', e); state.stockItems = state.stockItems || []; state.stockRevisions = state.stockRevisions || []; state.stockWriteoffs = state.stockWriteoffs || []; }
 
+    __ldMark(4593);
     try{
+      __ldMark(4594);
       const ro = await window.storage.get('reference-overrides', true);
       state.refOverrides = ro ? JSON.parse(ro.value) : {};
     }catch(e){ state.refOverrides = {}; }
+    __ldMark(4597);
     try{
+      __ldMark(4598);
       const rs = await window.storage.get('reference-settings', true);
       state.refSettings = rs ? JSON.parse(rs.value) : {};
     }catch(e){ state.refSettings = {}; }
+    __ldMark(4601);
     try{
+      __ldMark(4602);
       const kt = await window.storage.get('kp-texts', true);
       state.kpTexts = kt ? JSON.parse(kt.value) : {};
     }catch(e){ state.kpTexts = {}; }
+    __ldMark(4605);
     try{
+      __ldMark(4606);
       const mp = await window.storage.get('material-pools', true);
       const v = mp ? JSON.parse(mp.value) : [];
       state.materialPools = Array.isArray(v) ? v : [];
     }catch(e){ state.materialPools = []; }
+    __ldMark(4610);
     try{
+      __ldMark(4611);
       const mi = await window.storage.get('mk-info', true);
       state.mkInfo = mi ? JSON.parse(mi.value) : {};
     }catch(e){ state.mkInfo = {}; }
     state._mkInfoBaseline = JSON.parse(JSON.stringify(state.mkInfo||{}));
+    __ldMark(4615);
     try{ refSyncCatalogExtras(); }catch(e){ console.warn('ref extras', e); }
+    __ldMark(4616);
     try{
+      __ldMark(4617);
       const lsr = await window.storage.get('load-settings', true);
       state.loadSettings = lsr ? JSON.parse(lsr.value) : {};
     }catch(e){ state.loadSettings = {}; }
+    __ldMark(4620);
     try{
+      __ldMark(4621);
       const rl = await window.storage.get('reference-log', true);
       state.refLog = rl ? JSON.parse(rl.value) : [];
     }catch(e){ state.refLog = []; }
 
+    __ldMark(4625);
     try{
+      __ldMark(4626);
       const dof = await window.storage.get('days-off', true);
       state.daysOff = dof ? JSON.parse(dof.value) : [];
     }catch(e){ state.daysOff = []; }
 
+    __ldMark(4630);
     try{
+      __ldMark(4631);
       const mp = await window.storage.get('marketing-plans', true);
       state.marketingPlans = mp ? JSON.parse(mp.value) : {};
     }catch(e){ state.marketingPlans = {}; }
 
+    __ldMark(4635);
     try{
+      __ldMark(4636);
       const cp = await window.storage.get('content-posts', true);
       state.contentPosts = cp ? JSON.parse(cp.value) : [];
     }catch(e){ state.contentPosts = []; }
 
+    __ldMark(4640);
     await seedCodesOverrideOnce();
 
+    __ldMark(4642);
     try{
+      __ldMark(4643);
       const cert = await window.storage.get('certificates', true);
       state.certificates = cert ? JSON.parse(cert.value) : [];
     }catch(e){ state.certificates = []; }
@@ -4648,6 +4769,7 @@
     // список в Excel, который менеджеры вели вручную; при первом запуске (ключа ещё нет на сервере)
     // подставляем исходный импортированный список ОДИН раз, дальше это обычная база данных приложения
     try{
+      __ldMark(4651);
       const bo = await window.storage.get('birthday-outreach', true);
       if(bo){ state.birthdayOutreach = JSON.parse(bo.value); }
       else { state.birthdayOutreach = DEFAULT_BIRTHDAY_OUTREACH; await storageSetWithRetry('birthday-outreach', JSON.stringify(DEFAULT_BIRTHDAY_OUTREACH)); }
@@ -4659,116 +4781,164 @@
       if(!o.status){ o.status = o.bought ? 'bought' : (o.written ? 'written' : 'in_progress'); }
     });
 
+    __ldMark(4662);
     try{
+      __ldMark(4663);
       const rc = await window.storage.get('report-comments', true);
       state.reportComments = rc ? JSON.parse(rc.value) : [];
     }catch(e){ state.reportComments = []; }
+    __ldMark(4666);
     try{
+      __ldMark(4667);
       const rr = await window.storage.get('report-reactions', true);
       state.reportReactions = rr ? JSON.parse(rr.value) : [];
     }catch(e){ state.reportReactions = []; }
 
+    __ldMark(4671);
     try{
+      __ldMark(4672);
       const ref = await window.storage.get('refunds', true);
       state.refunds = ref ? JSON.parse(ref.value) : [];
     }catch(e){ state.refunds = []; }
 
+    __ldMark(4676);
     try{
+      __ldMark(4677);
       const dp = await window.storage.get('deposits', true);
       state.deposits = dp ? JSON.parse(dp.value) : [];
     }catch(e){ state.deposits = []; }
 
+    __ldMark(4681);
     try{
+      __ldMark(4682);
       const sch = await window.storage.get('salary-checks', true);
       state.salaryChecks = sch ? JSON.parse(sch.value) : [];
     }catch(e){ state.salaryChecks = []; }
+    __ldMark(4685);
     try{
+      __ldMark(4686);
       const csh = await window.storage.get('cash-shifts', true);
       state.cashShifts = csh ? JSON.parse(csh.value) : [];
     }catch(e){ state.cashShifts = []; }
+    __ldMark(4689);
     try{
+      __ldMark(4690);
       const cad = await window.storage.get('cash-adjustments', true);
       state.cashAdjustments = cad ? JSON.parse(cad.value) : [];
     }catch(e){ state.cashAdjustments = []; }
 
+    __ldMark(4694);
     try{
+      __ldMark(4695);
       const ef = await window.storage.get('event-formats', true);
       state.eventFormats = ef ? (JSON.parse(ef.value) || []) : [];
     }catch(e){ state.eventFormats = []; }
 
+    __ldMark(4699);
     try{
+      __ldMark(4700);
       const inc = await window.storage.get('incomes', true);
       state.incomes = inc ? JSON.parse(inc.value) : [];
     }catch(e){ state.incomes = []; }
 
+    __ldMark(4704);
     try{
+      __ldMark(4705);
       const exp = await window.storage.get('expenses', true);
       state.expenses = exp ? JSON.parse(exp.value) : [];
     }catch(e){ state.expenses = []; }
 
+    __ldMark(4709);
     try{
+      __ldMark(4710);
       const ld = await window.storage.get('leads', true);
       state.leads = ld ? JSON.parse(ld.value) : [];
     }catch(e){ state.leads = []; }
 
+    __ldMark(4714);
     try{
+      __ldMark(4715);
       const kpr = await window.storage.get('kp-offers', true);
       state.kpOffers = kpr ? JSON.parse(kpr.value) : [];
       if(!Array.isArray(state.kpOffers)) state.kpOffers = [];
     }catch(e){ state.kpOffers = []; }
 
+    __ldMark(4720);
     try{
+      __ldMark(4721);
       const ltr = await window.storage.get('lead-tasks', true);
       state.leadTasks = ltr ? JSON.parse(ltr.value) : [];
       if(!Array.isArray(state.leadTasks)) state.leadTasks = [];
     }catch(e){ state.leadTasks = []; }
 
+    __ldMark(4726);
     try{
+      __ldMark(4727);
       const clr = await window.storage.get('clients', true);
       state.clients = clr ? JSON.parse(clr.value) : [];
       if(!Array.isArray(state.clients)) state.clients = [];
     }catch(e){ state.clients = []; }
+    __ldMark(4731);
     try{
+      __ldMark(4732);
       const crr = await window.storage.get('crm-settings', true);
       state.crmSettings = crr ? JSON.parse(crr.value) : {};
       if(!state.crmSettings || typeof state.crmSettings !== 'object' || Array.isArray(state.crmSettings)) state.crmSettings = {};
     }catch(e){ state.crmSettings = {}; }
 
+    __ldMark(4737);
     try{
+      __ldMark(4738);
       const jsr = await window.storage.get('journal-sync', true);
       state.journalSync = jsr ? JSON.parse(jsr.value) : {};
       if(!state.journalSync || typeof state.journalSync !== 'object' || Array.isArray(state.journalSync)) state.journalSync = {};
     }catch(e){ state.journalSync = {}; }
 
+    __ldMark(4743);
     try{
+      __ldMark(4744);
       const hs = await window.storage.get('hostess-shifts', true);
       state.hostessShifts = hs ? JSON.parse(hs.value) : {};
     }catch(e){ state.hostessShifts = {}; }
 
+    __ldMark(4748);
     try{
+      __ldMark(4749);
       const ms = await window.storage.get('manager-shifts', true);
       state.managerShifts = ms ? JSON.parse(ms.value) : {};
     }catch(e){ state.managerShifts = {}; }
+    __ldMark(4752);
     try{
+      __ldMark(4753);
       const mss = await window.storage.get('master-shifts', true);
       state.masterShifts = mss ? JSON.parse(mss.value) : {};
     }catch(e){ state.masterShifts = {}; }
+    __ldMark(4756);
     try{
+      __ldMark(4757);
       const bzs = await window.storage.get('biz-settings', true);
       state.biz = bzs ? JSON.parse(bzs.value) : {};
     }catch(e){ state.biz = {}; }
+    __ldMark(4760);
     try{ bizApplyAll(); }catch(e){ console.error('biz settings apply', e); }
+    __ldMark(4761);
     try{
+      __ldMark(4762);
       const bac = await window.storage.get('block-access', true);
       state.blockAccess = bac ? JSON.parse(bac.value) : {};
     }catch(e){ state.blockAccess = {}; }
+    __ldMark(4765);
     try{
+      __ldMark(4766);
       const msc = await window.storage.get('master-slot-config', true);
       state.masterSlotCfg = msc ? JSON.parse(msc.value) : null;
     }catch(e){ state.masterSlotCfg = null; }
     masterSlotCfg();
+    __ldMark(4770);
     await loadHelperShifts();
+    __ldMark(4771);
     try{
+      __ldMark(4772);
       const cdr = await window.storage.get('closed-days', true);
       state.closedDays = cdr ? JSON.parse(cdr.value) : {};
     }catch(e){ state.closedDays = {}; }
@@ -4836,15 +5006,25 @@
     // await seedDemo30Once();
     // await seedDemoExpensesOnce();
     // await seedAugustExtrasOnce();
+    __ldMark(4839);
     try{ await splitSameNameManagers(); }catch(e){ console.warn('split managers', e); }
+    __ldMark(4840);
     await migrateOffsiteSpaceOnce();
+    __ldMark(4841);
     await migrateFulldayShiftsOnce();
+    __ldMark(4842);
     await autoDeductCanvasesForPastPaintingEvents();
+    __ldMark(4843);
     await autoApplyMaterialRulesForPastEvents();
+    __ldMark(4844);
     await autoApplyKeywordPayRules();
+    __ldMark(4845);
     await migrateCatalogCosts20261116();
+    __ldMark(4846);
     await migrateCeramicsCost20261119();
+    __ldMark(4847);
     await migrateVarCostsFromSebes20261119();
+    __ldMark(4848);
     await autoApplyCatalogCostForPastEvents();
     // ускорение входа: независимые проверки идут параллельно, а служебное (резервная копия, push-напоминания)
     // — уже после того, как приложение открылось, в фоне. Раньше всё это шло по очереди и задерживало экран входа.
@@ -4854,7 +5034,9 @@
       (async ()=>{ try{ const abm = await window.storage.get('auto-backup-meta', true); state.autoBackupMeta = abm ? JSON.parse(abm.value) : {}; }catch(e){ state.autoBackupMeta = {}; } })(),
       (async ()=>{ try{ const prt = await window.storage.get('push-refund-threshold', true); state.pushRefundThreshold = prt ? Number(prt.value) : 10000; }catch(e){ state.pushRefundThreshold = 10000; } })(),
       (async ()=>{
+        __ldMark(4857);
         try{
+          __ldMark(4858);
           const t = await window.storage.get('sync-token', true);
           if(t && t.value){ state.syncToken = t.value; }
           else { await bumpSyncToken(); }
@@ -4862,6 +5044,7 @@
       })()
     ]);
 
+    __ldMark('done');
     state.loaded = true;
     render();
 
@@ -42940,7 +43123,24 @@
   }
   setupPrivacyToggle();
 
-  loadData();
+  loadData().catch(err=>{
+    console.error('loadData упал:', err);
+    window.__ldError = err;
+  });
+  // если через 25 секунд приложение так и не открылось — показываем, на каком шаге застряла загрузка
+  setTimeout(()=>{
+    if(state.loaded) return;
+    const last = window.__ldLast; const err = window.__ldError;
+    const slow = (window.__ldTrace||[]).filter(x=> x.ms > 1500).map(x=> 'шаг ' + x.step + ': ' + (x.ms/1000).toFixed(1) + ' с').join(', ');
+    const msg = 'Загрузка не завершилась. ' + (err ? ('Ошибка: ' + (err && err.message || err) + '. ') : '') +
+      'Последний шаг: ' + (last ? last.step : '—') + (last ? (' (идёт ' + ((Date.now()-last.at)/1000).toFixed(0) + ' с)') : '') +
+      (slow ? '. Долгие шаги: ' + slow : '');
+    console.error('[загрузка]', msg, err && err.stack);
+    const app = document.getElementById('app');
+    if(app) app.innerHTML = '<div style="max-width:560px;margin:60px auto;padding:18px;border:1px solid #EBC5BD;background:#FBEDEA;border-radius:14px;font:14px/1.5 system-ui;color:#7A2E22;">' +
+      '<b>Приложение не смогло открыться</b><br>' + msg.replace(/</g,'&lt;') + (err && err.stack ? '<pre style="white-space:pre-wrap;font-size:11px;margin-top:8px;">' + String(err.stack).replace(/</g,'&lt;').slice(0,1500) + '</pre>' : '') +
+      '<br><button onclick="location.reload()" style="margin-top:10px;padding:6px 14px;border-radius:10px;border:1px solid #7A2E22;background:#fff;cursor:pointer;">Повторить</button></div>';
+  }, 25000);
   setTimeout(()=>{ try{ journalSyncSoon(500); }catch(e){} }, 15000);
   setInterval(()=>{ try{ journalSyncSoon(500); }catch(e){} }, 300000);
 })();
