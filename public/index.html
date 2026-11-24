@@ -234,6 +234,11 @@
     .cp-week, .cp-mlist{ padding-bottom:70px; }
     body:has(.cpe-wrap) #privacy-toggle-btn, body:has(.cpe-wrap) #ql-fab, body:has(.cpe-wrap) .cp-add-btn,
     body:has(#cp-st-menu) #privacy-toggle-btn, body:has(#cp-st-menu) #ql-fab, body:has(#cp-st-menu) .cp-add-btn{ display:none !important; }
+    body:has(.cpe-wrap) #td-fab, body:has(#cp-st-menu) #td-fab, body:has(#ql-pop) #td-fab{ display:none !important; }
+    #td-fab:hover{ filter:brightness(1.08); } #td-fab.on{ box-shadow:0 0 0 3px rgba(117,128,79,.35), 0 6px 18px rgba(23,21,18,.28) !important; }
+    @media print{ #td-fab{ display:none !important; } }
+    .cal-cell.td-flash{ animation: tdFlash 1.8s ease-out 1; }
+    @keyframes tdFlash{ 0%,30%{ box-shadow: inset 0 0 0 3px #75804F; background:#EEF0E4; } 100%{ box-shadow: inset 0 0 0 0 transparent; } }
     .cpe-stats{ display:grid !important; grid-template-columns:repeat(3,1fr); gap:6px !important; }
     .cpe-stats label{ flex-direction:column; align-items:stretch !important; font-size:12px !important; }
     .cpe-stats input{ width:100% !important; box-sizing:border-box; font-size:16px; }
@@ -1897,6 +1902,40 @@
   .acl-wrap{ max-width:900px; margin:0 auto; padding:0 16px 40px; }
   .acl-sub{ font-size:12px; color:var(--ink-soft); }
   .acl-ok{ color:var(--status-green); font-size:12px; }
+  .navgrp-tabs{ display:flex; gap:6px; flex-wrap:wrap; align-items:center; margin:0 0 12px; padding:8px 10px; background:var(--white); border:1px solid var(--line); border-radius:12px; }
+  .navgrp-h{ font-weight:700; font-size:13.5px; margin-right:6px; color:var(--ink-soft); }
+  .cat-wrap{ padding:0 16px 40px; } .cat-dim{ color:var(--ink-soft); font-weight:400; }
+  .cat-bar{ display:flex; gap:10px; align-items:center; flex-wrap:wrap; margin-bottom:10px; }
+  .cat-bar input{ border:1px solid var(--line-strong); border-radius:8px; padding:7px 10px; font:inherit; font-size:13.5px; min-width:240px; background:var(--white); }
+  .cat-grp{ background:var(--white); border:1px solid var(--line); border-left:4px solid var(--grp-c, var(--line-strong)); border-radius:12px; margin-bottom:10px; }
+  .cat-grp > summary{ padding:10px 12px; cursor:pointer; display:flex; gap:10px; align-items:baseline; flex-wrap:wrap; font-size:14.5px; }
+  .cat-sum{ font-size:12px; color:var(--ink-soft); }
+  .cat-table{ width:100%; border-collapse:collapse; font-size:13px; }
+  .cat-table th{ font-size:11px; color:var(--ink-soft); font-weight:600; text-align:center; padding:6px 8px; background:var(--paper); white-space:nowrap; }
+  .cat-table td{ padding:7px 8px; border-top:1px solid var(--line); text-align:center; vertical-align:top; }
+  .cat-table td.cat-price{ white-space:nowrap; font-size:12.5px; } .cat-table td.cat-hosts{ font-size:12px; max-width:240px; }
+  .cat-click{ cursor:pointer; } .cat-click:hover td{ background:#F6F3EA; }
+  .cat-cards{ display:grid; grid-template-columns:repeat(auto-fill, minmax(260px, 1fr)); gap:12px; }
+  .cat-card{ background:var(--white); border:1px solid var(--line); border-radius:12px; padding:14px; display:flex; flex-direction:column; gap:8px; }
+  .cat-card-h{ font-weight:700; font-size:15px; } .cat-card-t{ font-size:12.5px; color:var(--ink-soft); flex:1; line-height:1.45; }
+  .cat-wrap .ref-wrap{ padding:0; }
+  .gb{ display:inline-flex; align-items:center; gap:2px; border-radius:999px; font-weight:800; white-space:nowrap; line-height:1.25; vertical-align:middle; font-family:var(--font-body, inherit); letter-spacing:0; }
+  .gb-md{ font-size:13px; padding:2px 9px; } .gb-xs{ font-size:10.5px; padding:0 5px; margin:0 3px; }
+  .gb-zero{ background:#FBEAE6; color:#A3402F; box-shadow: inset 0 0 0 1px #E5A99B; }
+  .gb-low{ background:#FFF1D2; color:#7A5518; box-shadow: inset 0 0 0 1px #E8C77A; }
+  .gb-ok{ background:#E4EBD3; color:#3F4A22; box-shadow: inset 0 0 0 1px #B9C79B; }
+  .gb-full{ background:#3F4A22; color:#fff; }
+  .gb-info{ background:#E3ECF7; color:#2F4A6B; box-shadow: inset 0 0 0 1px #B4C8E3; }
+  .rvd-box{ background:var(--white); border:1px solid var(--line); border-radius:12px; padding:10px 12px; margin-bottom:14px; }
+  .rvd-sum{ font-size:13.5px; margin-bottom:6px; } .rvd-up{ color:#4E5733; } .rvd-down{ color:var(--danger); }
+  .rvd-h{ font-size:12px; font-weight:700; color:var(--ink-soft); margin:8px 0 2px; text-transform:uppercase; letter-spacing:.4px; }
+  .rvd-row{ display:flex; gap:10px; align-items:center; padding:7px 0; border-top:1px solid var(--line); font-size:13px; }
+  .rvd-amt{ flex:none; width:92px; font-size:14px; } .rvd-body{ flex:1; min-width:0; line-height:1.35; }
+  .rvd-why{ font-size:12px; color:var(--ink-soft); margin-top:1px; } .rvd-row .dy-gb{ flex:none; }
+  @media (max-width:600px){ .rvd-amt{ width:74px; font-size:13px; } }
+  .acl-redir-tag{ font-size:12px; font-weight:600; color:#4E5A2E; background:#EEF0E4; border-radius:6px; padding:1px 6px; white-space:nowrap; }
+  .acl-redir-tag.warn{ color:var(--danger); background:#FBEAE6; }
+  .acl-redir{ background:#EEF0E4; }
   .acl-who{ color:var(--ink); background:#EEF0E4; border-radius:6px; padding:0 5px; font-weight:600; }
   .acl-bad{ color:var(--danger); font-size:12px; font-weight:600; }
   .acl-top{ background:var(--white); border:1px solid var(--line-strong); border-radius:12px; padding:12px 14px; margin-bottom:14px; }
@@ -4181,11 +4220,11 @@
     // первым стоит раздел, куда сотрудник попадает после входа, дальше — по частоте ежедневного использования
     hostess: ['adminshift','calendar','prep','cashbox','certificates','print','tufting','reference','book','analytics','host'],
     master: ['host','masters','analytics','my-orders','matreq','reportsfeed','calendar'],
-    manager: ['certificates','adminshift','calendar','reference','planprogress','prep','marketing','book','host','analytics'],
-    assistant: ['calendar','adminshift','certificates','book','cashbox','reference','prep','marketing','masters','host','analytics'],
-    admin: ['calendar','adminshift','prep','cashbox','book','procurement','certificates','masters','reference','marketing','host','analytics'],
+    manager: ['certificates','adminshift','calendar','reference','reference','planprogress','prep','marketing','book','host','analytics'],
+    assistant: ['calendar','adminshift','reference','certificates','book','cashbox','reference','prep','marketing','masters','host','analytics'],
+    admin: ['calendar','adminshift','reference','prep','cashbox','book','procurement','certificates','masters','reference','marketing','host','analytics'],
     marketer: ['marketing','calendar','masters','reference','planprogress','analytics','certificates','host'],
-    owner: ['calendar','summary','adminshift','analytics','book','cashbox','certificates','procurement','marketing','prep','reference','host','masters'],
+    owner: ['calendar','summary','adminshift','reference','analytics','book','cashbox','certificates','procurement','marketing','prep','reference','host','masters'],
     smm: ['marketing','masters','reportsfeed','calendar','host'],
   };
   const DEFAULT_ROLE_CODES = { hostess:'1111', master:'2222', manager:'3333', marketer:'6666', smm:'7777', assistant:'4444', admin:'5555', owner:'0000' };
@@ -4259,7 +4298,7 @@
   // Руководитель видит всё всегда (чтобы нельзя было случайно закрыть доступ самой себе).
   const ACCESS_BLOCKS = [
     ['calendar','По пространствам'], ['host','По ведущим'], ['masters','🎨 График мастеров'], ['analytics','Аналитика / 💰 Моя зарплата'],
-    ['reference','📖 Справочник'], ['planprogress','🎯 План'], ['prep','🤝 Частники'], ['print','🖨 На печать'], ['tufting','🧶 Тафтинг'],
+    ['reference','📚 Каталог'], ['planprogress','🎯 План'], ['prep','🤝 Частники'], ['print','🖨 На печать'], ['tufting','🧶 Тафтинг'],
     ['certificates','Для менеджеров / Сертификаты'], ['marketing','Маркетинг'], ['book','Книга'], ['cashbox','💵 Касса'],
     ['procurement','📦 Закупки'], ['reportsfeed','💬 Отчёты'], ['summary','📊 Сводка'], ['adminshift','✅ Чек-листы'],
   ];
@@ -4544,6 +4583,11 @@
       const v = mct ? JSON.parse(mct.value) : null;
       state.managerChecklistTpl = (v && Array.isArray(v.items)) ? v : null;
     }catch(e){ state.managerChecklistTpl = null; }
+    try{
+      const sct = await window.storage.get('senior-checklist-template', true);
+      const v = sct ? JSON.parse(sct.value) : null;
+      state.seniorChecklistTpl = (v && Array.isArray(v.items)) ? v : null;
+    }catch(e){ state.seniorChecklistTpl = null; }
 
     // состав администраторов/менеджеров, изменённый руководителем в «Настройках доступа → Сотрудники»
     try{
@@ -8288,6 +8332,7 @@
     if(!state._tasksSweepTried && ['owner','admin','manager','assistant'].includes(state.currentRole)){ state._tasksSweepTried = true; setTimeout(()=>{ leadSaleDateRepairOnce().catch(e=> console.warn('sale date repair', e)).then(()=> leadsCancelSync()).catch(e=> console.warn('cancel sync', e)).then(()=> leadTasksHealthSweep()).catch(e=> console.warn('tasks sweep', e)); }, 2500); }
     if(state.currentRole === 'owner' && !state._mgrFixTried && state.unlocked){ state._mgrFixTried = true; setTimeout(()=>{ managersRosterFixOnce().catch(()=>{}); }, 1500); }
     try{ qlEnsureFab(); }catch(e){}
+    try{ tdEnsureFab(); }catch(e){}
     if(state.view === 'today'){
       app.innerHTML = renderTodayView();
       attachTodayViewEvents();
@@ -8298,6 +8343,7 @@
     let html = '';
     html += renderHeader();
     html += renderGlobalMonthBar();
+    try{ html += navGroupTabsHtml(); }catch(e){}
     if(state.view === 'calendar'){
       html += renderSpaceTabs();
       html += renderCalendar();
@@ -8308,7 +8354,7 @@
     } else if(state.view === 'my-orders'){
       html += renderMyOrdersView();
     } else if(state.view === 'reference'){
-      html += renderReferenceView();
+      html += renderCatalogHub();
     } else if(state.view === 'planprogress'){
       html += renderPlanProgressView();
     } else if(state.view === 'print'){
@@ -8343,12 +8389,13 @@
     app.innerHTML = html;
     attachHeaderEvents();
     attachGlobalMonthBar();
+    try{ attachNavGroupTabs(); }catch(e){}
     if(state.view === 'calendar'){ attachCalendarEvents(); }
     else if(state.view === 'host'){ attachHostEvents(); }
     else if(state.view === 'analytics'){ attachAnalyticsEvents(); }
     else if(state.view === 'my-orders'){ /* только чтение, обработчики не нужны */ }
     else if(state.view === 'matreq'){ attachMatReqEvents(); }
-    else if(state.view === 'reference'){ attachReferenceEvents(); }
+    else if(state.view === 'reference'){ attachCatalogHubEvents(); }
     else if(state.view === 'planprogress'){ attachPlanProgressViewEvents(); }
     else if(state.view === 'print'){ attachPrintEvents(); }
     else if(state.view === 'prep'){ attachPrepEvents(); }
@@ -9062,7 +9109,7 @@
     buttons.push({key:'host', html: `<button data-view="host" class="${state.view==='host'?'active':''}">По ведущим</button>`});
     buttons.push({key:'masters', html: `<button data-view="masters" class="${state.view==='masters'?'active':''}">🎨 График мастеров</button>`});
     if(canAccessViewBase('adminshift', role)){
-      const an = aclOverdueOwn(role); const albl = role === 'manager' ? '✅ Чек-лист дня' : (['hostess','admin'].includes(role) ? '✅ Чек-лист смены' : '✅ Чек-листы');
+      const an = aclOverdueOwn(role); const albl = role === 'manager' ? '✅ Чек-лист дня' : (role === 'hostess' ? '✅ Чек-лист смены' : (role === 'admin' ? '✅ Отчёт СА' : '✅ Чек-листы'));
       buttons.push({key:'adminshift', html: `<button data-view="adminshift" class="${state.view==='adminshift'?'active':''}">${albl}${an ? ' <span style="background:var(--danger);color:#fff;border-radius:9px;padding:0 6px;font-size:11px;">'+an+'</span>' : ''}</button>`});
     }
     if(roleCanAccessAnalytics(role) || state.loggedInMasterName || state.loggedInHostessName){
@@ -9075,7 +9122,7 @@
       buttons.push({key:'my-orders', html: `<button data-view="my-orders" class="${state.view==='my-orders'?'active':''}">📦 Заказы</button>`});
     }
     if(roleCanSeeReference(role)){
-      buttons.push({key:'reference', html: `<button data-view="reference" class="${state.view==='reference'?'active':''}">📖 Справочник</button>`});
+      buttons.push({key:'reference', html: `<button data-view="reference" class="${state.view==='reference'?'active':''}">📚 Каталог</button>`});
     }
     if(roleCanSeePlanProgress(role)){
       buttons.push({key:'planprogress', html: `<button data-view="planprogress" class="${state.view==='planprogress'?'active':''}">🎯 План</button>`});
@@ -9123,6 +9170,7 @@
     const priority = NAV_PRIORITY_BY_ROLE[role] || [];
     const priorityIndex = (key)=>{ const i = priority.indexOf(key); return i===-1 ? 999 : i; };
     buttons.sort((a,b)=> priorityIndex(a.key) - priorityIndex(b.key)); // стабильная сортировка — порядок остальных кнопок не меняется
+    try{ navCollapseGroups(buttons); }catch(e){ console.warn('nav groups', e); }
     return buttons.map(b=>b.html).join('');
   }
 
@@ -9181,12 +9229,8 @@
           ${role ? `<details class="hdr-more no-print" id="hdr-more">
             <summary class="lock-btn">⚙ Ещё</summary>
             <div class="hdr-more-panel">
-              ${roleCanEditEventCatalog(role) ? `<button class="lock-btn" id="btn-event-catalog">📚 Каталог МК</button>` : ''}
-              ${roleCanEditEventCatalog(role) ? `<button class="lock-btn" id="btn-event-formats">🎨 Форматы</button>` : ''}
+              ${roleCanSeeReference(role) ? `<button class="lock-btn" id="btn-go-catalog" onclick="document.querySelector('button[data-view=&quot;reference&quot;]') && document.querySelector('button[data-view=&quot;reference&quot;]').click()">📚 Каталог, форматы, тарифы, себес → в разделе «Каталог»</button>` : ''}
               ${isAdminLevel ? `
-              <button class="lock-btn" id="btn-hosts-list">💰 Тарифы мастеров</button>
-              <button class="lock-btn" id="btn-materials-catalog">🧱 Себес</button>
-              <button class="lock-btn" id="btn-event-types">📋 Виды мероприятий</button>
               <button class="lock-btn" id="btn-role-settings">🔑 Настройки доступа</button>
               <button class="lock-btn" id="btn-export">${exportBtnLabel()}</button>
               ` : ''}
@@ -9263,7 +9307,7 @@
           ${managerLine ? `<div class="cal-manager" title="Менеджер: ${escapeHtml(managerLine)}">👔 ${escapeHtml(managerLine)}</div>` : ''}
           ${dayOffEntries.length ? `<div class="cal-dayoff-line" title="Выходной: ${escapeHtml(dayOffEntries.map(x=>ROLE_LABELS[x.role] ? `${x.name} (${ROLE_LABELS[x.role]})` : x.name).join(', '))}">🚫 ${escapeHtml(dayOffEntries.map(x=>x.name).join(', '))}</div>` : ''}
           <div class="cal-events">
-            ${shown.map(e=>`<div class="cal-evt-chip" style="background:${statusColor(e.status)}" title="${escapeHtml(eventStartLabel(e) + ' ' + (e.title||'') + (isCinemaEvent(e.title) ? (eventFilm(e) ? ' · 🎬 ' + eventFilm(e) : ' · 🎬 фильм не поставлен') : '') + (e.host ? ' · ' + e.host : '') + (eventFormatText(e) ? '\n🎨 ' + eventFormatText(e) : '') + (eventTimingText(e) && state.currentRole!=='master' ? '\n' + eventTimingText(e) : ''))}">${isAll?spaceBadge(getSpace(e.spaceId),'xs'):''}<span class="t">${eventStartLabel(e)}</span><span class="evt-title">${escapeHtml(e.title)}</span>${isCinemaEvent(e.title) && e.status !== 'cancelled' ? (eventFilm(e) ? `<span class="evt-film" title="Фильм: ${escapeHtml(eventFilm(e))}" style="margin-left:4px;font-size:10.5px;opacity:.95;white-space:nowrap;">🎬 ${escapeHtml(eventFilm(e))}</span>` : `<span title="Фильм не поставлен" style="margin-left:4px;font-size:10px;background:#fff;color:#A3402F;border-radius:6px;padding:0 4px;white-space:nowrap;font-weight:700;">🎬 нет фильма</span>`) : ''}${scheduleFillText(e)?`<span class="evt-fill" style="margin-left:4px;font-family:var(--font-mono);font-size:10.5px;opacity:0.95;white-space:nowrap;">${scheduleFillText(e)}</span>`:''}</div>`).join('')}
+            ${shown.map(e=>`<div class="cal-evt-chip" style="background:${statusColor(e.status)}" title="${escapeHtml(eventStartLabel(e) + ' ' + (e.title||'') + (isCinemaEvent(e.title) ? (eventFilm(e) ? ' · 🎬 ' + eventFilm(e) : ' · 🎬 фильм не поставлен') : '') + (e.host ? ' · ' + e.host : '') + (eventFormatText(e) ? '\n🎨 ' + eventFormatText(e) : '') + (eventTimingText(e) && state.currentRole!=='master' ? '\n' + eventTimingText(e) : ''))}">${isAll?spaceBadge(getSpace(e.spaceId),'xs'):''}<span class="t">${eventStartLabel(e)}</span>${guestBadgeHtml(e, 'xs')}<span class="evt-title">${escapeHtml(e.title)}</span>${isCinemaEvent(e.title) && e.status !== 'cancelled' ? (eventFilm(e) ? `<span class="evt-film" title="Фильм: ${escapeHtml(eventFilm(e))}" style="margin-left:4px;font-size:10.5px;opacity:.95;white-space:nowrap;">🎬 ${escapeHtml(eventFilm(e))}</span>` : `<span title="Фильм не поставлен" style="margin-left:4px;font-size:10px;background:#fff;color:#A3402F;border-radius:6px;padding:0 4px;white-space:nowrap;font-weight:700;">🎬 нет фильма</span>`) : ''}</div>`).join('')}
             ${extra>0?`<div class="cal-more">+${extra} ещё</div>`:''}
           </div>
         </div>
@@ -10543,7 +10587,7 @@
               ${e.notes ? `<div class="host-row-notes" style="font-size:12px;color:var(--ink-soft);margin-top:3px;white-space:pre-wrap;">💬 ${escapeHtml(e.notes)}</div>` : ''}
               ${(state.currentRole==='master' && guestNamesText(e)) ? `<div class="host-row-notes guest-names" style="font-size:12px;color:var(--ink-soft);margin-top:3px;white-space:pre-wrap;">👥 ${escapeHtml(guestNamesText(e))}</div>` : ''}
             </div>
-            <div class="duration">${e.duration ? formatDuration(e.duration) : ''}${scheduleFillText(e) ? '<br>👤 '+scheduleFillText(e) : ((e.guests!==undefined&&e.guests!==null&&e.guests!=='')?'<br>👤 '+e.guests:'')}</div>
+            <div class="duration">${e.duration ? formatDuration(e.duration) : ''}${guestBadgeHtml(e, 'md') ? '<br>' + guestBadgeHtml(e, 'md') : ''}</div>
           </div>
         `;
       }
@@ -14350,6 +14394,41 @@
       return false;
     }).sort((a,b)=> (b.requestDate||'').localeCompare(a.requestDate||'')).slice(0,3);
   }
+  // кнопка «Сегодня»: из любого места открывает календарь мероприятий на текущем месяце и прокручивает к сегодняшнему дню;
+  // стоит слева от «Заявки» (или в углу, если «Заявки» нет)
+  function tdGoToday(){
+    const now = new Date();
+    if(typeof canAccessView === 'function' && !canAccessView('calendar')){ state.modal = null; state.view = 'today'; render(); window.scrollTo(0,0); return; }
+    // календарь на текущем месяце + сразу открытый сегодняшний день со всеми мероприятиями (как по нажатию на клетку)
+    state.view = 'calendar'; state.cursor = new Date(now.getFullYear(), now.getMonth(), 1);
+    state.modal = { type:'day', date: todayStr() };
+    render();
+    setTimeout(()=>{ const cell = document.querySelector('.cal-cell.today'); if(cell){ cell.classList.remove('td-flash'); void cell.offsetWidth; cell.classList.add('td-flash'); } }, 60);
+  }
+  function tdFabPlace(){
+    const fab = document.getElementById('td-fab'); if(!fab) return;
+    const ql = document.getElementById('ql-fab');
+    const qlW = ql && getComputedStyle(ql).display !== 'none' ? ql.getBoundingClientRect().width : 0;
+    fab.style.right = (qlW ? 18 + qlW + 10 : (window.innerWidth <= 760 ? 70 : 18)) + 'px';
+  }
+  function tdEnsureFab(){
+    let fab = document.getElementById('td-fab');
+    const show = !!state.currentRole && state.unlocked !== false && state.view !== 'login';
+    if(!show){ if(fab) fab.remove(); return; }
+    if(!fab){
+      fab = document.createElement('button');
+      fab.id = 'td-fab'; fab.type = 'button'; fab.className = 'no-print';
+      fab.title = 'Открыть сегодняшний день в календаре: все мероприятия';
+      fab.innerHTML = '<span style="font-size:18px;line-height:1;">☀️</span><span>Сегодня</span>';
+      fab.style.cssText = 'position:fixed;right:18px;bottom:18px;z-index:900;display:flex;align-items:center;gap:8px;padding:13px 18px;border:none;border-radius:999px;background:#75804F;color:#fff;font-weight:800;font-size:15px;font-family:inherit;cursor:pointer;box-shadow:0 6px 18px rgba(23,21,18,.28);';
+      fab.onclick = ()=> tdGoToday();
+      document.body.appendChild(fab);
+      window.addEventListener('resize', tdFabPlace);
+    }
+    const n = new Date(); const c = state.cursor;
+    fab.classList.toggle('on', state.view === 'calendar' && !!state.modal && state.modal.type === 'day' && state.modal.date === todayStr());
+    tdFabPlace();
+  }
   function qlEnsureFab(){
     let fab = document.getElementById('ql-fab');
     const show = state.currentRole && qlRoleAllowed(state.currentRole) && state.view !== 'login';
@@ -15545,7 +15624,7 @@
       return `<div class="lt-card${od ? ' od' : ''}${t.done ? ' done' : ''}${inGroup ? ' ing' : ''}${t.docKind ? ' lg' : ''}">
         <input type="checkbox" data-tdone="${escapeHtml(t.id)}" ${t.done?'checked':''} title="Выполнено">
         <div class="lt-card-body">
-          ${inGroup ? '' : `<div class="lt-card-title">${escapeHtml(t.title)}</div>`}
+          ${inGroup ? '' : `<div class="lt-card-title">${escapeHtml(t.title)}${aclRedirectSuffix(t.title, t.due && t.due > today ? addDaysIso(t.due, -1) : today)}</div>`}
           <div class="lt-card-meta${inGroup ? ' main' : ''}">${l.id ? `<a href="#" data-openlead="${escapeHtml(t.leadId)}">${escapeHtml(l.contact||'заявка')}${l.product ? ' · ' + escapeHtml(l.product) : ''}</a>` : (dl ? `<a href="#" data-lgdeal="${escapeHtml(dl.ref)}">${dl.type === 'o' ? '📦' : '📅'} ${escapeHtml(lgDateDots(dl.date) + ' · ' + dl.title)}</a>` : 'заявка')}</div>
           <div class="lt-card-foot">
             <span class="lt-who">${escapeHtml(t.assignee||'—')}</span>
@@ -16120,6 +16199,7 @@
       <div class="dy-hint">Сертификаты и товары — по дате продажи (маркетинговые и возвращённые сертификаты не считаются). Продажи заявок — по дню, когда заявку продали (момент перевода в «Продано» по истории заявки), а не по дате мероприятия; «по воронке» — каждая смена этапа (кто её сделал); задачи — выполненные менеджером (автозакрытые программой не считаются): ⚙️ автозадачи воронки и ✍️ ручные, которые поставили себе, коллеге или руководство. «Обычно» — среднее за 7 предыдущих дней.</div>
       ${kpis}
       ${lyHtml}
+      ${revDeltaHtml(D)}
       ${bonusHtml}
       ${people.length ? `<div class="dy-sec">👥 ${me ? 'Моя активность' : 'Кто что сделал'}</div><div class="dy-cards">${people.map(pcard).join('')}</div>` : '<div style="color:var(--ink-soft);font-size:13px;margin:10px 0;">За этот день действий с заявками нет.</div>'}
       ${sold}${otherHtml}${dupHtml}${feedHtml}</div>`;
@@ -19916,7 +19996,7 @@
     const tip = [e.title, _gn ? 'Гости: ' + _gn : '', e.notes, e.foodInfo, e.ageCategory].filter(Boolean).join('\n');
     return `<div class="ds-card" data-eid="${escapeHtml(e.id)}" data-tdate="${escapeHtml(e.date||'')}" data-tst="${timeToMinutes(e.time)}" data-ten="${timeToMinutes(e.time) + (Number(e.duration)||0)}" title="${escapeHtml(tip)}" style="font-size:${fs}px;border-left:4px solid ${statusColor(e.status)};">
       <div class="ds-card-main">
-        <div class="ds-ct">${spaceTag || ''}<b>${e.time ? ftMinToTime(effectiveStart(e)) + '–' + ftMinToTime(effectiveEnd(e)) : ''}</b>${escapeHtml(gTxt)}</div>
+        <div class="ds-ct">${spaceTag || ''}<b>${e.time ? ftMinToTime(effectiveStart(e)) + '–' + ftMinToTime(effectiveEnd(e)) : ''}</b> ${guestBadgeHtml(e, 'md')}</div>
         <div class="ds-ctitle">${escapeHtml(e.title || '')}</div>
         <div class="ds-ch">${isPrivateWithoutHost(e) ? '<span style="color:var(--danger);">без ведущего</span>' : escapeHtml(hostLine)}${isPrivateWithoutHost(e) && (e.product || '') ? ' · ' + escapeHtml(e.product) : ''}${legalSuffix(e)}</div>
         ${isOpenMasterSlot(e) ? (()=>{ const av = (e.availableMasters||[]).filter(n=>(n||'').trim()); return av.length
@@ -19931,6 +20011,7 @@
         ${e.notes ? `<div style="font-size:.92em;white-space:pre-wrap;overflow-wrap:anywhere;">💬 ${escapeHtml(e.notes)}</div>` : ''}
         ${w ? `<div class="ds-cn" style="color:var(--danger);">⚠ ${w.gap < 0 ? 'наложение ' + Math.abs(w.gap) + ' мин' : 'перерыв ' + w.gap + ' мин'}</div>` : ''}
         ${remainder > 0 ? `<div class="ds-cn" style="color:var(--status-red);">💳 Остаток: ${escapeHtml(formatMoney(remainder))}</div>` : ''}
+        ${unpaidGuestsLineHtml(e, 'ds-cn')}
       </div>
       <div class="ds-cbtn"><button class="quick-host-btn" data-eid="${escapeHtml(e.id)}" title="Сменить мастера (без кода)">✎ мастер</button>${isMyEventForReport(e) ? `<button class="quick-report-btn" data-eid="${escapeHtml(e.id)}">📝 ${hasMasterReport(e) ? 'отчёт ✓' : 'отчёт'}</button>` : ''}</div>
     </div>`;
@@ -20874,7 +20955,7 @@
         if(!o || !o.brief){ showGapWarningBanner('Коммерческое предложение не найдено.'); return; }
         if(!roleCanSeeReference(state.currentRole)){ showGapWarningBanner('Справочник доступен менеджерам, администраторам и руководителю.'); return; }
         refUI.brief = JSON.parse(JSON.stringify(o.brief)); refUI.brief.kpId = o.id; refUI.panel = 'brief';
-        state.modal = null; overlay.remove(); state.view = 'reference'; render();
+        state.modal = null; overlay.remove(); state.view = 'reference'; state.catTab = 'prices'; render();
       };
     }
     overlay.querySelectorAll('[data-salekind]').forEach(opt=>{
@@ -28094,6 +28175,7 @@
             <label>${escapeHtml(n)} <span style="font-weight:400;color:var(--ink-soft);font-size:11px;">${escapeHtml(staffPositionsLabel(n) || 'без должности')}${(()=>{ const ids = staffPositionsOf(n); const acc = [...new Set(ids.map(id=> (staffPositionById(id)||{}).access))]; return acc.length === 1 && acc[0] === 'none' ? ' · без входа' : ''; })()}</span></label>
             ${canPos ? (()=>{ const ids = staffPositionsOf(n); return `<div style="display:flex;gap:6px;margin-bottom:4px;">${staffPosSelectHtml(n, 0, ids[0]||'')}${staffPosSelectHtml(n, 1, ids[1]||'')}</div>`; })() : ''}
             <div style="display:flex;gap:6px;"><input type="password" autocomplete="new-password" class="staff-pw-input" data-name="${escapeHtml(n)}" placeholder="без личного пароля" value="${escapeHtml(dv)}" style="flex:1;"><button type="button" class="btn btn-ghost staff-pw-gen" data-name="${escapeHtml(n)}" title="Сгенерировать новый пароль" style="padding:4px 8px;font-size:13px;">🎲</button>
+            <div style="display:flex;gap:6px;align-items:center;margin-top:4px;"><span style="font-size:13px;">📞</span><input type="tel" class="staff-phone-input" data-name="${escapeHtml(n)}" placeholder="телефон (для переадресации и связи)" value="${escapeHtml(staffPhoneFmt((staffPosData().phones||{})[spKey(n)] || ''))}" style="flex:1;" inputmode="tel" autocomplete="off"></div>
             ${isOwnerRole && !staffPositionsOf(n).some(id=> (staffPositionById(id)||{}).access === 'owner') ? `<button type="button" class="btn btn-ghost staff-fire-btn" data-name="${escapeHtml(n)}" title="Сотрудник уволился" style="padding:4px 10px;font-size:12px;color:var(--danger);">Уволить</button>` : ''}</div>
           </div>`;
         })}
@@ -28526,6 +28608,7 @@
 
   function computeQuickSummary(cursor){
     const evts = getMonthEvents(cursor);
+    const totalRevenueAll = monthRevenueAll(cursor.getFullYear() + '-' + pad(cursor.getMonth()+1));
     const totalRevenue = evts.reduce((s,e)=> s+eventRevenueForecast(e),0);
     const totalProfit = evts.reduce((s,e)=> s+eventProfitForecast(e),0);
     const totalGuests = evts.reduce((s,e)=> s+((e.guests!==undefined&&e.guests!==null&&!isNaN(e.guests))?Number(e.guests):0),0);
@@ -28537,7 +28620,7 @@
     });
     return {
       total: evts.length,
-      totalRevenue, totalProfit, totalGuests,
+      totalRevenue, totalRevenueAll, totalProfit, totalGuests,
       occupancyPct: occupancyOf(evts).pct,
       productRevenue,
     };
@@ -29135,6 +29218,7 @@
     return (Array.isArray(e.payments) ? e.payments : []).filter(p=>p.certRedemptionRef).reduce((s,p)=> s + (Number(p.amount)||0), 0);
   }
   // прогнозная выручка мероприятия — полная ожидаемая сумма (включает уже внесённую предоплату), используется в аналитике как "факт".
+  // ⚠ устаревшее пояснение ниже (до ноября 2026): теперь сертификатная часть вычитается из «Согласованной суммы» — см. сам расчёт.
   // сертификатную часть здесь вычитать НЕ нужно: performCertRedemption() сознательно не увеличивает "Выручку"/"Согласованную
   // сумму" при оплате сертификатом (см. комментарий там же) — то есть price/agreedPrice и так уже не включают эту сумму,
   // она уже "чистые деньги". Задвоения с выручкой от продажи сертификата поэтому не возникает (сверено с книгой учёта:
@@ -29158,7 +29242,10 @@
     const price = (e.price!==undefined && e.price!==null && !isNaN(e.price)) ? Number(e.price) : 0;
     const agreed = (e.agreedPrice!==undefined && e.agreedPrice!==null && !isNaN(e.agreedPrice)) ? Number(e.agreedPrice) : 0;
     // только с октября 2026: сентябрь и раньше не пересчитываем (там «Книга» велась иначе)
-    return Math.max(price, agreed, (e.date && e.date >= '2026-10-01') ? eventPaidFromBook(e.id) : 0);
+    // «Согласованная сумма» — полная цена для клиента, вместе с сертификатом (так же её понимает «Остаток к оплате»),
+    // поэтому сертификатную часть вычитаем: выручка студии по сертификату уже посчитана в месяце его продажи.
+    const certPart = eventCertRedeemedTotal(e);
+    return Math.max(price, Math.max(0, agreed - certPart), (e.date && e.date >= '2026-10-01') ? eventPaidFromBook(e.id) : 0);
   }
   // полная ожидаемая сумма по мероприятию (максимум из "Выручки" и "Согласованной суммы"), без вычета сертификатов —
   // используется только для метки "Остаток", в отличие от eventRevenueForecast (для аналитики)
@@ -29312,6 +29399,22 @@
     return state.incomes.filter(i=> i.date && i.date.startsWith(ym) && !i.autoFromEvent && !i.autoFromPayment && !i.itemSaleId && !i.orderId && !i.eventId && !i.safeTransfer && !covered.has(i.id) && !(legacy ? i.notRevenue === true : isYclientsPayoutIncome(i)));
   }
 
+  // ВЫРУЧКА — одно правило для всего приложения (прогноз, бонус менеджера, «План по продуктам», аналитика, отчёт дня):
+  // мероприятия (без части, оплаченной сертификатом) + сертификаты по дате продажи (без маркетинговых и возвращённых)
+  // + заказы (раздел «Заказы») + изделия (без части, оплаченной сертификатом) + прочие доходы «Книги» (аренда и т.п.)
+  function monthOtherProductsRevenue(ym, from, to){
+    const inR = d=> !!d && d.startsWith(ym) && d >= from && d <= to;
+    const n = v=> (v!==undefined && v!==null && !isNaN(v)) ? Number(v) : 0;
+    return (state.orders||[]).filter(x=> inR(x.date)).reduce((s,x)=> s + n(x.revenue), 0)
+      + (state.itemSales||[]).filter(x=> inR(x.date)).reduce((s,x)=> s + itemMoneyRev(x), 0)
+      + otherIncomesForMonth(ym).filter(i=> inR(i.date)).reduce((s,i)=> s + n(i.amount), 0);
+  }
+  function monthRevenueAll(ym){
+    const n = v=> (v!==undefined && v!==null && !isNaN(v)) ? Number(v) : 0;
+    const ev = (state.events||[]).filter(e=> e.date && e.date.startsWith(ym)).reduce((s,e)=> s + eventRevenueForecast(e), 0);
+    const certs = (state.certificates||[]).filter(c=> c.saleDate && c.saleDate.startsWith(ym) && c.purpose !== 'marketing' && c.status !== 'refunded').reduce((s,c)=> s + n(c.amount), 0);
+    return ev + certs + monthOtherProductsRevenue(ym, ym + '-01', ym + '-31');
+  }
   function computeDailyReportLive(dateStr){
     const ym = dateStr.slice(0,7);
     const plan = (state.monthlyPlans && state.monthlyPlans[ym]) || {};
@@ -29348,8 +29451,8 @@
     const isOrderLike = i => i.product==='Заказ' || i.product==='Изделие';
     const ordersToday = state.incomes.filter(i=>i.date===dateStr && isOrderLike(i));
     const ordersMTD = state.incomes.filter(i=>i.date && i.date.startsWith(ym) && i.date<=dateStr && isOrderLike(i));
-    const ordersRevenueToday = ordersToday.reduce((s,i)=>s+((i.amount!==undefined&&i.amount!==null&&!isNaN(i.amount))?Number(i.amount):0),0);
-    const ordersRevenueMTD = ordersMTD.reduce((s,i)=>s+((i.amount!==undefined&&i.amount!==null&&!isNaN(i.amount))?Number(i.amount):0),0);
+    const ordersRevenueToday = monthOtherProductsRevenue(ym, dateStr, dateStr);
+    const ordersRevenueMTD = monthOtherProductsRevenue(ym, ym + '-01', dateStr);
 
     const certsToday = state.certificates.filter(c=>c.saleDate===dateStr && c.purpose!=='marketing' && c.status!=='refunded');
     const certsMTD = state.certificates.filter(c=>c.saleDate && c.saleDate.startsWith(ym) && c.saleDate<=dateStr && c.purpose!=='marketing' && c.status!=='refunded');
@@ -29516,6 +29619,8 @@
     DAILY_REPORT_FORECAST_FIELDS.forEach(f=>{ entry[f] = live[f]; });
     entry.privateByCatForecast = live.privateByCatForecast;
     entry.avgCheck = live.avgCheck; entry.avgCheckByCat = live.avgCheckByCat;
+    if(isToday){ try{ entry.revItems = revItemsForMonth(dateStr.slice(0,7)); entry.revAt = new Date().toISOString(); }catch(e){} }
+    try{ revItemsPrune(state.dailyReportSnapshots); }catch(e){}
     if(state.currentRole === 'owner' && live.netProfitMonth !== null) entry.netProfitMonth = live.netProfitMonth;
     state.dailyReportSnapshots[dateStr] = entry;
     if(quiet) saveDailySnapshotQuiet(dateStr, entry);
@@ -29530,6 +29635,7 @@
         let serverMap = {};
         try{ const res = await window.storage.get('daily-report-snapshots', true); if(res && res.value) serverMap = JSON.parse(res.value) || {}; }catch(e){ return; }
         serverMap[dateStr] = entry;
+        try{ revItemsPrune(serverMap); }catch(e){}
         const ok = await window.storage.set('daily-report-snapshots', JSON.stringify(serverMap), true);
         if(ok) state._dailyReportSnapshotsBaseline = JSON.parse(JSON.stringify({ ...(state._dailyReportSnapshotsBaseline||{}), [dateStr]: entry }));
       }catch(e){ /* не критично: снимок обновится при следующем открытии */ }
@@ -30357,7 +30463,9 @@
     // ВАЖНО: сертификаты, проданные в прошлые месяцы и погашенные в этом — по прямому указанию владелицы
     // в выручку ТЕКУЩЕГО месяца больше не включаются (эти деньги — выручка того месяца, когда сертификат
     // продан, а не когда погашен). Раньше сюда прибавлялся certRedeemedThisMonthForTotal — убрано.
-    const totalRevenueAllSources = totalRevenue + certSalesRevenueForTotal + itemSalesRevenueForTotal + ordersRevenueForTotal;
+    // + прочие доходы «Книги» (аренда и т.п.) — то же правило, что в прогнозе и бонусе (monthRevenueAll)
+    const otherIncomeRevenueForTotal = otherIncomesForMonth(planYm).reduce((s,i)=> s + ((i.amount!==undefined&&i.amount!==null&&!isNaN(i.amount))?Number(i.amount):0), 0);
+    const totalRevenueAllSources = totalRevenue + certSalesRevenueForTotal + itemSalesRevenueForTotal + ordersRevenueForTotal + otherIncomeRevenueForTotal;
 
     const PLAN_METRICS = [
       {key:'revenue', label:'Выручка', value: totalRevenueAllSources, format:'money'},
@@ -31113,7 +31221,7 @@
           <div class="analytics-section" style="background:var(--paper-2);padding:14px 16px;border-radius:var(--radius);">
             <h4 style="margin-top:0;">Сравнение: ${monthLabel} vs ${prevLabel}</h4>
             <div class="stat-row"><div class="stat-label">Мероприятий</div><div style="flex:1;font-size:13px;">${prevSum.total} → 0</div>${deltaHtml(0, prevSum.total, false)}</div>
-            <div class="stat-row"><div class="stat-label">Выручка</div><div style="flex:1;font-size:13px;">${formatMoney(prevSum.totalRevenue)} → 0 ₽</div>${deltaHtml(0, prevSum.totalRevenue, true)}</div>
+            <div class="stat-row"><div class="stat-label">Выручка</div><div style="flex:1;font-size:13px;">${formatMoney(prevSum.totalRevenueAll)} → ${formatMoney(monthRevenueAll(cursor.getFullYear() + '-' + pad(cursor.getMonth()+1)))}</div>${deltaHtml(monthRevenueAll(cursor.getFullYear() + '-' + pad(cursor.getMonth()+1)), prevSum.totalRevenueAll, true)}</div>
           </div>
         `;
       }
@@ -32110,7 +32218,7 @@
         <div class="analytics-section" style="background:var(--paper-2);padding:14px 16px;border-radius:var(--radius);">
           <h4 style="margin-top:0;">Сравнение: ${monthLabel} vs ${prevLabel}</h4>
           <div class="stat-row"><div class="stat-label">Мероприятий</div><div style="flex:1;font-size:13px;">${prevSum.total} → ${total}</div>${deltaHtml(total, prevSum.total, false)}</div>
-          <div class="stat-row"><div class="stat-label">Выручка</div><div style="flex:1;font-size:13px;">${formatMoney(prevSum.totalRevenue)} → ${formatMoney(totalRevenue)}</div>${deltaHtml(totalRevenue, prevSum.totalRevenue, true)}</div>
+          <div class="stat-row"><div class="stat-label">Выручка</div><div style="flex:1;font-size:13px;">${formatMoney(prevSum.totalRevenueAll)} → ${formatMoney(monthRevenueAll(cursor.getFullYear() + '-' + pad(cursor.getMonth()+1)))}</div>${deltaHtml(monthRevenueAll(cursor.getFullYear() + '-' + pad(cursor.getMonth()+1)), prevSum.totalRevenueAll, true)}</div>
           ${state.currentRole==='owner' ? `<div class="stat-row"><div class="stat-label">Прибыль</div><div style="flex:1;font-size:13px;">${formatMoney(prevSum.totalProfit)} → ${formatMoney(totalProfit)}</div>${deltaHtml(totalProfit, prevSum.totalProfit, true)}</div>` : ''}
           <div class="stat-row"><div class="stat-label">Гостей</div><div style="flex:1;font-size:13px;">${prevSum.totalGuests} → ${totalGuests}</div>${deltaHtml(totalGuests, prevSum.totalGuests, false)}</div>
           <div class="stat-row"><div class="stat-label">Заполняемость</div><div style="flex:1;font-size:13px;">${prevSum.occupancyPct}% → ${occupancyPct}%</div>${deltaHtml(occupancyPct, prevSum.occupancyPct, false)} п.п.</div>
@@ -32525,10 +32633,12 @@
       if(!c.saleDate || !c.saleDate.startsWith(ym) || c.purpose === 'marketing' || c.status === 'refunded') return;
       const r = out.certs; if(c.saleDate <= cut){ r.factRub += amt(c.amount); r.factN += 1; } else { r.bookRub += amt(c.amount); r.bookN += 1; }
     });
-    state.incomes.forEach(i=>{
-      if(!i.date || !i.date.startsWith(ym) || !(i.product === 'Заказ' || i.product === 'Изделие')) return;
-      const r = out.orders; if(i.date <= cut){ r.factRub += amt(i.amount); r.factN += 1; } else { r.bookRub += amt(i.amount); r.bookN += 1; }
-    });
+    // заказы — из раздела «Заказы» (в т.ч. заведённые не через «Книгу»), изделия — продажи со стеллажа (без сертификатной части)
+    const put = (r, d, v)=>{ if(d <= cut){ r.factRub += v; r.factN += 1; } else { r.bookRub += v; r.bookN += 1; } };
+    (state.orders||[]).forEach(o=>{ if(o.date && o.date.startsWith(ym)) put(out.orders, o.date, amt(o.revenue)); });
+    (state.itemSales||[]).forEach(x=>{ if(x.date && x.date.startsWith(ym)) put(out.orders, x.date, itemMoneyRev(x)); });
+    // прочие доходы «Книги» (аренда и т.п.) — в строку «Другое + аренда»
+    otherIncomesForMonth(ym).forEach(i=> put(out['Другое'], i.date, amt(i.amount)));
     return out;
   }
   function pdPrevYm(ym){ const [y,m] = ym.split('-').map(Number); const d = new Date(y, m-2, 1); return d.getFullYear() + '-' + String(d.getMonth()+1).padStart(2,'0'); }
@@ -32925,7 +33035,9 @@
       .reduce((s,x)=> s + ((x.revenue!==undefined&&x.revenue!==null&&!isNaN(x.revenue))?Number(x.revenue):0), 0);
     // ВАЖНО: сертификаты, проданные в прошлые месяцы и погашенные в этом, в выручку текущего месяца НЕ включаются
     // (по прямому указанию владелицы) — это выручка того месяца, когда сертификат продан.
-    const totalRevenueAllSources = totalRevenue + certSalesRevenueForTotal + itemSalesRevenueForTotal + ordersRevenueForTotal;
+    // + прочие доходы «Книги» (аренда и т.п.) — то же правило, что в прогнозе и бонусе (monthRevenueAll)
+    const otherIncomeRevenueForTotal = otherIncomesForMonth(planYm).reduce((s,i)=> s + ((i.amount!==undefined&&i.amount!==null&&!isNaN(i.amount))?Number(i.amount):0), 0);
+    const totalRevenueAllSources = totalRevenue + certSalesRevenueForTotal + itemSalesRevenueForTotal + ordersRevenueForTotal + otherIncomeRevenueForTotal;
 
     // без "Прибыли" — менеджеру/маркетологу не нужны финансовые показатели, только операционные и выручка
     const PP_METRICS = [
@@ -39078,6 +39190,7 @@
   const ACL_BLOCKS = [
     { key:'open',    icon:'🌅', label:'Открытие смены' },
     { key:'event',   icon:'🎨', label:'По каждому мастер-классу' },
+    { key:'prep',    icon:'🎬', label:'Подготовка к ближайшим мероприятиям (авто)' },
     { key:'during',  icon:'🔄', label:'В течение смены' },
     { key:'close',   icon:'🌙', label:'Закрытие смены' },
     { key:'evening', icon:'✉️', label:'Вечером после смены' },
@@ -39128,7 +39241,14 @@
     { key:'mstart', icon:'☀️', label:'Начало дня' },
     { key:'meve',   icon:'🕡', label:'Вечерняя сверка · ЮКлиент и приложение (18:30)' },
     { key:'mclose', icon:'🌙', label:'Закрытие дня' },
+    { key:'mauto',  icon:'🎯', label:'По ближайшим мероприятиям (авто)' },
   ];
+  // ---- 🧭 отчёт старшего администратора ----
+  const SA_BLOCKS = [
+    { key:'scontrol', icon:'🧭', label:'Контроль мероприятий (авто)' },
+    { key:'sday',     icon:'📋', label:'Задачи дня' },
+  ];
+  const SA_DEFAULT_ITEMS = [];
   const MGR_DEFAULT_ITEMS = [
     { id:'m1', block:'mstart', text:'Открыть задачи — проверить список задач: есть ли срочные заявки' },
     { id:'m2', block:'mstart', text:'Ответить на заявки в Инстаграм и Макс' },
@@ -39146,12 +39266,17 @@
   const ACL_LISTS = {
     admin:   { key:'admin',   label:'🗝 Администраторы', title:'Чек-лист смены администратора', tplKey:'admin-checklist-template',   stateKey:'adminChecklistTpl',   blocks: ACL_BLOCKS, defaults: ACL_DEFAULT_ITEMS, roles:['hostess','admin','owner','assistant'], push:['admin'] },
     manager: { key:'manager', label:'💼 Менеджеры',      title:'Чек-лист дня менеджера',        tplKey:'manager-checklist-template', stateKey:'managerChecklistTpl', blocks: MGR_BLOCKS, defaults: MGR_DEFAULT_ITEMS, roles:['manager','owner','assistant'], push:['owner'] },
+    senior:  { key:'senior',  label:'🧭 Старший админ',  title:'Отчёт старшего администратора', tplKey:'senior-checklist-template',  stateKey:'seniorChecklistTpl',  blocks: SA_BLOCKS,  defaults: SA_DEFAULT_ITEMS,  roles:['admin','owner','assistant'], push:['owner'] },
   };
   const aclListsForRole = (role)=> Object.values(ACL_LISTS).filter(l=> l.roles.includes(role)).map(l=> l.key);
-  function aclCurList(){ const ls = aclListsForRole(state.currentRole); return ls.includes(state.aclList) ? state.aclList : (ls[0] || 'admin'); }
-  const aclIdPfx = (list)=> list === 'manager' ? 'mgr|' : '';
+  function aclCurList(){ const ls = aclListsForRole(state.currentRole); if(ls.includes(state.aclList)) return state.aclList; const own = aclOwnList(state.currentRole); return ls.includes(own) ? own : (ls[0] || 'admin'); }
+  const aclIdPfx = (list)=> list === 'manager' ? 'mgr|' : (list === 'senior' ? 'sa|' : '');
   const aclMarkOf = (m, list)=> (m.list || 'admin') === list;
   const ACL_DAYS = [['all','Каждый день'],['weekday','Будни'],['weekend','Выходные'],['1','Пн'],['2','Вт'],['3','Ср'],['4','Чт'],['5','Пт'],['6','Сб'],['0','Вс']];
+  // дата с днём недели: «Вт, 24 ноября 2026» (full — «Вторник, 24 ноября 2026»)
+  const ACL_DOW_SHORT = ['Вс','Пн','Вт','Ср','Чт','Пт','Сб'];
+  const ACL_DOW_FULL = ['Воскресенье','Понедельник','Вторник','Среда','Четверг','Пятница','Суббота'];
+  function aclDateText(ds, full){ const w = parseDate(ds).getDay(); return (full ? ACL_DOW_FULL : ACL_DOW_SHORT)[w] + ', ' + formatDateText(ds); }
   const aclCanView = ()=> aclListsForRole(state.currentRole).includes('admin');
   const aclCanEdit = ()=> state.currentRole === 'owner';
   const aclCanControl = ()=> ['owner','admin','assistant'].includes(state.currentRole);
@@ -39170,6 +39295,21 @@
     const L = ACL_LISTS[list || 'admin']; const t = state[L.stateKey];
     return (t && Array.isArray(t.items)) ? t : { items: L.defaults.map(x=> ({ ...x })), isDefault:true };
   }
+  // удалённые блоки: шаблон.blocksOff = { ключ блока: с какого дня скрыт } — прошлые дни не трогаем
+  function aclBlocksOff(list){ const t = aclTpl(list); return (t.blocksOff && typeof t.blocksOff === 'object') ? t.blocksOff : {}; }
+  function aclBlockOn(list, key, ds){ const off = aclBlocksOff(list)[key]; return !off || ds < off; }
+  // блоки списка: из шаблона (если руководитель их правил: название, значок, срок, порядок, новые) или стандартные
+  function aclBlocksAll(list){
+    const t = aclTpl(list); const def = ACL_LISTS[list].blocks.map(b=> ({ ...b }));
+    if(!(Array.isArray(t.blockList) && t.blockList.length)) return def;
+    // блоки, которые появились в приложении позже, чем руководитель правил список, добавляем в конец
+    const have = new Set(t.blockList.map(b=> b.key));
+    return [...t.blockList, ...def.filter(b=> !have.has(b.key))];
+  }
+  function aclBlockOf(list, key){ return aclBlocksAll(list).find(b=> b.key === key) || null; }
+  function aclBlocksFor(list, ds){ return aclBlocksAll(list).filter(b=> aclBlockOn(list, b.key, ds)); }
+  // запись шаблона без потери удалённых блоков
+  function aclSetTpl(list, patch){ const { isDefault, ...cur } = aclTpl(list); state[ACL_LISTS[list].stateKey] = { ...cur, ...patch }; }
   function aclDaysMatch(days, ds){
     const w = parseDate(ds).getDay();
     if(!days || days === 'all') return true;
@@ -39194,6 +39334,7 @@
   // кто на смене и границы рабочего дня админов
   function aclShiftPeople(ds, list){
     if(list === 'manager'){ const n = String((state.managerShifts||{})[ds] || '').trim(); return n ? [{ name:n, start:'', end:'' }] : []; }
+    if(list === 'senior') return aclShiftPeople(ds, 'admin').filter(p=> p.senior);
     const s = (state.hostessShifts||{})[ds] || {}; const out = [];
     try{ shiftDefsForDate(ds).forEach(def=>{ const en = normalizeShiftEntry(s[def.key], def); if(en && en.name) out.push({ name: en.name, start: en.start, end: en.end, senior: !!def.senior }); }); }catch(e){}
     return out;
@@ -39207,10 +39348,13 @@
     if(t.time && aclMin(t.time) !== null) return aclMin(t.time);
     const b = aclBounds(t.ds);
     if(t.block === 'event' && t.event){ const s = aclMin(t.event.time); if(s !== null) return s - (Number(t.offset)||0); }
+    if(t.block === 'prep' && t.event && t.event.date === t.ds){ const s0 = aclMin(t.event.time); if(s0 !== null) return Math.max(0, s0 - 60); }
+    { const bl = aclBlockOf(t.list || 'admin', t.block); if(bl && bl.due && aclMin(bl.due) !== null) return aclMin(bl.due); }
     if(t.block === 'open') return b.start + 30;
     if(t.block === 'mstart') return 11*60;
     if(t.block === 'meve') return 18*60 + 30;
     if(t.block === 'mclose') return 21*60;
+    if(t.block === 'mauto') return 18*60;
     if(t.block === 'evening') return 23*60 + 30;
     return b.end;
   }
@@ -39250,8 +39394,139 @@
       if(it.block === 'event') evs.forEach(e=> push({ id: ds + '|' + it.id + '|' + e.id, ds, itemId: it.id, eventId: e.id, event: e, block:'event', text: it.text, hint: it.hint || '', offset: it.offset, time: '', auto: it.auto || '', tpl: it }));
       else push({ id: pf + ds + '|' + it.id, ds, itemId: it.id, block: it.block, text: it.text, hint: it.hint || '', time: it.time || '', auto: it.auto || '', tpl: it });
     });
-    marks.filter(m=> m.custom && !m.deleted && String(m.text||'').trim()).forEach(m=> push({ id: m.id, ds, block: m.block || ACL_LISTS[list].blocks[0].key, text: m.text, hint: m.hint || '', time: m.time || '', custom: true }));
+    marks.filter(m=> m.custom && !m.deleted && String(m.text||'').trim()).forEach(m=> push({ id: m.id, ds, block: m.block || (aclBlocksFor(list, ds)[0] || aclBlocksAll(list)[0]).key, text: m.text, hint: m.hint || '', time: m.time || '', custom: true }));
+    try{ aclAutoTasks(ds, list).forEach(base=>{ const t = aclAutoPrepState({ ...base, list }); if(!t.hiddenDone) out.push(t); }); }catch(e){ console.warn('auto tasks', e); }
+    return out.filter(t=> aclBlockOn(list, t.block, ds));
+  }
+  // ---- 🎬 автозадачи подготовки: фильм для «Кино и вино» и печать референсов гостей ----
+  // Появляются за 2 дня до мероприятия; если файлы к печати прикрепили позже — в день, когда их прикрепили.
+  // Не сделали в свой день — задача переходит на следующий (до дня мероприятия включительно).
+  function aclAutoPrepTasks(ds){
+    const out = []; const until = addDaysIso(ds, 2);
+    const dm = (d)=> d.slice(8,10) + '.' + d.slice(5,7);
+    (state.events||[]).forEach(e=>{
+      if(!e || !e.date || e.status === 'cancelled' || e.date < ds || e.date > until) return;
+      const start2 = addDaysIso(e.date, -2); const when = dm(e.date) + (e.time ? ' ' + e.time : '');
+      if(isCinemaEvent(e.title) && ds >= start2){
+        const f = eventFilm(e);
+        out.push({ id: 'auto|film|' + e.id, ds, block:'prep', event: e, kind:'film', since: start2,
+          text: f ? `Скачать фильм «${f}» для «${e.title}» ${when}` : `Скачать фильм для «${e.title}» ${when} — фильм ещё не поставлен, уточнить у менеджера`,
+          hint: 'Скачать заранее и проверить, что файл открывается и есть звук' });
+      }
+      const gs = (e.guestList||[]).filter(g=> g && !g.refunded && Array.isArray(g.printFiles) && g.printFiles.length);
+      if(gs.length){
+        const ats = gs.flatMap(g=> g.printFiles.map(f=> isoLocalDate(f.at))).filter(Boolean).sort();
+        const first = ats[0] || start2, last = ats[ats.length - 1] || start2;
+        const start = first > start2 ? first : start2;
+        if(ds >= start){
+          const names = gs.map(g=> String(g.name||'гость').trim());
+          out.push({ id: 'auto|print|' + e.id, ds, block:'prep', event: e, kind:'print', since: start, lastFileDay: last,
+            printed: gs.every(g=> g.printStatus === 'done'),
+            text: `Распечатать референсы гостей для «${e.title}» ${when}: ${names.slice(0, 5).join(', ')}${names.length > 5 ? ' и ещё ' + (names.length - 5) : ''}`,
+            hint: 'Файлы — в разделе «🖨 На печать». Распечатали — поставьте там «Готово», пункт отметится сам' });
+        }
+      }
+    });
     return out;
+  }
+  // автозадачи по спискам: админ — подготовка (фильм, печать) + по мероприятиям дня (оплата, посуда/еда, формат);
+  // старший админ — без ведущего, отчёт мастера; менеджер — детали от клиента, фильм для «Кино и вино»
+  function aclAutoTasks(ds, list){
+    const dm = (d)=> d.slice(8,10) + '.' + d.slice(5,7);
+    const when = (e)=> dm(e.date) + (e.time ? ' ' + e.time : '');
+    const ttl = (e)=> '«' + (e.title || e.product || 'мероприятие') + '»';
+    const out = [];
+    if(list === 'admin'){
+      out.push(...aclAutoPrepTasks(ds));
+      aclDayEvents(ds).forEach(e=>{
+        // 1) оплата: остаток к оплате и гости без оплаты
+        if(roleCanSeeGuestBalances(state.currentRole)){
+          let rem = 0, unpaid = []; try{ rem = eventRemainderTotal(e); unpaid = eventUnpaidGuests(e); }catch(err){}
+          const was = (state.adminChecklistMarks||[]).some(m=> m.id === 'auto|pay|' + e.id);
+          if(rem > 0 || unpaid.length || was){
+            const parts = [rem > 0 ? 'остаток ' + formatMoney(rem) : '', unpaid.length ? 'без оплаты: ' + unpaid.map(g=> String(g.name).trim()).slice(0, 4).join(', ') + (unpaid.length > 4 ? ' и ещё ' + (unpaid.length - 4) : '') : ''].filter(Boolean);
+            out.push({ id:'auto|pay|' + e.id, ds, block:'event', event:e, eventId:e.id, offset:-30, kind:'pay',
+              text: 'Взять оплату' + (parts.length ? ' — ' + parts.join(' · ') : ''), hint: 'Пункт закроется сам, когда оплату внесут в журнал мероприятия или в «Книгу»',
+              autoDoneNow: !(rem > 0) && !unpaid.length, via:'оплата внесена' });
+          }
+        }
+        // 3) частник: посуда и еда
+        if(isPrivateEventStatus(e.status) && showsDishesAndRental(e.status) && e.dishes === 'needed')
+          out.push({ id:'auto|dishes|' + e.id, ds, block:'event', event:e, eventId:e.id, offset:60, kind:'dishes', text:'Подготовить посуду для гостей' });
+        if(isPrivateEventStatus(e.status) && String(e.foodInfo||'').trim())
+          out.push({ id:'auto|food|' + e.id, ds, block:'event', event:e, eventId:e.id, offset:60, kind:'food', text:'Еда: ' + String(e.foodInfo).trim().slice(0, 120), hint:'Встретить доставку / подготовить стол и посуду под еду' });
+        // 4) не выбран формат (у мероприятия или у гостей тафтинга — форма коврика)
+        const noFormat = (()=>{ try{ return eventFormatRequired(e) && !eventFormatItems(e).length; }catch(err){ return false; } })();
+        const noShape = isTuftingEvent(e.title) ? (e.guestList||[]).filter(g=> g && !g.refunded && String(g.name||'').trim() && !g.tuftShape) : [];
+        const fmtWas = (state.adminChecklistMarks||[]).some(m=> m.id === 'auto|format|' + e.id);
+        if(noFormat || noShape.length || fmtWas)
+          out.push({ id:'auto|format|' + e.id, ds, block:'event', event:e, eventId:e.id, offset:90, kind:'format',
+            text: noShape.length ? 'Уточнить у гостей форму коврика: ' + noShape.map(g=> String(g.name).trim()).slice(0, 5).join(', ') : 'Уточнить формат мероприятия у клиента и внести в карточку',
+            hint:'Пункт закроется сам, когда формат внесут', autoDoneNow: !noFormat && !noShape.length, via:'формат внесён' });
+      });
+    }
+    if(list === 'senior'){
+      // 2) мероприятие без ведущего / открытый слот — на сегодня и 3 дня вперёд
+      const until = addDaysIso(ds, 3);
+      (state.events||[]).filter(e=> e && e.date && e.date >= ds && e.date <= until && e.status !== 'cancelled').forEach(e=>{
+        let noHost = false, slot = false; try{ noHost = isPrivateWithoutHost(e); slot = isOpenMasterSlot(e); }catch(err){}
+        if(!noHost && !slot && !(state.adminChecklistMarks||[]).some(m=> m.id === 'auto|host|' + e.id)) return;
+        const av = slot ? (e.availableMasters||[]).filter(n=> String(n||'').trim()) : [];
+        out.push({ id:'auto|host|' + e.id, ds, block:'scontrol', event:e, kind:'host',
+          text: (slot ? 'Открытый слот без мастера: ' : 'Нет ведущего: ') + ttl(e) + ' ' + when(e) + (av.length ? ' — откликнулись: ' + av.join(', ') : ''),
+          hint: av.length ? 'Выберите мастера в карточке («✎ мастер»)' : 'Найти ведущего; пункт закроется сам, когда мастер будет назначен',
+          time: e.date === ds && e.time ? aclHM(Math.max(0, aclMin(e.time) - 120)) : '', autoDoneNow: !noHost && !slot, via:'ведущий назначен' });
+      });
+      // 5) после МК: отметить «не пришёл» и отчёт мастера — за этот день и хвосты за вчера
+      [addDaysIso(ds, -1), ds].forEach(d=>{
+        (state.events||[]).filter(e=> e && e.date === d && ['confirmed','tentative','offsite'].includes(e.status) && String(e.host||'').trim()).forEach(e=>{
+          let rep = false; try{ rep = hasMasterReport(e); }catch(err){}
+          if(d < ds && rep) return; // вчерашние с отчётом не тянем
+          out.push({ id:'auto|report|' + e.id, ds, block:'scontrol', event:e, kind:'report',
+            text: 'После МК: отметить «не пришёл» и проверить отчёт мастера — ' + ttl(e) + ' ' + when(e) + ' · ' + allHostNamesDisplay(e),
+            hint: 'Отчёт не сдан — напомнить мастеру. Пункт закроется сам, когда отчёт будет', time: d < ds ? '12:00' : '23:00', autoDoneNow: rep, via:'отчёт сдан' });
+        });
+      });
+    }
+    if(list === 'manager'){
+      // 8) частник через 1–2 дня (и сегодня), а деталей от клиента нет
+      try{
+        prepTargets(ds, addDaysIso(ds, 2)).forEach(e=>{
+          const st = prepState(e); const open = prepOpen(e);
+          if(!open && !(state.adminChecklistMarks||[]).some(m=> m.id === 'auto|prep|' + e.id)) return;
+          const stTxt = { todo:'ещё не написали', sent:'написали, ждём ответ', noanswer:'клиент молчит' }[st] || '';
+          out.push({ id:'auto|prep|' + e.id, ds, block:'mauto', event:e, kind:'prep',
+            text: 'Написать клиенту и внести детали: ' + ttl(e) + ' ' + when(e) + (stTxt ? ' — ' + stTxt : ''),
+            hint: 'Меню, возраст, гости, пожелания — раздел «Подготовка». Пункт закроется сам, когда детали внесут',
+            time: e.date === addDaysIso(ds, 1) ? aclHM(PREP_DEADLINE_HOUR * 60) : (e.date === ds ? (e.time ? aclHM(Math.max(0, aclMin(e.time) - 180)) : '12:00') : ''),
+            autoDoneNow: !open, via:'детали внесены', goView:'prep' });
+        });
+      }catch(err){}
+      // 9) «Кино и вино» в ближайшие 3 дня без фильма
+      const until = addDaysIso(ds, 3);
+      (state.events||[]).filter(e=> e && e.date && e.date >= ds && e.date <= until && e.status !== 'cancelled' && isCinemaEvent(e.title)).forEach(e=>{
+        const f = eventFilm(e);
+        if(f && !(state.adminChecklistMarks||[]).some(m=> m.id === 'auto|setfilm|' + e.id)) return;
+        out.push({ id:'auto|setfilm|' + e.id, ds, block:'mauto', event:e, kind:'setfilm',
+          text: 'Поставить фильм для ' + ttl(e) + ' ' + when(e), hint:'Админ получает задачу скачать фильм за 2 дня — поставьте заранее',
+          autoDoneNow: !!f, via:'фильм поставлен' });
+      });
+    }
+    return out;
+  }
+  function aclAutoPrepState(base){
+    const m = (state.adminChecklistMarks||[]).find(x=> x.id === base.id) || {};
+    const ds = base.ds; const doneDay = m.done ? isoLocalDate(m.doneAt) : '';
+    // ручная отметка действует с дня, когда её поставили; новые файлы к печати после отметки — задача снова открыта
+    let manual = !!m.done && doneDay && doneDay <= ds && !(base.kind === 'print' && base.lastFileDay > doneDay);
+    const hiddenDone = !!m.hidden || (manual && doneDay < ds);
+    const auto = base.kind === 'print' ? !!base.printed : !!base.autoDoneNow;
+    const nd = !!m.notDone && isoLocalDate(m.notDoneAt) === ds;
+    return { ...base, list: base.list || 'admin', auto: 'prep-' + base.kind, prepAuto: true, hiddenDone,
+      done: manual || auto, manual, autoDone: auto && !manual,
+      doneBy: manual ? (m.doneBy||'') : (auto ? '' : ''), doneAt: manual ? (m.doneAt||'') : '', doneVia: !manual && auto ? (base.via || '«Готово» в «На печать»') : '',
+      notDone: nd && !manual && !auto, reason: nd ? (m.reason||'') : '', notDoneBy: nd ? (m.notDoneBy||'') : '', notDoneAt: nd ? (m.notDoneAt||'') : '',
+      undoneBy: m.undoneBy || '', undoneAt: m.undoneAt || '' };
   }
   function aclStatus(t){ if(t.done) return 'done'; if(t.notDone) return 'notdone'; return aclDue(t) < new Date() ? 'overdue' : 'open'; }
   function aclStats(ds, list){
@@ -39278,11 +39553,12 @@
   function aclRefresh(force){
     if(!force && Date.now() - (state._aclFreshAt||0) < 15000) return;
     state._aclFreshAt = Date.now();
-    Promise.all([window.storage.get('admin-checklist-marks', true).catch(()=>null), window.storage.get('admin-checklist-template', true).catch(()=>null), window.storage.get('manager-checklist-template', true).catch(()=>null)]).then(([r, tp, mtp])=>{
+    Promise.all([window.storage.get('admin-checklist-marks', true).catch(()=>null), window.storage.get('admin-checklist-template', true).catch(()=>null), window.storage.get('manager-checklist-template', true).catch(()=>null), window.storage.get('senior-checklist-template', true).catch(()=>null)]).then(([r, tp, mtp, stp])=>{
       let ch = false;
       try{ if(r){ const v = JSON.parse(r.value); if(Array.isArray(v) && JSON.stringify(v) !== JSON.stringify(state.adminChecklistMarks)){ state.adminChecklistMarks = v; state._adminChecklistMarksBaseline = JSON.parse(JSON.stringify(v)); ch = true; } } }catch(e){}
       try{ if(tp){ const v = JSON.parse(tp.value); if(v && Array.isArray(v.items) && JSON.stringify(v) !== JSON.stringify(state.adminChecklistTpl)){ state.adminChecklistTpl = v; ch = true; } } }catch(e){}
       try{ if(mtp){ const v = JSON.parse(mtp.value); if(v && Array.isArray(v.items) && JSON.stringify(v) !== JSON.stringify(state.managerChecklistTpl)){ state.managerChecklistTpl = v; ch = true; } } }catch(e){}
+      try{ if(stp){ const v = JSON.parse(stp.value); if(v && Array.isArray(v.items) && JSON.stringify(v) !== JSON.stringify(state.seniorChecklistTpl)){ state.seniorChecklistTpl = v; ch = true; } } }catch(e){}
       const a = document.activeElement; const typing = a && /^(INPUT|TEXTAREA|SELECT)$/.test(a.tagName);
       if(ch && state.view === 'adminshift' && !state.modal && !typing && !state.aclForm) render();
     }).catch(()=>{});
@@ -39292,19 +39568,19 @@
     return aclTasks(ds, 'admin').filter(t=> ['during','close'].includes(t.block) && !t.done && !t.notDone && !['cash-close','tochka'].includes(t.auto));
   }
   // свой чек-лист роли: админ смены и старший админ — админский, менеджер — менеджерский
-  function aclOwnList(role){ return ['hostess','admin'].includes(role) ? 'admin' : (role === 'manager' ? 'manager' : null); }
+  function aclOwnList(role){ return role === 'hostess' ? 'admin' : (role === 'admin' ? 'senior' : (role === 'manager' ? 'manager' : null)); }
   function aclOverdueOwn(role){ const l = aclOwnList(role); if(!l || todayStr() < ACL_FROM) return 0; try{ return aclStats(todayStr(), l).overdue; }catch(e){ return 0; } }
   function aclAlert(){
     const n = aclOverdueOwn(state.currentRole); if(!n) return null;
     const l = aclOwnList(state.currentRole);
-    return { icon:'✅', text:`${l === 'manager' ? 'Чек-лист дня' : 'Чек-лист смены'}: просрочено ${n}`, view:'adminshift' };
+    return { icon:'✅', text:`${l === 'manager' ? 'Чек-лист дня' : (l === 'senior' ? 'Отчёт СА' : 'Чек-лист смены')}: просрочено ${n}`, view:'adminshift' };
   }
   function aclCalBadge(ds){
     if(ds > todayStr() || ds < ACL_FROM) return '';
-    return ['admin','manager'].filter(aclCanSee).map(l=>{
+    return ['admin','senior','manager'].filter(aclCanSee).map(l=>{
       const s = aclStats(ds, l); if(!s.total || !aclShiftPeople(ds, l).length) return '';
-      const bad = s.overdue + s.notdone; const ic = l === 'manager' ? '💼' : '📋';
-      return `<div class="cal-hostess" style="${bad ? 'color:#A3402F;font-weight:600;' : 'color:var(--ink-soft);'}" title="${l === 'manager' ? 'Чек-лист менеджера' : 'Чек-лист админов'}: выполнено ${s.done} из ${s.total}${s.notdone ? ', не сделано ' + s.notdone : ''}${s.overdue ? ', просрочено ' + s.overdue : ''}">${ic} ${s.done}/${s.total}</div>`;
+      const bad = s.overdue + s.notdone; const ic = l === 'manager' ? '💼' : (l === 'senior' ? '🧭' : '📋');
+      return `<div class="cal-hostess" style="${bad ? 'color:#A3402F;font-weight:600;' : 'color:var(--ink-soft);'}" title="${l === 'manager' ? 'Чек-лист менеджера' : (l === 'senior' ? 'Отчёт старшего админа' : 'Чек-лист админов')}: выполнено ${s.done} из ${s.total}${s.notdone ? ', не сделано ' + s.notdone : ''}${s.overdue ? ', просрочено ' + s.overdue : ''}">${ic} ${s.done}/${s.total}</div>`;
     }).join('');
   }
   function aclMastersTomorrow(ds){
@@ -39328,17 +39604,32 @@
       <textarea id="acl-f-text" rows="2" placeholder="Что сделать">${escapeHtml(task ? task.text : '')}</textarea>
       <input type="text" id="acl-f-hint" placeholder="Подсказка (необязательно): где лежит, как сделать" value="${escapeHtml(it.hint||'')}">
       <div class="acl-form-row">
-        <label>Блок <select id="acl-f-block">${L.blocks.map(b=> `<option value="${b.key}" ${b.key===block?'selected':''}>${b.icon} ${escapeHtml(b.label)}</option>`).join('')}</select></label>
+        <label>Блок <select id="acl-f-block">${aclBlocksFor(L.key, state.aclDate || todayStr()).map(b=> `<option value="${b.key}" ${b.key===block?'selected':''}>${b.icon} ${escapeHtml(b.label)}</option>`).join('')}</select></label>
         <label class="acl-f-when-ev" style="${isEvent?'':'display:none;'}">За сколько минут до начала МК <input type="number" id="acl-f-offset" value="${escapeHtml(String(it.offset ?? 15))}" style="width:70px;"> <span class="acl-sub">минус — после начала</span></label>
         <label class="acl-f-when-tm" style="${isEvent?'display:none;':''}">К какому времени <input type="time" id="acl-f-time" value="${escapeHtml(it.time||'')}"> <span class="acl-sub">пусто — по блоку</span></label>
         ${task && task.custom ? '' : `<label class="acl-f-days">Дни <select id="acl-f-days">${ACL_DAYS.map(([v,l])=> `<option value="${v}" ${String(it.days||'all')===v?'selected':''}>${l}</option>`).join('')}</select></label>`}
       </div>
-      ${!task ? `<label class="acl-f-once" style="${isEvent?'display:none;':''}"><input type="checkbox" id="acl-f-once"> Только на ${escapeHtml(formatDateText(state.aclDate))} (в шаблон не попадёт)</label>` : ''}
+      ${!task ? `<label class="acl-f-once" style="${isEvent?'display:none;':''}"><input type="checkbox" id="acl-f-once"> Только на ${escapeHtml(aclDateText(state.aclDate))} (в шаблон не попадёт)</label>` : ''}
       ${task && !task.custom ? `<div class="acl-sub">Изменение попадёт в шаблон — во все дни, где есть этот пункт.</div>` : ''}
       <div class="acl-form-row"><button class="btn btn-primary" data-acl-save>Сохранить</button><button class="btn btn-ghost" data-acl-cancel>Отмена</button></div>
     </div>`;
   }
+  function aclBlockForm(b){
+    const isEv = b && b.key === 'event';
+    return `<div class="acl-form" style="margin:4px 0 8px;">
+      <div class="acl-form-row">
+        <label>Значок <input type="text" id="acl-b-icon" value="${escapeHtml(b ? b.icon || '' : '📌')}" style="width:52px;text-align:center;font-size:16px;"></label>
+        <label style="flex:1;min-width:200px;">Название <input type="text" id="acl-b-label" value="${escapeHtml(b ? b.label : '')}" placeholder="Например: Перед выходными" style="flex:1;min-width:160px;"></label>
+        ${isEv ? '' : `<label>Срок по умолчанию <input type="time" id="acl-b-due" value="${escapeHtml(b && b.due || '')}"> <span class="acl-sub">для задач без своего времени</span></label>`}
+      </div>
+      <div class="acl-form-row"><button class="btn btn-primary acl-mini" data-acl-bsave="${b ? escapeHtml(b.key) : ''}">Сохранить</button><button class="btn btn-ghost acl-mini" data-acl-cancel>Отмена</button></div>
+    </div>`;
+  }
   function aclExtraHtml(t){
+    if(t.kind === 'print') return `<div class="acl-form-row"><button class="btn btn-ghost acl-mini" data-acl-goview="print">🖨 Открыть «На печать»</button>${t.event ? `<span class="acl-sub">мероприятие ${escapeHtml(t.event.date.slice(8,10) + '.' + t.event.date.slice(5,7))}</span>` : ''}</div>`;
+    if(t.kind === 'prep') return `<div class="acl-form-row"><button class="btn btn-ghost acl-mini" data-acl-goview="prep">✉️ Открыть «Подготовка»</button>${t.event ? `<button class="btn btn-ghost acl-mini" data-acl-openev="${escapeHtml(t.event.id)}">📅 Мероприятие</button>` : ''}</div>`;
+    if(['host','report','setfilm'].includes(t.kind)) return t.event ? `<div class="acl-form-row"><button class="btn btn-ghost acl-mini" data-acl-openev="${escapeHtml(t.event.id)}">📅 Открыть мероприятие</button></div>` : '';
+    if(t.kind === 'film') return t.event ? `<div class="acl-form-row"><button class="btn btn-ghost acl-mini" data-acl-openev="${escapeHtml(t.event.id)}">📅 Открыть мероприятие</button></div>` : '';
     if(t.auto === 'events-today' || t.auto === 'events-all'){
       const evs = aclDayEvents(t.ds, true);
       if(!evs.length) return `<div class="acl-extra">На этот день мероприятий нет.</div>`;
@@ -39348,11 +39639,11 @@
     if(t.auto === 'handover-read'){
       const n = aclPrevNote(t.ds);
       if(!n) return `<div class="acl-extra">Передачи смены пока нет.</div>`;
-      return `<div class="acl-extra"><div class="acl-sub">Передача от ${escapeHtml(n.by||'—')} · ${escapeHtml(formatDateText(n.ds))}</div><div style="white-space:pre-wrap;">${escapeHtml(n.text||'')}</div></div>`;
+      return `<div class="acl-extra"><div class="acl-sub">Передача от ${escapeHtml(n.by||'—')} · ${escapeHtml(aclDateText(n.ds))}</div><div style="white-space:pre-wrap;">${escapeHtml(n.text||'')}</div></div>`;
     }
     if(t.auto === 'masters-tomorrow'){
       const { tom, list } = aclMastersTomorrow(t.ds);
-      if(!list.length) return `<div class="acl-extra">На ${escapeHtml(formatDateText(tom))} мастер-классов нет — писать некому.</div>`;
+      if(!list.length) return `<div class="acl-extra">На ${escapeHtml(aclDateText(tom))} мастер-классов нет — писать некому.</div>`;
       return `<div class="acl-extra">${list.map((m,i)=> `<div class="acl-rem"><div><b>${escapeHtml(m.name)}</b>: ${m.evs.map(e=> escapeHtml(e.time + ' «' + (e.title||'МК') + '»')).join(', ')}</div>
         <button class="btn btn-ghost acl-mini" data-acl-copy="${escapeHtml(aclReminderText(m, tom))}">📋 Скопировать текст</button></div>`).join('')}</div>`;
     }
@@ -39382,21 +39673,23 @@
     return `<div class="acl-row acl-${st}" data-acl-id="${escapeHtml(t.id)}">
       <button class="acl-check" data-acl-toggle="${escapeHtml(t.id)}" title="${t.done ? 'Снять отметку' : 'Отметить выполненным'}" ${t.done && !t.manual ? 'disabled' : ''}>${t.done ? '✓' : (t.notDone ? '✕' : '')}</button>
       <div class="acl-body">
-        <div class="acl-text">${escapeHtml(t.text)}${t.custom ? ' <span class="acl-tag">разово</span>' : ''}</div>
+        <div class="acl-text">${escapeHtml(t.text)}${aclRedirectSuffix(t.text, t.ds)}${t.custom ? ' <span class="acl-tag">разово</span>' : ''}</div>
         ${t.hint ? `<div class="acl-hint">${escapeHtml(t.hint)}</div>` : ''}
         <div class="acl-meta">${meta}</div>
         ${aclExtraHtml(t)}
+        ${t.done ? '' : aclRedirectBox(t.text, t.ds)}
         ${f.type === 'notdone' && f.id === t.id ? `<div class="acl-form-row"><input type="text" id="acl-reason" placeholder="Почему не получилось" style="flex:1;min-width:180px;"><button class="btn btn-primary acl-mini" data-acl-nd-save>Сохранить</button><button class="btn btn-ghost acl-mini" data-acl-cancel>Отмена</button></div>` : ''}
         ${f.type === 'del' && f.id === t.id ? `<div class="acl-form-row acl-del-box">
-            ${t.custom ? `<button class="btn btn-primary acl-mini" data-acl-del-do="custom" style="background:var(--danger);border-color:var(--danger);">Удалить задачу</button>`
-              : `<button class="btn btn-primary acl-mini" data-acl-del-do="tpl" style="background:var(--danger);border-color:var(--danger);">Удалить из шаблона (с ${escapeHtml(formatDateText(t.ds))})</button>
+            ${t.prepAuto ? `<button class="btn btn-primary acl-mini" data-acl-del-do="day" style="background:var(--danger);border-color:var(--danger);">Убрать эту задачу</button>`
+              : t.custom ? `<button class="btn btn-primary acl-mini" data-acl-del-do="custom" style="background:var(--danger);border-color:var(--danger);">Удалить задачу</button>`
+              : `<button class="btn btn-primary acl-mini" data-acl-del-do="tpl" style="background:var(--danger);border-color:var(--danger);">Удалить из шаблона (с ${escapeHtml(aclDateText(t.ds))})</button>
                  <button class="btn btn-ghost acl-mini" data-acl-del-do="day">Убрать только в этот день${t.event ? ' (этот МК)' : ''}</button>`}
             <button class="btn btn-ghost acl-mini" data-acl-cancel>Отмена</button></div>` : ''}
       </div>
       <div class="acl-actions">
         ${!t.done && !t.notDone ? `<button class="acl-mini-btn" data-acl-nd="${escapeHtml(t.id)}" title="Не получилось сделать">не сделано</button>` : ''}
         ${t.notDone ? `<button class="acl-mini-btn" data-acl-reopen="${escapeHtml(t.id)}">вернуть</button>` : ''}
-        ${edit ? `<button class="acl-mini-btn" data-acl-edit="${escapeHtml(t.id)}" title="Редактировать">✎</button><button class="acl-mini-btn" data-acl-del="${escapeHtml(t.id)}" title="Удалить">🗑</button>` : ''}
+        ${edit && !t.prepAuto ? `<button class="acl-mini-btn" data-acl-edit="${escapeHtml(t.id)}" title="Редактировать">✎</button><button class="acl-mini-btn" data-acl-del="${escapeHtml(t.id)}" title="Удалить">🗑</button>` : ''}
       </div>
     </div>`;
   }
@@ -39411,7 +39704,7 @@
       <button class="btn ${tab==='control'?'btn-primary':'btn-ghost'}" data-acl-tab="control">📊 Контроль смен</button></div>` : '';
     return `<div class="analytics-wrap acl-wrap">
       <h2 style="font-family:var(--font-display);margin:18px 0 4px;">✅ ${escapeHtml(L.title)}</h2>
-      <div class="acl-sub" style="margin-bottom:12px;">${list === 'admin' ? 'По регламенту смены администратора. Галочку ставит любой админ на смене' : 'Ежедневные дела менеджера по продажам. Галочку ставит менеджер'}, ассистент может закрыть пункты при аврале — у каждой отметки видно, кто и во сколько её поставил. Не получилось — нажмите «не сделано» и напишите почему, ${list === 'admin' ? 'старший администратор' : 'руководитель'} получит уведомление.</div>
+      <div class="acl-sub" style="margin-bottom:12px;">${list === 'admin' ? 'По регламенту смены администратора. Галочку ставит любой админ на смене' : (list === 'senior' ? 'Контроль мероприятий и задачи старшего администратора. Галочку ставит старший администратор' : 'Ежедневные дела менеджера по продажам. Галочку ставит менеджер')}, ассистент может закрыть пункты при аврале — у каждой отметки видно, кто и во сколько её поставил. Не получилось — нажмите «не сделано» и напишите почему, ${list === 'admin' ? 'старший администратор' : 'руководитель'} получит уведомление.</div>
       ${listTabs}
       ${tabs}
       ${tab === 'control' ? aclControlHtml(list) : aclDayHtml(ds, list)}
@@ -39420,7 +39713,7 @@
   function aclDayHtml(ds, list){
     const ts = aclTasks(ds, list); const s = aclStats(ds, list); const people = aclShiftPeople(ds, list); const f = state.aclForm || {};
     const pct = s.total ? Math.round(s.done / s.total * 100) : 0;
-    const blocksHtml = ACL_LISTS[list].blocks.map(b=>{
+    const blocksHtml = aclBlocksFor(list, ds).map(b=>{
       const list = ts.filter(t=> t.block === b.key);
       const addBtn = aclCanEdit() ? (f.type === 'add' && f.block === b.key ? aclTaskForm(null, b.key) : `<button class="acl-add" data-acl-add="${b.key}">＋ Добавить задачу</button>`) : '';
       if(!list.length && !aclCanEdit()) return '';
@@ -39433,13 +39726,22 @@
           : `<div class="acl-sub" style="padding:6px 0;">В этот день нет мастер-классов в Художественной, Мастерской и Лектории.</div>`;
       } else inner = list.sort((a,c)=> aclDueMin(a) - aclDueMin(c)).map(aclRowHtml).join('');
       const d = list.filter(t=> t.done).length;
-      return `<div class="acl-block"><div class="acl-block-h">${b.icon} ${escapeHtml(b.label)} <span class="acl-sub">${list.length ? d + '/' + list.length : 'пусто'}</span></div>${inner}${addBtn}</div>`;
+      const delBtn = aclCanEdit() ? `<span style="margin-left:auto;display:flex;gap:4px;">
+          <button class="acl-mini-btn" data-acl-bmove="${b.key}|-1" title="Выше">↑</button><button class="acl-mini-btn" data-acl-bmove="${b.key}|1" title="Ниже">↓</button>
+          <button class="acl-mini-btn" data-acl-bedit="${b.key}" title="Переименовать, значок, срок">✎ блок</button>
+          <button class="acl-mini-btn" data-acl-bdel="${b.key}" title="Удалить блок">🗑</button></span>` : '';
+      if(f.type === 'bedit' && f.block === b.key) return `<div class="acl-block">${aclBlockForm(b)}${inner}${addBtn}</div>`;
+      const delBox = (f.type === 'bdel' && f.block === b.key) ? `<div class="acl-form-row acl-del-box" style="margin-bottom:6px;">
+          <span style="font-size:12.5px;">Удалить блок «${escapeHtml(b.label)}» со всеми задачами с ${escapeHtml(aclDateText(ds))}? Прошлые дни останутся как были.</span>
+          <button class="btn btn-primary acl-mini" data-acl-bdel-do="${b.key}" style="background:var(--danger);border-color:var(--danger);">Удалить блок</button>
+          <button class="btn btn-ghost acl-mini" data-acl-cancel>Отмена</button></div>` : '';
+      return `<div class="acl-block"><div class="acl-block-h">${b.icon} ${escapeHtml(b.label)} <span class="acl-sub">${list.length ? d + '/' + list.length : 'пусто'}</span>${delBtn}</div>${delBox}${inner}${addBtn}</div>`;
     }).join('');
     return `
       <div class="acl-top">
         <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
           <button class="nav-btn" id="acl-prev">‹</button>
-          <b style="font-size:16px;min-width:150px;text-align:center;">${escapeHtml(formatDateText(ds))}</b>
+          <b style="font-size:16px;min-width:150px;text-align:center;">${escapeHtml(aclDateText(ds, true))}</b>
           <button class="nav-btn" id="acl-next">›</button>
           ${ds !== todayStr() ? `<button class="today-btn" id="acl-today">сегодня</button>` : ''}
         </div>
@@ -39448,6 +39750,8 @@
         <div class="acl-sub">Выполнено <b>${s.done}</b> из ${s.total}${s.overdue ? ` · <span class="acl-bad">просрочено ${s.overdue}</span>` : ''}${s.notdone ? ` · <span class="acl-bad">не сделано ${s.notdone}</span>` : ''}</div>
       </div>
       ${blocksHtml}
+      ${aclCanEdit() ? (f.type === 'bnew' ? `<div class="acl-block"><div class="acl-block-h">＋ Новый блок</div>${aclBlockForm(null)}</div>` : `<button class="acl-add" id="acl-bnew" style="margin-bottom:6px;">＋ Новый блок</button>`) : ''}
+      ${aclCanEdit() ? (()=>{ const off = aclBlocksAll(list).filter(b=> !aclBlockOn(list, b.key, ds)); return off.length ? `<div class="acl-sub" style="margin-top:10px;">Удалённые блоки: ${off.map(b=> `${b.icon} ${escapeHtml(b.label)} <button class="acl-mini-btn" data-acl-brestore="${b.key}">вернуть</button>`).join(' · ')}</div>` : ''; })() : ''}
       ${aclCanEdit() && !aclTpl(list).isDefault ? `<div class="acl-sub" style="margin-top:10px;">Шаблон изменён вами. <button class="acl-mini-btn" id="acl-reset-tpl">вернуть стандартный список</button></div>` : ''}`;
   }
   function aclControlHtml(list){
@@ -39463,7 +39767,7 @@
       });
       ['total','done','notdone','overdue'].forEach(k=> T[k] += s[k]);
       const pct = Math.round(s.done / s.total * 100);
-      return `<tr data-acl-goday="${ds}" style="cursor:pointer;"><td style="text-align:left;">${escapeHtml(formatDateText(ds))}</td><td style="text-align:left;">${escapeHtml(aclShiftPeople(ds, list).map(p=> p.name).join(', ') || '—')}</td>
+      return `<tr data-acl-goday="${ds}" style="cursor:pointer;"><td style="text-align:left;">${escapeHtml(aclDateText(ds))}</td><td style="text-align:left;">${escapeHtml(aclShiftPeople(ds, list).map(p=> p.name).join(', ') || '—')}</td>
         <td class="${pct >= 90 ? 'acl-ok' : (pct < 60 ? 'acl-bad' : '')}"><b>${pct}%</b> <span class="acl-sub">${s.done}/${s.total}</span></td><td>${s.notdone || ''}</td><td>${s.overdue ? `<span class="acl-bad">${s.overdue}</span>` : ''}</td></tr>`;
     }).join('');
     const people = Object.entries(per).sort((a,b)=> b[1].n - a[1].n);
@@ -39474,9 +39778,9 @@
         <div class="summary-card"><div class="num" style="font-size:22px;">${T.notdone}</div><div class="label">не сделано (с причиной)</div></div>
         <div class="summary-card"><div class="num" style="font-size:22px;">${T.overdue}</div><div class="label">не отмечено вовремя</div></div>
       </div>
-      <table class="acl-table"><thead><tr><th style="text-align:left;">День</th><th style="text-align:left;">${list === 'manager' ? 'Менеджер' : 'Админы'}</th><th>Выполнено</th><th>Не сделано</th><th>Не отмечено</th></tr></thead><tbody>${rows || `<tr><td colspan="5" class="acl-sub">Пока нет данных за этот месяц. Контроль считается с ${escapeHtml(formatDateText(ACL_FROM))}, только по дням, где в графике стоит ${list === 'manager' ? 'менеджер' : 'админ'}.</td></tr>`}</tbody></table>
+      <table class="acl-table"><thead><tr><th style="text-align:left;">День</th><th style="text-align:left;">${list === 'manager' ? 'Менеджер' : (list === 'senior' ? 'Старший админ' : 'Админы')}</th><th>Выполнено</th><th>Не сделано</th><th>Не отмечено</th></tr></thead><tbody>${rows || `<tr><td colspan="5" class="acl-sub">Пока нет данных за этот месяц. Контроль считается с ${escapeHtml(aclDateText(ACL_FROM))}, только по дням, где в графике стоит ${list === 'manager' ? 'менеджер' : (list === 'senior' ? 'старший админ' : 'админ')}.</td></tr>`}</tbody></table>
       ${people.length ? `<div class="acl-block" style="margin-top:14px;"><div class="acl-block-h">👤 Кто отмечал</div>${people.map(([n,r])=> `<div class="stat-row"><div class="stat-label" style="flex:1;">${escapeHtml(n)}</div><div style="width:120px;font-size:12px;">отметок: ${r.n}</div><div style="width:150px;font-size:12px;">вовремя: ${Math.round(r.onTime / r.n * 100)}%</div></div>`).join('')}</div>` : ''}
-      ${nd.length ? `<div class="acl-block" style="margin-top:14px;"><div class="acl-block-h">✕ Не сделано — причины</div>${nd.sort((a,b)=> b.ds.localeCompare(a.ds)).map(t=> `<div class="stat-row" style="align-items:flex-start;"><div style="width:110px;font-size:12px;">${escapeHtml(formatDateText(t.ds))}</div><div style="flex:1;font-size:13px;"><b>${escapeHtml(t.text)}</b>${t.event ? ' <span class="acl-sub">(' + escapeHtml(t.event.time + ' «' + (t.event.title||'') + '»') + ')</span>' : ''}<div class="acl-bad">${escapeHtml(t.reason || 'без причины')} · ${escapeHtml(t.notDoneBy||'')}</div></div></div>`).join('')}</div>` : ''}`;
+      ${nd.length ? `<div class="acl-block" style="margin-top:14px;"><div class="acl-block-h">✕ Не сделано — причины</div>${nd.sort((a,b)=> b.ds.localeCompare(a.ds)).map(t=> `<div class="stat-row" style="align-items:flex-start;"><div style="width:110px;font-size:12px;">${escapeHtml(aclDateText(t.ds))}</div><div style="flex:1;font-size:13px;"><b>${escapeHtml(t.text)}</b>${t.event ? ' <span class="acl-sub">(' + escapeHtml(t.event.time + ' «' + (t.event.title||'') + '»') + ')</span>' : ''}<div class="acl-bad">${escapeHtml(t.reason || 'без причины')} · ${escapeHtml(t.notDoneBy||'')}</div></div></div>`).join('')}</div>` : ''}`;
   }
   function aclFindTask(id){ return aclTasks(state.aclDate, aclCurList()).find(t=> t.id === id); }
   function aclReadForm(){
@@ -39491,6 +39795,8 @@
     if($('#acl-prev')) $('#acl-prev').onclick = ()=> go(addDaysIso(state.aclDate, -1));
     if($('#acl-next')) $('#acl-next').onclick = ()=> go(addDaysIso(state.aclDate, 1));
     if($('#acl-today')) $('#acl-today').onclick = ()=> go(todayStr());
+    $$('[data-acl-goview]').forEach(b=> b.onclick = ()=>{ state.view = b.dataset.aclGoview; render(); window.scrollTo(0,0); });
+    $$('[data-acl-openev]').forEach(b=> b.onclick = ()=>{ const ev = (state.events||[]).find(x=> x.id === b.dataset.aclOpenev); if(ev) requireUnlock(()=>{ state.modal = { type:'event', event:{ ...ev }, isNew:false, keepAll:true }; render(); }); });
     $$('[data-acl-list]').forEach(b=> b.onclick = ()=>{ state.aclList = b.dataset.aclList; state.aclForm = null; render(); });
     $$('[data-acl-tab]').forEach(b=> b.onclick = ()=>{ state.aclTab = b.dataset.aclTab; state.aclForm = null; render(); });
     $$('[data-acl-goday]').forEach(r=> r.onclick = ()=>{ state.aclTab = 'day'; go(r.dataset.aclGoday); });
@@ -39519,7 +39825,7 @@
       const txt = b.dataset.aclCopy;
       try{ await navigator.clipboard.writeText(txt); b.textContent = '✓ Скопировано'; }
       catch(e){ const ta = document.createElement('textarea'); ta.value = txt; document.body.appendChild(ta); ta.select(); try{ document.execCommand('copy'); b.textContent = '✓ Скопировано'; }catch(err){} ta.remove(); }
-      setTimeout(()=>{ if(b.isConnected) b.textContent = '📋 Скопировать текст'; }, 1800);
+      setTimeout(()=>{ if(b.isConnected) b.textContent = b.dataset.copyLabel || '📋 Скопировать текст'; }, 1800);
     });
     const saveNote = async (text, nothing)=>{
       const ds = state.aclDate; const id = 'note|' + ds;
@@ -39535,6 +39841,41 @@
     if(!aclCanEdit()) return;
     $$('[data-acl-edit]').forEach(b=> b.onclick = ()=>{ state.aclForm = { type:'edit', id: b.dataset.aclEdit }; render(); });
     $$('[data-acl-del]').forEach(b=> b.onclick = ()=>{ state.aclForm = { type:'del', id: b.dataset.aclDel }; render(); });
+    const blocksSave = async (list, arr)=>{ aclSetTpl(list, { blockList: arr }); state.aclForm = null; render(); await saveAdminChecklistTpl(list); };
+    $$('[data-acl-bedit]').forEach(b=> b.onclick = ()=>{ state.aclForm = { type:'bedit', block: b.dataset.aclBedit }; render(); });
+    if($('#acl-bnew')) $('#acl-bnew').onclick = ()=>{ state.aclForm = { type:'bnew' }; render(); setTimeout(()=>{ const i = $('#acl-b-label'); if(i) i.focus(); }, 30); };
+    $$('[data-acl-bmove]').forEach(b=> b.onclick = async ()=>{
+      const list = aclCurList(); const [key, dir] = b.dataset.aclBmove.split('|');
+      const arr = aclBlocksAll(list).map(x=> ({ ...x })); const vis = aclBlocksFor(list, state.aclDate).map(x=> x.key);
+      const i = arr.findIndex(x=> x.key === key); if(i < 0) return;
+      // ищем соседний видимый блок в нужную сторону
+      let j = i + Number(dir); while(j >= 0 && j < arr.length && !vis.includes(arr[j].key)) j += Number(dir);
+      if(j < 0 || j >= arr.length) return;
+      const [x] = arr.splice(i, 1); arr.splice(j, 0, x); await blocksSave(list, arr);
+    });
+    const bSave = $('[data-acl-bsave]');
+    if(bSave) bSave.onclick = async ()=>{
+      const list = aclCurList(); const key = bSave.dataset.aclBsave;
+      const label = ($('#acl-b-label').value || '').trim(); const icon = ($('#acl-b-icon').value || '').trim().slice(0, 4) || '📌';
+      const due = $('#acl-b-due') ? $('#acl-b-due').value : '';
+      if(!label){ showGapWarningBanner('Напишите название блока.'); return; }
+      const arr = aclBlocksAll(list).map(x=> ({ ...x }));
+      if(key){ const i = arr.findIndex(x=> x.key === key); if(i < 0) return; arr[i] = { ...arr[i], label, icon, due }; }
+      else arr.push({ key: 'b' + uid(), label, icon, due });
+      await blocksSave(list, arr);
+      try{ recordAction(key ? 'Чек-лист: блок изменён' : 'Чек-лист: блок добавлен', label); }catch(e){}
+    };
+    $$('[data-acl-bdel]').forEach(b=> b.onclick = ()=>{ state.aclForm = { type:'bdel', block: b.dataset.aclBdel }; render(); });
+    $$('[data-acl-bdel-do]').forEach(b=> b.onclick = async ()=>{
+      const list = aclCurList(); const key = b.dataset.aclBdelDo; const lbl = (aclBlockOf(list, key)||{}).label || key;
+      aclSetTpl(list, { blocksOff: { ...aclBlocksOff(list), [key]: state.aclDate } });
+      state.aclForm = null; render(); await saveAdminChecklistTpl(list);
+      try{ recordAction('Чек-лист: блок удалён', lbl); }catch(e){}
+    });
+    $$('[data-acl-brestore]').forEach(b=> b.onclick = async ()=>{
+      const list = aclCurList(); const off = { ...aclBlocksOff(list) }; delete off[b.dataset.aclBrestore];
+      aclSetTpl(list, { blocksOff: off }); render(); await saveAdminChecklistTpl(list);
+    });
     $$('[data-acl-add]').forEach(b=> b.onclick = ()=>{ state.aclForm = { type:'add', block: b.dataset.aclAdd }; render(); setTimeout(()=>{ const i = $('#acl-f-text'); if(i) i.focus(); }, 30); });
     const blockSel = $('#acl-f-block');
     if(blockSel) blockSel.onchange = ()=>{ const ev = blockSel.value === 'event';
@@ -39556,7 +39897,7 @@
         }
         const i = items.findIndex(x=> x.id === t.itemId); if(i < 0) return;
         items[i] = { ...items[i], ...fields }; if(v.block !== 'event') delete items[i].offset;
-        state[ACL_LISTS[list].stateKey] = { items }; state.aclForm = null; render(); await saveAdminChecklistTpl(list);
+        aclSetTpl(list, { items }); state.aclForm = null; render(); await saveAdminChecklistTpl(list);
         try{ recordAction('Чек-лист: пункт изменён', v.text); }catch(e){}
         return;
       }
@@ -39567,7 +39908,7 @@
           state.aclForm = null; render(); await saveAdminChecklistMarks(); return;
         }
         items.push({ id: 't' + uid(), ...fields, since: state.aclDate });
-        state[ACL_LISTS[list].stateKey] = { items }; state.aclForm = null; render(); await saveAdminChecklistTpl(list);
+        aclSetTpl(list, { items }); state.aclForm = null; render(); await saveAdminChecklistTpl(list);
         try{ recordAction('Чек-лист: пункт добавлен', v.text); }catch(e){}
       }
     };
@@ -39577,7 +39918,7 @@
       if(mode === 'day'){ aclUpsertMark(t, { hidden:true }); state.aclForm = null; render(); await saveAdminChecklistMarks(); return; }
       const list = aclCurList();
       const items = aclTpl(list).items.map(x=> x.id === t.itemId ? { ...x, removedFrom: t.ds } : { ...x });
-      state[ACL_LISTS[list].stateKey] = { items }; state.aclForm = null; render(); await saveAdminChecklistTpl(list);
+      aclSetTpl(list, { items }); state.aclForm = null; render(); await saveAdminChecklistTpl(list);
       try{ recordAction('Чек-лист: пункт удалён', t.text); }catch(e){}
     });
     if($('#acl-reset-tpl')) $('#acl-reset-tpl').onclick = async ()=>{
@@ -39586,7 +39927,7 @@
       const list = aclCurList(); const L = ACL_LISTS[list];
       const today = todayStr(); const cur = aclTpl(list).items;
       const custom = cur.filter(x=> !L.defaults.some(d=> d.id === x.id)).map(x=> ({ ...x, removedFrom: x.removedFrom && x.removedFrom < today ? x.removedFrom : today }));
-      state[L.stateKey] = { items: [...L.defaults.map(x=> ({ ...x })), ...custom] }; render(); await saveAdminChecklistTpl(list);
+      aclSetTpl(list, { items: [...L.defaults.map(x=> ({ ...x })), ...custom], blockList: null, blocksOff: {} }); render(); await saveAdminChecklistTpl(list);
     };
     function confirmInline(btn){ if(btn.dataset.sure) return true; btn.dataset.sure = '1'; btn.textContent = 'точно вернуть? нажмите ещё раз'; return false; }
   }
@@ -39607,6 +39948,357 @@
     ov.querySelector('[data-x="list"]').onclick = ()=>{ ov.remove(); state.view = 'adminshift'; state.aclList = 'admin'; state.aclTab = 'day'; state.aclDate = todayStr(); render(); };
     ov.querySelector('[data-x="go"]').onclick = ()=>{ ov.remove(); onGo(); };
     ov.onclick = (e)=>{ if(e.target === ov) ov.remove(); };
+  }
+
+  // ===================== 📞 ТЕЛЕФОНЫ СОТРУДНИКОВ + ПОДСКАЗКА «КОМУ ПЕРЕАДРЕСОВАТЬ» =====================
+  // Телефоны хранятся в реестре сотрудников (staff-positions → phones: { имя в нижнем регистре: телефон }),
+  // заполняются там же, где личные пароли. Любой пункт чек-листа или задача со словом «переадрес…»
+  // показывает менеджера, который стоит в графике на следующий день, и его номер — с кнопкой «скопировать».
+  const ACL_REDIRECT_RE = /переадрес/i;
+  function staffPhoneOf(name){
+    const k = spKey(name); if(!k) return '';
+    const ph = staffPosData().phones || {};
+    if(ph[k]) return ph[k];
+    // «Алёна» и «Алёна Грекова» — один менеджер (managerCanon); по одному только имени не угадываем — в реестре бывают тёзки
+    const C = (x)=>{ try{ return spKey(managerCanon(x)); }catch(e){ return spKey(x); } };
+    const ck = C(name); const hit = Object.keys(ph).find(x=> C(x) === ck);
+    return hit ? ph[hit] : '';
+  }
+  function staffPhoneFmt(p){
+    const d = String(p||'').replace(/\D/g,'');
+    if(d.length === 11 && /^[78]/.test(d)) return '+7 ' + d.slice(1,4) + ' ' + d.slice(4,7) + '-' + d.slice(7,9) + '-' + d.slice(9);
+    if(d.length === 10) return '+7 ' + d.slice(0,3) + ' ' + d.slice(3,6) + '-' + d.slice(6,8) + '-' + d.slice(8);
+    return String(p||'').trim();
+  }
+  function aclRedirectInfo(ds){
+    const tom = addDaysIso(ds, 1);
+    const name = managerForDate(tom);
+    return { tom, name, phone: name ? staffPhoneFmt(staffPhoneOf(name)) : '' };
+  }
+  // короткая приписка к тексту задачи: «→ Ангелина, +7 913 …»
+  function aclRedirectSuffix(text, ds){
+    if(!ACL_REDIRECT_RE.test(String(text||''))) return '';
+    const r = aclRedirectInfo(ds || todayStr());
+    if(!r.name) return ' <span class="acl-redir-tag warn">→ на завтра менеджер в графике не стоит</span>';
+    return ` <span class="acl-redir-tag">→ ${escapeHtml(r.name)}${r.phone ? ', ' + escapeHtml(r.phone) : ''}</span>`;
+  }
+  function aclRedirectBox(text, ds){
+    if(!ACL_REDIRECT_RE.test(String(text||''))) return '';
+    const r = aclRedirectInfo(ds || todayStr());
+    const d = parseDate(r.tom); const lbl = ['Вс','Пн','Вт','Ср','Чт','Пт','Сб'][d.getDay()] + ', ' + pad(d.getDate()) + '.' + pad(d.getMonth()+1);
+    if(!r.name) return `<div class="acl-extra">📞 Кому переадресовать: на ${escapeHtml(lbl)} менеджер в графике не стоит — уточните у старшего администратора.</div>`;
+    return `<div class="acl-extra acl-redir">📞 Кому переадресовать — завтра (${escapeHtml(lbl)}) на смене: <b>${escapeHtml(r.name)}</b>
+      ${r.phone ? ` · <a href="tel:${escapeHtml(r.phone.replace(/[^\d+]/g,''))}" style="font-weight:700;color:inherit;">${escapeHtml(r.phone)}</a> <button class="btn btn-ghost acl-mini" data-acl-copy="${escapeHtml(r.phone)}" data-copy-label="📋 Номер">📋 Номер</button>`
+        : ` · <span class="acl-bad">номер не указан</span> <span class="acl-sub">(добавьте в реестре сотрудников, где пароли)</span>`}</div>`;
+  }
+  // сохранение телефона из реестра сотрудников (поле рядом с паролем) — одним обработчиком на весь документ
+  if(!window._staffPhoneHook){
+    window._staffPhoneHook = true;
+    document.addEventListener('change', async (e)=>{
+      const el = e.target; if(!el || !el.classList || !el.classList.contains('staff-phone-input')) return;
+      const d = staffPosData(); if(!d.phones || typeof d.phones !== 'object') d.phones = {};
+      const k = spKey(el.dataset.name); const v = String(el.value||'').trim();
+      if(v) d.phones[k] = staffPhoneFmt(v); else delete d.phones[k];
+      if(v) el.value = d.phones[k];
+      try{ await saveStaffPositions(); showToast(v ? '📞 Телефон сохранён' : 'Телефон удалён'); }catch(err){ showGapWarningBanner('Не удалось сохранить телефон — проверьте интернет и повторите.'); }
+    });
+  }
+
+  // ===================== 💸 ГОСТИ БЕЗ ОПЛАТЫ =====================
+  // Гость записан, но оплаты нет ни в журнале мероприятия (платёж на этого гостя), ни в «Книге»
+  // (доход по этому мероприятию, где в комментарии есть имя гостя — так подписываются и автозаписи из журнала).
+  // Не подсвечиваем: возврат, блогер, переделка, «не пришёл», «ожидаем с гостя: 0», мероприятие уже оплачено целиком,
+  // и единственного гостя, если по мероприятию есть оплата без привязки к гостю.
+  function guestPaidInBook(eventId, g){
+    const nm = String(g && g.name || '').trim().toLowerCase(); if(nm.length < 2 || !eventId) return false;
+    return (state.incomes||[]).some(i=> i.eventId === eventId && Number(i.amount) > 0 && String(i.comment||'').toLowerCase().includes(nm));
+  }
+  function eventUnpaidGuests(e){
+    if(!e || e.status === 'cancelled' || !Array.isArray(e.guestList) || !e.guestList.length) return [];
+    if(eventTotalExpected(e) > 0 && eventRemainderTotal(e) <= 0) return [];
+    const pays = Array.isArray(e.payments) ? e.payments : [];
+    const live = (p)=> Number(p.amount) > 0 && p.type !== 'refund' && !p.refundRef;
+    const gl = e.guestList.filter(g=> g && !g.refunded && !g.isBlogger && !g.isRedo && !g.noShow && String(g.name||'').trim());
+    if(e.guestList.length === 1 && (pays.some(live) || eventPaidFromBook(e.id) > 0)) return [];
+    return gl.filter(g=>{
+      if(g.expected !== undefined && g.expected !== null && g.expected !== '' && Number(g.expected) === 0) return false;
+      if(pays.some(p=> p.guestId === g.id && live(p))) return false;
+      return !guestPaidInBook(e.id, g);
+    });
+  }
+  function unpaidGuestsLineHtml(e, cls){
+    if(!roleCanSeeGuestBalances(state.currentRole)) return '';
+    let u = []; try{ u = eventUnpaidGuests(e); }catch(err){ return ''; }
+    if(!u.length) return '';
+    const past = e.date && e.date <= todayStr();
+    const names = u.map(g=> String(g.name).trim());
+    const shown = names.slice(0, 4).join(', ') + (names.length > 4 ? ' и ещё ' + (names.length - 4) : '');
+    return `<div class="${cls}" style="color:${past ? 'var(--status-red)' : '#8C6A1E'};font-weight:600;" title="Записаны, но оплаты нет ни в журнале мероприятия, ни в «Книге»">💸 Без оплаты (${u.length}): ${escapeHtml(shown)}</div>`;
+  }
+
+  // ===================== 📈 ЗА СЧЁТ ЧЕГО ИЗМЕНИЛСЯ ПРОГНОЗ =====================
+  // Каждый снимок прогноза на сегодня (автоматически раз в 20 мин) запоминает сумму по каждой записи месяца:
+  // e:мероприятие, c:сертификат, o:заказ, i:изделие, x:прочий доход «Книги». Разница со снимком прошлого дня
+  // и есть «за счёт чего вырос прогноз». Построчные суммы храним только за последнюю неделю (иначе файл разрастается).
+  const REV_ITEMS_KEEP_DAYS = 8;
+  function revItemsForMonth(ym){
+    const n = v=> (v!==undefined && v!==null && !isNaN(v)) ? Number(v) : 0;
+    const m = {}; const put = (k, v)=>{ v = Math.round(v); if(v) m[k] = (m[k]||0) + v; };
+    (state.events||[]).forEach(e=>{ if(e.date && e.date.startsWith(ym)) put('e:' + e.id, eventRevenueForecast(e)); });
+    (state.certificates||[]).forEach(c=>{ if(c.saleDate && c.saleDate.startsWith(ym) && c.purpose !== 'marketing' && c.status !== 'refunded') put('c:' + c.id, n(c.amount)); });
+    (state.orders||[]).forEach(o=>{ if(o.date && o.date.startsWith(ym)) put('o:' + o.id, n(o.revenue)); });
+    (state.itemSales||[]).forEach(x=>{ if(x.date && x.date.startsWith(ym)) put('i:' + x.id, itemMoneyRev(x)); });
+    otherIncomesForMonth(ym).forEach(i=> put('x:' + i.id, n(i.amount)));
+    return m;
+  }
+  function revItemsPrune(map){
+    if(!map) return map; const cut = addDaysIso(todayStr(), -REV_ITEMS_KEEP_DAYS);
+    Object.keys(map).forEach(k=>{ if(k < cut && map[k] && map[k].revItems){ const { revItems, revAt, ...rest } = map[k]; map[k] = rest; } });
+    return map;
+  }
+  function revItemLabel(key){
+    const [kind, id] = [key.slice(0, 1), key.slice(2)];
+    const dm = (d)=> d ? d.slice(8,10) + '.' + d.slice(5,7) : '';
+    if(kind === 'e'){ const e = (state.events||[]).find(x=> x.id === id); if(!e) return { icon:'📅', text:'Мероприятие удалено' };
+      const sp = (getSpace(e.spaceId) || {}).name || '';
+      return { icon: e.product === 'Мастер-класс' ? '🎨' : '🎉', text: (e.title || e.product || 'Мероприятие') + ' · ' + dm(e.date) + (e.time ? ' ' + e.time : '') + (sp ? ' · ' + sp : ''), ev: e }; }
+    if(kind === 'c'){ const c = (state.certificates||[]).find(x=> x.id === id); return { icon:'🎟', text: c ? 'Сертификат №' + (c.number || '—') + (c.buyerName ? ' · ' + c.buyerName : '') : 'Сертификат удалён', cert: c }; }
+    if(kind === 'o'){ const o = (state.orders||[]).find(x=> x.id === id); return { icon:'📦', text: o ? 'Заказ' + (o.masterName ? ' · ' + o.masterName : '') + ' · ' + dm(o.date) : 'Заказ удалён' }; }
+    if(kind === 'i'){ const x = (state.itemSales||[]).find(y=> y.id === id); return { icon:'🏺', text: x ? 'Изделие' + (x.masterName ? ' · ' + x.masterName : '') + ' · ' + dm(x.date) : 'Продажа изделия удалена' }; }
+    const i = (state.incomes||[]).find(y=> y.id === id);
+    return { icon:'📒', text: i ? (i.product || 'Доход') + (i.comment ? ' · ' + String(i.comment).slice(0, 60) : '') + ' · ' + dm(i.date) : 'Запись «Книги» удалена' };
+  }
+  // разница: что стало больше/меньше/новым/отменённым — текущий день против последнего снимка более раннего дня месяца
+  function revDeltaFor(D){
+    const ym = D.slice(0,7); const snaps = state.dailyReportSnapshots || {};
+    const cur = D === todayStr() ? revItemsForMonth(ym) : (snaps[D] && snaps[D].revItems) || null;
+    if(!cur) return { none:'Для этого дня раскладки нет — она появляется со дня обновления приложения и хранится неделю.' };
+    const prevKey = Object.keys(snaps).filter(k=> k.startsWith(ym) && k < D && snaps[k] && snaps[k].revItems).sort().pop();
+    if(!prevKey) return { none: D.slice(8,10) === '01' ? 'Первый день месяца — сравнивать прогноз пока не с чем.' : 'Вчерашнего снимка с раскладкой ещё нет — сравнение появится завтра (снимок делается сам, пока сотрудники работают в приложении).' };
+    const prev = snaps[prevKey].revItems;
+    // кто продал: заявка, проданная в этот день и привязанная к мероприятию / заказу
+    const soldBy = {};
+    (state.leads||[]).forEach(l=>{ if(!l.sold) return; let mo = { day:'' }; try{ mo = leadSoldMoment(l); }catch(e){} if(mo.day !== D) return;
+      let who = ''; try{ who = leadSeller(l); }catch(e){} if(l.eventId) soldBy['e:' + l.eventId] = who; if(l.orderId) soldBy['o:' + l.orderId] = who; });
+    const rows = [];
+    new Set([...Object.keys(cur), ...Object.keys(prev)]).forEach(k=>{
+      const a = prev[k] || 0, b = cur[k] || 0, d = b - a; if(Math.abs(d) < 1) return;
+      const L = revItemLabel(k);
+      let why = !a ? (k[0] === 'e' ? 'новая бронь' : 'новая продажа') : (!b ? (L.ev && L.ev.status === 'cancelled' ? 'отмена' : 'убрано') : 'было ' + formatMoney(a) + ' → стало ' + formatMoney(b));
+      if(k[0] === 'e' && a && b && L.ev && L.ev.product === 'Мастер-класс') why += ' (гости / оплаты)';
+      rows.push({ k, d, a, b, why, who: soldBy[k] || '', ...L });
+    });
+    rows.sort((x, y)=> y.d - x.d);
+    const at = snaps[prevKey].revAt ? new Date(snaps[prevKey].revAt) : null;
+    return { rows, total: rows.reduce((s, r)=> s + r.d, 0), prevKey, prevAt: at };
+  }
+  function revDeltaHtml(D){
+    let R; try{ R = revDeltaFor(D); }catch(e){ console.warn('rev delta', e); return ''; }
+    const head = `<div class="dy-sec">📈 За счёт чего изменился прогноз выручки за день</div>`;
+    if(R.none) return head + `<div class="dy-hint" style="margin-bottom:12px;">${escapeHtml(R.none)}</div>`;
+    const since = R.prevKey === addDaysIso(D, -1) ? 'со вчерашнего вечера' : 'с ' + R.prevKey.slice(8,10) + '.' + R.prevKey.slice(5,7);
+    const atTxt = R.prevAt ? ' (снимок ' + pad(R.prevAt.getHours()) + ':' + pad(R.prevAt.getMinutes()) + ')' : '';
+    if(!R.rows.length) return head + `<div class="dy-hint" style="margin-bottom:12px;">Прогноз ${since}${atTxt} не изменился.</div>`;
+    const up = R.rows.filter(r=> r.d > 0), down = R.rows.filter(r=> r.d < 0);
+    const sum = (a)=> a.reduce((s, r)=> s + r.d, 0);
+    const row = (r)=> `<div class="rvd-row"><b class="rvd-amt ${r.d > 0 ? 'rvd-up' : 'rvd-down'}">${r.d > 0 ? '+' : '−'}${escapeHtml(formatMoney(Math.abs(r.d)))}</b>
+      <div class="rvd-body"><div>${r.icon} ${escapeHtml(r.text)}</div><div class="rvd-why">${escapeHtml(r.why)}${r.who ? ' · продал(а) <b>' + escapeHtml(r.who) + '</b>' : ''}</div></div>
+      ${r.ev ? `<button type="button" class="dy-gb" data-dyev="${escapeHtml(r.ev.id)}">📅</button>` : ''}</div>`;
+    const list = (arr, n)=> arr.slice(0, n).map(row).join('') + (arr.length > n ? `<details><summary class="dy-hint" style="cursor:pointer;">ещё ${arr.length - n}</summary>${arr.slice(n).map(row).join('')}</details>` : '');
+    return head + `<div class="rvd-box">
+      <div class="rvd-sum">Итого ${since}${atTxt}: <b class="${R.total >= 0 ? 'rvd-up' : 'rvd-down'}">${R.total >= 0 ? '+' : '−'}${escapeHtml(formatMoney(Math.abs(R.total)))}</b>
+        ${up.length ? ` · выросло на <b class="rvd-up">+${escapeHtml(formatMoney(sum(up)))}</b> (${up.length})` : ''}${down.length ? ` · ушло <b class="rvd-down">−${escapeHtml(formatMoney(Math.abs(sum(down))))}</b> (${down.length})` : ''}</div>
+      ${up.length ? `<div class="rvd-h">⬆ Добавилось</div>${list(up, 15)}` : ''}
+      ${down.length ? `<div class="rvd-h">⬇ Ушло</div>${list(down, 10)}` : ''}
+    </div>`;
+  }
+
+  // ===================== 👥 ЯРКАЯ ПЛАШКА «СКОЛЬКО ЗАПИСАНО ГОСТЕЙ» =====================
+  // МК по расписанию: записано / мест в зале, цвет по заполненности (0 — красный, меньше половины — жёлтый,
+  // от половины — зелёный, мест нет — тёмно-зелёный). Частники и прочее: просто число гостей (синий).
+  function guestBadgeInfo(e){
+    if(!e || e.status === 'cancelled') return null;
+    const listN = realGuestsFromList(e.guestList);
+    const isSched = e.product === 'Мастер-класс' && (e.status || 'confirmed') === 'confirmed';
+    const cap = isSched ? SPACE_CAPACITY[e.spaceId] : null;
+    if(isSched && cap !== null && cap !== undefined){
+      const n = scheduleGuestsCount(e);
+      const r = cap > 0 ? n / cap : 0;
+      const tone = n <= 0 ? 'zero' : (n >= cap ? 'full' : (r < 0.5 ? 'low' : 'ok'));
+      return { text: n + '/' + cap, tone, title: n <= 0 ? 'Пока никто не записался' : (n >= cap ? 'Мест нет — записано ' + n + ' из ' + cap : 'Записано ' + n + ' из ' + cap + ' мест, свободно ' + (cap - n)) };
+    }
+    const n = listN || (Number(e.guests) > 0 ? Math.round(Number(e.guests)) : 0);
+    if(!n) return null;
+    return { text: String(n), tone:'info', title: 'Гостей: ' + n };
+  }
+  function guestBadgeHtml(e, size){
+    const g = guestBadgeInfo(e); if(!g) return '';
+    return `<span class="gb gb-${g.tone} gb-${size || 'md'}" title="${escapeHtml(g.title)}">👥 ${escapeHtml(g.text)}</span>`;
+  }
+
+  // ===================== 📚 КАТАЛОГ — всё по направлениям в одном разделе =====================
+  // Раньше: «📖 Справочник» в меню + пять окон в «⚙ Ещё» (Каталог МК, Форматы, Тарифы мастеров, Себес, Виды мероприятий).
+  // Теперь один раздел (тот же ключ 'reference', чтобы все ссылки и доступы работали) с вкладками:
+  //   📊 Направления — каждый МК: цена, длительность, кто ведёт + цифры месяца (мероприятия, гости, заполняемость, выручка, маржа);
+  //   💰 Цены и описания — прежний справочник (калькулятор цены, бриф, КП);
+  //   ⚙️ Настройка — те самые пять окон (кнопки с прежними id — обработчики шапки их подхватывают).
+  function catDefaultTab(){ return ['owner','admin','assistant','manager'].includes(state.currentRole) ? 'dir' : 'prices'; }
+  function catPricesOf(title, refIdx){
+    const ents = refIdx[normName(title)] || [];
+    let sched = null, priv = null;
+    ents.forEach(({ cat, item })=> (item.vars||[]).forEach(v=> (v.tiers||[]).forEach((t, ti)=>{
+      const p = Number(t.price); if(!(p > 0)) return;
+      if(cat.id === 'sched' || /за чел|за пару/i.test(t.unit || '')){ if(cat.id === 'sched' && (sched === null || p < sched)) sched = p; }
+      if(cat.id !== 'sched' && ti === 0 && (priv === null || p < priv)) priv = p;
+    })));
+    return { sched, priv };
+  }
+  function catDirStats(ym){
+    const all = eventCatalogList(); const byN = new Map(all.map(c=> [normName(c.title), c]));
+    const keyOf = (e)=>{ const n = normName(e.title); if(byN.has(n)) return n; const lg = legacyTitleToOfficial(n); return lg && byN.has(lg) ? lg : n; };
+    const st = {};
+    (state.events||[]).forEach(e=>{
+      if(!e.date || !e.date.startsWith(ym) || e.status === 'cancelled' || !String(e.title||'').trim()) return;
+      const k = keyOf(e); const r = st[k] || (st[k] = { n:0, guests:0, rev:0, margin:0, fillSum:0, fillN:0, title: e.title });
+      const g = realGuestsFromList(e.guestList) || (Number(e.guests) || 0);
+      const rev = eventRevenueForecast(e);
+      let pay = 0, mat = 0; try{ pay = eventTotalMasterPay(e); }catch(x){} try{ mat = eventMaterialsCost(e); }catch(x){}
+      r.n++; r.guests += g; r.rev += rev; r.margin += rev - pay - mat;
+      const cap = SPACE_CAPACITY[e.spaceId];
+      if(e.product === 'Мастер-класс' && (e.status||'confirmed') === 'confirmed' && cap){ r.fillSum += Math.min(1, scheduleGuestsCount(e) / cap); r.fillN++; }
+    });
+    return { st, byN };
+  }
+  function catDirectionsHtml(){
+    const role = state.currentRole;
+    const money = ['owner','admin','assistant','manager'].includes(role);
+    const fin = ['owner','assistant'].includes(role);
+    const c = state.cursor; const ym = c.getFullYear() + '-' + pad(c.getMonth()+1);
+    const all = eventCatalogList(); const refIdx = refEntriesByName();
+    const durOf = t=>{ const x = (state.eventTypes||[]).find(e=> normName(e.name) === normName(t)); return x ? x.duration : 0; };
+    const { st, byN } = catDirStats(ym);
+    const q = normName(state.catQ || '');
+    const canOpen = roleCanEditEventCatalog(role);
+    const money0 = (v)=> v ? formatMoney(Math.round(v)) : '—';
+    const head = `<tr><th style="text-align:left;">Мастер-класс / направление</th><th>Цена</th><th>Длит.</th><th style="text-align:left;">Кто ведёт</th><th>Мер.</th><th>Гостей</th><th>Заполн.</th>${money ? '<th>Выручка</th>' : ''}${fin ? '<th>Маржа</th>' : ''}</tr>`;
+    const rowOf = (title, hosts, gid)=>{
+      const k = normName(title); const s = st[k] || { n:0, guests:0, rev:0, margin:0, fillN:0 };
+      const pr = catPricesOf(title, refIdx); const dur = durOf(title);
+      const price = [pr.sched ? pr.sched.toLocaleString('ru-RU') + ' ₽/чел' : '', pr.priv ? 'частник от ' + pr.priv.toLocaleString('ru-RU') + ' ₽' : ''].filter(Boolean).join('<br>') || '<span class="cat-dim">нет в справочнике</span>';
+      const fill = s.fillN ? Math.round(s.fillSum / s.fillN * 100) : null;
+      return `<tr class="cat-row${canOpen ? ' cat-click' : ''}" data-cat-open="${escapeHtml(k)}" data-cat-gid="${escapeHtml(gid)}" title="${canOpen ? 'Открыть карточку в каталоге' : ''}">
+        <td style="text-align:left;"><b>${escapeHtml(title)}</b></td><td class="cat-price">${price}</td><td>${dur ? escapeHtml(durTextFromMin(dur)) : '—'}</td>
+        <td style="text-align:left;" class="cat-hosts">${(hosts||[]).length ? escapeHtml(hosts.join(', ')) : '<span class="cat-dim">не указано</span>'}</td>
+        <td>${s.n || '<span class="cat-dim">0</span>'}</td><td>${s.guests || '<span class="cat-dim">0</span>'}</td>
+        <td>${fill === null ? '—' : `<span class="gb gb-xs gb-${fill === 0 ? 'zero' : fill < 50 ? 'low' : fill >= 100 ? 'full' : 'ok'}">${fill}%</span>`}</td>
+        ${money ? `<td>${money0(s.rev)}</td>` : ''}${fin ? `<td>${money0(s.margin)}</td>` : ''}</tr>`;
+    };
+    const used = new Set();
+    const groups = EC_GROUPS.map(([gid, gname, col])=>{
+      const items = all.filter(x=> ecGroupOf(x) === gid && (!q || normName(x.title).includes(q)));
+      items.sort((x, y)=> ((st[normName(y.title)]||{}).n||0) - ((st[normName(x.title)]||{}).n||0) || String(x.title).localeCompare(String(y.title), 'ru'));
+      items.forEach(x=> used.add(normName(x.title)));
+      if(!items.length) return '';
+      const tot = items.reduce((t, x)=>{ const s = st[normName(x.title)]; if(s){ t.n += s.n; t.g += s.guests; t.rev += s.rev; t.m += s.margin; } return t; }, { n:0, g:0, rev:0, m:0 });
+      const open = state.catOpen ? state.catOpen[gid] !== false : true;
+      return `<details class="cat-grp" data-cat-grp="${gid}" style="--grp-c:${col};" ${open ? 'open' : ''}>
+        <summary><b>${escapeHtml(gname)}</b><span class="cat-sum">${items.length} МК · мероприятий: ${tot.n} · гостей: ${tot.g}${money ? ' · ' + formatMoney(Math.round(tot.rev)) : ''}${fin ? ' · маржа ' + formatMoney(Math.round(tot.m)) : ''}</span></summary>
+        <div style="overflow-x:auto;"><table class="cat-table">${head}${items.map(x=> rowOf(x.title, x.hosts, gid)).join('')}</table></div></details>`;
+    }).join('');
+    // мероприятия месяца, названия которых нет в каталоге — чтобы было видно, что не заведено
+    const orphan = Object.keys(st).filter(k=> !used.has(k) && !byN.has(k) && (!q || k.includes(q)));
+    const orphanHtml = orphan.length ? `<details class="cat-grp" style="--grp-c:#8C8C8C;"><summary><b>❓ Нет в каталоге</b><span class="cat-sum">${orphan.length} назв. — мероприятия месяца, которых нет в каталоге (частники, разовые, опечатки)</span></summary>
+      <div style="overflow-x:auto;"><table class="cat-table">${head}${orphan.map(k=> rowOf(st[k].title, [], 'other')).join('')}</table></div></details>` : '';
+    return `
+      <div class="cat-bar"><input type="search" id="cat-q" placeholder="🔍 Найти мастер-класс" value="${escapeHtml(state.catQ || '')}">
+        <span class="acl-sub">Цифры — за ${escapeHtml(MONTHS[c.getMonth()])} ${c.getFullYear()} (месяц меняется в общей панели сверху). ${canOpen ? 'Нажмите на строку — откроется карточка МК в каталоге.' : ''}</span></div>
+      ${groups}${orphanHtml}`;
+  }
+  function catSetupHtml(){
+    const role = state.currentRole; const can = roleCanEditEventCatalog(role); const adm = ['assistant','admin','owner'].includes(role);
+    const card = (id, icon, title, text, ok)=> ok ? `<div class="cat-card"><div class="cat-card-h">${icon} ${escapeHtml(title)}</div><div class="cat-card-t">${escapeHtml(text)}</div><button class="btn btn-primary" id="${id}">Открыть</button></div>` : '';
+    return `<div class="cat-cards">
+      ${card('btn-event-catalog', '📚', 'Каталог мастер-классов', 'Названия и группы направлений, кто может вести, цены и длительность для справочника и КП, варианты и себестоимость, описание и картинка для КП.', can)}
+      ${card('btn-event-formats', '🎨', 'Форматы', 'Что гость выбирает на мероприятии (форма коврика, размер холста и т.п.) — по семействам направлений.', can)}
+      ${card('btn-hosts-list', '💰', 'Тарифы мастеров', 'Мастера и их ставки за мастер-классы и мероприятия (по числу гостей).', adm)}
+      ${card('btn-materials-catalog', '🧱', 'Себестоимость материалов', 'Справочник материалов и их цены — из них считается себестоимость направлений.', adm)}
+      ${card('btn-event-types', '📋', 'Виды мероприятий', 'Названия мероприятий для расписания и их длительность по умолчанию.', adm)}
+    </div>`;
+  }
+  function renderCatalogHub(){
+    const role = state.currentRole; const can = roleCanEditEventCatalog(role);
+    let tab = state.catTab || catDefaultTab(); if(tab === 'setup' && !can) tab = 'prices';
+    const t = (k, label)=> `<button class="btn ${tab === k ? 'btn-primary' : 'btn-ghost'}" data-cat-tab="${k}">${label}</button>`;
+    return `<div class="cat-wrap">
+      <h2 style="font-family:var(--font-display);margin:18px 0 4px;">📚 Каталог</h2>
+      <div class="acl-sub" style="margin-bottom:10px;">Всё по направлениям в одном месте: что проводим, по какой цене, кто ведёт, сколько стоит и как продаётся.</div>
+      <div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:12px;">${t('dir', '📊 Направления')}${t('prices', '💰 Цены и описания')}${can ? t('setup', '⚙️ Настройка') : ''}</div>
+      ${tab === 'prices' ? renderReferenceView() : tab === 'setup' ? catSetupHtml() : catDirectionsHtml()}
+    </div>`;
+  }
+  function attachCatalogHubEvents(){
+    const tab = state.catTab || catDefaultTab();
+    document.querySelectorAll('[data-cat-tab]').forEach(b=> b.onclick = ()=>{ state.catTab = b.dataset.catTab; render(); });
+    if(tab === 'prices'){ attachReferenceEvents(); return; }
+    const q = document.getElementById('cat-q');
+    if(q) q.oninput = ()=>{ state.catQ = q.value; clearTimeout(window._catQt); window._catQt = setTimeout(()=>{ render(); const n = document.getElementById('cat-q'); if(n){ n.focus(); n.setSelectionRange(n.value.length, n.value.length); } }, 250); };
+    document.querySelectorAll('[data-cat-grp]').forEach(d=> d.addEventListener('toggle', ()=>{ state.catOpen = state.catOpen || {}; state.catOpen[d.dataset.catGrp] = d.open; }));
+    if(roleCanEditEventCatalog(state.currentRole)) document.querySelectorAll('.cat-click').forEach(r=> r.onclick = ()=>{
+      const lc = r.dataset.catOpen, gid = r.dataset.catGid;
+      if(!state.groupOpen) state.groupOpen = {}; state.groupOpen['ec:' + gid] = true;
+      state.modal = { type:'event-catalog' }; render();
+      setTimeout(()=>{ const card = [...document.querySelectorAll('.ec-row')].find(x=> x.dataset.titleLc === lc); if(card){ card.open = true; card.scrollIntoView({ block:'start', behavior:'smooth' }); card.style.outline = '2px solid #75804F'; setTimeout(()=>{ card.style.outline = ''; }, 2000); } }, 120);
+    });
+  }
+
+  // ===================== 🧭 ОБЪЕДИНЁННЫЕ РАЗДЕЛЫ МЕНЮ =====================
+  // В строке меню — одна кнопка на группу; внутри раздела сверху — вкладки. Сами разделы не менялись.
+  const NAV_GROUPS = [
+    { key:'grp-prep',  icon:'🎒', label:'Подготовка', views:[['prep','🤝 Частники'], ['print','🖨 На печать'], ['tufting','🧶 Тафтинг']] },
+    { key:'grp-money', icon:'💰', label:'Деньги',     views:[['cashbox','💵 Касса'], ['book','📒 Книга']] },
+  ];
+  function navGroupBadge(v){
+    try{
+      if(v === 'prep') return (prepPendingCount() || 0) + (typeof photoPendingCount === 'function' ? (photoPendingCount() || 0) : 0);
+      if(v === 'print') return printOpenCount() || 0;
+      if(v === 'tufting') return tuftTodoCount() || 0;
+    }catch(e){}
+    return 0;
+  }
+  const navBadgeHtml = (n)=> n ? ` <span style="background:var(--danger);color:#fff;border-radius:9px;padding:0 6px;font-size:11px;">${n}</span>` : '';
+  // сворачивает кнопки групп в одну (вызывается после сортировки кнопок меню)
+  function navCollapseGroups(buttons){
+    state._navGroupMembers = {};
+    NAV_GROUPS.forEach(g=>{
+      const keys = g.views.map(v=> v[0]);
+      const idx = buttons.map((b, i)=> keys.includes(b.key) ? i : -1).filter(i=> i >= 0);
+      if(idx.length < 2) return;
+      const present = keys.filter(k=> buttons.some(b=> b.key === k));
+      state._navGroupMembers[g.key] = present;
+      const last = (state.navGroupLast || {})[g.key];
+      const target = present.includes(state.view) ? state.view : (present.includes(last) ? last : buttons[idx[0]].key);
+      const badge = present.reduce((s, k)=> s + navGroupBadge(k), 0);
+      const html = `<button data-view="${target}" class="${present.includes(state.view) ? 'active' : ''}">${g.icon} ${g.label}${navBadgeHtml(badge)}</button>`;
+      const first = idx[0];
+      for(let i = idx.length - 1; i >= 0; i--) buttons.splice(idx[i], 1);
+      buttons.splice(first, 0, { key: g.key, html });
+    });
+    return buttons;
+  }
+  function navGroupTabsHtml(){
+    const g = NAV_GROUPS.find(x=> x.views.some(v=> v[0] === state.view)); if(!g) return '';
+    const present = (state._navGroupMembers || {})[g.key]; if(!present || present.length < 2) return '';
+    return `<div class="navgrp-tabs no-print"><span class="navgrp-h">${g.icon} ${g.label}</span>${g.views.filter(v=> present.includes(v[0])).map(([v, label])=>
+      `<button class="btn ${state.view === v ? 'btn-primary' : 'btn-ghost'}" data-navgrp-view="${v}" data-navgrp="${g.key}">${label}${navBadgeHtml(navGroupBadge(v))}</button>`).join('')}</div>`;
+  }
+  function attachNavGroupTabs(){
+    document.querySelectorAll('[data-navgrp-view]').forEach(b=> b.onclick = ()=>{
+      state.navGroupLast = state.navGroupLast || {}; state.navGroupLast[b.dataset.navgrp] = b.dataset.navgrpView;
+      state.view = b.dataset.navgrpView; render(); window.scrollTo(0, 0);
+    });
+    // запоминаем, какая вкладка группы была открыта последней — кнопка меню вернёт туда же
+    const g = NAV_GROUPS.find(x=> x.views.some(v=> v[0] === state.view));
+    if(g){ state.navGroupLast = state.navGroupLast || {}; state.navGroupLast[g.key] = state.view; }
   }
 
   // ===================== 🗓 ДЕНЬ МАСТЕРА НА СЛОТЕ =====================
@@ -40470,7 +41162,7 @@
             ${warnHtml}
             <div class="day-evt${openSlot?' open-master-slot':''}" data-eid="${e.id}" ${masterRowNoClick?'style="cursor:default;"':''}>
               <div class="left">
-                <div class="time"><span class="chip-dot" style="background:${statusColor(e.status)};display:inline-block;margin-right:6px;"></span>${eventStartLabel(e)}${e.duration?' · '+formatDuration((Number(e.duration)||0) + (state.currentRole==='master' ? 0 : (Number(e.rentalBefore)||0) + (Number(e.rentalAfter)||0))):''}${scheduleFillText(e) ? ' · 👤 '+scheduleFillText(e) : ((e.guests!==undefined&&e.guests!==null&&e.guests!=='')?' · 👤 '+e.guests:'')}</div>
+                <div class="time"><span class="chip-dot" style="background:${statusColor(e.status)};display:inline-block;margin-right:6px;"></span>${eventStartLabel(e)}${e.duration?' · '+formatDuration((Number(e.duration)||0) + (state.currentRole==='master' ? 0 : (Number(e.rentalBefore)||0) + (Number(e.rentalAfter)||0))):''} ${guestBadgeHtml(e, 'md')}</div>
                 ${state.currentRole==='master' ? '' : eventTimingLineHtml(e)}
                 <div class="title">${openSlot?'🙋 ':''}${escapeHtml(e.title)}</div>
                 ${isAll ? `<div class="host" style="display:flex;align-items:center;gap:6px;">${spaceBadge(getSpace(e.spaceId),'sm')}${escapeHtml(getSpace(e.spaceId).name)} · ${escapeHtml(allHostNamesDisplay(e))}${e.product?' · '+escapeHtml(e.product):''}${showsDishesAndRental(e.status)&&e.dishes?' · 🍽 '+(e.dishes==='needed'?'нужна посуда':'без посуды'):''}${rentalSuffix(e)}${legalSuffix(e)}</div>` : `<div class="host">${escapeHtml(allHostNamesDisplay(e))}${e.product?' · '+escapeHtml(e.product):''}${showsDishesAndRental(e.status)&&e.dishes?' · 🍽 '+(e.dishes==='needed'?'нужна посуда':'без посуды'):''}${rentalSuffix(e)}${legalSuffix(e)}</div>`}
@@ -40484,6 +41176,7 @@
                 ${e.notes ? `<div class="notes${state.currentRole==='master'?' notes-full':''}" title="${escapeHtml(e.notes)}">💬 ${escapeHtml(e.notes)}</div>` : ''}
                 ${(state.currentRole==='master' && guestNamesText(e)) ? `<div class="notes notes-full guest-names">👥 ${escapeHtml(guestNamesText(e))}</div>` : ''}
                 ${remainder>0 ? `<div class="notes" style="color:var(--status-red);">💳 Остаток: ${formatMoney(remainder)}</div>` : ''}
+                ${unpaidGuestsLineHtml(e, 'notes')}
               </div>
               <div style="display:flex;flex-direction:column;gap:6px;flex-shrink:0;">
                 ${openSlot && state.currentRole === 'master' && !iAmAvailable && !slotFitsMe(e)
@@ -42718,6 +43411,10 @@
           ${g.isBlogger ? `<div style="font-size:11px;color:var(--status-blue);font-family:var(--font-mono);margin-bottom:6px;">🎥 Блогер — приходит бесплатно, без ожидаемой оплаты</div>` : ''}
           ${g.movedFrom ? `<div style="font-size:11px;color:var(--ink-soft);font-family:var(--font-mono);margin-bottom:6px;">↪ Перенесён с «${escapeHtml(g.movedFrom.title||'')}» ${escapeHtml(lgDateDots(g.movedFrom.date))} ${escapeHtml(g.movedFrom.time||'')}${g.movedFrom.by ? ' · ' + escapeHtml(g.movedFrom.by) : ''}</div>` : ''}
           ${g.isRedo ? `<div style="font-size:11px;color:var(--status-cyan);font-family:var(--font-mono);margin-bottom:6px;">🔁 Переделка — приходит бесплатно, изделие не выжило при обжиге</div>` : ''}
+          ${(roleCanSeeGuestBalances(state.currentRole) && !g.refunded && !g.isBlogger && !g.isRedo && !g.noShow && gTotal <= 0 && gExpected !== 0
+              && !(guestListArr.length === 1 && paymentsArr.some(p=> Number(p.amount) > 0 && p.type !== 'refund' && !p.refundRef))
+              && !(state.modal.event && guestPaidInBook(state.modal.event.id, g)))
+            ? `<div style="font-size:11.5px;color:var(--status-red);font-weight:700;background:#FBEAE6;border-radius:6px;padding:3px 7px;margin-bottom:6px;">💸 Нет оплаты — ни в журнале мероприятия, ни в «Книге»</div>` : ''}
           <div style="display:flex;gap:8px;align-items:center;">
             <input type="text" class="guest-name" data-gid="${g.id}" value="${escapeHtml(g.name||'')}" placeholder="Имя гостя" style="flex:1;min-width:0;border:1px solid ${g.name&&g.name.trim()?'var(--line-strong)':'var(--status-red)'};border-radius:var(--radius);padding:6px 8px;font-family:var(--font-body);font-size:12.5px;">
             <input type="number" class="guest-seats" data-gid="${g.id}" value="${g.seats||1}" min="1" step="1" title="Количество мест, за которые платит этот гость" style="width:52px;flex-shrink:0;border:1px solid var(--line-strong);border-radius:var(--radius);padding:6px 8px;font-family:var(--font-body);font-size:12.5px;">
@@ -42930,7 +43627,7 @@
               state.receiptPhotoCache[key] = data; printNewKeys.add(key);
               if(!Array.isArray(g.printFiles)) g.printFiles = [];
               g.printFiles.push({ key, name: file.name, type: file.type || '', at: new Date().toISOString() });
-              if(!g.printStatus) g.printStatus = 'print';
+              g.printStatus = 'print'; // новый файл — снова на печать (иначе «Готово» скрыло бы его)
             }catch(e){ bad++; }
           }
           if(bad) showGapWarningBanner('Не загрузилось файлов: ' + bad + '. Допустимо до 4 МБ на файл (фото ужимаются сами).');
