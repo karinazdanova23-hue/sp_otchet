@@ -1902,6 +1902,29 @@
   .acl-wrap{ max-width:900px; margin:0 auto; padding:0 16px 40px; }
   .acl-sub{ font-size:12px; color:var(--ink-soft); }
   .acl-ok{ color:var(--status-green); font-size:12px; }
+  .sas-grid{ display:grid; grid-template-columns:repeat(auto-fill, minmax(132px, 1fr)); gap:6px; max-height:60vh; overflow:auto; padding:2px; }
+  .sas-day{ border:1px solid var(--line); border-radius:8px; padding:6px; display:flex; flex-direction:column; gap:4px; font-size:12px; }
+  .sas-day.we{ background:#F6F3EA; } .sas-day.today{ box-shadow: inset 0 0 0 2px #75804F; } .sas-day.past{ opacity:.55; }
+  .sas-d{ font-weight:700; }
+  .sas-slot{ display:flex; justify-content:space-between; align-items:center; gap:4px; border-radius:7px; padding:4px 6px; font:inherit; font-size:11.5px; border:1px solid var(--line-strong); background:var(--white); text-align:left; }
+  .sas-slot span{ color:var(--ink-soft); font-family:var(--font-mono); }
+  button.sas-slot{ cursor:pointer; } button.sas-slot:disabled{ cursor:default; }
+  .sas-slot.free{ border-style:dashed; color:#4E5A2E; } .sas-slot.free:not(:disabled):hover{ background:#EEF0E4; }
+  .sas-slot.mine{ background:#3F4A22; color:#fff; border-color:#3F4A22; } .sas-slot.mine span{ color:#DDE3CC; }
+  .sas-slot.other{ background:var(--paper); }
+  .sas-slot select{ border:none; background:transparent; font:inherit; font-size:11.5px; max-width:90px; }
+  .sas-slot.taken{ background:#E4EBD3; }
+  .mgs-box{ background:var(--white); border-radius:14px; width:100%; max-width:760px; padding:14px 16px; box-shadow:0 12px 40px rgba(0,0,0,.25); }
+  .mgs-head{ display:flex; align-items:center; gap:12px; margin-bottom:10px; font-size:16px; } .mgs-head .modal-close{ margin-left:auto; }
+  .mgs-nav{ display:flex; align-items:center; gap:8px; font-size:14px; }
+  .mgs-fill{ background:var(--paper); border-radius:10px; padding:8px 10px; margin-bottom:10px; font-size:12.5px; }
+  .mgs-fill-row{ display:flex; flex-wrap:wrap; gap:6px; align-items:center; padding:3px 0; }
+  .mgs-fill select, .mgs-grid select, .mgs-fill input[type=date]{ border:1px solid var(--line-strong); border-radius:6px; padding:3px 5px; font:inherit; font-size:12.5px; background:var(--white); }
+  .mgs-wd{ display:inline-flex; gap:3px; align-items:center; }
+  .mgs-grid{ display:grid; grid-template-columns:repeat(auto-fill, minmax(150px, 1fr)); gap:6px; max-height:52vh; overflow:auto; padding:2px; }
+  .mgs-day{ display:flex; flex-direction:column; gap:3px; border:1px solid var(--line); border-radius:8px; padding:6px 8px; font-size:12px; }
+  .mgs-day.we{ background:#F6F3EA; } .mgs-day.today{ box-shadow: inset 0 0 0 2px #75804F; } .mgs-day.empty select{ border-color:#E5A99B; }
+  .mgs-foot{ display:flex; align-items:center; gap:10px; margin-top:12px; flex-wrap:wrap; }
   .navgrp-tabs{ display:flex; gap:6px; flex-wrap:wrap; align-items:center; margin:0 0 12px; padding:8px 10px; background:var(--white); border:1px solid var(--line); border-radius:12px; }
   .navgrp-h{ font-weight:700; font-size:13.5px; margin-right:6px; color:var(--ink-soft); }
   .cat-wrap{ padding:0 16px 40px; } .cat-dim{ color:var(--ink-soft); font-weight:400; }
@@ -4237,7 +4260,23 @@
   function roleCanAccessBook(role){ return ['manager','assistant','admin','owner','hostess'].includes(role); }
   // скрывать ли агрегированные суммы в "Книге" (итого за период, разбивки по категориям/счетам,
   // вкладку "Аналитика" и сверку с Точка Банком) — по просьбе владелицы, только для администраторов
-  function bookTotalsHidden(role){ return role === 'hostess'; }
+  function bookTotalsHidden(role){ return role === 'hostess' || role === 'admin'; }
+  // админы видят в «Книге» только свои записи за последние 14 дней (без личного входа — только сегодняшние)
+  function bookScopedRole(role){ return role === 'hostess' || role === 'admin'; }
+  function bookScopeOk(r){
+    if(!bookScopedRole(state.currentRole)) return true;
+    const d = String((r && (r.date || r.accrualDate)) || ''); const today = todayStr();
+    if(!d || d < addDaysIso(today, -14) || d > addDaysIso(today, 60)) return false;
+    let me = ''; try{ me = controlMyName() || ''; }catch(e){}
+    if(!me) return d === today;
+    return normName(r.createdBy || r.author || '') === normName(me);
+  }
+  function bookScopeNote(){
+    if(!bookScopedRole(state.currentRole)) return '';
+    let me = ''; try{ me = controlMyName() || ''; }catch(e){}
+    return `<div style="font-size:12.5px;background:#EEF0E4;border-radius:8px;padding:7px 10px;margin:0 0 10px;">🔒 Здесь только ${me ? 'ваши записи (' + escapeHtml(me) + ')' : 'записи за сегодня'} за последние 14 дней — внести оплату или расход можно как обычно. Итоги и записи других сотрудников видит руководитель.</div>`;
+  }
+  // кто видит суммы выручки студии — см. roleCanSeeRevenue (маркетолог — нет, он видит заявки, конверсию и продажи по каналам)
   function roleCanAccessAnalytics(role){ return ['manager','assistant','marketer','admin','owner'].includes(role); }
   // окно с выполнением плана (без прибыли и прочих финансовых деталей) — для тех, у кого и так есть полная "Аналитика", не нужно отдельно
   function roleCanSeePlanProgress(role){ return ['manager','marketer'].includes(role); }
@@ -4262,7 +4301,10 @@
   function roleCanMarkDayOffForOthers(role){ return ['owner','assistant','admin'].includes(role); }
   // метку "Остаток" (сколько ещё должны заплатить за мероприятие) видят все роли, кроме мастера —
   // у мастера открывается отдельная урезанная модалка без финансовых полей (см. quick-host)
-  function roleCanSeeGuestBalances(role){ return role !== 'master' && role !== 'marketer'; }
+  function roleCanSeeGuestBalances(role){ return role !== 'master' && role !== 'marketer' && role !== 'smm'; }
+  // кто видит суммы выручки (за день, по направлениям и т.п.): руководитель, ассистент, менеджер, маркетолог.
+  // Администраторы (смены и старший), мастера и SMM — нет (оплаты и остатки гостей админы видят — они их принимают).
+  function roleCanSeeRevenue(role){ return ['owner','assistant','manager'].includes(role); }
   // денежные поля в карточке мероприятия ("Выручка"/"Прогнозная выручка") скрыты для мастера
   // (он их и так почти никогда не видит — открывает урезанную модалку) и для маркетолога
   // (по просьбе владелицы у него нет доступа ни к каким финансам)
@@ -4904,6 +4946,14 @@
       state.masterSlotCfg = msc ? JSON.parse(msc.value) : null;
     }catch(e){ state.masterSlotCfg = null; }
     masterSlotCfg();
+    try{
+      const mpk = await window.storage.get('master-packages', true);
+      state.masterPkgCfg = mpk ? JSON.parse(mpk.value) : {};
+    }catch(e){ state.masterPkgCfg = {}; }
+    try{
+      const mcs = await window.storage.get('master-checklist-scores', true);
+      state.masterChecklist = mcs ? JSON.parse(mcs.value) : {};
+    }catch(e){ state.masterChecklist = {}; }
     await loadHelperShifts();
     await loadShootRequests();
     try{
@@ -4926,6 +4976,7 @@
     state._itemSalesBaseline = JSON.parse(JSON.stringify(state.itemSales));
     state._ordersBaseline = JSON.parse(JSON.stringify(state.orders));
     state._salaryAdjustmentsBaseline = JSON.parse(JSON.stringify(state.salaryAdjustments));
+    try{ refreshVirtualSalaryAdj(); }catch(e){}
     state._monthlyPlansBaseline = JSON.parse(JSON.stringify(state.monthlyPlans));
     state._refOverridesBaseline = JSON.parse(JSON.stringify(state.refOverrides||{}));
     state._refSettingsBaseline = JSON.parse(JSON.stringify(state.refSettings||{}));
@@ -5467,7 +5518,7 @@
     'Менажница 25 см':[null,800,null,1500], 'Менажница 20 см':[null,0,null,1000], 'Винный столик':[null,900,null,1800],
     'Блюдо 30×20':[900,null,700,null], 'Антистресс-картина':[null,800,null,1300]
   };
-  function isCeramicsPayEvent(e){ const t = String(e && e.title || '').toLowerCase(); return isCeramicsEvent(t) && !t.includes('смол'); }
+  function isCeramicsPayEvent(e){ const t = String(e && e.title || '').toLowerCase(); return (isCeramicsEvent(t) || t.includes('глин') || t.includes('лепк')) && !t.includes('смол'); }
   function isResinPayEvent(e){ return String(e && e.title || '').toLowerCase().includes('смол'); }
   function resinMasterIdx(host){ const h = String(host||'').toLowerCase(); return h.includes('ольг') ? 0 : (h.includes('наташ') ? 1 : -1); }
   function keywordPayRuleFor(e){
@@ -5525,11 +5576,14 @@
       if(!kind) return;
       if(!Array.isArray(e.materialsItems)) e.materialsItems = [];
       if(kind === 'ceramics'){
-        const items = (e.itemsCount!==undefined && e.itemsCount!==null && !isNaN(e.itemsCount) && Number(e.itemsCount) > 0) ? Number(e.itemsCount) : (Number(e.guests)||0);
+        const items = ceramicsEventItems(e);
+        const al = (state._ceramicsAlloc && state._ceramicsAlloc.byEvent && state._ceramicsAlloc.byEvent[e.id]) || null;
         CERAMICS_PAY_LINES.forEach(l=>{
           const tag = 'autorule:kw:' + l.name.toLowerCase();
+          // Василене — по ступеням месяца (300 / 250 / 220 ₽ за изделие), см. computeCeramicsAlloc
+          const masterCost = (al && al.qty === items) ? al.cost : items*l.rate;
           const line = items > 0 ? (l.policy === 'master'
-            ? { name: l.name, cost: items*l.rate, qty: items, source: 'master', payTo: l.payee }
+            ? { name: l.name, cost: masterCost, qty: items, source: 'master', payTo: l.payee }
             : { name: l.name, cost: items*l.rate, qty: items, source: 'studio' }) : null;
           if(syncAutoLine(e, tag, line)) ch = true;
         });
@@ -5552,9 +5606,562 @@
   }
   async function autoApplyKeywordPayRules(){
     await cleanupCeramicsPayOnce();
+    refreshCeramicsAlloc();
     let ch = false;
     state.events.forEach(e=>{ if(applyKeywordPayToEvent(e)) ch = true; });
     if(ch) await saveEvents();
+  }
+
+
+  // ===== ЗП мастеров по пакетам слотов + ступенчатая оплата керамики Василене (с 1 ноября 2026) =====
+  // Шпаргалка «Расчёт зарплаты мастера»:
+  //  • Пакеты: Базовый 22 000 ₽ (3 слота/нед), Стандарт 28 000 ₽ (4), Максимум 34 000 ₽ (5).
+  //  • Оклад за период = оклад пакета × отработанные смены ÷ смены по плану на месяц. Смены берутся из «График мастеров»:
+  //    каждый слот = 1 смена (суббота/воскресенье целиком 12–17 + 17–22 = 2). Обмен — смена у того, кто стоит в графике;
+  //    болезнь/пропуск — мастера убирают из слота, смена не оплачивается. План фиксируется на месяц и при обменах не меняется.
+  //  • МК, начатый в своём слоте, входит в оклад (0 ₽ отдельно). МК вне своих слотов — по общим ставкам. МК с 0 гостей — не оплачивается.
+  //  • Премия по чек-листу: 30–34 балла — 7 000 ₽, 24–29 — 5 000 ₽, меньше 24 — 0; по половине в каждую выплату.
+  //  • Выплаты: 16-го — за 1–15, 2-го — за 16–конец. Оклад/премия — автоматические «корректировки» (virtual: true),
+  //    они не сохраняются на сервер, а пересчитываются из графика и настроек при каждом показе.
+  //  • Керамика (вся глина: керамика, лепка, гончарный круг): Василене за изделие по ступеням месяца — 1–300-е изделие 300 ₽,
+  //    301–500-е 250 ₽, с 501-го 220 ₽. Себестоимость каждого МК считается по ступени, на которую пришлись его изделия
+  //    (изделия месяца нумеруются по дате и времени МК). Вся сумма за месяц — одной выплатой 2-го числа следующего месяца.
+  const MASTER_PKG_FROM = '2026-11-01';
+  const MASTER_PACKAGES = {
+    base:     { label: 'Базовый',  perWeek: 3, salary: 22000 },
+    standard: { label: 'Стандарт', perWeek: 4, salary: 28000 },
+    max:      { label: 'Максимум', perWeek: 5, salary: 34000 },
+  };
+  const MASTER_PKG_DEFAULT = { 'Олюсик':'standard', 'Дашулик':'standard', 'Алёна':'base', 'Василена':'base', 'Арина':'none' };
+  function masterPkgBonusFor(score){
+    if(score === null || score === undefined || score === '' || isNaN(score)) return null;
+    const s = Number(score);
+    if(s >= 30) return 7000;
+    if(s >= 24) return 5000;
+    return 0;
+  }
+  function masterPkgBonusLabel(score){
+    const s = Number(score);
+    if(score === null || score === undefined || score === '' || isNaN(s)) return 'баллы не внесены';
+    return s >= 30 ? 'Отлично' : (s >= 24 ? 'Хорошо' : 'Требует внимания');
+  }
+  const CERAMICS_TIERS = [ { upTo: 300, rate: 300 }, { upTo: 500, rate: 250 }, { upTo: Infinity, rate: 220 } ];
+  const CERAMICS_PAYEE = 'Василена';
+  const CERAMICS_MASTER_LINE_TAG = 'autorule:kw:керамика: изделие — василена';
+  function ceramicsRateAt(n){ for(const t of CERAMICS_TIERS){ if(n <= t.upTo) return t.rate; } return CERAMICS_TIERS[CERAMICS_TIERS.length-1].rate; }
+  // разбивка по ступеням для изделий с (from+1) по (from+count)
+  function ceramicsTierParts(from, count){
+    const parts = []; let prevUp = 0;
+    CERAMICS_TIERS.forEach(t=>{
+      const lo = Math.max(from, prevUp), hi = Math.min(from + count, t.upTo);
+      if(hi > lo) parts.push({ rate: t.rate, n: hi - lo });
+      prevUp = t.upTo;
+    });
+    return parts;
+  }
+  function ceramicsPartsText(parts){ return parts.map(p=> p.n + ' × ' + p.rate + ' ₽').join(' + '); }
+  function ceramicsEventItems(e){
+    return (e.itemsCount!==undefined && e.itemsCount!==null && !isNaN(e.itemsCount) && Number(e.itemsCount) > 0) ? Number(e.itemsCount) : (Number(e.guests)||0);
+  }
+  // все изделия из глины по месяцам, по порядку МК → сколько стоит каждое мероприятие и весь месяц
+  function computeCeramicsAlloc(){
+    const byMonth = {}, byEvent = {};
+    (state.events||[]).filter(e=> e && e.date && e.date >= KEYWORD_PAY_FROM && e.status !== 'cancelled' && e.status !== 'marketing' && keywordPayRuleFor(e) === 'ceramics')
+      .slice().sort((a,b)=> a.date.localeCompare(b.date) || String(a.time||'').localeCompare(String(b.time||'')) || String(a.id).localeCompare(String(b.id)))
+      .forEach(e=>{
+        const ym = e.date.slice(0,7);
+        const m = byMonth[ym] || (byMonth[ym] = { items: 0, amount: 0, events: 0, futureAmount: 0 });
+        const n = ceramicsEventItems(e);
+        if(n <= 0) return;
+        const parts = ceramicsTierParts(m.items, n);
+        const cost = parts.reduce((s,p)=> s + p.n*p.rate, 0);
+        byEvent[e.id] = { cost, qty: n, from: m.items, parts };
+        m.items += n; m.amount += cost; m.events += 1;
+        if(e.date > todayStr()) m.futureAmount += cost;
+      });
+    Object.values(byMonth).forEach(m=>{ m.parts = ceramicsTierParts(0, m.items); });
+    return { byMonth, byEvent };
+  }
+  function refreshCeramicsAlloc(){ try{ state._ceramicsAlloc = computeCeramicsAlloc(); }catch(err){ console.warn('ceramics alloc', err); state._ceramicsAlloc = null; } return state._ceramicsAlloc; }
+
+  // --- пакеты мастеров ---
+  function pkgKey(n){ return String(n||'').trim().toLowerCase().replace(/ё/g,'е'); }
+  function pkgNameKeys(name){
+    const keys = new Set([pkgKey(name)]);
+    Object.entries(HOST_PAY_ALIASES||{}).forEach(([main, al])=>{
+      const all = [main, ...(al||[])].map(pkgKey);
+      if(all.includes(pkgKey(name))) all.forEach(k=> keys.add(k));
+    });
+    return keys;
+  }
+  // настройки месяца: { имя: { pkg, plan, score } }; если месяц ещё не настраивали — пакеты берём с прошлого месяца
+  function masterPkgMonthCfg(ym){
+    const all = state.masterPkgCfg || {};
+    if(all[ym]) return all[ym];
+    const prev = Object.keys(all).filter(k=> k < ym).sort().pop();
+    const out = {};
+    if(prev) Object.keys(all[prev]).forEach(n=> out[n] = { pkg: all[prev][n].pkg });
+    else Object.keys(MASTER_PKG_DEFAULT).forEach(n=> out[n] = { pkg: MASTER_PKG_DEFAULT[n] });
+    return out;
+  }
+  function masterPkgEntry(ym, name){
+    if(!ym || ym < MASTER_PKG_FROM.slice(0,7)) return null;
+    const cfg = masterPkgMonthCfg(ym);
+    const keys = pkgNameKeys(name);
+    const n = Object.keys(cfg).find(k=> keys.has(pkgKey(k)));
+    if(!n || !MASTER_PACKAGES[cfg[n].pkg]) return null;
+    return { name: n, ...cfg[n], def: MASTER_PACKAGES[cfg[n].pkg] };
+  }
+  function masterSlotsOfOn(ds, name){
+    const keys = pkgNameKeys(name);
+    const m = masterShiftMap(ds);
+    return Object.keys(m).filter(k=> m[k].some(n=> keys.has(pkgKey(n))));
+  }
+  // смены мастера за месяц по графику: всего, по половинам и сколько из них ещё впереди
+  function masterShiftCounts(ym, name){
+    const [y, mo] = ym.split('-').map(Number);
+    const dim = new Date(y, mo, 0).getDate();
+    const today = todayStr();
+    const r = { total: 0, h1: 0, h2: 0, f1: 0, f2: 0, futureDates: [] };
+    for(let d=1; d<=dim; d++){
+      const ds = ym + '-' + String(d).padStart(2,'0');
+      const c = masterSlotsOfOn(ds, name).length;
+      if(!c) continue;
+      r.total += c;
+      if(d <= 15) r.h1 += c; else r.h2 += c;
+      if(ds > today){ if(d <= 15) r.f1 += c; else r.f2 += c; r.futureDates.push([ds, c]); }
+    }
+    return r;
+  }
+  function eventInMasterSlot(e, name){
+    if(!e || !e.date || e.date < MASTER_PKG_FROM) return false;
+    if(!masterPkgEntry(e.date.slice(0,7), name)) return false;
+    const slots = masterSlotsOfOn(e.date, name);
+    if(!slots.length) return false;
+    const t = String(e.time||'').slice(0,5);
+    if(!/^\d\d:\d\d$/.test(t)) return true;
+    return slots.some(k=>{ const [a, b] = String(k).split('-'); return t >= (a||'00:00') && t < (b||'24:00'); });
+  }
+  // известно, что гостей 0 (а не просто не заполнено)
+  function eventKnownZeroGuests(e){
+    if(e.guests !== undefined && e.guests !== null && e.guests !== '' && !isNaN(e.guests)) return Number(e.guests) === 0;
+    if(Array.isArray(e.guestList)) return scheduleGuestsCount(e) === 0;
+    return false;
+  }
+  // правила оплаты с 1 ноября поверх суммы за МК: в своём слоте — входит в оклад, 0 гостей — МК не проведён
+  function applyMasterPayRules(e, h){
+    if(!e || !e.date || e.date < MASTER_PKG_FROM || e.status === 'slot') return h;
+    if(eventInMasterSlot(e, h.name)) return { ...h, pay: 0, inSlot: true, basePay: h.pay };
+    if(e.date <= todayStr() && ['confirmed','tentative','offsite'].includes(e.status||'confirmed') && eventKnownZeroGuests(e)) return { ...h, pay: 0, zeroGuests: true, basePay: h.pay };
+    return h;
+  }
+  function computeMasterPkgPay(ym){
+    const rows = [];
+    if(!ym || ym < MASTER_PKG_FROM.slice(0,7)) return rows;
+    const cfg = masterPkgMonthCfg(ym);
+    const stored = !!(state.masterPkgCfg && state.masterPkgCfg[ym]);
+    Object.keys(cfg).forEach(name=>{
+      const c = cfg[name]; const def = MASTER_PACKAGES[c.pkg];
+      const cnt = masterShiftCounts(ym, name);
+      const planFixed = stored && c.plan !== undefined && c.plan !== null && c.plan !== '' && !isNaN(c.plan);
+      const plan = planFixed ? Number(c.plan) : cnt.total;
+      const manual = (c.score===undefined||c.score===null||c.score==='')?null:Number(c.score); // старое ручное поле — запасной вариант
+      const s1 = masterChecklistScore(ym, name, 'h1'), s2 = masterChecklistScore(ym, name, 'h2');
+      const row = { name, pkg: c.pkg, def, cnt, plan, planFixed, score1: s1 !== null ? s1 : manual, score2: s2 !== null ? s2 : manual };
+      row.score = row.score1;
+      if(def && plan > 0){
+        row.price = def.salary / plan;
+        row.oklad1 = Math.round(def.salary * cnt.h1 / plan);
+        row.oklad2 = Math.round(def.salary * cnt.h2 / plan);
+        row.future = Math.round(def.salary * (cnt.f1 + cnt.f2) / plan);
+      } else { row.price = 0; row.oklad1 = 0; row.oklad2 = 0; row.future = 0; }
+      const b1 = def ? masterPkgBonusFor(row.score1) : null, b2 = def ? masterPkgBonusFor(row.score2) : null;
+      row.bonus1 = Math.round((b1||0)/2); row.bonus2 = Math.round((b2||0)/2); row.bonusMonth = row.bonus1 + row.bonus2;
+      rows.push(row);
+    });
+    return rows;
+  }
+  function smenWord(n){ const a = Math.abs(n)%100, b = a%10; return (a>10&&a<20) ? 'смен' : (b===1 ? 'смена' : (b>=2&&b<=4 ? 'смены' : 'смен')); }
+  const MONTH_GEN_RU = ['января','февраля','марта','апреля','мая','июня','июля','августа','сентября','октября','ноября','декабря'];
+  const MONTH_NOM_RU = ['январь','февраль','март','апрель','май','июнь','июль','август','сентябрь','октябрь','ноябрь','декабрь'];
+  function ymLastDay(ym){ const [y, m] = ym.split('-').map(Number); return ym + '-' + String(new Date(y, m, 0).getDate()).padStart(2,'0'); }
+  function ymNext(ym){ const [y, m] = ym.split('-').map(Number); const d = new Date(y, m, 1); return d.getFullYear() + '-' + String(d.getMonth()+1).padStart(2,'0'); }
+  function ceramicsPayDateText(ym){ const n = ymNext(ym); return '2 ' + MONTH_GEN_RU[Number(n.slice(5,7))-1]; }
+  function buildVirtualSalaryAdj(){
+    const out = [];
+    const startYm = MASTER_PKG_FROM.slice(0,7);
+    const curYm = todayStr().slice(0,7);
+    const alloc = state._ceramicsAlloc || refreshCeramicsAlloc() || { byMonth: {} };
+    const months = new Set([curYm]);
+    Object.keys(alloc.byMonth||{}).forEach(k=> months.add(k));
+    Object.keys(state.masterShifts||{}).forEach(ds=> months.add(String(ds).slice(0,7)));
+    [...months].filter(ym=> ym >= startYm && ym <= ymNext(ymNext(curYm))).sort().forEach(ym=>{
+      const mName = MONTH_NOM_RU[Number(ym.slice(5,7))-1];
+      computeMasterPkgPay(ym).forEach(r=>{
+        if(!r.def) return;
+        const pr = Math.round(r.price);
+        const planTxt = 'план ' + r.plan + (r.planFixed ? '' : ' (не зафиксирован)');
+        if(r.oklad1) out.push({ id: 'vpay:pkg:'+ym+':'+r.name+':h1', virtual: true, vkind: 'oklad', masterName: r.name, date: ym+'-15', amount: r.oklad1,
+          comment: `📦 Оклад «${r.def.label}» за 1–15: ${r.cnt.h1} ${smenWord(r.cnt.h1)} × ${formatMoney(pr)} (${formatMoney(r.def.salary)} ÷ ${planTxt})` });
+        if(r.oklad2) out.push({ id: 'vpay:pkg:'+ym+':'+r.name+':h2', virtual: true, vkind: 'oklad', masterName: r.name, date: ymLastDay(ym), amount: r.oklad2,
+          comment: `📦 Оклад «${r.def.label}» за 16–конец: ${r.cnt.h2} ${smenWord(r.cnt.h2)} × ${formatMoney(pr)} (${formatMoney(r.def.salary)} ÷ ${planTxt})` });
+        if(r.bonus1) out.push({ id: 'vpay:bonus:'+ym+':'+r.name+':h1', virtual: true, vkind: 'bonus', masterName: r.name, date: ym+'-15', amount: r.bonus1,
+          comment: `⭐ Премия по чек-листу за 1–15: ${r.score1} из ${MASTER_CHECKLIST_MAX} — ${masterPkgBonusLabel(r.score1)}` });
+        if(r.bonus2) out.push({ id: 'vpay:bonus:'+ym+':'+r.name+':h2', virtual: true, vkind: 'bonus', masterName: r.name, date: ymLastDay(ym), amount: r.bonus2,
+          comment: `⭐ Премия по чек-листу за 16–конец: ${r.score2} из ${MASTER_CHECKLIST_MAX} — ${masterPkgBonusLabel(r.score2)}` });
+      });
+      const cm = (alloc.byMonth||{})[ym];
+      if(cm && cm.amount > 0) out.push({ id: 'vpay:cer:'+ym, virtual: true, vkind: 'ceramics', cerPay: true, masterName: CERAMICS_PAYEE, date: ymLastDay(ym), amount: cm.amount,
+        comment: `🏺 Керамика за ${mName}: ${cm.items} изд. (${ceramicsPartsText(cm.parts)}) — выплата ${ceramicsPayDateText(ym)} одной суммой` });
+    });
+    return out;
+  }
+  function refreshVirtualSalaryAdj(){
+    if(!Array.isArray(state.salaryAdjustments)) return;
+    let v = [];
+    try{ refreshCeramicsAlloc(); v = buildVirtualSalaryAdj(); }catch(err){ console.warn('virtual salary', err); }
+    state.salaryAdjustments = state.salaryAdjustments.filter(a=> !a.virtual).concat(v);
+  }
+  // прогноз ЗП по пакетам на будущие дни месяца (для «Чистой прибыли»: выплачено + будущее)
+  function masterPkgFutureByName(ym){
+    const res = {};
+    computeMasterPkgPay(ym).forEach(r=>{ if(r.def && r.future) res[r.name] = (res[r.name]||0) + r.future; });
+    return res;
+  }
+  async function saveMasterPkgCfg(){ return await storageSetWithRetry('master-packages', JSON.stringify(state.masterPkgCfg || {})); }
+  // план на месяц фиксируется сам при первом входе владельца в этом месяце (начиная с декабря;
+  // ноябрь — вручную, т.к. график ноября уже менялся обменами)
+  async function autoFreezeMasterPkgPlan(){
+    try{
+      if(state.currentRole !== 'owner') return;
+      const ym = todayStr().slice(0,7);
+      if(ym <= MASTER_PKG_FROM.slice(0,7)) return;
+      if(!state.masterPkgCfg) state.masterPkgCfg = {};
+      if(state.masterPkgCfg[ym]) return;
+      const cfg = masterPkgMonthCfg(ym), out = {};
+      Object.keys(cfg).forEach(n=>{ out[n] = { pkg: cfg[n].pkg, plan: MASTER_PACKAGES[cfg[n].pkg] ? masterShiftCounts(ym, n).total : null, score: null }; });
+      state.masterPkgCfg[ym] = out;
+      await saveMasterPkgCfg();
+    }catch(err){ console.warn('freeze pkg plan', err); }
+  }
+
+
+  // ===== Чек-лист мастера для премии (оценивают руководитель и старший администратор) =====
+  // 17 пунктов × 0–2 балла = максимум 34. Оценка ставится за каждую половину месяца: от неё — половина премии
+  // (30–34 → 3 500 ₽, 24–29 → 2 500 ₽, меньше 24 → 0). Хранится в 'master-checklist-scores':
+  // { 'ГГГГ-ММ': { 'Имя': { h1: { items:{id:0|1|2}, noOrders, note, by, at }, h2: {...} } } }
+  const MASTER_CHECKLIST = [
+    { id: 'mk', title: '1. Проведение мастер-класса', items: [
+      ['mk1','Пунктуальность и внешний вид','Опоздал или не предупредил, неопрятный вид.','Пришёл вовремя, но не готов к началу или есть замечания по виду.','Пришёл за 15–20 минут, всё готово, вид в стиле СП.'],
+      ['mk2','Встреча гостей','Не поздоровался, начал без вступления.','Поздоровался, но не представился и не рассказал правила.','Представился, рассказал о технике безопасности и программе.'],
+      ['mk3','Вовлечение и атмосфера','Монотонно, сухо, гости скучают.','Вовлекает, но не всех, без энтузиазма.','Держит внимание всей группы, дружелюбный тон СП.'],
+      ['mk4','Объяснение и помощь','Объясняет сложно, не помогает.','Понятно, но помогает только по просьбе.','Легко и с примерами, сам подходит и подсказывает.'],
+      ['mk5','Соблюдение тайминга','Затянул на 30+ мин или закончил слишком рано.','Отклонение 10–15 минут.','Начал и закончил вовремя, всё успели.'],
+      ['mk6','Результат и обратная связь','Не показал итог, не попросил отзыв.','Фото и отзыв — формально, не у всех.','Сфотографировал работы, попросил отзыв в 2ГИС/Яндекс.'],
+      ['mk7','Отчётность по МК','Нет отчёта и фото.','Отчёт позже или без фото.','Отчёт и фото в течение 2 часов после МК.'],
+    ]},
+    { id: 'ord', title: '2. Создание изделий на заказ', orders: true, items: [
+      ['or1','Сроки','Сорвал срок, не предупредил.','Сделал с опозданием, но предупредил заранее.','Изделие готово точно в срок.'],
+      ['or2','Качество','Изделие с браком или не по заказу.','Есть мелкие недочёты, требуется доработка.','Аккуратно, точно по заказу и образцу.'],
+      ['or3','Уточнение деталей','Сделал «на глаз», не уточнив детали.','Уточнил не всё, были переделки.','Заранее уточнил все детали у менеджера.'],
+      ['or4','Фото готового изделия','Фото нет.','Фото позже или плохого качества.','Качественное фото сразу после готовности.'],
+      ['or5','Учёт в приложении','Изделие не внесено, статусы не обновлены.','Внесено с опозданием или не все статусы.','Изделие и статусы внесены вовремя.'],
+    ]},
+    { id: 'mat', title: '3. Работа с материалами', items: [
+      ['ma1','Подготовка к МК','Материалы не проверены, гостю не хватило.','Проверены в спешке, есть недостатки.','Всё проверено и разложено заранее.'],
+      ['ma2','Расход материалов','Перерасход, материалы испорчены.','Иногда расходует больше нормы.','Расходует бережно, по нормам.'],
+      ['ma3','Хранение и порядок','После работы беспорядок, материалы не на месте.','Убрал не всё.','Всё убрано и разложено по местам.'],
+      ['ma4','Заявка на закуп','Не сообщил о нехватке, МК под угрозой.','Сообщил в последний момент.','Заранее оформил заявку на закуп.'],
+      ['ma5','Контроль остатков','Не знает, чего и сколько осталось.','Следит, но только по напоминанию.','Сам отслеживает остатки и сообщает заранее.'],
+    ]},
+  ];
+  const MASTER_CHECKLIST_MAX = MASTER_CHECKLIST.reduce((s,b)=> s + b.items.length*2, 0);
+  function roleCanRateMasters(){ return state.currentRole === 'owner' || state.currentRole === 'admin'; }
+  function masterChecklistRec(ym, name, half){
+    const m = (state.masterChecklist||{})[ym] || {};
+    const keys = pkgNameKeys(name);
+    const n = Object.keys(m).find(k=> keys.has(pkgKey(k)));
+    return n && m[n] ? (m[n][half] || null) : null;
+  }
+  // { total, rated, complete } — заказы «не было» засчитывают блок 2 на максимум
+  function masterChecklistTotal(rec){
+    if(!rec) return { total: 0, rated: 0, complete: false };
+    let total = 0, rated = 0, count = 0;
+    MASTER_CHECKLIST.forEach(b=> b.items.forEach(([id])=>{
+      count++;
+      if(b.orders && rec.noOrders){ total += 2; rated++; return; }
+      const v = rec.items && rec.items[id];
+      if(v === 0 || v === 1 || v === 2){ total += v; rated++; }
+    }));
+    return { total, rated, count, complete: rated === count };
+  }
+  // оценка половины месяца для премии: число или null (не оценено / оценено не полностью)
+  function masterChecklistScore(ym, name, half){
+    const t = masterChecklistTotal(masterChecklistRec(ym, name, half));
+    return t.complete ? t.total : null;
+  }
+  async function saveMasterChecklistRec(ym, name, half, rec){
+    let server = {};
+    try{ const r = await window.storage.get('master-checklist-scores', true); server = r && r.value ? JSON.parse(r.value) : {}; }catch(e){ server = JSON.parse(JSON.stringify(state.masterChecklist||{})); }
+    if(!server[ym]) server[ym] = {};
+    if(!server[ym][name]) server[ym][name] = {};
+    server[ym][name][half] = rec;
+    state.masterChecklist = server;
+    await storageSetWithRetry('master-checklist-scores', JSON.stringify(server));
+  }
+  function openMasterChecklist(ym, name, half){
+    const canEdit = roleCanRateMasters();
+    const prev = masterChecklistRec(ym, name, half);
+    const draft = { items: { ...((prev && prev.items) || {}) }, noOrders: !!(prev && prev.noOrders), note: (prev && prev.note) || '' };
+    const mName = MONTH_GEN_RU[Number(ym.slice(5,7))-1];
+    const periodTxt = half === 'h1' ? `1–15 ${mName}` : `16 ${mName} – конец месяца`;
+    const payTxt = half === 'h1' ? `выплата 16 ${mName}` : `выплата ${ceramicsPayDateText(ym)}`;
+    const ov = document.createElement('div');
+    ov.id = 'mchk-overlay';
+    ov.style.cssText = 'position:fixed;inset:0;background:rgba(23,21,18,.45);z-index:400;display:flex;align-items:flex-start;justify-content:center;overflow-y:auto;padding:24px 10px;';
+    const btn = (id, v, txt, sel)=> `<button type="button" data-mchk-item="${id}" data-mchk-v="${v}" ${canEdit?'':'disabled'} style="flex:1;min-width:0;text-align:left;border:1.5px solid ${sel?(v===2?'#4E5733':(v===1?'#B8863A':'#B0443B')):'var(--line-strong)'};background:${sel?(v===2?'#E4EBD3':(v===1?'#F6EBD6':'#F6E0DC')):'#fff'};border-radius:8px;padding:6px 8px;font:inherit;font-size:11.5px;line-height:1.35;cursor:${canEdit?'pointer':'default'};color:#171512;opacity:${(!canEdit && !sel)?'.55':'1'};"><b>${v}</b> — ${escapeHtml(txt)}</button>`;
+    const draw = ()=>{
+      const t = masterChecklistTotal(draft);
+      const bonus = t.complete ? masterPkgBonusFor(t.total) : null;
+      ov.innerHTML = `<div style="background:var(--paper,#F2ECDD);max-width:860px;width:100%;border-radius:14px;padding:16px 18px;box-shadow:0 10px 40px rgba(0,0,0,.25);">
+        <div style="display:flex;justify-content:space-between;gap:10px;align-items:flex-start;">
+          <div><div style="font-size:18px;font-weight:700;">✅ ${canEdit ? 'Чек-лист мастера — ' + escapeHtml(name) : 'Моя оценка по чек-листу'}</div>
+            <div style="font-size:12.5px;color:var(--ink-soft);">${periodTxt} · половина премии, ${payTxt}</div></div>
+          <button type="button" data-mchk-close style="border:none;background:none;font-size:22px;cursor:pointer;line-height:1;">×</button>
+        </div>
+        <div style="position:sticky;top:-24px;background:var(--paper,#F2ECDD);padding:8px 0;margin:6px 0 4px;border-bottom:1px solid var(--line-strong);display:flex;gap:14px;flex-wrap:wrap;align-items:center;z-index:1;">
+          <span style="font-size:20px;font-weight:800;font-family:var(--font-mono);">${t.total} / ${MASTER_CHECKLIST_MAX}</span>
+          <span style="font-size:12.5px;">${t.complete ? `${masterPkgBonusLabel(t.total)} · премия за полмесяца <b>${formatMoney(Math.round((bonus||0)/2))}</b>` : `<span style="color:var(--status-red);">оценено ${t.rated} из ${t.count} — премия посчитается, когда будут оценены все пункты</span>`}</span>
+          <span style="font-size:11px;color:var(--ink-soft);">30–34 — 3 500 ₽ · 24–29 — 2 500 ₽ · меньше 24 — 0</span>
+        </div>
+        ${MASTER_CHECKLIST.map(b=>`
+          <div style="margin-top:12px;">
+            <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap;">
+              <div style="font-weight:700;font-size:14px;">${escapeHtml(b.title)}</div>
+              ${b.orders ? `<label style="font-size:12px;display:flex;gap:6px;align-items:center;cursor:pointer;"><input type="checkbox" data-mchk-noorders ${draft.noOrders?'checked':''} ${canEdit?'':'disabled'}> заказов в этот период не было — блок засчитывается на максимум (10 баллов)</label>` : ''}
+            </div>
+            ${(b.orders && draft.noOrders) ? '' : b.items.map(([id, title, c0, c1, c2])=>{
+              const v = draft.items[id];
+              return `<div style="margin-top:7px;"><div style="font-size:12.5px;font-weight:600;margin-bottom:3px;">${escapeHtml(title)}${(v===0||v===1||v===2)?'':' <span style="color:var(--status-red);font-weight:400;font-size:11px;">не оценено</span>'}</div>
+                <div style="display:flex;gap:6px;">${btn(id,0,c0,v===0)}${btn(id,1,c1,v===1)}${btn(id,2,c2,v===2)}</div></div>`;
+            }).join('')}
+          </div>`).join('')}
+        <div style="margin-top:12px;"><div style="font-size:12.5px;font-weight:600;margin-bottom:3px;">Комментарий для мастера</div>
+          <textarea data-mchk-note rows="2" ${canEdit?'':'disabled'} style="width:100%;box-sizing:border-box;border:1px solid var(--line-strong);border-radius:8px;padding:6px 8px;font:inherit;font-size:12.5px;">${escapeHtml(draft.note)}</textarea></div>
+        ${prev && prev.by ? `<div style="font-size:11px;color:var(--ink-soft);margin-top:4px;">Последняя оценка: ${escapeHtml(prev.by)}${prev.at?' · '+escapeHtml(new Date(prev.at).toLocaleString('ru-RU',{day:'numeric',month:'long',hour:'2-digit',minute:'2-digit'})):''}</div>` : ''}
+        <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:12px;flex-wrap:wrap;">
+          ${canEdit && !t.complete ? `<button type="button" data-mchk-fill style="border:1px solid var(--line-strong);background:#fff;border-radius:8px;padding:7px 12px;font:inherit;font-size:12.5px;cursor:pointer;">Остальные пункты — 2 балла</button>` : ''}
+          <button type="button" data-mchk-close style="border:1px solid var(--line-strong);background:#fff;border-radius:8px;padding:7px 14px;font:inherit;font-size:13px;cursor:pointer;">${canEdit?'Отмена':'Закрыть'}</button>
+          ${canEdit ? `<button type="button" data-mchk-save style="border:none;background:#171512;color:#F2ECDD;border-radius:8px;padding:7px 16px;font:inherit;font-size:13px;font-weight:700;cursor:pointer;">Сохранить оценку</button>` : ''}
+        </div>
+      </div>`;
+    };
+    draw();
+    document.body.appendChild(ov);
+    const close = ()=>{ ov.remove(); };
+    ov.addEventListener('input', (ev)=>{ if(ev.target.matches('[data-mchk-note]')) draft.note = ev.target.value; });
+    ov.addEventListener('change', (ev)=>{ if(ev.target.matches('[data-mchk-noorders]')){ draft.noOrders = ev.target.checked; draw(); } });
+    ov.addEventListener('click', async (ev)=>{
+      if(ev.target === ov) return close();
+      const el = ev.target.closest('button'); if(!el) return;
+      if(el.hasAttribute('data-mchk-close')) return close();
+      if(!canEdit) return;
+      if(el.dataset.mchkItem){ draft.items[el.dataset.mchkItem] = Number(el.dataset.mchkV); draw(); return; }
+      if(el.hasAttribute('data-mchk-fill')){ MASTER_CHECKLIST.forEach(b=> b.items.forEach(([id])=>{ if(!(draft.items[id]===0||draft.items[id]===1||draft.items[id]===2)) draft.items[id] = 2; })); draw(); return; }
+      if(el.hasAttribute('data-mchk-save')){
+        el.disabled = true; el.textContent = 'Сохраняю…';
+        const who = state.loggedInManagerName || (typeof ROLE_LABELS !== 'undefined' && ROLE_LABELS[state.currentRole]) || state.currentRole;
+        try{
+          await saveMasterChecklistRec(ym, name, half, { items: draft.items, noOrders: draft.noOrders, note: draft.note.trim(), by: who, at: new Date().toISOString() });
+          close(); refreshVirtualSalaryAdj(); render();
+        }catch(err){ el.disabled = false; el.textContent = 'Сохранить оценку'; alert('Не удалось сохранить, попробуйте ещё раз.'); }
+      }
+    });
+  }
+
+  // ===== блок «📦 Пакеты мастеров и керамика» во вкладке зарплаты =====
+  function renderMasterPkgSection(ym){
+    if(!ym || ym < MASTER_PKG_FROM.slice(0,7)) return '';
+    if(state.loggedInMasterName || state.loggedInHostessName) return '';
+    const isOwner = state.currentRole === 'owner';
+    const rows = computeMasterPkgPay(ym);
+    const stored = !!(state.masterPkgCfg && state.masterPkgCfg[ym]);
+    const mName = MONTH_NOM_RU[Number(ym.slice(5,7))-1];
+    const alloc = state._ceramicsAlloc || refreshCeramicsAlloc() || { byMonth: {} };
+    const cm = (alloc.byMonth||{})[ym];
+    const anyUnfixed = rows.some(r=> r.def && !r.planFixed);
+    const noScore = rows.some(r=> r.def && (r.score1 === null || r.score2 === null));
+    const inp = 'width:62px;padding:4px 6px;border:1px solid var(--line-strong);border-radius:6px;font:inherit;font-size:12.5px;';
+    const pkgSel = (r)=> isOwner
+      ? `<select data-mpkg-field="pkg" data-mpkg-name="${escapeHtml(r.name)}" style="padding:4px 6px;border:1px solid var(--line-strong);border-radius:6px;font:inherit;font-size:12.5px;">
+          ${Object.entries(MASTER_PACKAGES).map(([k,d])=>`<option value="${k}" ${r.pkg===k?'selected':''}>${d.label} · ${formatMoney(d.salary)}</option>`).join('')}
+          <option value="none" ${!r.def?'selected':''}>Без пакета — по МК</option>
+        </select>`
+      : (r.def ? `${r.def.label} · ${formatMoney(r.def.salary)}` : 'Без пакета — по МК');
+    const body = rows.map(r=>{
+      if(!r.def) return `<tr><td style="padding:6px 8px;font-weight:600;">${escapeHtml(r.name)}</td><td style="padding:6px 8px;">${pkgSel(r)}</td>
+        <td colspan="5" style="padding:6px 8px;color:var(--ink-soft);font-size:12px;">каждый МК по общим ставкам (до 3 гостей — 1 300 ₽, 4–8 — 1 500 ₽, от 9 — 200 ₽ × гостей), МК с 0 гостей не оплачивается</td>
+        <td style="padding:6px 8px;">${isOwner?`<button type="button" class="btn btn-ghost" data-mpkg-del="${escapeHtml(r.name)}" title="Убрать из списка" style="font-size:11px;padding:2px 7px;">✕</button>`:''}</td></tr>`;
+      const planCell = isOwner
+        ? `<input type="number" min="0" step="1" data-mpkg-field="plan" data-mpkg-name="${escapeHtml(r.name)}" value="${r.planFixed?r.plan:''}" placeholder="${r.cnt.total}" style="${inp}${r.planFixed?'':'border-color:var(--status-red);'}">`
+        : `${r.plan}`;
+      const chkBtn = (half)=>{
+        const rec = masterChecklistRec(ym, r.name, half), t = masterChecklistTotal(rec);
+        const sc = half === 'h1' ? r.score1 : r.score2;
+        const label = t.complete ? `${t.total}/${MASTER_CHECKLIST_MAX}` : (t.rated ? `${t.rated}/${t.count} пунктов` : (sc !== null ? `${sc} (вручную)` : 'оценить'));
+        const color = t.complete ? (t.total>=30?'#4E5733':(t.total>=24?'#8A5A1E':'#B0443B')) : 'var(--ink-soft)';
+        const canOpen = roleCanRateMasters() || t.rated;
+        return `<button type="button" ${canOpen?`data-mchk-open="${escapeHtml(r.name)}|${half}"`:'disabled'} title="Чек-лист за ${half==='h1'?'1–15':'16–конец'}" style="border:1px solid var(--line-strong);background:#fff;border-radius:6px;padding:3px 7px;font:inherit;font-size:11.5px;cursor:${canOpen?'pointer':'default'};color:${color};font-weight:${t.complete?700:400};white-space:nowrap;">${half==='h1'?'1–15':'16–к.'}: ${label}${roleCanRateMasters()?' ✎':''}</button>`;
+      };
+      const scoreCell = `<div style="display:flex;flex-direction:column;gap:3px;align-items:flex-start;">${chkBtn('h1')}${chkBtn('h2')}</div>`;
+      return `<tr style="border-top:1px solid var(--line);">
+        <td style="padding:6px 8px;font-weight:600;">${escapeHtml(r.name)}</td>
+        <td style="padding:6px 8px;">${pkgSel(r)}</td>
+        <td style="padding:6px 8px;">${planCell}${r.planFixed?'':`<div style="font-size:10.5px;color:var(--status-red);">не зафиксирован</div>`}</td>
+        <td style="padding:6px 8px;font-family:var(--font-mono);font-size:12px;">${r.cnt.h1} / ${r.cnt.h2}${(r.cnt.f1+r.cnt.f2)?`<div style="font-size:10.5px;color:var(--ink-soft);">впереди: ${r.cnt.f1+r.cnt.f2}</div>`:''}</td>
+        <td style="padding:6px 8px;font-family:var(--font-mono);font-size:12px;">${r.plan?formatMoney(Math.round(r.price)):'—'}</td>
+        <td style="padding:6px 8px;">${scoreCell}${r.bonusMonth?`<div style="font-size:10.5px;color:var(--ink-soft);margin-top:2px;">премия: ${formatMoney(r.bonusMonth)}</div>`:''}</td>
+        <td style="padding:6px 8px;font-family:var(--font-mono);font-size:12px;">${formatMoney(r.oklad1 + r.bonus1)} / ${formatMoney(r.oklad2 + r.bonus2)}</td>
+        <td style="padding:6px 8px;">${isOwner?`<button type="button" class="btn btn-ghost" data-mpkg-del="${escapeHtml(r.name)}" title="Убрать из списка" style="font-size:11px;padding:2px 7px;">✕</button>`:''}</td>
+      </tr>`;
+    }).join('');
+    const known = new Set(rows.map(r=> pkgKey(r.name)));
+    const addOpts = (state.hostsList||[]).filter(n=> !known.has(pkgKey(n))).sort((a,b)=> a.localeCompare(b,'ru'));
+    const tierLine = cm ? CERAMICS_TIERS.map((t, i)=>{
+      const lo = i ? CERAMICS_TIERS[i-1].upTo : 0;
+      const n = Math.max(0, Math.min(cm.items, t.upTo) - lo);
+      const lbl = t.upTo === Infinity ? `с ${lo+1}-го` : `${lo+1}–${t.upTo}`;
+      return `<span style="display:inline-block;margin:2px 10px 2px 0;${n?'font-weight:700;':'color:var(--ink-soft);'}">${lbl}: ${t.rate} ₽ × ${n}</span>`;
+    }).join('') : '';
+    return `
+      <div class="analytics-section" id="master-pkg-section" data-ym="${ym}" style="border:1px solid var(--line-strong);border-radius:var(--radius);padding:12px 14px;margin-bottom:14px;">
+        <h4 style="margin-top:0;">📦 Мастера на пакетах — ${mName}</h4>
+        <div style="font-size:11.5px;color:var(--ink-soft);margin-bottom:8px;line-height:1.5;">
+          Оклад = оклад пакета × смены в «Графике мастеров» за половину месяца ÷ смены по плану на месяц. Выходной целиком (12–17 и 17–22) — 2 смены.
+          Обмен: смена у того, кто стоит в графике; болезнь или пропуск — уберите мастера из слота. МК, начатый в своём слоте, входит в оклад;
+          МК вне слота — по общим ставкам; МК с 0 гостей не оплачивается. Оклад и премия попадают в «К выдаче» сами: 16-го за 1–15, 2-го за 16–конец.
+        </div>
+        ${(anyUnfixed || noScore) ? `<div style="font-size:12px;background:#FBEFE4;border-radius:8px;padding:7px 10px;margin-bottom:8px;color:#8A4A1E;">
+          ${anyUnfixed ? `⚠ План смен не зафиксирован — пока берётся текущий график, и обмены его меняют. ${isOwner?'Впишите план или нажмите «Зафиксировать план из графика».':''}<br>` : ''}
+          ${noScore ? `⚠ Чек-лист оценён не за все половины месяца — там премия пока 0 ₽. Оценку ставят руководитель или старший администратор: кнопки в колонке «Чек-лист».` : ''}
+        </div>` : ''}
+        <div style="overflow-x:auto;">
+          <table style="width:100%;border-collapse:collapse;font-size:12.5px;">
+            <thead><tr style="text-align:left;color:var(--ink-soft);font-size:11px;">
+              <th style="padding:4px 8px;">Мастер</th><th style="padding:4px 8px;">Пакет</th><th style="padding:4px 8px;">План смен</th>
+              <th style="padding:4px 8px;">Смен 1–15 / 16–конец</th><th style="padding:4px 8px;">Цена смены</th><th style="padding:4px 8px;">Чек-лист (премия)</th>
+              <th style="padding:4px 8px;">Оклад + премия 1–15 / 16–конец</th><th></th>
+            </tr></thead>
+            <tbody>${body || `<tr><td colspan="8" style="padding:8px;color:var(--ink-soft);">Пока никого нет.</td></tr>`}</tbody>
+          </table>
+        </div>
+        ${isOwner ? `<div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-top:8px;">
+          ${anyUnfixed ? `<button type="button" class="btn btn-primary" data-mpkg-freeze="${ym}" style="font-size:12px;padding:5px 12px;">📌 Зафиксировать план из графика</button>` : ''}
+          ${addOpts.length ? `<select data-mpkg-add="${ym}" style="padding:5px 8px;border:1px solid var(--line-strong);border-radius:6px;font:inherit;font-size:12px;"><option value="">+ Добавить мастера…</option>${addOpts.map(n=>`<option value="${escapeHtml(n)}">${escapeHtml(n)}</option>`).join('')}</select>` : ''}
+          <span style="font-size:11px;color:var(--ink-soft);">Пакеты переносятся на следующий месяц сами; план со следующего месяца фиксируется 1-го числа.</span>
+        </div>` : ''}
+        <div style="margin-top:12px;padding-top:10px;border-top:1px dashed var(--line-strong);">
+          <div style="font-weight:700;font-size:13px;margin-bottom:4px;">🏺 Керамика и гончарный круг — ${escapeHtml(CERAMICS_PAYEE)}: ${cm ? formatMoney(cm.amount) : '0 ₽'}</div>
+          <div style="font-size:12px;">${cm ? `${cm.items} изд. за ${mName} в ${cm.events} МК${cm.futureAmount?` (из них по будущим МК: ${formatMoney(cm.futureAmount)})`:''}` : 'В этом месяце изделий из глины пока нет.'}</div>
+          ${cm ? `<div style="font-size:12px;margin-top:3px;">${tierLine}</div>` : ''}
+          <div style="font-size:11.5px;color:var(--ink-soft);margin-top:4px;">За изделие: 1–300-е — 300 ₽, 301–500-е — 250 ₽, с 501-го — 220 ₽ (считается по всем МК месяца по порядку дат). Сумма идёт в себестоимость этих МК и в зарплату (${escapeHtml(CERAMICS_PAYEE)}), выплата одной суммой ${ceramicsPayDateText(ym)}. Плюс 100 ₽ за изделие — материалы студии.</div>
+        </div>
+      </div>`;
+  }
+  // «Моя зарплата» у мастера: своя оценка по чек-листу за обе половины месяца (только просмотр)
+  function renderMyChecklistSection(ym, myName){
+    if(!ym || !myName || ym < MASTER_PKG_FROM.slice(0,7)) return '';
+    const pk = masterPkgEntry(ym, myName);
+    const recs = ['h1','h2'].map(h=> ({ h, rec: masterChecklistRec(ym, myName, h) }));
+    if(!pk && !recs.some(x=> x.rec)) return '';
+    const mName = MONTH_GEN_RU[Number(ym.slice(5,7))-1];
+    const cards = recs.map(({h, rec})=>{
+      const t = masterChecklistTotal(rec);
+      const per = h === 'h1' ? `1–15 ${mName}` : `16 ${mName} – конец`;
+      if(!t.complete) return `<div style="flex:1;min-width:200px;border:1px solid var(--line-strong);border-radius:10px;padding:10px 12px;">
+        <div style="font-size:12px;color:var(--ink-soft);">${per}</div><div style="font-weight:600;margin-top:4px;">Ещё не оценено</div></div>`;
+      const bonus = Math.round((masterPkgBonusFor(t.total)||0)/2);
+      const color = t.total>=30?'#4E5733':(t.total>=24?'#8A5A1E':'#B0443B');
+      return `<div style="flex:1;min-width:200px;border:1.5px solid ${color};border-radius:10px;padding:10px 12px;">
+        <div style="font-size:12px;color:var(--ink-soft);">${per}</div>
+        <div style="font-size:22px;font-weight:800;font-family:var(--font-mono);color:${color};margin-top:2px;">${t.total} / ${MASTER_CHECKLIST_MAX}</div>
+        <div style="font-size:12.5px;">${masterPkgBonusLabel(t.total)} · премия <b>${formatMoney(bonus)}</b></div>
+        ${rec.note ? `<div style="font-size:12px;margin-top:6px;background:var(--paper,#F2ECDD);border-radius:6px;padding:5px 8px;">💬 ${escapeHtml(rec.note)}</div>` : ''}
+        <button type="button" data-mychk-open="${h}" style="margin-top:8px;border:1px solid var(--line-strong);background:#fff;border-radius:6px;padding:4px 10px;font:inherit;font-size:12px;cursor:pointer;">Посмотреть по пунктам →</button>
+      </div>`;
+    }).join('');
+    return `<div class="analytics-section" id="my-checklist-section" data-ym="${ym}" data-name="${escapeHtml(myName)}">
+      <h4 style="margin-top:0;">✅ Моя оценка по чек-листу</h4>
+      <div style="font-size:11.5px;color:var(--ink-soft);margin-bottom:8px;">Оценивают руководитель или старший администратор за каждую половину месяца. 30–34 балла — премия 3 500 ₽ за полмесяца, 24–29 — 2 500 ₽, меньше 24 — без премии.</div>
+      <div style="display:flex;gap:10px;flex-wrap:wrap;">${cards}</div>
+    </div>`;
+  }
+  function masterPkgEnsureMonth(ym){
+    if(!state.masterPkgCfg) state.masterPkgCfg = {};
+    if(!state.masterPkgCfg[ym]){
+      const cfg = masterPkgMonthCfg(ym), out = {};
+      Object.keys(cfg).forEach(n=> out[n] = { pkg: cfg[n].pkg, plan: null, score: null });
+      state.masterPkgCfg[ym] = out;
+    }
+    return state.masterPkgCfg[ym];
+  }
+  function masterPkgSectionYm(){
+    const sec = document.getElementById('master-pkg-section');
+    return (sec && sec.dataset.ym) || todayStr().slice(0,7);
+  }
+  async function masterPkgCommit(){
+    await saveMasterPkgCfg();
+    refreshVirtualSalaryAdj();
+    render();
+  }
+  if(!window.__masterPkgEventsBound){
+    window.__masterPkgEventsBound = true;
+    document.addEventListener('change', async (ev)=>{
+      const el = ev.target;
+      if(!el || !el.closest || !el.closest('#master-pkg-section') || state.currentRole !== 'owner') return;
+      const ym = masterPkgSectionYm();
+      if(el.dataset.mpkgAdd !== undefined){
+        const n = el.value; if(!n) return;
+        const m = masterPkgEnsureMonth(ym);
+        m[n] = { pkg: 'base', plan: null, score: null };
+        await masterPkgCommit(); return;
+      }
+      const f = el.dataset.mpkgField, name = el.dataset.mpkgName;
+      if(!f || !name) return;
+      const m = masterPkgEnsureMonth(ym);
+      if(!m[name]) m[name] = { pkg: 'base', plan: null, score: null };
+      if(f === 'pkg') m[name].pkg = el.value;
+      else { const v = el.value.trim(); m[name][f] = v === '' ? null : Math.max(0, Math.round(Number(v)||0)); }
+      await masterPkgCommit();
+    });
+    document.addEventListener('click', (ev)=>{
+      const b = ev.target && ev.target.closest ? ev.target.closest('[data-mychk-open]') : null;
+      const sec = b && b.closest('#my-checklist-section');
+      if(!sec) return;
+      ev.preventDefault();
+      openMasterChecklist(sec.dataset.ym, sec.dataset.name, b.dataset.mychkOpen);
+    });
+    document.addEventListener('click', (ev)=>{
+      const b = ev.target && ev.target.closest ? ev.target.closest('[data-mchk-open]') : null;
+      if(!b || !b.closest('#master-pkg-section')) return;
+      ev.preventDefault();
+      const [name, half] = b.dataset.mchkOpen.split('|');
+      openMasterChecklist(masterPkgSectionYm(), name, half);
+    });
+    document.addEventListener('click', async (ev)=>{
+      const el = ev.target && ev.target.closest ? ev.target.closest('[data-mpkg-freeze],[data-mpkg-del]') : null;
+      if(!el || !el.closest('#master-pkg-section') || state.currentRole !== 'owner') return;
+      ev.preventDefault();
+      const ym = masterPkgSectionYm();
+      const m = masterPkgEnsureMonth(ym);
+      if(el.dataset.mpkgFreeze){
+        Object.keys(m).forEach(n=>{ if(MASTER_PACKAGES[m[n].pkg] && (m[n].plan === null || m[n].plan === undefined)) m[n].plan = masterShiftCounts(ym, n).total; });
+      } else if(el.dataset.mpkgDel){
+        if(!confirm('Убрать «' + el.dataset.mpkgDel + '» из списка мастеров на пакетах в этом месяце?')) return;
+        delete m[el.dataset.mpkgDel];
+      }
+      await masterPkgCommit();
+    });
   }
 
   async function autoApplyMaterialRulesForPastEvents(){
@@ -5758,7 +6365,7 @@
       materialsCatalog: state.materialsCatalog,
       itemSales: state.itemSales,
       orders: state.orders,
-      salaryAdjustments: state.salaryAdjustments,
+      salaryAdjustments: (state.salaryAdjustments||[]).filter(a=> !a.virtual),
       masterPayRates: state.masterPayRates,
       masterPayOverrides: state.masterPayOverrides,
       monthlyPlans: state.monthlyPlans,
@@ -6408,7 +7015,7 @@
   async function saveEvents(){
     // керамика (300 ₽ Василене + 150 ₽ студии за изделие) и смола — пересчитываем перед каждым сохранением,
     // чтобы себестоимость вписывалась сразу при создании мероприятия и обновлялась при изменении гостей/изделий
-    try{ state.events.forEach(e=>{ applyKeywordPayToEvent(e); applyCatalogCostToEvent(e); }); }catch(err){ console.warn('auto cost', err); }
+    try{ refreshCeramicsAlloc(); state.events.forEach(e=>{ applyKeywordPayToEvent(e); applyCatalogCostToEvent(e); }); refreshVirtualSalaryAdj(); }catch(err){ console.warn('auto cost', err); }
     const r = await saveCollectionMerged('events', state.events, state._eventsBaseline, (finalArr)=>{
       state.events = finalArr;
       state._eventsBaseline = JSON.parse(JSON.stringify(finalArr));
@@ -6558,11 +7165,15 @@
     try{ legalDocsSweepSoon(); }catch(e){}
   }
   async function saveSalaryAdjustments(){
-    await saveCollectionMerged('salary-adjustments', state.salaryAdjustments, state._salaryAdjustmentsBaseline, (finalArr)=>{
+    // автоматические строки (оклад по пакету, премия, керамика) не сохраняются — они считаются из графика
+    const real = (state.salaryAdjustments||[]).filter(a=> !a.virtual);
+    await saveCollectionMerged('salary-adjustments', real, state._salaryAdjustmentsBaseline, (finalArr)=>{
       state.salaryAdjustments = finalArr;
       state._salaryAdjustmentsBaseline = JSON.parse(JSON.stringify(finalArr));
+      refreshVirtualSalaryAdj();
     });
   }
+
   async function saveMonthlyPlans(){
     await saveMapMerged('monthly-plans', state.monthlyPlans, state._monthlyPlansBaseline, (finalMap)=>{
       state.monthlyPlans = finalMap;
@@ -8327,6 +8938,8 @@
       return;
     }
     autoCaptureForecastSnapshot();
+    try{ refreshVirtualSalaryAdj(); }catch(e){}
+    if(!state._pkgFreezeTried && state.currentRole === 'owner'){ state._pkgFreezeTried = true; setTimeout(()=>{ autoFreezeMasterPkgPlan().then(()=>{ refreshVirtualSalaryAdj(); }); }, 2000); }
 
     try{ managerLandingOnce(); }catch(e){}
     if(!state._tasksSweepTried && ['owner','admin','manager','assistant'].includes(state.currentRole)){ state._tasksSweepTried = true; setTimeout(()=>{ leadSaleDateRepairOnce().catch(e=> console.warn('sale date repair', e)).then(()=> leadsCancelSync()).catch(e=> console.warn('cancel sync', e)).then(()=> leadTasksHealthSweep()).catch(e=> console.warn('tasks sweep', e)); }, 2500); }
@@ -9229,6 +9842,7 @@
           ${role ? `<details class="hdr-more no-print" id="hdr-more">
             <summary class="lock-btn">⚙ Ещё</summary>
             <div class="hdr-more-panel">
+              ${canEditManagerShifts(role) ? `<button class="lock-btn" type="button" onclick="window.__openMgrMonth && window.__openMgrMonth()">📅 График менеджеров</button>` : ''}
               ${roleCanSeeReference(role) ? `<button class="lock-btn" id="btn-go-catalog" onclick="document.querySelector('button[data-view=&quot;reference&quot;]') && document.querySelector('button[data-view=&quot;reference&quot;]').click()">📚 Каталог, форматы, тарифы, себес → в разделе «Каталог»</button>` : ''}
               ${isAdminLevel ? `
               <button class="lock-btn" id="btn-role-settings">🔑 Настройки доступа</button>
@@ -13511,7 +14125,7 @@
     if(!state.certSummaryExpandedYears) state.certSummaryExpandedYears = new Set(); // по умолчанию свёрнуто
     // администратор (роль "hostess") видит отдельные сертификаты и их остатки, но не общую сумму по месяцам/годам —
     // это агрегированная финансовая цифра, закрыта по просьбе владелицы
-    const monthlyHtml = (allMonths.length && state.currentRole !== 'hostess') ? `
+    const monthlyHtml = (allMonths.length && !['hostess','admin'].includes(state.currentRole)) ? `
       <div class="analytics-section" style="margin-bottom:20px;">
         <h4>Сумма сертификатов по месяцам</h4>
         <div style="font-size:11px;color:var(--ink-soft);font-family:var(--font-mono);margin-bottom:8px;">Сумма — только продажи; маркетинговые сертификаты в неё не входят и показаны отдельно.</div>
@@ -14156,6 +14770,7 @@
       row.onclick = ()=>{
         const a = state.salaryAdjustments.find(x=>x.id===row.dataset.adjid);
         if(!a) return;
+        if(a.virtual){ alert('Эта строка начисляется автоматически (оклад по пакету, премия или керамика). Поменять её можно в блоке «📦 Мастера на пакетах»: пакет, план смен, баллы чек-листа — или в «Графике мастеров».'); return; }
         requireUnlock(()=>{
           state.modal = {type:'salary-adj', isNew:false, adj:{...a}};
           render();
@@ -16248,12 +16863,14 @@
 
   function renderConversionView(){
     if(state.currentRole === 'admin'){ state.convTab = 'clients'; return renderClientsView(); }
+    const _mkt = state.currentRole === 'marketer'; // маркетологу — заявки и конверсия, без денег студии (день, прогноз, план выручки)
+    if(_mkt && ['day','forecast'].includes(state.convTab)) state.convTab = 'board';
     const tab = state.convTab || 'board';
-    const tabs = [['board','Воронка'],['tasks','Задачи'],['day','📅 День'],['control','🕓 Контроль'],['forecast','🔮 Прогноз'],['clients','Клиенты'],['stats','Статистика и список']];
+    const tabs = [['board','Воронка'],['tasks','Задачи'],['day','📅 День'],['control','🕓 Контроль'],['forecast','🔮 Прогноз'],['clients','Клиенты'],['stats','Статистика и список']].filter(t=> !_mkt || !['day','forecast'].includes(t[0]));
     const nOpen = (state.leadTasks||[]).filter(t=>!t.done && t.due && t.due <= todayStr() && taskAlive(t)).length;
     const bar = `<div class="sub-tabs" style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:12px;">${tabs.map(t=>`<button class="btn ${tab===t[0]?'btn-primary':'btn-ghost'}" data-convtab="${t[0]}">${t[1]}${t[0]==='tasks' && nOpen ? ' <span style="color:'+(tab==='tasks'?'#fff':'var(--danger)')+';">('+nOpen+')</span>' : ''}</button>`).join('')}</div>`;
-    const _lpStrip = (tab !== 'clients' && tab !== 'stats' && tab !== 'control' && tab !== 'forecast' && tab !== 'day') ? (()=>{ try{ const c = new Date(); const ym = c.getFullYear()+'-'+pad(c.getMonth()+1); return renderRevenuePlanStrip(ym) + renderLeadPlanHtml(ym, { strip:true }); }catch(e){ return ''; } })() : '';
-    return bar + ((tab === 'board' || tab === 'tasks') ? renderDayStrip() : '') + (tab === 'tasks' ? renderRopTasksStrip() : '') + _lpStrip + (tab === 'board' ? renderForecastStrip() + renderForecastNextStrip() : '') + (tab === 'day' ? renderLeadDayView() : tab === 'forecast' ? renderForecastView() : tab === 'control' ? renderLeadControlView() : tab === 'tasks' ? renderLeadTasksView() : (tab === 'clients' ? renderClientsView() : tab === 'stats' ? renderConversionStatsView() : renderLeadBoard()));
+    const _lpStrip = (!_mkt && tab !== 'clients' && tab !== 'stats' && tab !== 'control' && tab !== 'forecast' && tab !== 'day') ? (()=>{ try{ const c = new Date(); const ym = c.getFullYear()+'-'+pad(c.getMonth()+1); return renderRevenuePlanStrip(ym) + renderLeadPlanHtml(ym, { strip:true }); }catch(e){ return ''; } })() : '';
+    return bar + ((!_mkt && (tab === 'board' || tab === 'tasks')) ? renderDayStrip() : '') + (tab === 'tasks' ? renderRopTasksStrip() : '') + _lpStrip + (tab === 'board' && !_mkt ? renderForecastStrip() + renderForecastNextStrip() : '') + (tab === 'day' ? renderLeadDayView() : tab === 'forecast' ? renderForecastView() : tab === 'control' ? renderLeadControlView() : tab === 'tasks' ? renderLeadTasksView() : (tab === 'clients' ? renderClientsView() : tab === 'stats' ? renderConversionStatsView() : renderLeadBoard()));
   }
 
 
@@ -17683,7 +18300,7 @@
     const maxMaster = Math.max(1, ...byMasterList.map(x=>x[1]));
     // администратор (роль "hostess") видит отдельные продажи, но не общие суммы/разбивку по мастерам —
     // это агрегированные финансовые цифры, закрыты по просьбе владелицы
-    const showItemSalesTotals = state.currentRole !== 'hostess';
+    const showItemSalesTotals = !['hostess','admin'].includes(state.currentRole);
 
     return navHtml + `
       ${showItemSalesTotals ? `
@@ -17754,15 +18371,16 @@
     const byMasterList = Object.entries(byMaster).sort((a,b)=>b[1].revenue-a[1].revenue);
     const maxMaster = Math.max(1, ...byMasterList.map(x=>x[1].revenue));
 
+    const showOrderTotals = !['hostess','admin'].includes(state.currentRole);
     return navHtml + `
-      <div class="analytics-summary" style="margin-bottom:20px;">
+      ${showOrderTotals ? `<div class="analytics-summary" style="margin-bottom:20px;">
         <div class="summary-card"><div class="num" style="font-size:20px;">${formatMoney(totalRevenue)}</div><div class="label">Выручка от заказов</div></div>
         <div class="summary-card"><div class="num" style="font-size:20px;color:var(--accent);">${formatMoney(totalMasterShare)}</div><div class="label">Мастерам (по договорённости)</div></div>
         <div class="summary-card"><div class="num" style="font-size:20px;">${formatMoney(totalCost)}</div><div class="label">Себестоимость (студия)</div></div>
         <div class="summary-card" style="border-left:4px solid var(--status-green);"><div class="num" style="font-size:20px;color:var(--status-green);">${formatMoney(totalStudioShare)}</div><div class="label">В прибыль студии</div></div>
-      </div>
+      </div>` : ''}
 
-      ${byMasterList.length ? `
+      ${(showOrderTotals && byMasterList.length) ? `
       <div class="analytics-section">
         <h4>Выручка по мастерам</h4>
         ${byMasterList.map(([name,v])=>`
@@ -20033,7 +20651,7 @@
     const list = dayEvs.filter(e=> sel === 'all' ? true : e.spaceId === sel).sort((a,b)=> timeToMinutes(a.time) - timeToMinutes(b.time));
     const warn = {}; spaces.forEach(s=> Object.assign(warn, computeGapWarnings(dayEvs.filter(e=>e.spaceId === s.id))));
     const guests = dayEvs.reduce((s,e)=> s + (Number(e.guests)||0), 0);
-    const showMoney = ['owner','admin','assistant','manager'].includes(state.currentRole);
+    const showMoney = roleCanSeeRevenue(state.currentRole);
     const revenue = dayEvs.reduce((s,e)=> s + (Number(e.price)||0), 0);
     const noHost = dayEvs.filter(e=> isPrivateWithoutHost(e)).length;
     const mgr = managerForDate(ds);
@@ -20056,7 +20674,7 @@
     </style>
     <div class="day-screen" data-dsdate="${ds}">
       <div class="dsm-top"><button class="btn btn-primary modal-close" id="ds-close" style="width:auto;height:auto;padding:6px 10px;font-size:13px;color:#fff;">✕</button><button class="btn btn-ghost" data-dsnav="-1">‹</button><h3 data-dsnav="today">${escapeHtml(dLabel)}</h3><button class="btn btn-ghost" data-dsnav="1">›</button></div>
-      <div class="ds-sum" style="text-align:center;font-size:12px;color:var(--ink-soft);">🕒 <b data-dsclock></b> · <span style="color:#2F9E5F;font-weight:700;">● идут</span> ярче, прошедшие бледнее<br>${dayEvs.length} мер. · 👥 ${guests}${showMoney ? ' · ' + escapeHtml(formatMoney(revenue)) : ''}${mgr ? ' · ' + escapeHtml(mgr) : ''}${noHost ? ' · <span style="color:var(--danger);">без вед.: ' + noHost + '</span>' : ''}</div>
+      <div class="ds-sum" style="text-align:center;font-size:12px;color:var(--ink-soft);">🕒 <b data-dsclock></b> · <span style="color:#2F9E5F;font-weight:700;">● идут</span> ярче, прошедшие бледнее<br>${dayEvs.length} мер. · 👥 ${guests}${showMoney ? ' · ' + escapeHtml(formatMoney(revenue)) : ''}${mgr ? ' · ' + escapeHtml(mgr) : ''}${canEditManagerShifts() ? ` <button type="button" class="manager-shift-edit-btn" onclick="event.stopPropagation(); window.__openMgrMonth && window.__openMgrMonth('${ds.slice(0,7)}')">📅 менеджеры</button>` : ''}${noHost ? ' · <span style="color:var(--danger);">без вед.: ' + noHost + '</span>' : ''}</div>
       <div style="text-align:center;">${dayStaffLineHtml(ds)}</div>
       <div style="display:flex;gap:6px;margin:6px 0 0;"><button class="btn btn-primary" id="ds-find" style="flex:2;">🔎 Подобрать время</button>${state.currentRole !== 'hostess' ? '<button class="btn btn-ghost" id="ds-add" style="flex:1;">＋ новое</button>' : ''}<button class="btn btn-ghost" id="ds-list" style="flex:1;" title="Список с деталями">📋 список</button></div>
       <div style="margin-top:6px;"><button class="btn ${state.dsOffOpen?'btn-primary':'btn-ghost'}" data-dsoff="1" style="width:100%;">🚫 Выходные${dayOffEntriesFor(ds).length ? ': ' + escapeHtml(dayOffEntriesFor(ds).map(x=>x.name).join(', ')) : ''}</button></div>
@@ -20081,7 +20699,7 @@
     inSpaces.forEach(e=>{ t0 = Math.min(t0, Math.floor(effectiveStart(e)/60)*60); t1 = Math.max(t1, Math.ceil(effectiveEnd(e)/60)*60); });
     t0 = Math.max(0, t0); t1 = Math.min(24*60, t1); const span = t1 - t0;
     const pct = m => ((m - t0) / span * 100);
-    const showMoney = ['owner','admin','assistant','manager'].includes(state.currentRole);
+    const showMoney = roleCanSeeRevenue(state.currentRole);
     const revenue = dayEvs.reduce((s,e)=> s + (Number(e.price)||0), 0);
     const guests = dayEvs.reduce((s,e)=> s + (Number(e.guests)||0), 0);
     const noHost = dayEvs.filter(e=> isPrivateWithoutHost(e)).length;
@@ -20180,7 +20798,7 @@
         <h3>${escapeHtml(dLabel)}</h3>
         <button class="btn btn-ghost" data-dsnav="1" title="Следующий день">›</button>
         <button class="btn btn-ghost" data-dsnav="today">сегодня</button>
-        <span class="ds-sum">${dayEvs.length} мер. · 👥 ${guests}${showMoney ? ' · ' + escapeHtml(formatMoney(revenue)) : ''}${mgr ? ' · менеджер: ' + escapeHtml(mgr) : ''}</span>
+        <span class="ds-sum">${dayEvs.length} мер. · 👥 ${guests}${showMoney ? ' · ' + escapeHtml(formatMoney(revenue)) : ''}${mgr ? ' · менеджер: ' + escapeHtml(mgr) : (canEditManagerShifts() ? ' · <span style="color:var(--danger);">менеджер не назначен</span>' : '')}${canEditManagerShifts() ? ` <button type="button" class="manager-shift-edit-btn" onclick="event.stopPropagation(); window.__openMgrMonth && window.__openMgrMonth('${ds.slice(0,7)}')" title="График менеджеров на месяц">📅 график менеджеров</button>` : ''}</span>
         <span class="ds-sum" style="flex-basis:100%;">${dayStaffLineHtml(ds)}</span>
         <span class="ds-legend" data-dsnow title="Время считается по Омску">🕒 <b data-dsclock></b> · <span style="color:#2F9E5F;font-weight:700;">● идут</span> и будущие яркие, прошедшие бледные</span>
         ${noHost ? `<span style="color:var(--danger);font-size:12.5px;">⚠ без ведущего: ${noHost}</span>` : ''}
@@ -22640,7 +23258,7 @@
   function renderBookView(){
     const hideTotals = bookTotalsHidden(state.currentRole);
     if(hideTotals && state.bookView === 'book-analytics') state.bookView = 'incomes';
-    if(state.bookView === 'reconcile' && !['owner','admin','assistant'].includes(state.currentRole)) state.bookView = 'incomes';
+    if(state.bookView === 'reconcile' && !['owner','assistant'].includes(state.currentRole)) state.bookView = 'incomes';
     if(state.bookView === 'dayclose' && !DAYCLOSE_ROLES.includes(state.currentRole)) state.bookView = 'incomes';
     const subTabsHtml = `
       <div class="cert-subtabs">
@@ -22648,7 +23266,7 @@
         <button data-bookview="expenses" class="${state.bookView==='expenses'?'active':''}">Расходы</button>
         ${controlSeesAll() ? (()=>{ let n = 0; try{ n = controlVisibleFlags().filter(x=> ['del','retro','debt','nolink'].includes(x.kind)).length; }catch(e){} return `<button type="button" id="btn-book-control" style="${n?'color:#9B2C1F;font-weight:700;':''}">🚩 Контроль${n ? ' (' + n + ')' : ''}</button>`; })() : ''}
         ${!hideTotals ? `<button data-bookview="book-analytics" class="${state.bookView==='book-analytics'?'active':''}">Аналитика</button>` : ''}
-        ${['owner','admin','assistant'].includes(state.currentRole) ? `<button data-bookview="reconcile" class="${state.bookView==='reconcile'?'active':''}">🔎 Сверка</button>` : ''}
+        ${['owner','assistant'].includes(state.currentRole) ? `<button data-bookview="reconcile" class="${state.bookView==='reconcile'?'active':''}">🔎 Сверка</button>` : ''}
         ${DAYCLOSE_ROLES.includes(state.currentRole) ? (()=>{ const n = unclosedDays().length; return `<button data-bookview="dayclose" class="${state.bookView==='dayclose'?'active':''}">✅ Закрытие дня${n ? ` <span style="background:var(--danger);color:#fff;border-radius:9px;padding:0 6px;font-size:11px;">${n}</span>` : ''}</button>`; })() : ''}
       </div>
     `;
@@ -22673,7 +23291,7 @@
     `;
     const period = { mode, periodLabel, inPeriod };
     if(state.bookView === 'expenses'){
-      return subTabsHtml + navHtml + renderExpensesView(period);
+      return subTabsHtml + bookScopeNote() + navHtml + renderExpensesView(period);
     }
     if(state.bookView === 'reconcile'){
       return subTabsHtml + navHtml + renderReconcileView();
@@ -22684,7 +23302,7 @@
     if(state.bookView === 'book-analytics'){
       return subTabsHtml + navHtml + renderBookAnalyticsView(period);
     }
-    return subTabsHtml + navHtml + renderIncomesView(period);
+    return subTabsHtml + bookScopeNote() + navHtml + renderIncomesView(period);
   }
 
   // -------------------- «Касса»: урезанная книга доходов/расходов только по наличным --------------------
@@ -24247,7 +24865,7 @@
     const incQ = refNorm(state.incQ || '').trim();
     const incHay = (i)=> [atsDateHay(i.date), i.operation, i.product, i.account, i.comment, i.createdBy, i.author, i.eventId ? linkedEventLabel(i.eventId) : '',
       (i.amount!==undefined && i.amount!==null && !isNaN(i.amount)) ? String(Number(i.amount)) + ' ' + formatMoney(i.amount) : '', i.viaYuklient ? 'юклиент' : ''].filter(Boolean).join(' | ');
-    const items = state.incomes.filter(i=>(incQ ? atsMatch(incQ, incHay(i)) : inPeriod(i.date)) && (!state.bookWho || bookWhoOf(i) === state.bookWho)).sort((a,b)=> (b.date||'').localeCompare(a.date||''));
+    const items = state.incomes.filter(i=>(incQ ? atsMatch(incQ, incHay(i)) : inPeriod(i.date)) && (!state.bookWho || bookWhoOf(i) === state.bookWho) && bookScopeOk(i)).sort((a,b)=> (b.date||'').localeCompare(a.date||''));
     const total = items.reduce((s,i)=> s + ((i.amount!==undefined&&i.amount!==null&&!isNaN(i.amount))?Number(i.amount):0), 0);
     return `${allTimeSearchBar('inc-q', 'incQ', '🔎 Поиск по всем доходам: гость, продукт, мероприятие, сумма, счёт, дата…')}${incQ ? '' : bookWhoSummaryHtml(inPeriod, 'inc')}
       <div class="cert-toolbar">
@@ -24295,7 +24913,7 @@
     const isOwner = state.currentRole === 'owner';
     const hideTotals = bookTotalsHidden(state.currentRole);
     // «Аренда»/«Зарплата» — видно только руководителю (та же чувствительная инфа, что и в «Ручных расходах»)
-    const canSee = (e)=> isOwner || (!e.ownerOnly && e.category!=='Аренда' && e.category!=='Зарплата');
+    const canSee = (e)=> (isOwner || (!e.ownerOnly && e.category!=='Аренда' && e.category!=='Зарплата')) && bookScopeOk(e);
     const expensesP = state.expenses.filter(e=>inPeriod(expenseAccrualDate(e)) && canSee(e));
     // 🔎 общий поиск: по всем расходам за всё время (не только за выбранный месяц)
     const expQ = refNorm(state.expQ || '').trim();
@@ -28923,7 +29541,7 @@
     // дата попадания в зарплату — дата расхода (m.expenseDate), если она указана, иначе дата самого мероприятия
     if(!Array.isArray(e.materialsItems)) return [];
     return e.materialsItems
-      .filter(m=>m.source==='master' && m.payTo && m.payTo.trim() && m.cost>0)
+      .filter(m=>m.source==='master' && m.payTo && m.payTo.trim() && m.cost>0 && m.autoRuleTag !== CERAMICS_MASTER_LINE_TAG) // керамика Василене — это ЗП (см. buildVirtualSalaryAdj)
       .map(m=>({ name: m.payTo.trim(), amount: Number(m.cost), date: (m.expenseDate && m.expenseDate.trim()) ? m.expenseDate.trim() : e.date, expenseDateOverride: !!(m.expenseDate && m.expenseDate.trim()) }));
   }
   // сумма материалов, которые принёс сам мастер (не влияет на прибыль студии, но фиксируется для прозрачности)
@@ -28948,7 +29566,7 @@
         list.push({ name: h.name.trim(), pay });
       }
     });
-    return list;
+    return list.map(h=> applyMasterPayRules(e, h));
   }
   function eventTotalMasterPay(e){
     return eventHostsWithPay(e).reduce((s,h)=>s+h.pay, 0);
@@ -29159,6 +29777,12 @@
     const today = todayStr();
     state.events.filter(e=> e.date && e.date.startsWith(ym) && e.date>today && e.status!=='marketing' && e.status!=='cancelled' && scheduleGuestsCount(e)>0)
       .forEach(e=> eventHostsWithPay(e).forEach(h=> add(canon(h.name), h.pay)));
+    // пакеты мастеров: оклад за оставшиеся по графику смены месяца; керамика Василене — по будущим МК
+    try{
+      Object.entries(masterPkgFutureByName(ym)).forEach(([n,a])=> add(canon(n), a));
+      const cm = (state._ceramicsAlloc && state._ceramicsAlloc.byMonth || {})[ym];
+      if(cm && cm.futureAmount) add(canon(CERAMICS_PAYEE), cm.futureAmount);
+    }catch(err){}
     const rows = Object.entries(byName).filter(([,a])=>a).map(([name,amount])=>({name,amount})).sort((a,b)=>b.amount-a.amount);
     return { total: rows.reduce((s,r)=>s+r.amount,0), rows };
   }
@@ -30360,16 +30984,18 @@
   }
 
   function analyticsModeSwitchHtml(){
+    if(state.currentRole === 'marketer') return '';
     return `<div class="kpi-mode"><button class="kpi-mode-btn ${state.analyticsMode==='kpi'?'':'on'}" data-amode="overview">📊 Обзор месяца</button><button class="kpi-mode-btn ${state.analyticsMode==='kpi'?'on':''}" data-amode="kpi">📈 Показатели бизнеса</button></div>`;
   }
   function renderAnalytics(){
+    if(state.currentRole === 'marketer' && state.analyticsMode === 'kpi') state.analyticsMode = 'overview';
     if(state.analyticsMode === 'kpi' && !state.loggedInMasterName && !state.loggedInHostessName) return analyticsModeSwitchHtml() + renderKpiView();
     const cursor = state.analyticsCursor;
     // "старший администратор" видит аналитику, но без денежных показателей — только операционные вещи
     // (заполняемость, планы по количеству, отчёты и т.п.); финансовые вкладки/суммы скрыты для этой роли
-    const isAdminFinRestricted = state.currentRole === 'admin';
+    const isAdminFinRestricted = state.currentRole === 'admin' || state.currentRole === 'marketer'; // маркетологу — без денег студии
     // «Отчёт дня» — сводка с выручкой/прибылью, доступна только ролям, которым вообще видны финансы
-    const canSeeDailyReport = !['master','admin'].includes(state.currentRole);
+    const canSeeDailyReport = !['master','admin','marketer'].includes(state.currentRole);
     const monthLabel = MONTHS[cursor.getMonth()] + ' ' + cursor.getFullYear();
     const evts = getMonthEvents(cursor);
     const total = evts.length;
@@ -30572,7 +31198,7 @@
         const mMastersSalary = mEvts.filter(e=> e.status !== 'marketing').reduce((s,e)=> s + eventTotalMasterPay(e), 0)
           + state.itemSales.filter(x=>x.date && x.date.startsWith(ym)).reduce((s,x)=> s + Math.round(((x.revenue!==undefined&&x.revenue!==null&&!isNaN(x.revenue))?Number(x.revenue):0) * itemMasterPct(x.date) / 100), 0)
           + state.orders.filter(x=>x.date && x.date.startsWith(ym)).reduce((s,x)=> s + orderTotalMasterShare(x), 0)
-          + state.salaryAdjustments.filter(a=> !a.msRef && adjEffDate(a) && adjEffDate(a).startsWith(ym)).reduce((s,a)=> s + (Number(a.amount)||0), 0);
+          + state.salaryAdjustments.filter(a=> !a.msRef && !a.cerPay && adjEffDate(a) && adjEffDate(a).startsWith(ym)).reduce((s,a)=> s + (Number(a.amount)||0), 0);
         let mHostessSalary = hostessBaseTotalFor(ym);
         {
           const daysInM = new Date(year, mIdx+1, 0).getDate();
@@ -31514,7 +32140,7 @@
         hostSalary[h.name] = (hostSalary[h.name]||0) + h.pay;
         hostSessionPay[h.name] = (hostSessionPay[h.name]||0) + h.pay;
         if(!masterEventDetails[h.name]) masterEventDetails[h.name] = [];
-        masterEventDetails[h.name].push({ date: e.date, title: e.title || 'Без названия', eid: e.id, time: e.time||'', sessionPay: h.pay, materialsComp: 0, total: h.pay, half, kind: 'session' });
+        masterEventDetails[h.name].push({ date: e.date, title: (e.title || 'Без названия') + (h.inSlot ? ' · в своём слоте — входит в оклад' : (h.zeroGuests ? ' · 0 гостей — не оплачивается' : '')), eid: e.id, time: e.time||'', sessionPay: h.pay, materialsComp: 0, total: h.pay, half, kind: 'session' });
       });
     });
     // компенсация за материалы ("Кому платить") — попадает в ЗП за период, когда фактически был расход:
@@ -32036,7 +32662,7 @@
           ${payoutHalfHtml('За 1–15 число', dueDateH1, hostSalaryH1, hostPaidH1, totalSalaryH1, 'H1')}
           ${payoutHalfHtml('За 16 – конец месяца', dueDateH2, hostSalaryH2, hostPaidH2, totalSalaryH2, 'H2')}
         </div>` : '';
-      finContent = payoutBlock + `
+      finContent = payoutBlock + renderMasterPkgSection(monthYmForItemSales) + `
         <div class="analytics-section">
           <h4>ЗП по мастерам за месяц: ${formatMoney(combinedGrandTotal)}</h4>
           ${combinedMaterialsCompTotal>0 ? `<div style="font-size:12.5px;color:var(--ink-soft);margin:-4px 0 8px;">🧾 Отдельно — возмещение себестоимости мастерам (не входит в ЗП): <b>${formatMoney(combinedMaterialsCompTotal)}</b></div>` : ''}
@@ -33041,7 +33667,7 @@
 
     // без "Прибыли" — менеджеру/маркетологу не нужны финансовые показатели, только операционные и выручка
     const PP_METRICS = [
-      {key:'revenue', label:'Выручка', value: totalRevenueAllSources, format:'money'},
+      ...(state.currentRole === 'marketer' ? [] : [{key:'revenue', label:'Выручка', value: totalRevenueAllSources, format:'money'}]),
       {key:'eventsCount', label:'Мероприятий', value: total, format:'int'},
       {key:'guestsCount', label:'Гостей', value: totalGuests, format:'int'},
       {key:'leadsCount', label:'Заявки', value: planLeadsCount, format:'int'},
@@ -33121,7 +33747,7 @@
           <button class="nav-btn" id="pp-next">›</button>
         </div>
       </div>
-      ${renderPlanDecompHtml(planYm)}
+      ${state.currentRole === 'marketer' ? '' : renderPlanDecompHtml(planYm)}
       ${renderLeadPlanHtml(planYm, { compact:true })}
       <div class="analytics-section" style="padding:14px 16px;">
         <h4 style="margin-top:0;">🎯 Выполнение плана</h4>
@@ -33129,7 +33755,7 @@
         ${hasAnyPlan ? `
           <div style="font-size:11.5px;color:var(--ink-soft);font-family:var(--font-mono);margin-bottom:10px;">День ${daysElapsed} из ${daysInMonth}</div>
           ${[...planProgress.filter(p=>p.target!==null), ...customPlanProgress].map(rowHtml).join('')}
-          ${productPlanProgress.length>0 ? `<h4 style="margin-top:4px;">По продуктам (сезонность)</h4>${productPlanProgress.map(productRowHtml).join('')}` : ''}
+          ${(productPlanProgress.length>0 && state.currentRole !== 'marketer') ? `<h4 style="margin-top:4px;">По продуктам (сезонность)</h4>${productPlanProgress.map(productRowHtml).join('')}` : ''}
         ` : `<div style="color:var(--ink-soft);font-size:13px;">План на этот месяц ещё не задан.</div>`}
       </div>
     `;
@@ -33357,6 +33983,7 @@
           <button class="nav-btn" id="an-next">›</button>
         </div>
       </div>
+      ${(()=>{ try{ const c = state.analyticsCursor || new Date(); return renderMyChecklistSection(c.getFullYear()+'-'+String(c.getMonth()+1).padStart(2,'0'), resolvedName || myName); }catch(e){ return ''; } })()}
       ${(myMissingReports.length > 0 && reportsRequiredNow()) ? `
         <div class="analytics-section" style="border:1px solid var(--status-red);">
           <h4 style="color:var(--status-red);">📝 Не сдано отчётов: ${myMissingReports.length}</h4>
@@ -34379,7 +35006,7 @@
       render();
     };
     overlay.querySelector('#manager-shift-save').onclick = async ()=>{
-      if(state.currentRole === 'master' || state.currentRole === 'admin'){
+      if(!canEditManagerShifts()){
         overlay.remove();
         state.modal = {type:'day', date: shiftDate};
         render();
@@ -39745,6 +40372,7 @@
           <button class="nav-btn" id="acl-next">›</button>
           ${ds !== todayStr() ? `<button class="today-btn" id="acl-today">сегодня</button>` : ''}
         </div>
+        ${list === 'manager' && canEditManagerShifts() ? `<button class="acl-mini-btn" style="margin-top:6px;" onclick="window.__openMgrMonth && window.__openMgrMonth('${ds.slice(0,7)}')">📅 График менеджеров на месяц</button>` : ''}
         <div class="acl-sub" style="margin-top:6px;">На смене: ${people.length ? people.map(p=> escapeHtml(p.name + (p.senior ? ' (СА)' : '') + (p.start ? ' ' + p.start + '–' + p.end : ''))).join(' · ') : 'никто не назначен'}</div>
         <div class="acl-progress"><div style="width:${pct}%;"></div></div>
         <div class="acl-sub">Выполнено <b>${s.done}</b> из ${s.total}${s.overdue ? ` · <span class="acl-bad">просрочено ${s.overdue}</span>` : ''}${s.notdone ? ` · <span class="acl-bad">не сделано ${s.notdone}</span>` : ''}</div>
@@ -40171,7 +40799,7 @@
   }
   function catDirectionsHtml(){
     const role = state.currentRole;
-    const money = ['owner','admin','assistant','manager'].includes(role);
+    const money = roleCanSeeRevenue(role);
     const fin = ['owner','assistant'].includes(role);
     const c = state.cursor; const ym = c.getFullYear() + '-' + pad(c.getMonth()+1);
     const all = eventCatalogList(); const refIdx = refEntriesByName();
@@ -40300,6 +40928,155 @@
     const g = NAV_GROUPS.find(x=> x.views.some(v=> v[0] === state.view));
     if(g){ state.navGroupLast = state.navGroupLast || {}; state.navGroupLast[g.key] = state.view; }
   }
+
+  // ===================== 📅 ГРАФИК МЕНЕДЖЕРОВ НА МЕСЯЦ =====================
+  // Раньше — только по одному дню (окно дня → «График менеджеров» → ✎). Теперь — весь месяц одной таблицей
+  // с быстрым заполнением «2/2» и «по дням недели». Править могут руководитель, ассистент и старший администратор.
+  function canEditManagerShifts(role){ return ['owner','assistant','admin'].includes(role || state.currentRole); }
+  function openManagerMonthSchedule(ym){
+    if(!canEditManagerShifts()){ showGapWarningBanner('График менеджеров меняют руководитель, ассистент и старший администратор.'); return; }
+    const now = new Date();
+    let Y = ym ? Number(ym.slice(0,4)) : now.getFullYear(), M = ym ? Number(ym.slice(5,7)) - 1 : now.getMonth();
+    let draft = {};
+    const DOW = ['Вс','Пн','Вт','Ср','Чт','Пт','Сб'];
+    const ymOf = ()=> Y + '-' + pad(M+1);
+    const days = ()=>{ const n = new Date(Y, M+1, 0).getDate(); return Array.from({ length:n }, (_, i)=> ymOf() + '-' + pad(i+1)); };
+    const load = ()=>{ draft = {}; days().forEach(d=>{ const v = managerForDate(d); if(v) draft[d] = v; }); };
+    // менеджеры из реестра + кто стоял в графике последние 2 месяца (подмены) + уже выбранные в этом месяце
+    const names = ()=>{ const s = new Set(MANAGER_LIST); const from = addDaysIso(todayStr(), -62);
+      Object.entries(state.managerShifts||{}).forEach(([d, v])=>{ if(d >= from && String(v||'').trim()) s.add(String(v).trim()); });
+      Object.values(draft).forEach(v=> v && s.add(v)); return [...s]; };
+    const opt = (sel)=> `<option value="">—</option>` + names().map(n=> `<option value="${escapeHtml(n)}" ${sel === n ? 'selected' : ''}>${escapeHtml(n)}</option>`).join('');
+    let dirty = false;
+    const ov = document.createElement('div');
+    ov.className = 'mgs-ov'; ov.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.45);display:flex;align-items:flex-start;justify-content:center;z-index:9998;padding:20px 12px;overflow:auto;';
+    const draw = ()=>{
+      const ds = days(); const today = todayStr();
+      const cnt = {}; ds.forEach(d=>{ const v = draft[d]; if(v) cnt[v] = (cnt[v]||0) + 1; });
+      const empty = ds.filter(d=> !draft[d]).length;
+      ov.innerHTML = `<div class="mgs-box">
+        <div class="mgs-head"><b>📅 График менеджеров</b>
+          <span class="mgs-nav"><button class="nav-btn" data-m="-1">‹</button><b>${escapeHtml(MONTHS[M])} ${Y}</b><button class="nav-btn" data-m="1">›</button></span>
+          <button class="modal-close" data-x>×</button></div>
+        <div class="mgs-fill">
+          <div class="mgs-fill-row"><b>Чередовать 2/2:</b> <select id="mgs-a">${opt(MANAGER_LIST[0] || '')}</select> и <select id="mgs-b">${opt(MANAGER_LIST[1] || '')}</select>
+            с <input type="date" id="mgs-from" value="${ds[0]}" min="${ds[0]}" max="${ds[ds.length-1]}"> <button class="btn btn-ghost acl-mini" id="mgs-22">Заполнить</button></div>
+          <div class="mgs-fill-row"><b>По дням недели:</b> ${[1,2,3,4,5,6,0].map(w=> `<label class="mgs-wd">${DOW[w]} <select data-wd="${w}">${opt('')}</select></label>`).join('')} <button class="btn btn-ghost acl-mini" id="mgs-wk">Заполнить</button></div>
+          <div class="mgs-fill-row"><label><input type="checkbox" id="mgs-only-empty"> заполнять только пустые дни</label> · <button class="acl-mini-btn" id="mgs-clear">очистить месяц</button></div>
+        </div>
+        <div class="mgs-grid">${ds.map(d=>{ const w = parseDate(d).getDay();
+          return `<label class="mgs-day${w === 0 || w === 6 ? ' we' : ''}${d === today ? ' today' : ''}${draft[d] ? '' : ' empty'}"><span>${DOW[w]}, ${Number(d.slice(8))}</span><select data-d="${d}">${opt(draft[d] || '')}</select></label>`; }).join('')}</div>
+        <div class="mgs-foot"><span class="acl-sub">${Object.entries(cnt).map(([n, c])=> escapeHtml(n) + ': ' + c + ' дн.').join(' · ') || 'никто не назначен'}${empty ? ` · <span style="color:var(--danger);font-weight:600;">без менеджера: ${empty} дн.</span>` : ''}</span>
+          <span style="margin-left:auto;display:flex;gap:8px;"><button class="btn btn-ghost" data-x>Отмена</button><button class="btn btn-primary" id="mgs-save">Сохранить</button></span></div>
+      </div>`;
+      const $ = (s)=> ov.querySelector(s);
+      ov.querySelectorAll('[data-x]').forEach(b=> b.onclick = ()=>{ if(dirty && !confirmClose()) return; ov.remove(); });
+      ov.querySelectorAll('[data-m]').forEach(b=> b.onclick = ()=>{ if(dirty && !confirmClose()) return; M += Number(b.dataset.m); if(M < 0){ M = 11; Y--; } if(M > 11){ M = 0; Y++; } load(); dirty = false; draw(); });
+      ov.querySelectorAll('[data-d]').forEach(s=> s.onchange = ()=>{ if(s.value) draft[s.dataset.d] = s.value; else delete draft[s.dataset.d]; dirty = true; draw(); });
+      const onlyEmpty = ()=> $('#mgs-only-empty').checked;
+      const put = (d, v)=>{ if(onlyEmpty() && draft[d]) return; if(v) draft[d] = v; else if(!onlyEmpty()) delete draft[d]; };
+      $('#mgs-22').onclick = ()=>{ const a = $('#mgs-a').value, b = $('#mgs-b').value, from = $('#mgs-from').value || ds[0];
+        if(!a || !b){ showGapWarningBanner('Выберите двух менеджеров для 2/2.'); return; }
+        ds.filter(d=> d >= from).forEach((d, i)=> put(d, Math.floor(i / 2) % 2 === 0 ? a : b)); dirty = true; draw(); };
+      $('#mgs-wk').onclick = ()=>{ const by = {}; ov.querySelectorAll('[data-wd]').forEach(s=> by[s.dataset.wd] = s.value);
+        if(!Object.values(by).some(Boolean)){ showGapWarningBanner('Выберите менеджера хотя бы на один день недели.'); return; }
+        ds.forEach(d=>{ const v = by[String(parseDate(d).getDay())]; if(v) put(d, v); }); dirty = true; draw(); };
+      $('#mgs-clear').onclick = ()=>{ if(!$('#mgs-clear').dataset.sure){ $('#mgs-clear').dataset.sure = '1'; $('#mgs-clear').textContent = 'точно очистить? нажмите ещё раз'; return; } draft = {}; dirty = true; draw(); };
+      $('#mgs-save').onclick = async ()=>{
+        if(!state.managerShifts) state.managerShifts = {};
+        ds.forEach(d=>{ if(draft[d]) state.managerShifts[d] = draft[d]; else delete state.managerShifts[d]; });
+        try{ await saveManagerShifts(); }catch(e){ showGapWarningBanner('Не удалось сохранить график — проверьте интернет и повторите.'); return; }
+        try{ recordAction('График менеджеров', MONTHS[M] + ' ' + Y); }catch(e){}
+        try{ showToast('📅 График менеджеров сохранён'); }catch(e){}
+        dirty = false; ov.remove(); render();
+      };
+    };
+    const confirmClose = ()=> true; // несохранённые правки — закрываем без вопросов (системные диалоги в приложении не используем)
+    load(); draw(); document.body.appendChild(ov);
+    ov.addEventListener('click', (e)=>{ if(e.target === ov) ov.remove(); });
+  }
+  window.__openMgrMonth = (ym)=> openManagerMonthSchedule(ym || (state.cursor ? state.cursor.getFullYear() + '-' + pad(state.cursor.getMonth()+1) : ''));
+
+
+  // ===================== 🗓 СТАРШИЕ МАСТЕРА САМИ ВЫБИРАЮТ СВОИ ДАТЫ =====================
+  // В «🎨 Графике мастеров» у старшего мастера (должность «Старший мастер» в доступах) есть кнопка «🗓 Выбрать свои даты»:
+  // свободный слот — «＋ взять», свой — «✓ моя» (нажать, чтобы отказаться). Слоты — те же, что в графике
+  // (по умолчанию будни 15–22, выходные 12–17 и 17–22; меняются в «⚙ Время слотов»). Пишется в тот же график мастеров.
+  function isSeniorMasterName(name){
+    if(!name) return false;
+    try{ const rec = (staffPosData().people || {})[spKey(name)]; if(rec && Array.isArray(rec.pos) && rec.pos.includes('pos-senior-master')) return true; }catch(e){}
+    try{ return staffPositionsOf(name).some(id=>{ const p = staffPositionById(id); return id === 'pos-senior-master' || (p && /старш\S*\s+мастер/i.test(p.name)); }); }catch(e){ return false; }
+  }
+  function smCanSelfPick(){ const me = msMyName(); return state.currentRole === 'master' && !!me && isSeniorMasterName(me); }
+  function openSeniorMasterSlots(ym){
+    const me = String(msMyName() || '').trim();
+    if(!smCanSelfPick()){ showGapWarningBanner(me ? 'Свои даты выбирают старшие мастера. Если вы старший мастер — попросите руководителя отметить должность в доступах.' : 'Войдите по личному паролю — приложение должно знать, кто вы.'); return; }
+    const now = new Date();
+    let Y = ym ? Number(ym.slice(0,4)) : now.getFullYear(), M = ym ? Number(ym.slice(5,7)) - 1 : now.getMonth();
+    const DOW = ['Вс','Пн','Вт','Ср','Чт','Пт','Сб'];
+    const same = (a, b)=> normName(a) === normName(b);
+    let draft = {}; let dirty = false;
+    const days = ()=>{ const n = new Date(Y, M+1, 0).getDate(); return Array.from({ length:n }, (_, i)=> Y + '-' + pad(M+1) + '-' + pad(i+1)); };
+    const load = ()=>{ draft = {}; days().forEach(d=>{ const m = masterShiftMap(d); masterSlotsForDate(d).forEach(k=>{ draft[d + '|' + k] = (m[k] || []).slice(); }); }); };
+    const hoursOf = (k)=>{ const [a, b] = String(k).split('-'); const x = aclMin(a), y = aclMin(b); return (x !== null && y !== null && y > x) ? (y - x) / 60 : 0; };
+    const ov = document.createElement('div');
+    ov.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.45);display:flex;align-items:flex-start;justify-content:center;z-index:9998;padding:20px 12px;overflow:auto;';
+    const draw = ()=>{
+      const ds = days(); const today = todayStr();
+      const mineKeys = Object.keys(draft).filter(k=> draft[k].some(n=> same(n, me)));
+      const hours = mineKeys.reduce((h, k)=> h + hoursOf(k.split('|')[1]), 0);
+      const free = Object.keys(draft).filter(k=> k.split('|')[0] >= today && !draft[k].length).length;
+      const slotHtml = (d, k)=>{
+        const names = draft[d + '|' + k] || []; const past = d < today; const t = slotLabelFull(k).replace(/:00/g, '');
+        if(names.some(n=> same(n, me))) return `<button class="sas-slot mine" data-k="${d}|${k}" ${past ? 'disabled' : ''} title="${past ? 'Прошедший день' : 'Нажмите, чтобы отказаться'}"><span>${t}</span><b>✓ моя</b></button>`;
+        if(names.length) return `<div class="sas-slot other"><span>${t}</span><b>${escapeHtml(names.join(', '))}</b></div>`;
+        return `<button class="sas-slot free" data-k="${d}|${k}" ${past ? 'disabled' : ''}><span>${t}</span><b>${past ? '—' : '＋ взять'}</b></button>`;
+      };
+      ov.innerHTML = `<div class="mgs-box">
+        <div class="mgs-head"><b>🗓 Мои даты — старший мастер</b>
+          <span class="mgs-nav"><button class="nav-btn" data-m="-1">‹</button><b>${escapeHtml(MONTHS[M])} ${Y}</b><button class="nav-btn" data-m="1">›</button></span>
+          <button class="modal-close" data-x>×</button></div>
+        <div class="mgs-fill">${escapeHtml(me)}, нажмите «＋ взять» на свободном слоте, на своём — чтобы отказаться. Слоты, которые уже заняты, видно с именем. Обычно: будни 15–22, выходные 12–17 и 17–22.</div>
+        <div class="sas-grid">${ds.map(d=>{ const w = parseDate(d).getDay(); const sl = masterSlotsForDate(d);
+          return `<div class="sas-day${w === 0 || w === 6 ? ' we' : ''}${d === today ? ' today' : ''}${d < today ? ' past' : ''}"><div class="sas-d">${DOW[w]}, ${Number(d.slice(8))}</div>${sl.length ? sl.map(k=> slotHtml(d, k)).join('') : '<div class="acl-sub">слотов нет</div>'}</div>`; }).join('')}</div>
+        <div class="mgs-foot"><span class="acl-sub">Мои слоты: <b>${mineKeys.length}</b> · ${hours} ч · свободно с сегодняшнего дня: <b style="${free ? 'color:var(--danger);' : ''}">${free}</b></span>
+          <span style="margin-left:auto;display:flex;gap:8px;"><button class="btn btn-ghost" data-x>Отмена</button><button class="btn btn-primary" id="sas-save" ${dirty ? '' : 'disabled'}>Сохранить</button></span></div>
+      </div>`;
+      ov.querySelectorAll('[data-x]').forEach(b=> b.onclick = ()=> ov.remove());
+      ov.querySelectorAll('[data-m]').forEach(b=> b.onclick = ()=>{ M += Number(b.dataset.m); if(M < 0){ M = 11; Y--; } if(M > 11){ M = 0; Y++; } load(); dirty = false; draw(); });
+      ov.querySelectorAll('button[data-k]').forEach(b=> b.onclick = ()=>{
+        const k = b.dataset.k; const arr = draft[k] || [];
+        draft[k] = arr.some(n=> same(n, me)) ? arr.filter(n=> !same(n, me)) : [...arr, me];
+        dirty = true; draw(); });
+      ov.querySelector('#sas-save').onclick = async ()=>{
+        if(!state.masterShifts) state.masterShifts = {};
+        const changed = [];
+        days().forEach(d=>{
+          if(d < todayStr()) return;
+          const cur = masterShiftMap(d); let touched = false; const next = { ...cur };
+          masterSlotsForDate(d).forEach(k=>{
+            const had = (cur[k] || []).some(n=> same(n, me)), want = (draft[d + '|' + k] || []).some(n=> same(n, me));
+            if(had === want) return;
+            // берём только свободный слот (если кто-то успел занять раньше — не перезаписываем)
+            if(want && (cur[k] || []).length){ changed.push(d.slice(8) + ' ' + k + ' — уже занят'); return; }
+            next[k] = want ? [...(cur[k] || []), me] : (cur[k] || []).filter(n=> !same(n, me));
+            if(!next[k].length) delete next[k];
+            touched = true; changed.push(d.slice(8) + ' ' + k + (want ? ' — взят' : ' — освобождён'));
+          });
+          if(touched){ if(Object.keys(next).length) state.masterShifts[d] = next; else delete state.masterShifts[d]; }
+        });
+        if(!changed.length){ ov.remove(); return; }
+        try{ await saveMasterShifts(); }catch(e){ showGapWarningBanner('Не удалось сохранить — проверьте интернет и повторите.'); return; }
+        try{ recordAction('Старший мастер выбрал даты', me + ': ' + changed.slice(0, 8).join(', ') + (changed.length > 8 ? ' и ещё ' + (changed.length - 8) : '')); }catch(e){}
+        const busy = changed.filter(x=> x.endsWith('уже занят'));
+        try{ showToast(busy.length ? '⚠ Часть слотов уже заняли: ' + busy.join(', ') : '🗓 Ваши даты сохранены'); }catch(e){}
+        ov.remove(); render();
+      };
+    };
+    load(); draw(); document.body.appendChild(ov);
+    ov.addEventListener('click', (e)=>{ if(e.target === ov) ov.remove(); });
+  }
+  window.__openSmSlots = (ym)=> openSeniorMasterSlots(ym || (state.cursor ? state.cursor.getFullYear() + '-' + pad(state.cursor.getMonth()+1) : ''));
 
   // ===================== 🗓 ДЕНЬ МАСТЕРА НА СЛОТЕ =====================
   // Мастер стоит на слоте (будни 15–22, выходные 12–17 и 17–22). Внутри слота видно:
@@ -40765,7 +41542,8 @@
         ${mdtCanSeeAnalytics() ? `<button class="btn ${state.msTab !== 'stats' ? 'btn-primary' : 'btn-ghost'}" data-mstab="grid">🗓 График</button><button class="btn ${state.msTab === 'stats' ? 'btn-primary' : 'btn-ghost'}" data-mstab="stats">📊 Аналитика смен</button><span style="width:10px;"></span>` : ''}
         ${state.msTab === 'stats' && mdtCanSeeAnalytics() ? '' : btn('weekend','Сб и Вс') + btn('all','Весь месяц')}
         ${canEd ? `<span style="flex:1;"></span><button class="btn btn-primary" id="ms-bulk">＋ Назначить на несколько дней</button><button class="btn btn-ghost" id="ms-slots">⚙ Время слотов</button>` : ''}
-        ${mdtCanEditTpl() ? `${canEd ? '' : '<span style="flex:1;"></span>'}<button class="btn btn-ghost" id="ms-tpl">🔁 Шаблон смены</button>` : ''}
+        ${smCanSelfPick() ? `${canEd ? '' : '<span style="flex:1;"></span>'}<button class="btn btn-primary" type="button" onclick="window.__openSmSlots && window.__openSmSlots()">🗓 Выбрать свои даты</button>` : ''}
+        ${mdtCanEditTpl() ? `${canEd || smCanSelfPick() ? '' : '<span style="flex:1;"></span>'}<button class="btn btn-ghost" id="ms-tpl">🔁 Шаблон смены</button>` : ''}
       </div>
       ${state.msTab === 'stats' && mdtCanSeeAnalytics() ? renderMasterShiftAnalytics() + '<!--ms-stats-end-->' : ''}
       ${me ? `<div style="background:#FFF8DC;border:1px solid #E9D98A;border-radius:10px;padding:8px 12px;margin-bottom:10px;font-size:13px;">
@@ -41030,7 +41808,7 @@
         <div class="shift-block-title">График менеджеров</div>
         <div class="shift-row">
           <span class="shift-name ${name?'':'empty'}">${name ? escapeHtml(name) : 'не назначено'}</span>
-          ${(state.currentRole !== 'master' && state.currentRole !== 'admin') ? `<button class="manager-shift-edit-btn" data-date="${dateStr}">✎</button>` : ''}
+          ${canEditManagerShifts() ? `<button class="manager-shift-edit-btn" data-date="${dateStr}">✎</button><button class="manager-shift-edit-btn" type="button" onclick="event.stopPropagation(); window.__openMgrMonth && window.__openMgrMonth('${dateStr.slice(0,7)}')" title="График менеджеров на весь месяц">📅 месяц</button>` : ''}
         </div>
       </div>
     `;
@@ -41113,10 +41891,10 @@
         <div class="modal-body">
           ${dayEventsCount > 0 ? `
           <div style="display:flex; gap:10px; margin-top:-6px; margin-bottom:4px;">
-            <div style="flex:1; background:var(--paper-2); border-radius:var(--radius); padding:10px 12px; text-align:center;">
+            ${roleCanSeeRevenue(state.currentRole) ? `<div style="flex:1; background:var(--paper-2); border-radius:var(--radius); padding:10px 12px; text-align:center;">
               <div style="font-family:var(--font-mono); font-size:17px; font-weight:600;">${formatMoney(dayRevenue)}</div>
               <div style="font-size:11px; color:var(--ink-soft);">выручка за день</div>
-            </div>
+            </div>` : ''}
             <div style="flex:1; background:var(--paper-2); border-radius:var(--radius); padding:10px 12px; text-align:center;">
               <div style="font-family:var(--font-mono); font-size:17px; font-weight:600;">${dayGuests}</div>
               <div style="font-size:11px; color:var(--ink-soft);">гостей</div>
@@ -41629,6 +42407,7 @@
           <div class="field">
             <label>Зарплата мастеру (₽) <span style="font-weight:400;color:var(--ink-soft);">— считается автоматически по тарифу, можно поправить вручную</span></label>
             <input type="number" id="f-master-pay" data-auto="${ev.masterPayAuto===false?'false':'true'}" value="${(ev.masterPay!==undefined && ev.masterPay!==null) ? ev.masterPay : masterPayForGuests(ev.guests, ev.host, ev.title)}" min="0" step="50">
+            ${(()=>{ try{ if(ev.host && eventInMasterSlot(ev, ev.host)) return `<div style="font-size:11.5px;color:#4E5733;margin-top:4px;font-weight:600;">📦 МК в слоте мастера на пакете — входит в оклад, отдельно 0 ₽</div>`; if(ev.host && ev.date >= MASTER_PKG_FROM && ev.date <= todayStr() && eventKnownZeroGuests(ev)) return `<div style="font-size:11.5px;color:var(--status-red);margin-top:4px;">0 гостей — МК не проведён, не оплачивается</div>`; }catch(e){} return ''; })()}
           </div>
           <div class="field">
             <label>Дополнительные ведущие и их зарплата <span style="font-weight:400;color:var(--ink-soft);">— если мероприятие ведут несколько человек</span></label>
