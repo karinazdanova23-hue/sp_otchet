@@ -4243,8 +4243,8 @@
     // первым стоит раздел, куда сотрудник попадает после входа, дальше — по частоте ежедневного использования
     hostess: ['adminshift','calendar','prep','cashbox','certificates','print','tufting','reference','book','analytics','host'],
     master: ['host','masters','analytics','my-orders','matreq','reportsfeed','calendar'],
-    manager: ['certificates','adminshift','calendar','reference','reference','planprogress','prep','marketing','book','host','analytics'],
-    assistant: ['calendar','adminshift','reference','certificates','book','cashbox','reference','prep','marketing','masters','host','analytics'],
+    manager: ['certificates','calendar','reference','reference','planprogress','prep','marketing','book','host','analytics'],
+    assistant: ['partners','calendar','adminshift','reference','certificates','book','cashbox','reference','prep','marketing','masters','host','analytics'],
     admin: ['calendar','adminshift','reference','prep','cashbox','book','procurement','certificates','masters','reference','marketing','host','analytics'],
     marketer: ['marketing','calendar','masters','reference','planprogress','analytics','certificates','host'],
     owner: ['calendar','summary','adminshift','reference','analytics','book','cashbox','certificates','procurement','marketing','prep','reference','host','masters'],
@@ -4323,6 +4323,7 @@
     if(view==='my-orders') return !!ctx.master;
     if(view==='matreq') return !roleCanAccessProcurement(role);
     if(view==='reportsfeed') return true; // лента отчётов — для всех сотрудников (после входа)
+    if(view==='partners') return roleCanSeePartners(role); // 🤝 партнёрка: ассистент ведёт, руководитель, менеджеры и маркетолог видят
     if(view==='adminshift') return ['hostess','admin','owner','assistant','manager'].includes(role); // ✅ чек-листы админов и менеджеров
     if(view==='reference') return roleCanSeeReference(role);
     if(view==='planprogress') return roleCanSeePlanProgress(role);
@@ -4342,7 +4343,7 @@
     ['calendar','По пространствам'], ['host','По ведущим'], ['masters','🎨 График мастеров'], ['analytics','Аналитика / 💰 Моя зарплата'],
     ['reference','📚 Каталог'], ['planprogress','🎯 План'], ['prep','🤝 Частники'], ['print','🖨 На печать'], ['tufting','🧶 Тафтинг'],
     ['certificates','Для менеджеров / Сертификаты'], ['marketing','Маркетинг'], ['book','Книга'], ['cashbox','💵 Касса'],
-    ['procurement','📦 Закупки'], ['reportsfeed','💬 Отчёты'], ['summary','📊 Сводка'], ['adminshift','✅ Чек-листы'],
+    ['procurement','📦 Закупки'], ['reportsfeed','💬 Отчёты'], ['summary','📊 Сводка'], ['adminshift','✅ Чек-листы'], ['partners','🤝 Партнёрка'],
   ];
   function blockAccessCfg(){
     if(!state.blockAccess || typeof state.blockAccess !== 'object') state.blockAccess = {};
@@ -4367,6 +4368,7 @@
     const role = state.currentRole;
     const base = canAccessViewBase(view, role, { master: !!state.loggedInMasterName, hostess: !!state.loggedInHostessName });
     if(!role || role === 'owner' || view === 'today' || view === 'my-orders') return base;
+    if(view === 'adminshift' && role === 'manager') return true; // чек-лист дня менеджеру открыт всегда, как администраторам — их чек-лист
     if(!ACCESS_BLOCKS.some(b=> b[0] === view)) return base;
     const rules = blockAccessCfg().positions;
     const ids = blockAccessPositionIds();
@@ -4956,6 +4958,7 @@
     }catch(e){ state.masterChecklist = {}; }
     await loadHelperShifts();
     await loadShootRequests();
+    await loadPartnerLeads();
     try{
       const cdr = await window.storage.get('closed-days', true);
       state.closedDays = cdr ? JSON.parse(cdr.value) : {};
@@ -5909,6 +5912,32 @@
     state.masterChecklist = server;
     await storageSetWithRetry('master-checklist-scores', JSON.stringify(server));
   }
+  // кого из мастеров на пакетах ещё не оценили к выплате: 1–15 — с 14-го числа, 16–конец — с предпоследнего дня,
+  // прошлый месяц (вторая половина) — до 5-го числа следующего
+  function mchkMissingFor(ds){
+    ds = ds || todayStr();
+    const ym = ds.slice(0,7), day = Number(ds.slice(8,10)), last = Number(ymLastDay(ym).slice(8,10));
+    const prevYm = (()=>{ const [y,m] = ym.split('-').map(Number); const d = new Date(y, m - 2, 1); return d.getFullYear() + '-' + String(d.getMonth()+1).padStart(2,'0'); })();
+    const want = [];
+    if(day <= 5) want.push([prevYm, 'h2']);
+    if(day >= 14) want.push([ym, 'h1']);
+    if(day >= last - 1) want.push([ym, 'h2']);
+    const out = [];
+    want.forEach(([y, h])=>{
+      if(y < MASTER_PKG_FROM.slice(0,7)) return;
+      const cfg = masterPkgMonthCfg(y);
+      const names = Object.keys(cfg).filter(n=> MASTER_PACKAGES[cfg[n].pkg] && masterChecklistScore(y, n, h) === null);
+      if(names.length) out.push({ ym: y, half: h, names });
+    });
+    return out;
+  }
+  function mchkLabel(x){ const mn = MONTH_GEN_RU[Number(x.ym.slice(5,7))-1]; return x.half === 'h1' ? '1–15 ' + mn : '16–конец ' + mn; }
+  function mchkGo(ym){
+    state.view = 'analytics'; state.analyticsFinTab = 'salary'; state.analyticsMode = 'overview';
+    try{ const [y, m] = String(ym || todayStr().slice(0,7)).split('-').map(Number); state.analyticsCursor = new Date(y, m - 1, 1); }catch(e){}
+    render(); setTimeout(()=>{ const s = document.getElementById('master-pkg-section'); if(s){ const d = s.closest('details'); if(d) d.open = true; s.scrollIntoView({ block:'start', behavior:'smooth' }); } }, 200);
+  }
+  if(!window.__mchkAlertBound){ window.__mchkAlertBound = true; document.addEventListener('click', (ev)=>{ const el = ev.target && ev.target.closest ? ev.target.closest('[data-alert-mchk]') : null; if(el){ ev.preventDefault(); ev.stopPropagation(); mchkGo(el.dataset.alertMchk); } }, true); }
   function openMasterChecklist(ym, name, half){
     const canEdit = roleCanRateMasters();
     const prev = masterChecklistRec(ym, name, half);
@@ -6366,6 +6395,8 @@
       itemSales: state.itemSales,
       orders: state.orders,
       salaryAdjustments: (state.salaryAdjustments||[]).filter(a=> !a.virtual),
+      partnerLeads: state.partnerLeads || [],
+      partnerPlan: state.partnerPlan || {},
       masterPayRates: state.masterPayRates,
       masterPayOverrides: state.masterPayOverrides,
       monthlyPlans: state.monthlyPlans,
@@ -6614,11 +6645,11 @@
   async function refreshSharedData(){
     if(refreshInFlight || !state.loaded || !state.currentRole) return;
     if(state.modal || failedSaveKeys.size > 0 || document.hidden) return;
-    if(document.querySelector('.modal, #lead-task-popup, #lead-popup, #crm-popup, #crm-lists-popup, #ft-popup')) return;
+    if(document.querySelector('.modal, #lead-task-popup, #lead-popup, #crm-popup, #crm-lists-popup, #ft-popup, #pt-modal')) return;
     const ae = document.activeElement; if(ae && /^(INPUT|TEXTAREA|SELECT)$/.test(ae.tagName) && ae.id !== 'global-search-input' && ae.id !== 'lb-q') return;
     refreshInFlight = true;
     try{
-      const specs = [['events','events','_eventsBaseline'],['certificates','certificates','_certificatesBaseline'],['incomes','incomes','_incomesBaseline'],['leads','leads','_leadsBaseline'],['lead-tasks','leadTasks','_leadTasksBaseline'],['clients','clients','_clientsBaseline']];
+      const specs = [['events','events','_eventsBaseline'],['certificates','certificates','_certificatesBaseline'],['incomes','incomes','_incomesBaseline'],['leads','leads','_leadsBaseline'],['lead-tasks','leadTasks','_leadTasksBaseline'],['clients','clients','_clientsBaseline'],['partner-leads','partnerLeads','_partnerLeadsBaseline']];
       let changed = false;
       for(const [key, prop, baseProp] of specs){
         const cur = Array.isArray(state[prop]) ? state[prop] : [];
@@ -7718,7 +7749,37 @@
     if(JSON.stringify(eventFormatItems(a)) !== JSON.stringify(eventFormatItems(b))) out.push(`формат: ${eventFormatText(b) || '—'}`);
     LEGAL_DOC_KINDS.forEach(k=>{ if(!!(a.documents||{})[k.key] !== !!(b.documents||{})[k.key]) out.push(`${k.label}: ${(b.documents||{})[k.key] ? 'прикреплён ✓' : 'удалён'}`); });
     if((a.payerType||'individual') !== (b.payerType||'individual') || (b.payerType === 'legal' && (a.companyName||'') !== (b.companyName||''))) out.push(`плательщик: ${b.payerType === 'legal' ? 'юрлицо ' + (b.companyName||'') : 'физлицо'}`);
-    if((a.notes||'').trim() !== (b.notes||'').trim()) out.push('заметки');
+    const cut = (t)=>{ t = String(t||'').trim().replace(/\s+/g,' '); return t ? (t.length > 80 ? t.slice(0,80) + '…' : t) : '—'; };
+    if((a.notes||'').trim() !== (b.notes||'').trim()) out.push(`заметки: «${cut(a.notes)}» → «${cut(b.notes)}»`);
+    if((Number(a.duration)||0) !== (Number(b.duration)||0)) out.push(`длительность: ${formatDuration(Number(a.duration)||0)} → ${formatDuration(Number(b.duration)||0)}`);
+    if((Number(a.rentalBefore)||0) !== (Number(b.rentalBefore)||0)) out.push(`аренда до: ${formatDuration(Number(a.rentalBefore)||0)} → ${formatDuration(Number(b.rentalBefore)||0)}`);
+    if((Number(a.rentalAfter)||0) !== (Number(b.rentalAfter)||0)) out.push(`аренда после: ${formatDuration(Number(a.rentalAfter)||0)} → ${formatDuration(Number(b.rentalAfter)||0)}`);
+    if((a.product||'') !== (b.product||'')) out.push(`продукт: ${a.product||'—'} → ${b.product||'—'}`);
+    // оплаты по отдельности: какие добавлены, какие убраны
+    const pKey = (p)=> p.id ? 'id:' + p.id + '|' + (Number(p.amount)||0) + '|' + (p.source||'') : [p.date||'', p.ts||'', Number(p.amount)||0, p.source||'', p.guestId||''].join('|');
+    const pTxt = (p)=> `${formatMoney(Number(p.amount)||0)}${p.source ? ' (' + p.source + ')' : ''}${p.date ? ' от ' + lgDateDots(p.date) : ''}`;
+    const pA = (a.payments||[]).map(pKey), pB = (b.payments||[]).map(pKey);
+    const pAdd = (b.payments||[]).filter(p=> !pA.includes(pKey(p))), pDel = (a.payments||[]).filter(p=> !pB.includes(pKey(p)));
+    if(pAdd.length) out.push('оплата добавлена: ' + pAdd.map(pTxt).join(', '));
+    if(pDel.length) out.push('оплата убрана: ' + pDel.map(pTxt).join(', '));
+    // гости по отдельности
+    const gName = (g)=> (g && (g.name||'').trim()) || 'без имени';
+    const gA = (a.guestList||[]), gB = (b.guestList||[]);
+    const gid = (g)=> g.id || gName(g);
+    const gAdd = gB.filter(g=> !gA.some(x=> gid(x) === gid(g))), gDel = gA.filter(g=> !gB.some(x=> gid(x) === gid(g)));
+    if(gAdd.length) out.push('гости добавлены: ' + gAdd.map(gName).join(', '));
+    if(gDel.length) out.push('гости убраны: ' + gDel.map(gName).join(', '));
+    const gChanged = gB.filter(g=>{ const o = gA.find(x=> gid(x) === gid(g)); return o && JSON.stringify(o) !== JSON.stringify(g); });
+    if(gChanged.length) out.push('изменены данные гостей: ' + gChanged.map(gName).join(', '));
+    if((a.guestName||'') !== (b.guestName||'') || (a.guestPhone||'') !== (b.guestPhone||'')) out.push(`контакт: ${a.guestName||'—'} ${a.guestPhone||''} → ${b.guestName||'—'} ${b.guestPhone||''}`.replace(/\s+/g,' '));
+    const ah = (x)=> (x.additionalHosts||[]).map(h=>h && h.name).filter(Boolean).join(', ');
+    if(ah(a) !== ah(b)) out.push(`доп. ведущие: ${ah(a)||'—'} → ${ah(b)||'—'}`);
+    if((a.dishes||'') !== (b.dishes||'') || (a.dishesPayment||'') !== (b.dishesPayment||'') || (a.dishesWasher||'') !== (b.dishesWasher||'')) out.push('посуда');
+    if((a.ageCategory||'') !== (b.ageCategory||'')) out.push(`возраст: ${cut(a.ageCategory)} → ${cut(b.ageCategory)}`);
+    if((a.foodInfo||'') !== (b.foodInfo||'')) out.push(`еда: «${cut(a.foodInfo)}» → «${cut(b.foodInfo)}»`);
+    if((Number(a.itemsCount)||0) !== (Number(b.itemsCount)||0)) out.push(`изделий: ${Number(a.itemsCount)||0} → ${Number(b.itemsCount)||0}`);
+    if((a.film||'') !== (b.film||'')) out.push(`фильм: ${a.film||'—'} → ${b.film||'—'}`);
+    if(JSON.stringify(a.masterReport||null) !== JSON.stringify(b.masterReport||null)) out.push('отчёт мастера');
     return out.join(' · ');
   }
   async function saveCertificates(){
@@ -8998,6 +9059,8 @@
       html += renderBizSettingsView();
     } else if(state.view === 'adminshift'){
       html += renderAdminShiftView();
+    } else if(state.view === 'partners'){
+      html += renderPartnersView();
     }
     app.innerHTML = html;
     attachHeaderEvents();
@@ -9023,6 +9086,7 @@
     else if(state.view === 'masters'){ attachMastersScheduleEvents(); }
     else if(state.view === 'bizsettings'){ attachBizSettingsEvents(); }
     else if(state.view === 'adminshift'){ attachAdminShiftEvents(); }
+    else if(state.view === 'partners'){ attachPartnersEvents(); }
 
     try{ installListSearch(); }catch(e){ console.error('list search failed', e); }
     if(state.modal){ renderModal(); }
@@ -9229,7 +9293,7 @@
                 <div class="today-status-dot" style="background:${statusColor(e.status)};"></div>
                 <div class="today-time">${eventStartLabel(e)}</div>
                 <div class="today-info">
-                  <div class="title">${escapeHtml(e.title)}${prodTag(e.product)?` <span class="today-tag">${escapeHtml(prodTag(e.product))}</span>`:''}</div>
+                  <div class="title">${escapeHtml(e.title)}${prodTag(e.product)?` <span class="today-tag">${escapeHtml(prodTag(e.product))}</span>`:''}${srBadgeHtml(e)}</div>
                   <div class="meta">
                     <span>${spaceBadge(sp,'sm')} ${escapeHtml(sp.name)}</span>
                     <span>· ${STATUS_LABEL[e.status]||e.status}</span>
@@ -9449,7 +9513,7 @@
         if(todayOpen > 0) alerts.push({icon:'⚠️', text:`Сегодня частник, а детали от клиента не внесены: ${todayOpen}`, view:'prep', prepTab:'today'});
         const phN = photoPendingCount();
         if(phN > 0) alerts.push({icon:'📸', text:`Отправить фото частникам: ${phN}`, view:'prep', prepTab:'photos'});
-        if(notSent > 0) alerts.push({icon:'✉️', text: late ? `Письма клиентам на завтра просрочены (срок ${PREP_DEADLINE_HOUR}:00): ${late}` : `Написать клиентам на завтра: ${notSent}`, view:'prep', prepTab:'tomorrow'});
+        if(notSent > 0 && state.currentRole !== 'manager') alerts.push({icon:'✉️', text: late ? `Письма клиентам на завтра просрочены (срок ${PREP_DEADLINE_HOUR}:00): ${late}` : `Написать клиентам на завтра: ${notSent}`, view:'prep', prepTab:'tomorrow'});
       }catch(e){}
     }
 
@@ -9496,6 +9560,31 @@
     if(['manager','owner','admin','assistant'].includes(state.currentRole)){
       const nf = eventsMissingFormat(30).length;
       if(nf > 0) alerts.push({icon:'🎨', text:`Не указан формат (холст / граммовка / флаконы): ${nf}`, formats:true});
+    }
+    // ✅ оценить чек-лист мастеров на пакетах — без оценки премия за половину месяца будет 0
+    if(['owner','admin'].includes(state.currentRole)){
+      try{ const mm = mchkMissingFor(todayStr()); if(mm.length){ const x = mm[0]; alerts.unshift({ icon:'✅', text:`Оценить чек-лист мастеров за ${mchkLabel(x)}: ${x.names.join(', ')}${mm.length > 1 ? ' (и ещё период)' : ''} — без оценки премия 0`, mchkYm: x.ym }); } }catch(e){}
+    }
+    // 🤝 партнёрка: автозадачи ассистенту (и руководителю), афиши — маркетологу и SMM
+    try{
+      if(canAccessView('partners') && ['assistant','owner'].includes(state.currentRole)){
+        const pt = ptTasks(); if(pt.length){ const urg = pt.filter(t=> t.urgent).length; alerts.push({ icon:'🤝', text:`Партнёрка: задач ${pt.length}${urg ? ' · срочных ' + urg : ''}`, view:'partners', ptTab:'tasks' }); }
+      }
+      if(canAccessView('partners') && ['marketer','smm'].includes(state.currentRole)){
+        const pn = ptPosterNeeded().length; if(pn) alerts.unshift({ icon:'📣', text:`Афиши для партнёрки: ${pn} — согласовано, афиши ещё нет`, view:'partners', ptTab:'board' });
+      }
+    }catch(e){}
+    // 📸 автозадача маркетологу (и SMM): снять мероприятия, где поставили «Нужна съёмка»
+    if(['marketer','smm'].includes(state.currentRole)){
+      try{
+        const tasks = srOpenTasks();
+        if(tasks.length){
+          const t = todayStr(), tm = addDaysIso(t, 1);
+          const nToday = tasks.filter(x=> x.e.date === t).length, nTom = tasks.filter(x=> x.e.date === tm).length, nNew = tasks.filter(x=> x.r.status === 'new').length;
+          const first = tasks[0].e;
+          alerts.unshift({ icon:'📸', text: `Задачи на съёмку: ${tasks.length}${nToday ? ' · сегодня ' + nToday : ''}${nTom ? ' · завтра ' + nTom : ''}${nNew ? ' · новых ' + nNew : ''} — ближайшая ${formatDateText(first.date)}${first.time ? ' ' + first.time : ''} «${first.title||''}»`, view:'marketing', marketingView:'shoots' });
+        }
+      }catch(e){}
     }
     try{ const ca = controlAlert(); if(ca) alerts.unshift(ca); }catch(e){ console.error(e); }
     try{ const aa = aclAlert(); if(aa) alerts.unshift(aa); }catch(e){}
@@ -9721,6 +9810,10 @@
     buttons.push({key:'calendar', html: `<button data-view="calendar" class="${state.view==='calendar'?'active':''}">По пространствам</button>`});
     buttons.push({key:'host', html: `<button data-view="host" class="${state.view==='host'?'active':''}">По ведущим</button>`});
     buttons.push({key:'masters', html: `<button data-view="masters" class="${state.view==='masters'?'active':''}">🎨 График мастеров</button>`});
+    if(canAccessView('partners')){
+      let ptN = 0; try{ ptN = ['assistant','owner'].includes(role) ? ptTasks().length : (['marketer','smm'].includes(role) ? ptPosterNeeded().length : 0); }catch(e){}
+      buttons.push({key:'partners', html: `<button data-view="partners" class="${state.view==='partners'?'active':''}">🤝 Партнёрка${ptN ? ' <span style="background:var(--danger);color:#fff;border-radius:9px;padding:0 6px;font-size:11px;">' + ptN + '</span>' : ''}</button>`});
+    }
     if(canAccessViewBase('adminshift', role)){
       const an = aclOverdueOwn(role); const albl = role === 'manager' ? '✅ Чек-лист дня' : (role === 'hostess' ? '✅ Чек-лист смены' : (role === 'admin' ? '✅ Отчёт СА' : '✅ Чек-листы'));
       buttons.push({key:'adminshift', html: `<button data-view="adminshift" class="${state.view==='adminshift'?'active':''}">${albl}${an ? ' <span style="background:var(--danger);color:#fff;border-radius:9px;padding:0 6px;font-size:11px;">'+an+'</span>' : ''}</button>`});
@@ -9783,6 +9876,7 @@
     const priority = NAV_PRIORITY_BY_ROLE[role] || [];
     const priorityIndex = (key)=>{ const i = priority.indexOf(key); return i===-1 ? 999 : i; };
     buttons.sort((a,b)=> priorityIndex(a.key) - priorityIndex(b.key)); // стабильная сортировка — порядок остальных кнопок не меняется
+    if(role === 'manager'){ const i = buttons.findIndex(b=> b.key === 'adminshift'); if(i >= 0) buttons.push(buttons.splice(i, 1)[0]); } // чек-лист дня — последним в меню
     try{ navCollapseGroups(buttons); }catch(e){ console.warn('nav groups', e); }
     return buttons.map(b=>b.html).join('');
   }
@@ -9859,7 +9953,7 @@
       </div>
       ${alerts.length ? `
       <div class="daily-alerts-banner">
-        ${alerts.map(a=>`<span class="daily-alert-item${(a.view||a.legalDocs||a.wishes||a.missingReports||a.reminders||a.formats||a.controlFlags)?' clickable':''}" ${a.formats?'data-alert-formats="1"':''} ${a.controlFlags?'data-alert-control="1" style="background:#FBE3DD;color:#9B2C1F;font-weight:700;"':''} ${a.view?`data-alert-view="${a.view}" data-alert-certview="${a.certView||''}" data-alert-preptab="${a.prepTab||''}"`:''} ${a.missingReports?'data-alert-missingreports="1"':''} ${a.legalDocs?'data-alert-legaldocs="1"':''} ${a.reminders?'data-alert-reminders="1"':''} ${a.wishes?'data-alert-wishes="1"':''}>${a.icon} ${escapeHtml(a.text)}</span>`).join('')}
+        ${alerts.map(a=>`<span class="daily-alert-item${(a.view||a.mchkYm||a.legalDocs||a.wishes||a.missingReports||a.reminders||a.formats||a.controlFlags)?' clickable':''}" ${a.formats?'data-alert-formats="1"':''} ${a.controlFlags?'data-alert-control="1" style="background:#FBE3DD;color:#9B2C1F;font-weight:700;"':''} ${a.view?`data-alert-view="${a.view}" data-alert-certview="${a.certView||''}" data-alert-preptab="${a.prepTab||''}" data-alert-mview="${a.marketingView||''}" data-alert-pttab="${a.ptTab||''}"`:''} ${a.mchkYm?`data-alert-mchk="${a.mchkYm}" style="background:#E4EBD3;color:#3E4A1E;font-weight:700;"`:''} ${'' ? ``:''} ${a.missingReports?'data-alert-missingreports="1"':''} ${a.legalDocs?'data-alert-legaldocs="1"':''} ${a.reminders?'data-alert-reminders="1"':''} ${a.wishes?'data-alert-wishes="1"':''}>${a.icon} ${escapeHtml(a.text)}</span>`).join('')}
       </div>
       ` : ''}
     `;
@@ -9921,7 +10015,7 @@
           ${managerLine ? `<div class="cal-manager" title="Менеджер: ${escapeHtml(managerLine)}">👔 ${escapeHtml(managerLine)}</div>` : ''}
           ${dayOffEntries.length ? `<div class="cal-dayoff-line" title="Выходной: ${escapeHtml(dayOffEntries.map(x=>ROLE_LABELS[x.role] ? `${x.name} (${ROLE_LABELS[x.role]})` : x.name).join(', '))}">🚫 ${escapeHtml(dayOffEntries.map(x=>x.name).join(', '))}</div>` : ''}
           <div class="cal-events">
-            ${shown.map(e=>`<div class="cal-evt-chip" style="background:${statusColor(e.status)}" title="${escapeHtml(eventStartLabel(e) + ' ' + (e.title||'') + (isCinemaEvent(e.title) ? (eventFilm(e) ? ' · 🎬 ' + eventFilm(e) : ' · 🎬 фильм не поставлен') : '') + (e.host ? ' · ' + e.host : '') + (eventFormatText(e) ? '\n🎨 ' + eventFormatText(e) : '') + (eventTimingText(e) && state.currentRole!=='master' ? '\n' + eventTimingText(e) : ''))}">${isAll?spaceBadge(getSpace(e.spaceId),'xs'):''}<span class="t">${eventStartLabel(e)}</span>${guestBadgeHtml(e, 'xs')}<span class="evt-title">${escapeHtml(e.title)}</span>${isCinemaEvent(e.title) && e.status !== 'cancelled' ? (eventFilm(e) ? `<span class="evt-film" title="Фильм: ${escapeHtml(eventFilm(e))}" style="margin-left:4px;font-size:10.5px;opacity:.95;white-space:nowrap;">🎬 ${escapeHtml(eventFilm(e))}</span>` : `<span title="Фильм не поставлен" style="margin-left:4px;font-size:10px;background:#fff;color:#A3402F;border-radius:6px;padding:0 4px;white-space:nowrap;font-weight:700;">🎬 нет фильма</span>`) : ''}</div>`).join('')}
+            ${shown.map(e=>`<div class="cal-evt-chip" style="background:${statusColor(e.status)}" title="${escapeHtml(eventStartLabel(e) + ' ' + (e.title||'') + (isCinemaEvent(e.title) ? (eventFilm(e) ? ' · 🎬 ' + eventFilm(e) : ' · 🎬 фильм не поставлен') : '') + (e.host ? ' · ' + e.host : '') + (eventFormatText(e) ? '\n🎨 ' + eventFormatText(e) : '') + (eventTimingText(e) && state.currentRole!=='master' ? '\n' + eventTimingText(e) : ''))}">${isAll?spaceBadge(getSpace(e.spaceId),'xs'):''}<span class="t">${eventStartLabel(e)}</span>${guestBadgeHtml(e, 'xs')}<span class="evt-title">${escapeHtml(e.title)}</span>${srBadgeHtml(e, 'xs')}${isCinemaEvent(e.title) && e.status !== 'cancelled' ? (eventFilm(e) ? `<span class="evt-film" title="Фильм: ${escapeHtml(eventFilm(e))}" style="margin-left:4px;font-size:10.5px;opacity:.95;white-space:nowrap;">🎬 ${escapeHtml(eventFilm(e))}</span>` : `<span title="Фильм не поставлен" style="margin-left:4px;font-size:10px;background:#fff;color:#A3402F;border-radius:6px;padding:0 4px;white-space:nowrap;font-weight:700;">🎬 нет фильма</span>`) : ''}</div>`).join('')}
             ${extra>0?`<div class="cal-more">+${extra} ещё</div>`:''}
           </div>
         </div>
@@ -10323,6 +10417,8 @@
       const prev = leadStatus(l); if(!['new','needs','brief'].includes(prev)) return false;
       if(l.kind === 'b2b' && !(l.company||'').trim()){ showGapWarningBanner('B2B-заявка: укажите компанию в заявке, потом переведите в «КП отправлено».'); return false; }
       if(!l.revenue && o.total) l.revenue = Math.round(o.total);
+      if(!leadHasMonth(l) && o.date){ l.eventYm = String(o.date).slice(0,7); l.eventMonth = leadMonthName(l.eventYm); }
+      if(!leadHasMonth(l)){ const v = await leadKpPrompt(l, false, true); if(v === false) return false; l.eventYm = v.ym; l.eventMonth = leadMonthName(v.ym); }
       l.status = 'kp'; l.statusAt = new Date().toISOString();
       await saveLeads(); await leadStageTasks(l, prev); return true;
     },
@@ -10888,14 +10984,21 @@
         const mi = B.date ? parseDate(B.date).getMonth() : -1;
         const monthName = mi >= 0 ? MONTHS[mi].charAt(0).toUpperCase() + MONTHS[mi].slice(1) : LEAD_MONTH_OPTIONS[0];
         const comment = 'КП на ' + formatMoney(T.total) + ': ' + summary.map(x=>x.name).join(', ') + (B.client && B.client.trim() ? ' · ' + B.client.trim() : '') + (B.wishes && B.wishes.trim() ? ' · ' + B.wishes.trim() : '');
-        lead = { id: uid(), requestDate: todayStr(), contact, eventMonth: monthName, source: B.source, product: PROD[B.type] || LEAD_PRODUCTS[0],
+        lead = { id: uid(), requestDate: todayStr(), contact, eventMonth: monthName, eventYm: B.date ? String(B.date).slice(0,7) : '', source: B.source, product: PROD[B.type] || LEAD_PRODUCTS[0],
           location: pos.every(x=>/выезд/i.test(x.v.space||'')) ? 'offsite' : 'in_studio', revenue: Math.round(T.total), sold: false, saleDate: '', saleKind: '', eventId: '', orderId: '',
           comment, hasPhoto: false, status: markSent ? 'kp' : 'brief', lostReason: '', kpId: offer.id, owner: leadOwnerNow(), statusAt: now, kind: B.type === 'corp' ? 'b2b' : 'b2c', company: B.type === 'corp' ? (B.client||'').trim() : '' };
         state.leads.push(lead); offer.leadId = lead.id;
       } else {
         if(!lead.sold) lead.revenue = Math.round(T.total);
         if(!lead.kpId) lead.kpId = offer.id;
+        if(!leadHasMonth(lead) && B.date){ lead.eventYm = String(B.date).slice(0,7); lead.eventMonth = leadMonthName(lead.eventYm); }
         if(markSent && ['new','needs','brief'].includes(leadStatus(lead))){ lead.status = 'kp'; lead.statusAt = now; }
+      }
+      // «КП отправлено» без месяца мероприятия не оставляем — спрашиваем
+      if(lead.status === 'kp' && !leadHasMonth(lead)){
+        const v = await leadKpPrompt(lead, false, true);
+        if(v === false){ lead.status = _prevSt && _prevSt !== 'kp' ? _prevSt : 'brief'; showGapWarningBanner('Месяц мероприятия не выбран — заявка осталась на этапе «' + leadStatusLabel(lead.status) + '». КП сохранено.'); }
+        else { lead.eventYm = v.ym; lead.eventMonth = leadMonthName(v.ym); }
       }
       await saveLeads(); await saveKpOffers();
       await leadStageTasks(lead, _prevSt);
@@ -16485,12 +16588,11 @@
       if(stage === 'kp' && l.kind === 'b2b' && (!(l.company||'').trim() || !(l.niche||'').trim())){
         state.modal = {type:'lead', isNew:false, lead:{ ...l, status:'kp', sold:false }, needKpFields: 'B2B-заявка на этапе «КП отправлено» — укажите компанию, нишу' + (Number(l.revenue) > 0 ? '' : ' и сумму') + ', затем «Сохранить».'}; render(); return;
       }
-      if(stage === 'kp' && !(Number(l.revenue) > 0)){
-        const v = await spConfirm({ title: 'КП отправлено', text: `«${(l.contact||'заявка').trim()}» — впишите сумму выручки из КП. Без суммы заявку на этот этап не перенести.`, okText: 'Перенести', input: { type:'number', placeholder:'Сумма, ₽', min: 1 } });
+      if(stage === 'kp' && (!(Number(l.revenue) > 0) || !leadHasMonth(l))){
+        const v = await leadKpPrompt(l, !(Number(l.revenue) > 0), !leadHasMonth(l));
         if(v === false) return;
-        const amt = Math.round(Number(v));
-        if(!(amt > 0)){ showGapWarningBanner('Сумма должна быть больше нуля.'); return; }
-        l.revenue = amt;
+        if(v.revenue) l.revenue = v.revenue;
+        if(v.ym){ l.eventYm = v.ym; l.eventMonth = leadMonthName(v.ym); }
       }
       l.status = stage; l.sold = false; if(cur === 'lost') l.lostReason = '';
       l.statusAt = new Date().toISOString();
@@ -16515,23 +16617,30 @@
     if(l && l.sold && l.createdAt && log.some(x=> x.type === 'created') && !log.some(x=> x.type === 'stage')) return { day: isoLocalDate(l.createdAt), who: l.createdBy || '' };
     return { day: '', who: '' };
   }
+  // День продажи во ВСЕХ отчётах (День, статистика, срок продажи, проценты менеджеров) — день, когда менеджер нажал «Продано»
+  // (момент из истории заявки). Нет записи в истории — когда заявке поставили статус «Продано»; совсем старые — дата продажи из карточки.
   function leadSaleDay(l){
     if(!l || !l.sold) return '';
-    const m = leadSoldMoment(l).day, sd = l.saleDate || '';
-    if(!sd) return m || (l.statusAt ? isoLocalDate(l.statusAt) : '');
-    return (m && sd > m) ? m : sd;
+    const m = leadSoldMoment(l).day;
+    if(m) return m;
+    if(l.statusAt) return isoLocalDate(l.statusAt);
+    return l.saleDate || '';
   }
   // кому засчитать продажу: ответственный по заявке; если его нет — тот, кто перевёл в «Продано» / завёл заявку
   function leadSeller(l){ return (l && l.owner) || leadSoldMoment(l).who || (l && (l.createdBy || l.quickBy)) || ''; }
   function dyWhoKey(n){ const s = String(n||'').trim(); if(!s) return ''; return isManagerName(s) ? managerCanon(s) : s; }
   function dyTime(ts){ const d = new Date(ts); return isNaN(d) ? '' : pad(d.getHours()) + ':' + pad(d.getMinutes()); }
+  // «День» у менеджеров: продажа засчитывается в тот день, когда менеджер нажал «Продано» (момент из истории заявки),
+  // а не по «дате продажи» в карточке — её часто ставят датой мероприятия. Если в истории нажатия нет — по времени,
+  // когда заявке поставили статус «Продано»; и только для совсем старых заявок без этих данных — по дате продажи.
+  function dySoldDay(l){ return leadSaleDay(l); }
   function dyStats(D){
     const P = {}; const T = { newLeads:0, sold:0, rev:0, moves:0, lost:0, done:0, kp:0, soldList:[], feed:[], other:[], otherN:0, otherRev:0 };
     const per = (who)=>{ const k = dyWhoKey(who) || 'Без имени'; return P[k] = P[k] || { name:k, newLeads:0, sold:0, rev:0, moves:0, lost:0, done:0, late:0, kp:0, acts:[], otherN:0, otherRev:0 }; };
     const onDay = (ts)=> !!ts && isoLocalDate(ts) === D;
     const act = (who, ts, icon, text, leadId)=>{ const p = per(who); p.acts.push(ts); T.feed.push({ ts, who: p.name, icon, text, leadId }); };
     // одно мероприятие продано по нескольким заявкам — засчитываем одну (самую раннюю продажу)
-    const evMain = new Map(); (state.leads||[]).forEach(l=>{ if(!l.sold || !l.eventId) return; const c = evMain.get(l.eventId); if(!c || (leadSaleDay(l)||'9') < (leadSaleDay(c)||'9')) evMain.set(l.eventId, l); });
+    const evMain = new Map(); (state.leads||[]).forEach(l=>{ if(!l.sold || !l.eventId) return; const c = evMain.get(l.eventId); if(!c || (dySoldDay(l)||'9') < (dySoldDay(c)||'9')) evMain.set(l.eventId, l); });
     T.dups = [];
     (state.leads||[]).forEach(l=>{
       const log = Array.isArray(l.log) ? l.log : [];
@@ -16546,8 +16655,8 @@
         const by = l.createdBy || l.quickBy || (cr && (cr.by || cr.who)) || owner;
         if(cTs) act(by, cTs, '🆕', 'Новая заявка: ' + nm + (l.source ? ' · ' + l.source : ''), l.id);
       }
-      if(l.sold && leadSaleDay(l) === D && l.eventId && evMain.get(l.eventId) !== l){ T.dups.push({ l, main: evMain.get(l.eventId) }); }
-      else if(l.sold && leadSaleDay(l) === D){
+      if(l.sold && dySoldDay(l) === D && l.eventId && evMain.get(l.eventId) !== l){ T.dups.push({ l, main: evMain.get(l.eventId) }); }
+      else if(l.sold && dySoldDay(l) === D){
         const amt = leadActualRevenue(l).amount;
         T.sold++; T.rev += amt; const p = per(leadSeller(l)); p.sold++; p.rev += amt;
         T.soldList.push(l);
@@ -16725,6 +16834,7 @@
         <span>🆕 заявок <b>${x.newLeads}</b></span>
         <span>➡️ по воронке <b>${x.moves}</b></span>
         <span>✅ задач <b>${x.done}</b></span>
+        ${(()=>{ try{ const P = revenuePlanLeft(D.slice(0,7)); if(!P) return ''; return P.left ? `<span>📊 до плана <b>${formatMoney(P.left)}</b> (${P.pct}%)</span>` : '<span>📊 план выполнен ✓</span>'; }catch(e){ return ''; } })()}
         ${(()=>{ try{ const B = dyBonusData(D); if(!B) return ''; const r = B.revNext; return r ? `<span>🎯 до бонуса <b>${formatMoney(r.need)}</b></span>` : '<span>🎯 бонус по выручке получен</span>'; }catch(e){ return ''; } })()}
         <span class="dy-s-more">подробнее ›</span></button>`;
     }catch(e){ console.warn(e); return ''; }
@@ -16811,7 +16921,7 @@
     const bonusHtml = dyBonusHtml(D);
     const lyHtml = lyCompareHtml(D);
     return `<div class="dy-wrap">${head}
-      <div class="dy-hint">Сертификаты и товары — по дате продажи (маркетинговые и возвращённые сертификаты не считаются). Продажи заявок — по дню, когда заявку продали (момент перевода в «Продано» по истории заявки), а не по дате мероприятия; «по воронке» — каждая смена этапа (кто её сделал); задачи — выполненные менеджером (автозакрытые программой не считаются): ⚙️ автозадачи воронки и ✍️ ручные, которые поставили себе, коллеге или руководство. «Обычно» — среднее за 7 предыдущих дней.</div>
+      <div class="dy-hint">Сертификаты и товары — по дате продажи (маркетинговые и возвращённые сертификаты не считаются). Продано — заявки, которые менеджер перевёл в «Продано» именно в этот день (когда пройдёт мероприятие — не важно, дата продажи в карточке тоже не влияет); «по воронке» — каждая смена этапа (кто её сделал); задачи — выполненные менеджером (автозакрытые программой не считаются): ⚙️ автозадачи воронки и ✍️ ручные, которые поставили себе, коллеге или руководство. «Обычно» — среднее за 7 предыдущих дней.</div>
       ${kpis}
       ${lyHtml}
       ${revDeltaHtml(D)}
@@ -16870,7 +16980,7 @@
     const nOpen = (state.leadTasks||[]).filter(t=>!t.done && t.due && t.due <= todayStr() && taskAlive(t)).length;
     const bar = `<div class="sub-tabs" style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:12px;">${tabs.map(t=>`<button class="btn ${tab===t[0]?'btn-primary':'btn-ghost'}" data-convtab="${t[0]}">${t[1]}${t[0]==='tasks' && nOpen ? ' <span style="color:'+(tab==='tasks'?'#fff':'var(--danger)')+';">('+nOpen+')</span>' : ''}</button>`).join('')}</div>`;
     const _lpStrip = (!_mkt && tab !== 'clients' && tab !== 'stats' && tab !== 'control' && tab !== 'forecast' && tab !== 'day') ? (()=>{ try{ const c = new Date(); const ym = c.getFullYear()+'-'+pad(c.getMonth()+1); return renderRevenuePlanStrip(ym) + renderLeadPlanHtml(ym, { strip:true }); }catch(e){ return ''; } })() : '';
-    return bar + ((!_mkt && (tab === 'board' || tab === 'tasks')) ? renderDayStrip() : '') + (tab === 'tasks' ? renderRopTasksStrip() : '') + _lpStrip + (tab === 'board' && !_mkt ? renderForecastStrip() + renderForecastNextStrip() : '') + (tab === 'day' ? renderLeadDayView() : tab === 'forecast' ? renderForecastView() : tab === 'control' ? renderLeadControlView() : tab === 'tasks' ? renderLeadTasksView() : (tab === 'clients' ? renderClientsView() : tab === 'stats' ? renderConversionStatsView() : renderLeadBoard()));
+    return bar + ((!_mkt && (tab === 'board' || tab === 'tasks')) ? renderDayStrip() : '') + (tab === 'tasks' ? renderRopTasksStrip() : '') + _lpStrip + (tab === 'board' && !_mkt ? renderKpNoMonthStrip() + renderForecastStrip() + renderForecastNextStrip() : '') + (tab === 'day' ? renderLeadDayView() : tab === 'forecast' ? renderForecastView() : tab === 'control' ? renderLeadControlView() : tab === 'tasks' ? renderLeadTasksView() : (tab === 'clients' ? renderClientsView() : tab === 'stats' ? renderConversionStatsView() : renderLeadBoard()));
   }
 
 
@@ -18121,13 +18231,24 @@
 
     // насколько заранее планируют: месяц мероприятия совпадает с текущим / это будущий месяц / неизвестно
     const currentMonthName = MONTHS[new Date().getMonth()].charAt(0).toUpperCase()+MONTHS[new Date().getMonth()].slice(1);
-    const planningGroups = { 'На текущий месяц': 0, 'На будущий месяц': 0, 'Неизвестно': 0 };
-    const planningSoldGroups = { 'На текущий месяц': 0, 'На будущий месяц': 0, 'Неизвестно': 0 };
+    // Месяц мероприятия сравниваем с месяцем, когда пришла заявка (а не с сегодняшним):
+    // проданная заявка — по дате привязанного мероприятия; иначе — дата мероприятия, месяц из воронки (с годом)
+    // или старое поле «Месяц мероприятия» (год подбирается от даты заявки)
+    const PL = ['В месяц обращения', 'На следующий месяц', 'На 2+ месяца вперёд', 'Неизвестно'];
+    const planningGroups = Object.fromEntries(PL.map(k=> [k, 0]));
+    const planningSoldGroups = Object.fromEntries(PL.map(k=> [k, 0]));
+    const ymIdx = (ym)=> Number(ym.slice(0,4)) * 12 + Number(ym.slice(5,7));
     allLeadsInPeriod.forEach(l=>{
-      let key;
-      if(!l.eventMonth || l.eventMonth === 'Нет информации') key = 'Неизвестно';
-      else if(l.eventMonth === currentMonthName) key = 'На текущий месяц';
-      else key = 'На будущий месяц';
+      let key = 'Неизвестно';
+      try{
+        const ev = l.eventId ? state.events.find(e=> e.id === l.eventId) : null;
+        const evYm = (ev && ev.date) ? ev.date.slice(0,7) : fcLeadMonth(l);
+        const reqYm = String(l.requestDate || (l.createdAt ? isoLocalDate(l.createdAt) : '')).slice(0,7);
+        if(evYm && /^\d{4}-\d{2}$/.test(reqYm)){
+          const d = ymIdx(evYm) - ymIdx(reqYm);
+          key = d <= 0 ? PL[0] : (d === 1 ? PL[1] : PL[2]);
+        }
+      }catch(e){}
       planningGroups[key]++;
       if(l.sold) planningSoldGroups[key]++;
     });
@@ -18177,7 +18298,7 @@
         <div style="margin-top:10px;">
       <div class="analytics-section">
         <h4>Насколько заранее планируют мероприятие</h4>
-        <div style="font-size:11.5px;color:var(--ink-soft);font-family:var(--font-mono);margin-bottom:8px;">Сравнение поля «Месяц мероприятия» с текущим месяцем (${escapeHtml(currentMonthName)}).</div>
+        <div style="font-size:11.5px;color:var(--ink-soft);font-family:var(--font-mono);margin-bottom:8px;">Месяц мероприятия по сравнению с месяцем, когда пришла заявка. Берётся дата привязанного мероприятия, иначе дата или месяц мероприятия из заявки (менеджеры указывают его на этапе «КП отправлено»).</div>
         ${planningList.map(x=>`
           <div class="stat-row">
             <div class="stat-label" style="width:140px;">${escapeHtml(x.name)}</div>
@@ -18271,7 +18392,7 @@
               <div class="cell">${escapeHtml(l.product||'')}</div>
               <div class="cell">${l.location==='offsite'?'Выезд':'В СП'}</div>
               <div class="amount">${l.revenue!==undefined&&l.revenue!==null ? formatMoney(l.revenue) : ''}</div>
-              <div class="sold-mark">${leadBadgeHtml(l)}${l.sold&&l.saleDate?'<br><span style="font-size:10px;color:var(--ink-soft);">'+formatDateText(l.saleDate)+'</span>':''}${l.eventId?'<br><span style="font-size:10px;color:var(--status-green);">🔗 МК</span>':''}${l.orderId?'<br><span style="font-size:10px;color:var(--status-purple);">🔗 Заказ</span>':''}</div>
+              <div class="sold-mark">${leadBadgeHtml(l)}${l.sold&&leadSaleDay(l)?'<br><span style="font-size:10px;color:var(--ink-soft);">'+formatDateText(leadSaleDay(l))+'</span>':''}${l.eventId?'<br><span style="font-size:10px;color:var(--status-green);">🔗 МК</span>':''}${l.orderId?'<br><span style="font-size:10px;color:var(--status-purple);">🔗 Заказ</span>':''}</div>
             </div>
           `).join('')}
         </div>
@@ -19681,7 +19802,7 @@
   // детали внесены), контроль сроков и история для руководителя. Всё хранится в самом мероприятии: e.prep
   const PREP_FROM = '2026-11-14';       // с какого дня мероприятий включаем контроль
   const PREP_DEADLINE_HOUR = 18;        // написать клиенту нужно до 18:00 дня накануне
-  const PREP_TPL_KEY = 'prep-letter-template';
+  const PREP_TPL_KEY = 'prep-letter-template-v2'; // v2 — новый скрипт (старый шаблон больше не подставляется)
   const PREP_NETS = [
     { k:'Telegram',  icon:'✈️', bg:'#2AABEE' },
     { k:'Instagram', icon:'📸', bg:'#C13584' },
@@ -19689,15 +19810,8 @@
     { k:'MAX',       icon:'Ⓜ️', bg:'#6C3BF5' },
     { k:'Звонок',    icon:'📞', bg:'#75804F' }
   ];
-  const PREP_DEFAULT_TPL = 'Здравствуйте{, имя}! Это студия «Свободное Пространство» 🌿\n\n'
-    + 'Напоминаем: {когда} в {время} ждём вас на «{мероприятие}»{где}.\n\n'
-    + 'Чтобы мы всё подготовили, подскажите, пожалуйста:\n'
-    + '1. Сколько гостей точно будет?\n'
-    + '2. Нужна ли посуда (тарелки, бокалы, приборы) — на сколько человек?\n'
-    + '3. Что планируете из еды и напитков? Будет ли торт?\n'
-    + '4. Будут ли дети и какого возраста?\n'
-    + '5. Во сколько приедете и нужно ли что-то подготовить заранее (декор, музыка, зона для фото)?\n'
-    + '{остаток}\nДо встречи! 💛';
+  // скрипт письма клиенту накануне (ноябрь 2026); {приветствие} = «Имя, добрый день!» или «Добрый день!», если имени нет
+  const PREP_DEFAULT_TPL = "{приветствие}🤍️️️️️️\n\nМы уже готовимся к вашему завтрашнему мероприятию!☺️\n\nХочется, чтобы всё прошло легко и вам ни о чём не пришлось думать на месте🤞️️️️️️\n\nПодскажите, пожалуйста, когда будет удобно:\n\n— итоговое количество гостей;\n— пригодится ли посуда: бокалы, тарелки, приборы, чайные пары;\n— будет ли доставка (еда, торт, цветы), чтобы мы её встретили и всё разместили до вашего прихода.\n\nЕсли есть ещё пожелания или задуман сюрприз, поделитесь, с радостью поможем🔥️️️️️️";
   function roleCanAccessPrep(role){ return ['hostess','admin','owner','assistant','manager'].includes(role); }
   function prepCanEditTpl(){ return ['owner','admin','assistant'].includes(state.currentRole); }
   function prepCanReset(){ return ['owner','admin'].includes(state.currentRole); }
@@ -19774,6 +19888,7 @@
     const rem = eventRemainderTotal(e);
     const where = e.status === 'offsite' ? '' : ' (' + (sp && sp.name ? sp.name + ', ' : '') + 'ул. Пушкина, 6)';
     return prepTpl()
+      .replace(/\{приветствие\}/g, first ? first + ', добрый день!' : 'Добрый день!')
       .replace(/\{,\s*имя\}/g, first ? ', ' + first : '')
       .replace(/\{имя\}/g, first)
       .replace(/\{когда\}/g, prepDayWord(e.date))
@@ -20218,6 +20333,514 @@
     declined: { label:'Не получится',     color:'#6E6E6E', bg:'#EFEFEF' },
   };
   function srCanHandle(){ return ['marketer','smm','owner','assistant'].includes(state.currentRole); }
+
+  // ===================== 🤝 Партнёрка: мероприятия в ресторанах и других местах (выезды) =====================
+  // Своя воронка (ведёт ассистент и руководитель; менеджеры, маркетолог и SMM видят). Хранится в 'partner-leads'.
+  // Вкладки: Воронка · Задачи (автозадачи ассистенту) · Партнёры (база площадок) · Аналитика (+ план партнёрки 'partner-plan').
+  // Договорённости (items) → выезды в календаре (пространство «Выезд»), синхронизация в обе стороны через снимок evSnap.
+  const PT_STAGES = [
+    { k:'new',    t:'🆕 Новая заявка',      c:'#3A86C8' },
+    { k:'kp',     t:'📄 Отправлено КП',     c:'#B8863A' },
+    { k:'agreed', t:'🤝 Согласовано',       c:'#75804F' },
+    { k:'poster', t:'📣 Выставлена афиша',  c:'#A23B72' },
+    { k:'done',   t:'✅ Проведено',         c:'#2F8F6B' },
+    { k:'paid',   t:'💰 Расчёт закрыт',     c:'#171512' },
+  ];
+  const PT_INIT = { we:'Мы написали', they:'Нам написали' };
+  const PT_KIT_BASE = ['Фартуки на всех гостей','Клеёнки / скатерти на столы','Салфетки и влажные салфетки','Мусорные пакеты','Удлинитель','Колонка и зарядка','Бейджи / таблички студии','Образцы готовых работ','Визитки и QR на отзыв','Терминал / QR для оплаты на месте'];
+  function roleCanSeePartners(role){ return ['assistant','owner','manager','marketer','smm'].includes(role); }
+  function ptCanEdit(){ return ['assistant','owner'].includes(state.currentRole); }
+  function ptCanPoster(){ return ptCanEdit() || ['marketer','smm'].includes(state.currentRole); }
+  function ptStage(k){ return PT_STAGES.find(s=> s.k === k) || PT_STAGES[0]; }
+  function ptStageIdx(k){ return Math.max(0, PT_STAGES.findIndex(s=> s.k === k)); }
+  async function loadPartnerLeads(){
+    try{ const r = await window.storage.get('partner-leads', true); state.partnerLeads = r ? JSON.parse(r.value) : []; }catch(e){ state.partnerLeads = []; }
+    if(!Array.isArray(state.partnerLeads)) state.partnerLeads = [];
+    state._partnerLeadsBaseline = JSON.parse(JSON.stringify(state.partnerLeads));
+    try{ const r = await window.storage.get('partner-plan', true); state.partnerPlan = r ? JSON.parse(r.value) : {}; }catch(e){ state.partnerPlan = {}; }
+  }
+  async function savePartnerLeads(){
+    await saveCollectionMerged('partner-leads', state.partnerLeads || [], state._partnerLeadsBaseline || [], (a)=>{ state.partnerLeads = a; state._partnerLeadsBaseline = JSON.parse(JSON.stringify(a)); });
+  }
+  function ptWho(){ try{ return feedWho(); }catch(e){ return ROLE_LABELS[state.currentRole] || ''; } }
+  function ptLog(p, text){ p.log = (Array.isArray(p.log) ? p.log : []).concat([{ ts: new Date().toISOString(), who: ptWho(), text }]).slice(-80); }
+  function ptDaysSince(iso){ const t = iso ? new Date(iso) : null; if(!t || isNaN(t)) return null; return Math.max(0, Math.floor((Date.now() - t.getTime()) / 864e5)); }
+  function ptDaysTo(ds){ const a = parseDate(todayStr()), b = parseDate(ds); return Math.round((b - a) / 864e5); }
+  function ptSafeUrl(u){ u = String(u||'').trim(); if(!u) return ''; if(/^@/.test(u)) return ''; if(!/^https?:\/\//i.test(u)) u = 'https://' + u; try{ const x = new URL(u); return /^https?:$/.test(x.protocol) ? x.href : ''; }catch(e){ return ''; } }
+  function ptVenueKey(place){ return String(place||'').toLowerCase().replace(/ё/g,'е').replace(/[«»"'“”]/g,'').replace(/^(ресторан|кафе|бар|кофейня|пространство|отель|гостиница|клуб)\s+/,'').split(',')[0].replace(/\s+/g,' ').trim(); }
+  function ptActive(){ return (state.partnerLeads||[]).filter(p=> !p.deleted); }
+  function ptItems(p){ return Array.isArray(p.items) ? p.items : []; }
+  function ptItemEventAny(it){ return it && it.eventId ? (state.events||[]).find(e=> e.id === it.eventId) || null : null; }
+  function ptItemEvent(it){ const e = ptItemEventAny(it); return e && e.status !== 'cancelled' ? e : null; }
+  function ptPendingItems(p){ return ptItems(p).filter(it=> it.date && !it.eventId); }
+  function ptDates(p){ return ptItems(p).map(it=> it.date).filter(Boolean).sort(); }
+  function ptPlanned(p){ return ptItems(p).reduce((a,it)=> a + (Number(it.price)||0), 0) || Number(p.amount) || 0; }
+  function ptRes(p){ const r = p.result || {}; const rev = Number(r.revenue)||0, share = Number(r.partnerShare)||0; const our = (r.ourIncome !== undefined && r.ourIncome !== null && r.ourIncome !== '') ? Number(r.ourIncome)||0 : Math.max(0, rev - share); return { guests: Number(r.guests)||0, revenue: rev, partnerShare: share, ourIncome: our }; }
+  function ptReceivedInCalendar(p){ return ptItems(p).reduce((a,it)=>{ const e = ptItemEvent(it); return a + (e ? Number(e.price)||0 : 0); }, 0); }
+  function ptEnterStage(p, k){ p.stage = k; p.stageAt = new Date().toISOString(); p.hist = (Array.isArray(p.hist) ? p.hist : []).concat([{ k, at: p.stageAt }]).slice(-40); }
+  function ptKitList(it){ return PT_KIT_BASE.concat(['Материалы на ' + (Number(it.guests)||'?') + ' гост. для МК «' + (it.mk || 'МК') + '»']).concat(String(it.kitExtra||'').split('\n').map(x=> x.trim()).filter(Boolean)); }
+  function ptKitStat(it){ const L = ptKitList(it); const k = it.kit || {}; return { done: L.filter(x=> k[x]).length, total: L.length }; }
+
+  // ---------- синхронизация с календарём ----------
+  function ptSnap(e){ return { date: e.date || '', time: e.time || '', duration: Number(e.duration)||0, guests: Number(e.guests)||0, title: e.title || '', agreedPrice: Number(e.agreedPrice)||0 }; }
+  // календарь → договорённости: мероприятие поменяли или отменили в расписании
+  function ptSyncFromCalendar(p){
+    let ch = false;
+    ptItems(p).forEach(it=>{
+      if(!it.eventId) return;
+      const e = ptItemEventAny(it);
+      if(!e){ it.eventId = ''; it.evSnap = null; it.evGone = true; ptLog(p, 'Выезд ' + formatDateText(it.date) + ' удалён из календаря'); ch = true; return; }
+      if(e.status === 'cancelled'){ if(!it.evCancelled){ it.evCancelled = true; ptLog(p, 'Выезд ' + formatDateText(it.date) + ' отменён в календаре'); ch = true; } return; }
+      if(it.evCancelled){ it.evCancelled = false; ch = true; }
+      const s = ptSnap(e), o = it.evSnap || {};
+      if(JSON.stringify(s) !== JSON.stringify(o)){
+        const diff = [];
+        if(s.date !== o.date || s.time !== o.time){ diff.push('дата/время ' + formatDateText(s.date) + ' ' + s.time); it.date = s.date; it.time = s.time; }
+        if(s.duration !== o.duration){ it.duration = s.duration; }
+        if(s.guests !== o.guests){ diff.push('гостей ' + s.guests); it.guests = s.guests; }
+        if(s.title !== o.title){ diff.push('название «' + s.title + '»'); it.mk = s.title; }
+        if(s.agreedPrice !== o.agreedPrice){ diff.push('цена ' + formatMoney(s.agreedPrice)); it.price = s.agreedPrice; }
+        if(it.evSnap && diff.length) ptLog(p, 'Изменено в календаре: ' + diff.join(', '));
+        it.evSnap = s; ch = true;
+      }
+    });
+    return ch;
+  }
+  // договорённости → календарь: поменяли дату/время/гостей/цену в карточке партнёрки
+  function ptPushToCalendar(p){
+    let n = 0;
+    ptItems(p).forEach(it=>{
+      const e = ptItemEvent(it); if(!e) return;
+      const want = { date: it.date || e.date, time: it.time || e.time, duration: Number(it.duration) || e.duration, guests: Number(it.guests)||0, title: (it.mk||'').trim() || e.title, agreedPrice: Number(it.price)||0 };
+      const cur = ptSnap(e);
+      if(JSON.stringify(ptSnap({ ...e, ...want })) !== JSON.stringify(cur)){ Object.assign(e, want); n++; }
+      it.evSnap = ptSnap(e);
+    });
+    return n;
+  }
+  function ptSyncAll(){
+    if(state._ptSyncing) return; state._ptSyncing = true;
+    try{
+      let ch = false; ptActive().forEach(p=>{ if(ptSyncFromCalendar(p)) ch = true; });
+      if(ch && ptCanEdit()) setTimeout(()=>{ savePartnerLeads().catch(()=>{}); }, 50);
+    }finally{ state._ptSyncing = false; }
+  }
+  // создать выездные мероприятия в календаре по договорённостям (пространство «Выезд», статус «Выезд»)
+  async function ptCreateEvents(p){
+    const todo = ptPendingItems(p); if(!todo.length) return 0;
+    const now = new Date().toISOString();
+    todo.forEach(it=>{
+      const notes = ['🤝 Партнёрка: ' + (p.place||''), p.address ? '📍 ' + p.address : '', p.contact ? '👤 ' + p.contact : '', p.terms ? 'Условия: ' + p.terms : '', it.transport ? '🚗 ' + it.transport : '', it.note || ''].filter(Boolean).join('\n');
+      const ev = { id: uid(), spaceId:'s5', date: it.date, time: it.time || '12:00', duration: Number(it.duration) || 120, guests: Number(it.guests) || 0,
+        title: (it.mk || '').trim() || ('Выезд: ' + (p.place||'партнёр')), product:'Мастер-класс', host:'', additionalHosts: [], status:'offsite',
+        price: 0, agreedPrice: Number(it.price) || 0, payments: [], guestList: [], notes, partnerLeadId: p.id,
+        prep: { skip: true, skipReason: 'Партнёрка — договорённости ведёт ассистент', at: now, by: ptWho() }, createdAt: now, createdBy: ptWho() };
+      state.events.push(ev); it.eventId = ev.id; it.evSnap = ptSnap(ev); it.evGone = false; it.evCancelled = false;
+    });
+    await saveEvents();
+    ptLog(p, '📅 Созданы выезды в календаре: ' + todo.map(it=> formatDateText(it.date) + (it.time ? ' ' + it.time : '')).join(', '));
+    try{ recordAction('Партнёрка: выезды в календаре', (p.place||'') + ' — ' + todo.length, { cat:'event', obj: p.place || '', verb:'создал(а)', silent:true }); }catch(e){}
+    return todo.length;
+  }
+  async function ptOfferCreateEvents(p){
+    const n = ptPendingItems(p).length;
+    if(!n){ if(!ptItems(p).some(it=> it.date)) showGapWarningBanner('Согласовано. Чтобы создать выезд в календаре, впишите в «Договорённости» дату мероприятия.'); return 0; }
+    const ok = await spConfirm({ title:'Согласовано 🤝', text:`Создать ${n} ${pluralRu(n,'выездное мероприятие','выездных мероприятия','выездных мероприятий')} в календаре (пространство «Выезд»)? Мастера можно будет назначить там. Маркетологу придёт задача сделать афишу.`, okText:'Создать', cancelText:'Позже' });
+    if(!ok) return 0;
+    const c = await ptCreateEvents(p); if(c) showToast('В календаре создано: ' + c); return c;
+  }
+
+  // ---------- автозадачи ассистенту ----------
+  function ptTasks(){
+    const out = []; const today = todayStr(); const tom = addDaysIso(today, 1);
+    ptActive().filter(p=> !p.lost).forEach(p=>{
+      const done = p.tasksDone || {};
+      const add = (key, icon, text, opts)=>{ if(done[key]) return; out.push({ key, p, icon, text, ...(opts||{}) }); };
+      const d = ptDaysSince(p.stageAt);
+      const future = ptDates(p).filter(x=> x >= today);
+      if(p.stage === 'kp' && d !== null && d >= 3) add('kpfollow|' + (p.stageAt||'').slice(0,10), '📨', `КП отправлено ${d} дн. назад — напомнить партнёру`, { urgent: d >= 7 });
+      if(p.stage === 'agreed' && !ptSafeUrl(p.posterUrl) && future.length){ const n = ptDaysTo(future[0]); if(n <= 14) add('poster|' + future[0], '📣', `Афиши ещё нет, до выезда ${n} дн. — поторопить маркетолога`, { urgent: n <= 7 }); }
+      if(['agreed','poster'].includes(p.stage)){
+        ptItems(p).forEach(it=>{
+          if(!it.date) return;
+          if(it.date === tom || it.date === today) add('confirm|' + it.id + '|' + it.date, '📞', `${it.date === today ? 'Сегодня' : 'Завтра'} выезд ${it.time||''} «${it.mk||'МК'}» — подтвердить с партнёром время, гостей и кто встречает`, { urgent: true, it });
+          const k = ptKitStat(it), n = ptDaysTo(it.date);
+          if(n >= 0 && n <= 2 && k.done < k.total) add('kit|' + it.id + '|' + it.date, '🧳', `Собрать с собой на выезд ${formatDateText(it.date)}: готово ${k.done} из ${k.total}`, { it });
+          if(it.evCancelled) add('cancel|' + it.id, '❌', `Выезд ${formatDateText(it.date)} отменён в календаре — уточнить у партнёра`, { urgent: true });
+        });
+        const all = ptDates(p);
+        if(all.length && all[all.length-1] < today) add('after|' + all[all.length-1], '✅', 'Выезд прошёл — внести итоги («Проведено»), забрать фото и отзыв, предложить следующую дату', { urgent: true, toStage:'done' });
+      }
+      if(p.stage === 'done') add('settle|' + (p.stageAt||'').slice(0,10), '💰', `Закрыть расчёт с партнёром${ptRes(p).partnerShare ? ' (доля партнёра ' + formatMoney(ptRes(p).partnerShare) + ')' : ''}`, { urgent: d !== null && d >= 5, toStage:'paid' });
+    });
+    return out.sort((a,b)=> (b.urgent?1:0) - (a.urgent?1:0));
+  }
+  // для маркетолога / SMM: согласовано, а афиши нет
+  function ptPosterNeeded(){ return ptActive().filter(p=> !p.lost && p.stage === 'agreed' && !ptSafeUrl(p.posterUrl)); }
+
+  // ---------- база партнёров ----------
+  function ptVenues(){
+    const m = new Map(); const today = todayStr();
+    ptActive().forEach(p=>{
+      const k = ptVenueKey(p.place); if(!k) return;
+      const v = m.get(k) || { key:k, name:'', deals:[], done:0, revenue:0, our:0, lastDate:'', contact:'', chat:'', address:'', active:0 };
+      v.deals.push(p);
+      if(!v.name || String(p.createdAt||'') > String(v._at||'')){ v.name = p.place; v._at = p.createdAt; if(p.contact) v.contact = p.contact; if(p.chat) v.chat = p.chat; if(p.address) v.address = p.address; }
+      if(['done','paid'].includes(p.stage)){ v.done++; const r = ptRes(p); v.revenue += r.revenue; v.our += r.ourIncome; }
+      if(!p.lost && !['done','paid'].includes(p.stage)) v.active++;
+      ptDates(p).filter(x=> x <= today).forEach(x=>{ if(x > v.lastDate) v.lastDate = x; });
+      m.set(k, v);
+    });
+    return [...m.values()].map(v=> ({ ...v, stale: v.done > 0 && !v.active && v.lastDate && ptDaysTo(v.lastDate) < -60 })).sort((a,b)=> (b.stale?1:0) - (a.stale?1:0) || b.revenue - a.revenue);
+  }
+  function ptRepeat(src){
+    const p = { id: uid(), stage:'new', stageAt: new Date().toISOString(), initiator:'we', owner: ptWho(), createdAt: new Date().toISOString(), createdBy: ptWho(),
+      place: src.place || src.name || '', contact: src.contact || '', chat: src.chat || '', address: src.address || '', format: src.format || '', terms: src.terms || '', items: [] };
+    p.hist = [{ k:'new', at: p.stageAt }];
+    ptLog(p, 'Создана повтором' + (src.id ? ' по прошлой сделке' : '') + ' · ' + PT_INIT.we);
+    return p;
+  }
+
+  // ---------- аналитика ----------
+  function ptStats(){
+    const all = ptActive();
+    const reached = (p)=> ptStageIdx(p.stage) >= ptStageIdx('agreed');
+    const byInit = ['we','they'].map(k=>{ const a = all.filter(p=> (p.initiator||'we') === k); const ok = a.filter(reached).length; const fin = a.filter(p=> reached(p) || p.lost).length; return { k, total: a.length, ok, lost: a.filter(p=> p.lost).length, conv: fin ? Math.round(ok / fin * 100) : null }; });
+    const doneL = all.filter(p=> ['done','paid'].includes(p.stage));
+    const avgCheck = doneL.length ? Math.round(doneL.reduce((a,p)=> a + ptRes(p).revenue, 0) / doneL.length) : null;
+    const avgOur = doneL.length ? Math.round(doneL.reduce((a,p)=> a + ptRes(p).ourIncome, 0) / doneL.length) : null;
+    const stageDays = PT_STAGES.slice(0, -1).map(s=>{ const arr = [];
+      all.forEach(p=>{ const h = Array.isArray(p.hist) ? p.hist : []; for(let i = 0; i < h.length - 1; i++){ if(h[i].k === s.k){ const dd = (new Date(h[i+1].at) - new Date(h[i].at)) / 864e5; if(dd >= 0) arr.push(dd); } } });
+      return { s, n: arr.length, avg: arr.length ? Math.round(arr.reduce((a,b)=>a+b,0) / arr.length * 10) / 10 : null }; });
+    const byMonth = {};
+    all.forEach(p=>{ const d = ptDates(p); const ym = (d[0] || (p.stageAt||'')).slice(0,7); if(!ym) return;
+      const r = byMonth[ym] = byMonth[ym] || { ym, fact:0, our:0, expected:0, n:0 };
+      if(['done','paid'].includes(p.stage)){ const x = ptRes(p); r.fact += x.revenue; r.our += x.ourIncome; r.n++; }
+      else if(!p.lost && reached(p)) r.expected += ptPlanned(p); });
+    const lostReasons = {}; all.filter(p=> p.lost).forEach(p=>{ const k = (p.lostReason||'без причины').trim(); lostReasons[k] = (lostReasons[k]||0) + 1; });
+    return { byInit, avgCheck, avgOur, stageDays, byMonth, lostReasons, total: all.length };
+  }
+
+  // ---------- экран ----------
+  function renderPartnersView(){
+    ptSyncAll();
+    const tab = state.ptTab || 'board';
+    const tasks = ptTasks();
+    const can = ptCanEdit();
+    const posterN = ptPosterNeeded().length;
+    const tabs = [['board','Воронка'],['tasks','🔔 Задачи' + (tasks.length ? ' (' + tasks.length + ')' : '')],['venues','🏢 Партнёры'],['stats','📊 Аналитика']];
+    const head = `<h2 style="font-family:var(--font-display);margin:18px 0 4px;">🤝 Партнёрка</h2>
+      <div style="font-size:12.5px;color:var(--ink-soft);">Мероприятия в ресторанах и других местах (выезды). Ведёт ассистент${can ? '' : (ptCanPoster() ? ' — вы можете вставлять ссылки на афиши' : ' — здесь только просмотр')}.</div>
+      ${['marketer','smm'].includes(state.currentRole) && posterN ? `<div style="margin-top:8px;background:#FBE3F1;border-radius:10px;padding:8px 12px;font-size:13px;color:#7A2456;">📣 Нужны афиши: <b>${posterN}</b> — откройте карточку в колонке «Согласовано» и вставьте ссылку на готовую афишу.</div>` : ''}
+      <div class="sub-tabs" style="display:flex;gap:6px;flex-wrap:wrap;margin:12px 0;">${tabs.map(([k,l])=> `<button class="btn ${tab===k?'btn-primary':'btn-ghost'}" data-pttab="${k}">${escapeHtml(l)}</button>`).join('')}</div>`;
+    const body = tab === 'tasks' ? ptTasksHtml(tasks) : (tab === 'venues' ? ptVenuesHtml() : (tab === 'stats' ? ptStatsHtml() : ptBoardHtml()));
+    return `<style>
+      .pt-wrap{ padding-bottom:40px; } .pt-top{ display:flex; gap:8px; align-items:center; flex-wrap:wrap; margin:0 0 12px; }
+      .pt-board{ display:grid; grid-template-columns:repeat(6, minmax(210px, 1fr)); gap:10px; overflow-x:auto; padding-bottom:6px; }
+      .pt-col{ background:var(--paper-2); border-radius:12px; padding:8px; min-height:120px; }
+      .pt-ch{ font-weight:700; font-size:13px; padding:4px 4px 8px; margin-bottom:8px; display:flex; justify-content:space-between; gap:6px; } .pt-ch span{ color:var(--ink-soft); font-weight:500; font-size:11.5px; }
+      .pt-card{ background:var(--white); border:1px solid var(--line); border-radius:10px; padding:8px 10px; margin-bottom:8px; cursor:pointer; font-size:12.5px; line-height:1.4; }
+      .pt-card:hover{ box-shadow:0 2px 8px rgba(0,0,0,.1); } .pt-t{ font-weight:700; font-size:13.5px; } .pt-m{ color:#4A4640; margin-top:2px; }
+      .pt-chip{ display:inline-block; border-radius:8px; padding:0 6px; font-size:11px; font-weight:700; } .pt-chip.out{ background:#E4EDF6; color:#2F6A9E; } .pt-chip.in{ background:#E9F2E1; color:#3E6B2F; }
+      .pt-f{ display:flex; justify-content:space-between; align-items:center; gap:6px; margin-top:6px; color:var(--ink-soft); font-size:11.5px; }
+      .pt-b{ border:1px solid var(--line-strong); background:#fff; border-radius:6px; padding:1px 7px; font:inherit; cursor:pointer; text-decoration:none; color:inherit; }
+      .pt-empty{ color:var(--ink-soft); font-size:12px; text-align:center; padding:10px 0; }
+      .pt-row{ background:var(--white); border:1px solid var(--line); border-radius:10px; padding:9px 12px; margin-bottom:8px; display:flex; gap:10px; align-items:flex-start; flex-wrap:wrap; font-size:13px; }
+      .pt-row.urg{ border-left:4px solid var(--danger); } .pt-row .grow{ flex:1; min-width:220px; } .pt-sub{ font-size:12px; color:var(--ink-soft); margin-top:2px; }
+      .pt-kpis{ display:grid; grid-template-columns:repeat(auto-fit, minmax(170px, 1fr)); gap:10px; margin-bottom:12px; }
+      .pt-kpi{ background:var(--white); border:1px solid var(--line); border-radius:12px; padding:10px 12px; } .pt-kpi b{ font-size:20px; display:block; } .pt-kpi span{ font-size:12px; color:var(--ink-soft); }
+      .pt-tbl{ width:100%; border-collapse:collapse; font-size:13px; background:var(--white); border-radius:10px; overflow:hidden; } .pt-tbl td, .pt-tbl th{ padding:6px 8px; border-bottom:1px solid var(--line); text-align:right; } .pt-tbl td:first-child, .pt-tbl th:first-child{ text-align:left; } .pt-tbl th{ font-size:11.5px; color:var(--ink-soft); font-weight:600; }
+      @media (max-width:760px){ .pt-board{ grid-template-columns:repeat(6, 78vw); } }
+    </style>
+    <div class="analytics-wrap pt-wrap">${head}${body}</div>`;
+  }
+  function ptCardHtml(p){
+    const st = ptStage(p.stage); const d = ptDaysSince(p.stageAt); const i = ptStageIdx(p.stage); const next = PT_STAGES[i+1];
+    const can = ptCanEdit(); const chat = ptSafeUrl(p.chat); const items = ptItems(p);
+    const inCal = items.filter(it=> ptItemEvent(it)).length, pend = ptPendingItems(p).length, canc = items.filter(it=> it.evCancelled).length;
+    const kitT = items.reduce((a,it)=>{ const k = ptKitStat(it); return { d: a.d + k.done, t: a.t + k.total }; }, { d:0, t:0 });
+    const r = ptRes(p);
+    return `<div class="pt-card" data-ptopen="${escapeHtml(p.id)}" style="border-left:4px solid ${st.c};">
+      <div class="pt-t">${escapeHtml(p.place || 'Без названия')}</div>
+      <div class="pt-m">${ptDates(p)[0] ? '📅 ' + escapeHtml(formatDateText(ptDates(p)[0])) + (items.length > 1 ? ' +' + (items.length-1) : '') + ' · ' : (p.eventDate ? '📅 ' + escapeHtml(formatDateText(p.eventDate)) + ' · ' : '')}${escapeHtml(p.format || (items[0] && items[0].mk) || '')}</div>
+      <div class="pt-m"><span class="pt-chip ${p.initiator === 'they' ? 'in' : 'out'}">${escapeHtml(PT_INIT[p.initiator] || 'Мы написали')}</span>${['done','paid'].includes(p.stage) ? (r.revenue ? ' <b>' + escapeHtml(formatMoney(r.revenue)) + '</b>' + (r.ourIncome !== r.revenue ? ' · нам ' + escapeHtml(formatMoney(r.ourIncome)) : '') : ' <span style="color:var(--danger);">итоги не внесены</span>') : (ptPlanned(p) ? ' <b>' + escapeHtml(formatMoney(ptPlanned(p))) + '</b>' : '')}</div>
+      ${p.contact ? `<div class="pt-m">👤 ${escapeHtml(p.contact)}</div>` : ''}
+      ${items.length ? `<div class="pt-m">📝 ${items.length} ${pluralRu(items.length,'выезд','выезда','выездов')}${inCal ? ' · 📅 в календаре ' + inCal : ''}${pend && ptStageIdx(p.stage) >= 2 && ptStageIdx(p.stage) <= 3 ? ' · <span style="color:var(--danger);">не в календаре ' + pend + '</span>' : ''}${canc ? ' · <span style="color:var(--danger);">отменено ' + canc + '</span>' : ''}${kitT.t && ptStageIdx(p.stage) >= 2 && ptStageIdx(p.stage) < 4 ? ' · 🧳 ' + kitT.d + '/' + kitT.t : ''}</div>` : ''}
+      ${p.stage === 'agreed' && !ptSafeUrl(p.posterUrl) ? '<div class="pt-m" style="color:#A23B72;">📣 ждём афишу</div>' : ''}
+      ${ptSafeUrl(p.posterUrl) ? `<div class="pt-m"><a href="${escapeHtml(ptSafeUrl(p.posterUrl))}" target="_blank" rel="noopener" onclick="event.stopPropagation()">📣 афиша</a></div>` : ''}
+      <div class="pt-f"><span>${escapeHtml(p.owner || '—')}${d !== null ? ' · ' + d + ' дн. на этапе' : ''}</span>
+        <span style="display:flex;gap:4px;">${chat ? `<a class="pt-b" href="${escapeHtml(chat)}" target="_blank" rel="noopener" onclick="event.stopPropagation()" title="Открыть диалог">💬</a>` : ''}${can && next && !p.lost ? `<button type="button" class="pt-b" data-ptnext="${escapeHtml(p.id)}" title="Перевести: ${escapeHtml(next.t)}">→</button>` : ''}</span></div>
+    </div>`;
+  }
+  function ptBoardHtml(){
+    const all = ptActive(); const showArch = !!state.ptArchive; const can = ptCanEdit();
+    const q = String(state.ptQ||'').trim().toLowerCase();
+    const match = (p)=> !q || [p.place, p.contact, p.format, p.comment, p.owner, p.address].join(' ').toLowerCase().includes(q);
+    const active = all.filter(p=> !p.lost && match(p)); const lost = all.filter(p=> p.lost && match(p));
+    const sumOf = (arr)=> arr.reduce((a,p)=> a + (['done','paid'].includes(p.stage) ? ptRes(p).revenue : ptPlanned(p)), 0);
+    const cols = PT_STAGES.map(s=>{ const arr = active.filter(p=> (p.stage||'new') === s.k).sort((a,b)=> String(b.stageAt||'').localeCompare(String(a.stageAt||'')));
+      return `<div class="pt-col"><div class="pt-ch" style="border-bottom:3px solid ${s.c};">${s.t} <span>${arr.length}${sumOf(arr) ? ' · ' + formatMoney(sumOf(arr)) : ''}</span></div>${arr.map(ptCardHtml).join('') || '<div class="pt-empty">пусто</div>'}</div>`; }).join('');
+    return `<div class="pt-top">
+        ${can ? `<button class="btn btn-primary" id="pt-add">＋ Новая заявка</button>` : ''}
+        <input type="search" id="pt-q" placeholder="Поиск: место, контакт, формат…" value="${escapeHtml(state.ptQ||'')}" style="flex:1;min-width:180px;max-width:320px;">
+        <button class="btn ${showArch ? 'btn-primary' : 'btn-ghost'}" id="pt-arch">✖ Отказы (${lost.length})</button>
+      </div>
+      ${showArch ? `<div class="pt-col" style="margin-bottom:12px;"><div class="pt-ch">✖ Отказы <span>${lost.length}</span></div>${lost.map(ptCardHtml).join('') || '<div class="pt-empty">пусто</div>'}</div>` : ''}
+      <div class="pt-board">${cols}</div>`;
+  }
+  function ptTasksHtml(tasks){
+    const can = ptCanEdit();
+    if(!tasks.length) return '<div class="pt-empty" style="padding:30px 0;font-size:14px;">Задач нет — всё под контролем 🌿</div>';
+    return `<div style="font-size:12.5px;color:var(--ink-soft);margin-bottom:10px;">Задачи ставятся сами по этапам и датам выездов. «✓ Сделано» убирает задачу; если дата или этап изменятся — появится новая.</div>` +
+      tasks.map(t=> `<div class="pt-row${t.urgent ? ' urg' : ''}"><div style="font-size:18px;">${t.icon}</div>
+        <div class="grow"><b>${escapeHtml(t.p.place || '')}</b> — ${escapeHtml(t.text)}<div class="pt-sub">${escapeHtml(ptStage(t.p.stage).t)}${t.p.contact ? ' · 👤 ' + escapeHtml(t.p.contact) : ''}${ptSafeUrl(t.p.chat) ? ` · <a href="${escapeHtml(ptSafeUrl(t.p.chat))}" target="_blank" rel="noopener">💬 диалог</a>` : ''}</div></div>
+        <div style="display:flex;gap:6px;flex-wrap:wrap;">
+          <button class="btn btn-ghost acl-mini" data-ptopen="${escapeHtml(t.p.id)}"${t.toStage ? ` data-ptopenstage="${t.toStage}"` : ''}>${t.toStage === 'done' ? '✅ Внести итоги' : (t.toStage === 'paid' ? '💰 Закрыть расчёт' : 'Открыть')}</button>
+          ${can ? `<button class="btn btn-ghost acl-mini" data-pttaskdone="${escapeHtml(t.p.id)}|${escapeHtml(t.key)}">✓ Сделано</button>` : ''}
+        </div></div>`).join('');
+  }
+  function ptVenuesHtml(){
+    const vs = ptVenues(); const can = ptCanEdit();
+    if(!vs.length) return '<div class="pt-empty" style="padding:30px 0;">Пока нет партнёров — они появятся из заявок.</div>';
+    const stale = vs.filter(v=> v.stale).length;
+    return `${stale ? `<div style="background:#FBEFE4;border-radius:10px;padding:8px 12px;font-size:13px;margin-bottom:10px;color:#8A4A1E;">⏳ Давно не работали (больше 2 месяцев): <b>${stale}</b> — пора написать и предложить новую дату.</div>` : ''}
+      ${vs.map(v=> `<div class="pt-row"${v.stale ? ' style="border-left:4px solid #C08A3E;"' : ''}>
+        <div class="grow"><b>${escapeHtml(v.name)}</b>${v.stale ? ' <span class="pt-chip" style="background:#FBEFE4;color:#8A4A1E;">давно не работали</span>' : ''}${v.active ? ' <span class="pt-chip out">в работе ' + v.active + '</span>' : ''}
+          <div class="pt-sub">сделок ${v.deals.length} · проведено ${v.done}${v.revenue ? ' · выручка ' + formatMoney(v.revenue) + (v.our !== v.revenue ? ' · нам ' + formatMoney(v.our) : '') : ''}${v.lastDate ? ' · последний выезд ' + formatDateText(v.lastDate) : ''}</div>
+          <div class="pt-sub">${v.contact ? '👤 ' + escapeHtml(v.contact) : ''}${v.address ? ' · 📍 ' + escapeHtml(v.address) : ''}${ptSafeUrl(v.chat) ? ` · <a href="${escapeHtml(ptSafeUrl(v.chat))}" target="_blank" rel="noopener">💬 диалог</a>` : ''}</div>
+          <div class="pt-sub">${v.deals.slice().sort((a,b)=> String(b.createdAt||'').localeCompare(String(a.createdAt||''))).slice(0,5).map(p=> `<a href="#" data-ptopen="${escapeHtml(p.id)}">${escapeHtml((ptDates(p)[0] ? formatDateText(ptDates(p)[0]) : 'без даты') + ' · ' + (p.lost ? '✖ отказ' : ptStage(p.stage).t))}</a>`).join(' · ')}</div></div>
+        ${can ? `<button class="btn btn-ghost acl-mini" data-ptrepeatv="${escapeHtml(v.key)}">🔁 Повторить</button>` : ''}
+      </div>`).join('')}`;
+  }
+  function ptStatsHtml(){
+    const S = ptStats(); const ym = todayStr().slice(0,7); const isOwner = state.currentRole === 'owner';
+    const plan = Number((state.partnerPlan||{})[ym]) || 0; const cur = S.byMonth[ym] || { fact:0, our:0, expected:0, n:0 };
+    const pct = plan ? Math.round((cur.fact + cur.expected) / plan * 100) : null;
+    const months = Object.values(S.byMonth).sort((a,b)=> b.ym.localeCompare(a.ym)).slice(0, 8);
+    const mName = (k)=> { const m = MONTHS[Number(k.slice(5,7))-1] || ''; return m.charAt(0).toUpperCase() + m.slice(1) + ' ' + k.slice(0,4); };
+    return `<div class="pt-kpis">
+        <div class="pt-kpi"><span>План партнёрки на ${escapeHtml(mName(ym).toLowerCase())}</span><b>${plan ? formatMoney(plan) : '—'}</b>${isOwner ? `<button class="pt-b" id="pt-plan-edit" style="margin-top:4px;">✎ задать план</button>` : ''}</div>
+        <div class="pt-kpi"><span>Проведено в этом месяце</span><b>${formatMoney(cur.fact)}</b><span>нам ${formatMoney(cur.our)}</span></div>
+        <div class="pt-kpi"><span>Ожидается (согласовано, по договорённостям)</span><b>${formatMoney(cur.expected)}</b>${pct !== null ? `<span>вместе ${pct}% плана${plan > cur.fact + cur.expected ? ' · не хватает ' + formatMoney(plan - cur.fact - cur.expected) : ' ✓'}</span>` : ''}</div>
+        <div class="pt-kpi"><span>Средний чек выезда</span><b>${S.avgCheck !== null ? formatMoney(S.avgCheck) : '—'}</b><span>${S.avgOur !== null ? 'нам в среднем ' + formatMoney(S.avgOur) : 'по проведённым'}</span></div>
+      </div>
+      <h4 style="margin:14px 0 6px;">Кто начал — и что из этого вышло</h4>
+      <table class="pt-tbl"><tr><th>Инициатор</th><th>Заявок</th><th>Дошли до «Согласовано»</th><th>Отказ</th><th>Конверсия</th></tr>
+        ${S.byInit.map(x=> `<tr><td>${x.k === 'we' ? '📤 ' : '📥 '}${escapeHtml(PT_INIT[x.k])}</td><td>${x.total}</td><td>${x.ok}</td><td>${x.lost}</td><td><b>${x.conv !== null ? x.conv + '%' : '—'}</b></td></tr>`).join('')}</table>
+      <div class="pt-sub" style="margin-top:4px;">Конверсия считается по завершённым: дошедшие до «Согласовано» ÷ (дошедшие + отказы).</div>
+      <h4 style="margin:14px 0 6px;">Сколько дней заявка стоит на этапе</h4>
+      <table class="pt-tbl"><tr><th>Этап</th><th>Переходов</th><th>В среднем дней</th></tr>
+        ${S.stageDays.map(x=> `<tr><td>${escapeHtml(x.s.t)}</td><td>${x.n}</td><td><b>${x.avg !== null ? String(x.avg).replace('.', ',') : '—'}</b></td></tr>`).join('')}</table>
+      <h4 style="margin:14px 0 6px;">По месяцам (по дате выезда)</h4>
+      ${months.length ? `<table class="pt-tbl"><tr><th>Месяц</th><th>Проведено</th><th>Выручка</th><th>Нам</th><th>Ожидается</th><th>План</th></tr>
+        ${months.map(r=> `<tr><td>${escapeHtml(mName(r.ym))}</td><td>${r.n}</td><td>${formatMoney(r.fact)}</td><td>${formatMoney(r.our)}</td><td>${r.expected ? formatMoney(r.expected) : '—'}</td><td>${Number((state.partnerPlan||{})[r.ym]) ? formatMoney(Number(state.partnerPlan[r.ym])) : '—'}</td></tr>`).join('')}</table>` : '<div class="pt-empty">Пока нет данных</div>'}
+      ${Object.keys(S.lostReasons).length ? `<h4 style="margin:14px 0 6px;">Причины отказов</h4><table class="pt-tbl"><tr><th>Причина</th><th>Сколько</th></tr>${Object.entries(S.lostReasons).sort((a,b)=> b[1]-a[1]).map(([k,n])=> `<tr><td>${escapeHtml(k)}</td><td>${n}</td></tr>`).join('')}</table>` : ''}`;
+  }
+  function attachPartnersEvents(){
+    document.querySelectorAll('[data-pttab]').forEach(b=> b.onclick = ()=>{ state.ptTab = b.dataset.pttab; render(); });
+    const add = document.getElementById('pt-add'); if(add) add.onclick = ()=> openPartnerLead(null);
+    const ar = document.getElementById('pt-arch'); if(ar) ar.onclick = ()=>{ state.ptArchive = !state.ptArchive; render(); };
+    const q = document.getElementById('pt-q'); if(q) q.oninput = ()=>{ state.ptQ = q.value; clearTimeout(state._ptQT); state._ptQT = setTimeout(()=>{ render(); const n = document.getElementById('pt-q'); if(n){ n.focus(); n.setSelectionRange(n.value.length, n.value.length); } }, 300); };
+    document.querySelectorAll('[data-ptopen]').forEach(c=> c.onclick = (ev)=>{ ev.preventDefault(); openPartnerLead(c.dataset.ptopen, c.dataset.ptopenstage ? { stage: c.dataset.ptopenstage } : null); });
+    document.querySelectorAll('[data-pttaskdone]').forEach(b=> b.onclick = async ()=>{ const [id, ...rest] = b.dataset.pttaskdone.split('|'); const key = rest.join('|');
+      const p = (state.partnerLeads||[]).find(x=> x.id === id); if(!p) return; p.tasksDone = { ...(p.tasksDone||{}), [key]: new Date().toISOString() }; ptLog(p, 'Задача выполнена: ' + key.split('|')[0]); await savePartnerLeads(); render(); });
+    document.querySelectorAll('[data-ptrepeatv]').forEach(b=> b.onclick = async ()=>{ const v = ptVenues().find(x=> x.key === b.dataset.ptrepeatv); if(!v) return;
+      const last = v.deals.slice().sort((a,b)=> String(b.createdAt||'').localeCompare(String(a.createdAt||'')))[0];
+      const p = ptRepeat(last || v); state.partnerLeads = [...(state.partnerLeads||[]), p]; await savePartnerLeads(); state.ptTab = 'board'; render(); openPartnerLead(p.id); });
+    const pe = document.getElementById('pt-plan-edit'); if(pe) pe.onclick = async ()=>{ const ym = todayStr().slice(0,7);
+      const v = await spConfirm({ title:'План партнёрки', text:'Выручка партнёрки на этот месяц, ₽', okText:'Сохранить', input:{ type:'number', min:0, placeholder:'например, 150000', value: String((state.partnerPlan||{})[ym] || '') } });
+      if(v === false) return; state.partnerPlan = { ...(state.partnerPlan||{}), [ym]: Math.max(0, Math.round(Number(v)||0)) }; await storageSetWithRetry('partner-plan', JSON.stringify(state.partnerPlan)); render(); };
+    document.querySelectorAll('[data-ptnext]').forEach(b=> b.onclick = async (ev)=>{ ev.stopPropagation(); const p = (state.partnerLeads||[]).find(x=> x.id === b.dataset.ptnext); if(!p) return;
+      const next = PT_STAGES[ptStageIdx(p.stage)+1]; if(!next) return;
+      if(next.k === 'done'){ openPartnerLead(p.id, { stage:'done' }); return; } // итоги вносятся в карточке
+      if(next.k === 'poster' && !ptSafeUrl(p.posterUrl)){ const v = await spConfirm({ title:'Выставлена афиша', text:'Ссылка на афишу (необязательно):', okText:'Перевести', input:{ placeholder:'https://…', optional:true } }); if(v === false) return; if(v) p.posterUrl = v; }
+      if(next.k === 'paid'){ const v = await spConfirm({ title:'Расчёт закрыт', text:'Деньги с партнёром рассчитаны? Можно оставить комментарий (необязательно).', okText:'Закрыть расчёт', input:{ placeholder:'например: доля партнёра переведена 28.11', optional:true } }); if(v === false) return; p.settle = { date: todayStr(), note: v || '', by: ptWho() }; }
+      await ptSetStage(p, next.k);
+      if(next.k === 'agreed'){ const c = await ptOfferCreateEvents(p); if(c){ await savePartnerLeads(); render(); } } });
+  }
+  async function ptSetStage(p, k){
+    if(p.stage === k) return;
+    ptLog(p, 'Этап: ' + ptStage(p.stage).t + ' → ' + ptStage(k).t);
+    ptEnterStage(p, k);
+    await savePartnerLeads();
+    try{ recordAction('Партнёрка: ' + ptStage(k).t, p.place || '', { cat:'lead', obj: p.place || '', verb:'перевёл(а)', silent:true }); }catch(e){}
+    render();
+  }
+  // заявка в «Закупки» на то, чего не хватает для выезда
+  async function ptKitToProcurement(p, it){
+    const v = await spConfirm({ title:'🧺 Не хватает для выезда', text:`Что докупить к выезду ${formatDateText(it.date)} «${it.mk||'МК'}»? Уйдёт заявкой в «Закупки».`, okText:'Отправить', input:{ placeholder:'например: воск соевый 3 кг' } });
+    if(!v) return;
+    const r = { id: uid(), ts: Date.now(), date: todayStr(), material: v, qty: '', unit: '', neededBy: it.date ? addDaysIso(it.date, -1) : '', comment: '🤝 Выезд: ' + (p.place||'') + (it.date ? ', ' + formatDateText(it.date) : '') + (it.guests ? ', ' + it.guests + ' гост.' : ''),
+      link: '', author: (typeof myStaffName === 'function' ? myStaffName() : ptWho()), authorKey: (typeof mrAuthorKey === 'function' ? mrAuthorKey() : ''), status: 'new', receiptId: '', adminNote: '' };
+    if(!state.materialRequests) state.materialRequests = [];
+    state.materialRequests.push(r);
+    await saveMaterialRequests();
+    ptLog(p, '🧺 В закупки: ' + v);
+    try{ recordAction('Заявка на материал: ' + v); }catch(e){}
+    showToast('Заявка отправлена в «Закупки»');
+  }
+  function openPartnerLead(id, opts){
+    opts = opts || {};
+    const can = ptCanEdit(); const canPoster = ptCanPoster();
+    const src = id ? (state.partnerLeads||[]).find(x=> x.id === id) : null;
+    if(id && !src) return;
+    if(src) ptSyncFromCalendar(src);
+    const p = src ? JSON.parse(JSON.stringify(src)) : { id: uid(), stage:'new', initiator:'we', owner: ptWho(), createdAt: new Date().toISOString(), createdBy: ptWho() };
+    if(opts.stage && can) p._stage = opts.stage;
+    const stageNow = ()=> p._stage || p.stage || 'new';
+    const old = document.getElementById('pt-modal'); if(old) old.remove();
+    const w = document.createElement('div'); w.id = 'pt-modal';
+    w.style.cssText = 'position:fixed;inset:0;background:rgba(23,21,18,.45);z-index:400;display:flex;align-items:flex-start;justify-content:center;overflow-y:auto;padding:24px 10px;';
+    const dis = can ? '' : 'disabled';
+    const f = (lbl, html)=> `<div style="margin-top:10px;"><div style="font-size:12.5px;font-weight:600;margin-bottom:3px;">${lbl}</div>${html}</div>`;
+    const inp = 'width:100%;box-sizing:border-box;padding:7px 9px;border:1px solid var(--line-strong);border-radius:8px;font:inherit;font-size:13.5px;';
+    const log = (Array.isArray(p.log) ? p.log : []).slice().reverse();
+    const r = p.result || {};
+    const stBtn = (s)=>{ const on = stageNow() === s.k; return `<button type="button" data-ptst="${s.k}" ${dis} style="border:1.5px solid ${on?s.c:'var(--line-strong)'};background:${on?s.c:'#fff'};color:${on?'#fff':'inherit'};border-radius:8px;padding:5px 9px;font:inherit;font-size:12.5px;cursor:${can?'pointer':'default'};">${s.t}</button>`; };
+    w.innerHTML = `<div style="background:var(--white);max-width:600px;width:100%;border-radius:14px;padding:16px 18px;box-shadow:0 10px 40px rgba(0,0,0,.25);">
+      <div style="display:flex;justify-content:space-between;align-items:center;gap:10px;"><div style="font-size:18px;font-weight:700;">🤝 ${src ? escapeHtml(p.place || 'Заявка партнёрки') : 'Новая заявка — партнёрка'}</div><button type="button" data-ptx style="border:none;background:none;font-size:22px;cursor:pointer;">×</button></div>
+      ${f('Этап', `<div style="display:flex;gap:6px;flex-wrap:wrap;">${PT_STAGES.map(stBtn).join('')}</div>`)}
+      ${f('Кто начал *', `<div style="display:flex;gap:6px;">${Object.entries(PT_INIT).map(([k,t])=> `<button type="button" data-ptinit="${k}" ${dis} style="flex:1;border:1.5px solid ${p.initiator===k?'#171512':'var(--line-strong)'};background:${p.initiator===k?'#171512':'#fff'};color:${p.initiator===k?'#fff':'inherit'};border-radius:8px;padding:6px;font:inherit;font-size:13px;cursor:${can?'pointer':'default'};">${k==='we'?'📤 ':'📥 '}${t}</button>`).join('')}</div>`)}
+      ${f('Площадка — ресторан, кафе, место *', `<input id="pt-place" ${dis} style="${inp}" value="${escapeHtml(p.place||'')}" placeholder="Например: ресторан «Тесто», ул. Ленина 10">`)}
+      ${f('Контакт', `<input id="pt-contact" ${dis} style="${inp}" value="${escapeHtml(p.contact||'')}" placeholder="Имя, должность, телефон">`)}
+      ${f('Ссылка на диалог / соцсеть', `<input id="pt-chat" ${dis} style="${inp}" value="${escapeHtml(p.chat||'')}" placeholder="https://t.me/… или https://instagram.com/…">`)}
+      ${f('Что проводим', `<input id="pt-format" ${dis} style="${inp}" value="${escapeHtml(p.format||'')}" placeholder="Например: МК по керамике для гостей ресторана">`)}
+      <div id="pt-pre" style="display:${stageNow() === 'new' ? 'grid' : 'none'};grid-template-columns:1fr 1fr 1fr;gap:8px;">
+        ${f('Дата (примерно)', `<input type="date" id="pt-date" ${dis} style="${inp}" value="${escapeHtml(p.eventDate||'')}">`)}
+        ${f('Время', `<input type="time" id="pt-time" ${dis} style="${inp}" value="${escapeHtml(p.eventTime||'')}">`)}
+        ${f('Гостей', `<input type="number" min="0" id="pt-guests" ${dis} style="${inp}" value="${escapeHtml(p.guests ? String(p.guests) : '')}">`)}
+      </div>
+      ${f('Сумма / условия', `<div style="display:grid;grid-template-columns:1fr 2fr;gap:8px;"><input type="number" min="0" id="pt-amount" ${dis} style="${inp}" value="${escapeHtml(p.amount ? String(p.amount) : '')}" placeholder="₽ (ориентир)"><input id="pt-terms" ${dis} style="${inp}" value="${escapeHtml(p.terms||'')}" placeholder="Например: 50/50 с билетов, площадка бесплатно"></div>`)}
+      <div id="pt-agr" style="display:${stageNow() === 'new' ? 'none' : 'block'};margin-top:14px;border:1px solid var(--line-strong);border-radius:10px;padding:10px 12px;background:var(--paper-2);">
+        <div style="font-weight:700;font-size:14px;">📝 Договорённости с партнёром <span style="font-weight:400;font-size:12px;color:var(--ink-soft);">— всё необязательно, заполняйте по мере согласования</span></div>
+        ${f('Адрес площадки', `<input id="pt-address" ${dis} style="${inp}" value="${escapeHtml(p.address||'')}" placeholder="Улица, дом, зал">`)}
+        <div id="pt-items"></div>
+        ${can ? `<button type="button" class="btn btn-ghost" id="pt-item-add" style="margin-top:8px;font-size:12.5px;">＋ Добавить выезд</button>` : ''}
+        ${can && src ? `<button type="button" class="btn btn-primary" id="pt-mkev" style="margin-top:8px;margin-left:6px;font-size:12.5px;display:none;">📅 Создать выезды в календаре</button>` : ''}
+      </div>
+      <div id="pt-poster-box">${f('📣 Ссылка на афишу' + (['marketer','smm'].includes(state.currentRole) ? ' — вставьте, когда афиша готова' : ''), `<input id="pt-poster" ${canPoster ? '' : 'disabled'} style="${inp}" value="${escapeHtml(p.posterUrl||'')}" placeholder="https://…">`)}</div>
+      <div id="pt-res" style="display:${ptStageIdx(stageNow()) >= 4 ? 'block' : 'none'};margin-top:14px;border:1px solid #2F8F6B;border-radius:10px;padding:10px 12px;background:#EEF6F1;">
+        <div style="font-weight:700;font-size:14px;">✅ Итоги выезда</div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;">
+          ${f('Пришло гостей', `<input type="number" min="0" id="pt-r-guests" ${dis} style="${inp}" value="${escapeHtml(r.guests ? String(r.guests) : '')}">`)}
+          ${f('Выручка всего, ₽', `<input type="number" min="0" id="pt-r-rev" ${dis} style="${inp}" value="${escapeHtml(r.revenue ? String(r.revenue) : '')}">`)}
+          ${f('Доля партнёра, ₽', `<input type="number" min="0" id="pt-r-share" ${dis} style="${inp}" value="${escapeHtml(r.partnerShare ? String(r.partnerShare) : '')}">`)}
+          ${f('Нам, ₽ <span style="font-weight:400;color:var(--ink-soft);">— пусто = выручка − доля</span>', `<input type="number" min="0" id="pt-r-our" ${dis} style="${inp}" value="${escapeHtml(r.ourIncome !== undefined && r.ourIncome !== null && r.ourIncome !== '' ? String(r.ourIncome) : '')}">`)}
+        </div>
+        <div style="font-size:12px;color:var(--ink-soft);margin-top:6px;">По выездам в календаре получено оплат: <b>${escapeHtml(formatMoney(ptReceivedInCalendar(p)))}</b>${ptReceivedInCalendar(p) ? ' — оплаты в журнале мероприятий и в «Книге»' : ' — оплаты ещё не внесены в мероприятия календаря'}.</div>
+        ${f('Расчёт с партнёром', `<div style="display:grid;grid-template-columns:1fr 2fr;gap:8px;"><input type="date" id="pt-s-date" ${dis} style="${inp}" value="${escapeHtml((p.settle||{}).date||'')}"><input id="pt-s-note" ${dis} style="${inp}" value="${escapeHtml((p.settle||{}).note||'')}" placeholder="как и когда рассчитались"></div>`)}
+        <div style="font-size:12px;margin-top:6px;">После выезда: забрать фото и отзыв у партнёра и предложить следующую дату — кнопка «🔁 Повторить» внизу создаст новую заявку с этим партнёром.</div>
+      </div>
+      ${f('Ответственный', `<input id="pt-owner" ${dis} style="${inp}" value="${escapeHtml(p.owner||'')}">`)}
+      ${f('Комментарий', `<textarea id="pt-comment" ${dis} rows="3" style="${inp}">${escapeHtml(p.comment||'')}</textarea>`)}
+      ${src ? `<div style="margin-top:10px;"><label style="font-size:13px;display:flex;gap:6px;align-items:center;"><input type="checkbox" id="pt-lost" ${dis} ${p.lost?'checked':''}> ✖ Отказ — убрать из воронки</label><input id="pt-lostr" ${dis} style="${inp}margin-top:4px;display:${p.lost?'block':'none'};" value="${escapeHtml(p.lostReason||'')}" placeholder="Причина отказа"></div>` : ''}
+      ${log.length ? `<details style="margin-top:12px;"><summary style="cursor:pointer;font-size:12.5px;font-weight:600;">🕓 История (${log.length})</summary>${log.map(x=> `<div style="font-size:12px;border-top:1px dashed var(--line);padding:4px 0;"><b>${escapeHtml(x.who||'—')}</b> · ${escapeHtml(new Date(x.ts).toLocaleString('ru-RU',{day:'numeric',month:'short',hour:'2-digit',minute:'2-digit'}))} — ${escapeHtml(x.text||'')}</div>`).join('')}</details>` : ''}
+      <div style="display:flex;gap:8px;justify-content:space-between;margin-top:14px;flex-wrap:wrap;">
+        <div style="display:flex;gap:6px;">${can && src && state.currentRole === 'owner' ? `<button type="button" class="btn btn-ghost" data-ptdel style="color:var(--danger);">Удалить</button>` : ''}${can && src ? `<button type="button" class="btn btn-ghost" data-ptrepeat>🔁 Повторить</button>` : ''}</div>
+        <div style="display:flex;gap:8px;"><button type="button" class="btn btn-ghost" data-ptx>${can || canPoster ? 'Отмена' : 'Закрыть'}</button>${can ? `<button type="button" class="btn btn-primary" data-ptsave>Сохранить</button>` : (canPoster && src ? `<button type="button" class="btn btn-primary" data-ptposter>📣 Сохранить афишу</button>` : '')}</div>
+      </div>
+    </div>`;
+    document.body.appendChild(w);
+    const q = (s)=> w.querySelector(s);
+    const close = ()=> w.remove();
+    w.querySelectorAll('[data-ptx]').forEach(b=> b.onclick = close);
+    const lostCb = q('#pt-lost'); if(lostCb) lostCb.onchange = ()=>{ q('#pt-lostr').style.display = lostCb.checked ? 'block' : 'none'; };
+    // маркетолог / SMM: только ссылка на афишу
+    const pb = q('[data-ptposter]'); if(pb) pb.onclick = async ()=>{
+      const url = q('#pt-poster').value.trim(); if(!ptSafeUrl(url)){ q('#pt-poster').style.borderColor = 'var(--danger)'; showGapWarningBanner('Вставьте ссылку на афишу (https://…).'); return; }
+      const cur = (state.partnerLeads||[]).find(x=> x.id === p.id); if(!cur) return;
+      cur.posterUrl = url; ptLog(cur, '📣 Афиша: ' + url);
+      if(cur.stage === 'agreed'){ ptLog(cur, 'Этап: ' + ptStage('agreed').t + ' → ' + ptStage('poster').t); ptEnterStage(cur, 'poster'); }
+      await savePartnerLeads(); close(); showToast('Афиша сохранена'); render(); };
+    // договорённости — список выездов
+    p.items = ptItems(p).map(x=> ({ ...x, kit: { ...(x.kit||{}) } }));
+    const itemsBox = q('#pt-items');
+    const readItems = ()=>{ if(!can) return; itemsBox.querySelectorAll('[data-pti]').forEach(row=>{ const it = p.items[Number(row.dataset.pti)]; if(!it) return;
+      row.querySelectorAll('[data-ptf]').forEach(el=>{ const k = el.dataset.ptf; it[k] = ['guests','price','duration'].includes(k) ? (Number(el.value) || 0) : (k === 'kitExtra' ? el.value : el.value.trim()); });
+      row.querySelectorAll('[data-ptkit]').forEach(cb=>{ it.kit[cb.dataset.ptkit] = cb.checked; }); }); };
+    const drawItems = (skipRead)=>{
+      if(!skipRead) readItems();
+      const cell = 'width:100%;box-sizing:border-box;padding:6px 8px;border:1px solid var(--line-strong);border-radius:7px;font:inherit;font-size:13px;';
+      itemsBox.innerHTML = p.items.length ? p.items.map((it, i)=>{ const ev = ptItemEvent(it); const evAny = ptItemEventAny(it); const k = ptKitStat(it);
+        return `<div data-pti="${i}" style="background:var(--white);border:1px solid var(--line);border-radius:8px;padding:8px;margin-top:8px;">
+          <div style="display:flex;justify-content:space-between;align-items:center;gap:6px;flex-wrap:wrap;"><b style="font-size:12.5px;">Выезд ${i+1}${ev && ev.host ? ' · мастер: ' + escapeHtml(allHostNamesDisplay(ev)) : (ev ? ' · <span style="color:var(--danger);">мастер не назначен</span>' : '')}</b>
+            <span>${ev ? `<button type="button" class="pt-b" data-ptopenev="${escapeHtml(ev.id)}">📅 в календаре ✓</button>` : ''}${evAny && evAny.status === 'cancelled' ? `<span style="color:var(--danger);font-size:12px;">❌ отменён в календаре</span>${can ? ` <button type="button" class="pt-b" data-ptunlink="${i}">создать заново</button>` : ''}` : ''}${it.evGone ? '<span style="color:var(--danger);font-size:12px;">удалён из календаря</span>' : ''}${can && !ev ? ` <button type="button" class="pt-b" data-ptdelit="${i}" title="Убрать">✕</button>` : ''}</span></div>
+          <div style="display:grid;grid-template-columns:1.3fr 1fr 1fr;gap:6px;margin-top:6px;">
+            <input type="date" data-ptf="date" ${dis} style="${cell}" value="${escapeHtml(it.date||'')}" title="Дата">
+            <input type="time" data-ptf="time" ${dis} style="${cell}" value="${escapeHtml(it.time||'')}" title="Время">
+            <input type="number" min="0" step="15" data-ptf="duration" ${dis} style="${cell}" value="${escapeHtml(it.duration ? String(it.duration) : '')}" placeholder="мин" title="Длительность, мин">
+          </div>
+          <input data-ptf="mk" ${dis} style="${cell}margin-top:6px;" value="${escapeHtml(it.mk||'')}" placeholder="Какой МК (например: Свечи с ароматом)">
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-top:6px;">
+            <input type="number" min="0" data-ptf="guests" ${dis} style="${cell}" value="${escapeHtml(it.guests ? String(it.guests) : '')}" placeholder="Гостей">
+            <input type="number" min="0" data-ptf="price" ${dis} style="${cell}" value="${escapeHtml(it.price ? String(it.price) : '')}" placeholder="Цена мероприятия, ₽">
+          </div>
+          <input data-ptf="note" ${dis} style="${cell}margin-top:6px;" value="${escapeHtml(it.note||'')}" placeholder="Заметка: кто встречает, оплата, особенности площадки…">
+          ${ptStageIdx(stageNow()) >= 2 ? `<details style="margin-top:6px;" ${state._ptKitOpen === it.id ? 'open' : ''} data-ptkitbox="${escapeHtml(it.id)}"><summary style="cursor:pointer;font-size:12.5px;font-weight:600;">🧳 Подготовка к выезду — ${k.done}/${k.total}</summary>
+            <input data-ptf="transport" ${dis} style="${cell}margin-top:6px;" value="${escapeHtml(it.transport||'')}" placeholder="🚗 Транспорт: кто везёт, такси, во сколько выезжаем">
+            <div style="margin-top:6px;columns:2;column-gap:12px;font-size:12.5px;">${ptKitList(it).map(x=> `<label style="display:flex;gap:6px;align-items:flex-start;break-inside:avoid;margin-bottom:3px;"><input type="checkbox" data-ptkit="${escapeHtml(x)}" ${dis} ${it.kit && it.kit[x] ? 'checked' : ''}> ${escapeHtml(x)}</label>`).join('')}</div>
+            <textarea data-ptf="kitExtra" ${dis} rows="2" style="${cell}margin-top:4px;" placeholder="Ещё взять (каждое с новой строки) — появится в списке">${escapeHtml(it.kitExtra||'')}</textarea>
+            ${can && src ? `<button type="button" class="pt-b" data-ptproc="${i}" style="margin-top:6px;">🧺 Не хватает — заявка в «Закупки»</button>` : ''}
+          </details>` : ''}
+        </div>`; }).join('') : '<div style="font-size:12.5px;color:var(--ink-soft);margin-top:8px;">Выездов пока нет — добавьте, когда договоритесь о дате и формате.</div>';
+      itemsBox.querySelectorAll('[data-ptdelit]').forEach(b=> b.onclick = ()=>{ readItems(); p.items.splice(Number(b.dataset.ptdelit), 1); drawItems(true); });
+      itemsBox.querySelectorAll('[data-ptunlink]').forEach(b=> b.onclick = ()=>{ readItems(); const it = p.items[Number(b.dataset.ptunlink)]; it.eventId = ''; it.evSnap = null; it.evCancelled = false; drawItems(true); });
+      itemsBox.querySelectorAll('[data-ptopenev]').forEach(b=> b.onclick = ()=>{ const ev = state.events.find(x=> x.id === b.dataset.ptopenev); if(!ev) return; close(); requireUnlock(()=>{ state.modal = { type:'event', event:{ ...ev }, isNew:false, keepAll:true }; render(); }); });
+      itemsBox.querySelectorAll('[data-ptproc]').forEach(b=> b.onclick = ()=>{ readItems(); const it = p.items[Number(b.dataset.ptproc)]; ptKitToProcurement(src, it).then(()=>{ const cur = (state.partnerLeads||[]).find(x=> x.id === p.id); if(cur) p.log = cur.log; }); });
+      itemsBox.querySelectorAll('[data-ptkitbox]').forEach(d=> d.addEventListener('toggle', ()=>{ state._ptKitOpen = d.open ? d.dataset.ptkitbox : null; }));
+      const mk = q('#pt-mkev'); if(mk){ const n = ptPendingItems(p).length; mk.style.display = (ptStageIdx(stageNow()) >= 2 && n) ? 'inline-block' : 'none'; mk.textContent = '📅 Создать выезды в календаре (' + n + ')'; }
+    };
+    drawItems(true);
+    itemsBox.addEventListener('change', (ev)=>{ if(can && !(ev.target && ev.target.matches('textarea'))) drawItems(); });
+    if(!can) return;
+    const addIt = q('#pt-item-add'); if(addIt) addIt.onclick = ()=>{ readItems(); p.items.push({ id: uid(), date: p.items.length ? '' : (p.eventDate || ''), time: p.eventTime || '', duration: 120, mk: p.format || '', guests: p.guests || 0, price: 0, note: '', kit: {} }); drawItems(true); };
+    const repaint = (sel, attr, val, onColor)=> w.querySelectorAll(sel).forEach(b=>{ const on = b.getAttribute(attr) === val; const col = onColor(b); b.style.background = on ? col : '#fff'; b.style.borderColor = on ? col : 'var(--line-strong)'; b.style.color = on ? '#fff' : 'inherit'; });
+    const onStage = ()=>{ const k = stageNow(); q('#pt-agr').style.display = k === 'new' ? 'none' : 'block'; q('#pt-pre').style.display = k === 'new' ? 'grid' : 'none'; q('#pt-res').style.display = ptStageIdx(k) >= 4 ? 'block' : 'none'; drawItems(); };
+    w.querySelectorAll('[data-ptst]').forEach(b=> b.onclick = ()=>{ p._stage = b.dataset.ptst; repaint('[data-ptst]', 'data-ptst', p._stage, (x)=> ptStage(x.dataset.ptst).c); onStage(); });
+    w.querySelectorAll('[data-ptinit]').forEach(b=> b.onclick = ()=>{ p.initiator = b.dataset.ptinit; repaint('[data-ptinit]', 'data-ptinit', p.initiator, ()=> '#171512'); });
+    const del = q('[data-ptdel]'); if(del) del.onclick = async ()=>{ if(!confirm('Удалить заявку партнёрки «' + (p.place||'') + '»?')) return;
+      state.partnerLeads = (state.partnerLeads||[]).map(x=> x.id === p.id ? { ...x, deleted:true } : x); await savePartnerLeads(); close(); render(); };
+    const rep = q('[data-ptrepeat]'); if(rep) rep.onclick = async ()=>{ const np = ptRepeat(src); state.partnerLeads = [...(state.partnerLeads||[]), np]; await savePartnerLeads(); close(); render(); openPartnerLead(np.id); };
+    const doSave = async (opt)=>{
+      opt = opt || {};
+      const v = (id)=> (q(id) ? q(id).value.trim() : '');
+      const place = v('#pt-place');
+      if(!place){ q('#pt-place').style.borderColor = 'var(--danger)'; showGapWarningBanner('Укажите площадку — ресторан или место.'); return; }
+      const newStage = stageNow(); delete p._stage;
+      readItems();
+      const becameAgreed = newStage === 'agreed' && (!src || src.stage !== 'agreed');
+      const before = src ? JSON.stringify(src) : '';
+      const num = (id)=> v(id) === '' ? '' : Math.max(0, Number(v(id)) || 0);
+      Object.assign(p, { place, contact: v('#pt-contact'), chat: v('#pt-chat'), format: v('#pt-format'), eventDate: v('#pt-date'), eventTime: v('#pt-time'), address: v('#pt-address'),
+        guests: Number(v('#pt-guests')) || 0, amount: Number(v('#pt-amount')) || 0, terms: v('#pt-terms'), posterUrl: v('#pt-poster'), owner: v('#pt-owner'), comment: v('#pt-comment') });
+      if(ptStageIdx(newStage) >= 4){
+        p.result = { guests: num('#pt-r-guests'), revenue: num('#pt-r-rev'), partnerShare: num('#pt-r-share'), ourIncome: num('#pt-r-our') };
+        if(v('#pt-s-date') || v('#pt-s-note')) p.settle = { ...(p.settle||{}), date: v('#pt-s-date'), note: v('#pt-s-note') };
+        if(newStage === 'done' && !(Number(p.result.revenue) > 0) && !confirm('Итоги выезда не внесены (выручка пустая). Всё равно перевести в «Проведено»?')) return;
+      }
+      if(lostCb){ const wasLost = !!p.lost; p.lost = lostCb.checked; p.lostReason = p.lost ? v('#pt-lostr') : ''; if(p.lost !== wasLost) ptLog(p, p.lost ? 'Отказ' + (p.lostReason ? ': ' + p.lostReason : '') : 'Возвращена в работу'); }
+      if(!src){ ptEnterStage(p, newStage); ptLog(p, 'Создана · ' + (PT_INIT[p.initiator]||'') + ' · ' + ptStage(p.stage).t); }
+      else if(newStage !== p.stage){ ptLog(p, 'Этап: ' + ptStage(p.stage).t + ' → ' + ptStage(newStage).t); ptEnterStage(p, newStage); }
+      else if(before !== JSON.stringify(p)) ptLog(p, 'Изменена карточка');
+      if(newStage === 'paid' && !(p.settle && p.settle.date)) p.settle = { ...(p.settle||{}), date: todayStr(), by: ptWho() };
+      // договорённости → календарь
+      const pushed = ptPushToCalendar(p);
+      if(pushed){ await saveEvents(); ptLog(p, '📅 Обновлено в календаре: ' + pushed + ' ' + pluralRu(pushed,'выезд','выезда','выездов')); }
+      p.updatedAt = new Date().toISOString();
+      const arr = state.partnerLeads || (state.partnerLeads = []);
+      const i = arr.findIndex(x=> x.id === p.id); if(i >= 0) arr[i] = p; else arr.push(p);
+      await savePartnerLeads();
+      try{ recordAction(src ? 'Партнёрка: карточка изменена' : 'Партнёрка: новая заявка', place, { cat:'lead', obj: place, verb: src ? 'изменил(а)' : 'создал(а)', silent:true }); }catch(e){}
+      close();
+      if(opt.create){ const c = await ptCreateEvents(p); if(c){ await savePartnerLeads(); showToast('В календаре создано: ' + c); } }
+      else if(becameAgreed){ const c = await ptOfferCreateEvents(p); if(c) await savePartnerLeads(); }
+      if(pushed) showToast('Изменения перенесены в календарь');
+      render();
+    };
+    q('[data-ptsave]').onclick = ()=> doSave();
+    const mkBtn = q('#pt-mkev'); if(mkBtn) mkBtn.onclick = ()=> doSave({ create: true });
+  }
+
   async function loadShootRequests(){
     try{ const r = await window.storage.get('shoot-requests', true); state.shootRequests = r ? JSON.parse(r.value) : []; }catch(e){ state.shootRequests = []; }
     if(!Array.isArray(state.shootRequests)) state.shootRequests = [];
@@ -20227,6 +20850,22 @@
     await saveCollectionMerged('shoot-requests', state.shootRequests||[], state._shootRequestsBaseline||[], (a)=>{ state.shootRequests = a; state._shootRequestsBaseline = JSON.parse(JSON.stringify(a)); });
   }
   function srForEvent(evId){ return (state.shootRequests||[]).filter(r=> r.eventId === evId && !r.deleted).sort((a,b)=> String(b.at||'').localeCompare(String(a.at||'')))[0] || null; }
+  // пометка «📸 съёмка» на мероприятии в расписании: есть активный запрос (ждёт / в работе) или уже снято
+  function srBadgeHtml(e, size){
+    if(!e || !e.id) return '';
+    const r = srForEvent(e.id); if(!r || !['new','taken','done'].includes(r.status)) return '';
+    const done = r.status === 'done';
+    const fs = size === 'xs' ? '10px' : '11px';
+    return `<span class="sr-badge" title="${escapeHtml(done ? 'Съёмка: снято' : 'Нужна съёмка' + (r.note ? ' — ' + r.note : ''))}" style="display:inline-block;font-size:${fs};font-weight:700;line-height:1.3;border-radius:8px;padding:0 5px;margin:0 3px;white-space:nowrap;vertical-align:middle;background:${done ? '#E9F2E1' : '#FBE3F1'};color:${done ? '#3E6B2F' : '#A23B72'};border:1px solid ${done ? '#B9D3A8' : '#E7B5D3'};">📸${size === 'xs' ? '' : (done ? ' снято' : ' съёмка')}</span>`;
+  }
+  // задачи маркетологу: открытые запросы на съёмку по будущим (и сегодняшним) мероприятиям
+  function srOpenTasks(){
+    const t = todayStr();
+    return (state.shootRequests||[]).filter(r=> !r.deleted && ['new','taken'].includes(r.status))
+      .map(r=> ({ r, e: state.events.find(x=> x.id === r.eventId) }))
+      .filter(x=> x.e && x.e.status !== 'cancelled' && x.e.date >= t)
+      .sort((a,b)=> (a.e.date + (a.e.time||'')).localeCompare(b.e.date + (b.e.time||'')));
+  }
   function srOpenCount(){ const t = todayStr(); return (state.shootRequests||[]).filter(r=>{ if(r.deleted || r.status !== 'new') return false; const e = state.events.find(x=> x.id === r.eventId); return e && e.status !== 'cancelled' && e.date >= t; }).length; }
   function srWho(){ try{ return feedWho(); }catch(e){ return ROLE_LABELS[state.currentRole] || ''; } }
   // блок в карточке мероприятия
@@ -20235,7 +20874,8 @@
     const saved = ev.id && (state.events||[]).some(x=> x.id === ev.id);
     const r = saved ? srForEvent(ev.id) : null;
     const box = (inner)=> `<div class="field" id="ev-shootreq-box"><div style="border:1px solid #E7D3F0;border-left:5px solid #A23B72;background:#FBF4FA;border-radius:10px;padding:9px 11px;font-size:12.5px;line-height:1.45;">${inner}</div></div>`;
-    if(!saved) return box('📸 <b>Нужна съёмка?</b> Сохраните мероприятие — после этого здесь можно будет позвать маркетолога.');
+    if(!saved) return box(`<label style="display:flex;gap:8px;align-items:center;cursor:pointer;font-weight:700;"><input type="checkbox" id="sr-new-flag" onchange="document.getElementById('sr-new-note-wrap').style.display=this.checked?'block':'none'"> 📸 Нужна съёмка — маркетологу придёт задача снять это мероприятие</label>
+      <div id="sr-new-note-wrap" style="display:none;margin-top:6px;"><textarea id="sr-new-note" rows="2" style="width:100%;box-sizing:border-box;" placeholder="Что снять? Например: рилс процесса, отзыв именинницы, фото готовых работ (необязательно)"></textarea></div>`);
     if(!r || r.status === 'declined' && state._srAskAgain === ev.id) return box(`<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
         <button type="button" class="btn btn-ghost" id="sr-open" style="font-size:12.5px;padding:5px 10px;">📸 Нужна съёмка</button>
         <span style="color:var(--ink-soft);">маркетологу придёт задача — снять контент на этом мероприятии</span></div>
@@ -20600,8 +21240,7 @@
     const rent = (a,b)=> `<span style="background:#FFF1CC;border:1px solid #E8B84B;border-radius:4px;padding:0 4px;white-space:nowrap;">${ftMinToTime(a)}–${ftMinToTime(b)} аренда ${escapeHtml(formatDuration(b-a))}</span>`;
     const main = `<span style="background:#E4F1E8;border:1px solid #3F8F6B;border-radius:4px;padding:0 4px;white-space:nowrap;"><b>${ftMinToTime(st)}–${ftMinToTime(en)}</b> ${escapeHtml((e.product || 'мероприятие').toLowerCase())} ${escapeHtml(formatDuration(en-st))}</span>`;
     const pills = `<div style="display:flex;flex-direction:column;align-items:flex-start;gap:2px;margin:3px 0;font-size:.88em;">${rb > 0 ? rent(st-rb, st) : ''}${main}${ra > 0 ? rent(en, en+ra) : ''}</div>`;
-    if(!dsIsMobile()) return pills;
-    return `<details style="margin:3px 0;font-size:.88em;" onclick="event.stopPropagation()"><summary style="cursor:pointer;color:#9A6B00;">⏱ аренда ${rb>0?'до ' + escapeHtml(formatDuration(rb)):''}${rb>0&&ra>0?' · ':''}${ra>0?'после ' + escapeHtml(formatDuration(ra)):''} — тайминг</summary>${pills}</details>`;
+    return pills; // на телефоне тайминг виден сразу, как на компьютере (раньше был свёрнут)
   }
   function dsCardHtml(e, warn, fs, spaceTag){
     const remainder = roleCanSeeGuestBalances(state.currentRole) ? eventRemainderTotal(e) : 0;
@@ -20615,7 +21254,7 @@
     return `<div class="ds-card" data-eid="${escapeHtml(e.id)}" data-tdate="${escapeHtml(e.date||'')}" data-tst="${timeToMinutes(e.time)}" data-ten="${timeToMinutes(e.time) + (Number(e.duration)||0)}" title="${escapeHtml(tip)}" style="font-size:${fs}px;border-left:4px solid ${statusColor(e.status)};">
       <div class="ds-card-main">
         <div class="ds-ct">${spaceTag || ''}<b>${e.time ? ftMinToTime(effectiveStart(e)) + '–' + ftMinToTime(effectiveEnd(e)) : ''}</b> ${guestBadgeHtml(e, 'md')}</div>
-        <div class="ds-ctitle">${escapeHtml(e.title || '')}</div>
+        <div class="ds-ctitle">${escapeHtml(e.title || '')}${srBadgeHtml(e)}</div>
         <div class="ds-ch">${isPrivateWithoutHost(e) ? '<span style="color:var(--danger);">без ведущего</span>' : escapeHtml(hostLine)}${isPrivateWithoutHost(e) && (e.product || '') ? ' · ' + escapeHtml(e.product) : ''}${legalSuffix(e)}</div>
         ${isOpenMasterSlot(e) ? (()=>{ const av = (e.availableMasters||[]).filter(n=>(n||'').trim()); return av.length
           ? `<div class="ds-ch" style="color:#4E5733;font-weight:700;">🙋 Откликнулись: ${escapeHtml(av.join(', '))} — нажмите «✎ мастер»</div>`
@@ -20648,7 +21287,7 @@
     const spaces = ftSpaces(); const sel = state.dsMobSpace || 'all';
     const showSp = spaces.filter(s=> sel === 'all' || s.id === sel);
     const dayEvs = state.events.filter(e=> e.date === ds && e.status !== 'cancelled' && e.time);
-    const list = dayEvs.filter(e=> sel === 'all' ? true : e.spaceId === sel).sort((a,b)=> timeToMinutes(a.time) - timeToMinutes(b.time));
+    const list = dayEvs.filter(e=> sel === 'all' ? true : e.spaceId === sel).sort((a,b)=> effectiveStart(a) - effectiveStart(b) || timeToMinutes(a.time) - timeToMinutes(b.time)); // по началу с учётом аренды
     const warn = {}; spaces.forEach(s=> Object.assign(warn, computeGapWarnings(dayEvs.filter(e=>e.spaceId === s.id))));
     const guests = dayEvs.reduce((s,e)=> s + (Number(e.guests)||0), 0);
     const showMoney = roleCanSeeRevenue(state.currentRole);
@@ -20742,7 +21381,7 @@
         const hatch = (a,b)=> `<div style="position:absolute;left:0;right:0;top:${pct(a)}%;height:${(b-a)/span*100}%;background:repeating-linear-gradient(45deg,rgba(0,0,0,.08),rgba(0,0,0,.08) 4px,transparent 4px,transparent 8px);pointer-events:none;"></div>`;
         const conflict = inf.n > 1;
         return (rb ? hatch(st - rb, st) : '') + (ra ? hatch(en, en + ra) : '') + `<div class="ds-evt" data-eid="${escapeHtml(e.id)}" data-tdate="${escapeHtml(e.date||'')}" data-tst="${timeToMinutes(e.time)}" data-ten="${timeToMinutes(e.time) + (Number(e.duration)||0)}" title="${escapeHtml((e.title||e.product||'') + ' · ' + e.time + ' · ' + (STATUS_LABEL[e.status||'confirmed']||'') + ((guestNamesText(e)||e.guestName) ? '\nГости: ' + (guestNamesText(e) || e.guestName) : ''))}" style="top:${pct(st)}%;height:${(en-st)/span*100}%;left:${inf.lane/inf.n*100}%;width:${100/inf.n}%;border-left:4px solid ${col};${conflict ? 'outline:2px solid var(--danger);' : ''}">
-          <div class="ds-t"><b>${escapeHtml(e.time)}–${ftMinToTime(en)}</b> ${escapeHtml(e.title || e.product || '')}</div>
+          <div class="ds-t"><b>${escapeHtml(e.time)}–${ftMinToTime(en)}</b> ${escapeHtml(e.title || e.product || '')}${srBadgeHtml(e, 'xs')}</div>
           <div class="ds-s">${(e.host||'').trim() ? escapeHtml(e.host) : (isPrivateWithoutHost(e) ? '<span style="color:var(--danger);">без ведущего</span>' : '')}${Number(e.guests) ? ' · 👥 ' + Number(e.guests) : ''}${warn[e.id] ? ' · <span style="color:var(--danger);">⚠ перерыв ' + Math.max(0, warn[e.id].gap) + ' мин</span>' : ''}</div></div>`;
       }).join('');
       const freeHtml = free.map(w=> `<div class="ds-free" data-dsfree="${s.id}|${w[0]}|${w[1]-w[0]}" style="top:${pct(w[0])}%;height:${(w[1]-w[0])/span*100}%;" title="Создать мероприятие в это время">свободно ${ftMinToTime(w[0])}–${ftMinToTime(w[1])}</div>`).join('');
@@ -20929,8 +21568,74 @@
       per, reliable: withStage.length >= 20, avg: allV.length ? Math.round(allV.reduce((a,b)=>a+b,0)/allV.length) : 0,
       avgBy: Object.fromEntries(Object.entries(avgBy).map(([k,v])=> [k, Math.round(v.reduce((a,b)=>a+b,0)/v.length)])) };
   }
+  // месяц мероприятия по заявке: с этапа «КП отправлено» обязателен (дата мероприятия или конкретный месяц с годом)
+  function leadMonthName(ym){ if(!ym) return LEAD_MONTH_OPTIONS[0]; const m = MONTHS[Number(ym.slice(5,7))-1] || ''; return m.charAt(0).toUpperCase() + m.slice(1); }
+  function leadMonthLabel(ym){ return ym ? leadMonthName(ym) + ' ' + ym.slice(0,4) : ''; }
+  function leadHasMonth(l){ return !!(l && (l.eventDate || l.eventYm || (l.eventMonth && LEAD_MONTH_OPTIONS.indexOf(l.eventMonth) > 0))); }
+  function leadYmOptions(sel){
+    const t = todayStr(); const out = [];
+    for(let i = -1; i <= 14; i++){ const d = new Date(Number(t.slice(0,4)), Number(t.slice(5,7)) - 1 + i, 1); out.push(d.getFullYear() + '-' + String(d.getMonth()+1).padStart(2,'0')); }
+    if(sel && !out.includes(sel)) out.unshift(sel);
+    return out;
+  }
+  // окно при переносе в «КП отправлено»: сумма из КП и месяц мероприятия (спрашиваем только то, чего нет)
+  function leadKpPrompt(l, needRev, needMonth){
+    return new Promise(resolve=>{
+      const old = document.getElementById('sp-kp'); if(old) old.remove();
+      const w = document.createElement('div'); w.id = 'sp-kp';
+      w.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.42);z-index:4000;display:flex;align-items:center;justify-content:center;padding:16px;';
+      const cur = fcLeadMonth(l);
+      w.innerHTML = `<div style="background:var(--white);border-radius:14px;padding:16px;max-width:380px;width:100%;box-shadow:0 10px 30px rgba(0,0,0,.2);">
+        <div style="font-weight:800;font-size:16px;margin-bottom:6px;">КП отправлено</div>
+        <div style="font-size:14px;line-height:1.4;">«${escapeHtml((l.contact||'заявка').trim())}» — ${needRev && needMonth ? 'впишите сумму из КП и месяц мероприятия' : (needRev ? 'впишите сумму выручки из КП' : 'выберите месяц мероприятия')}. Без этого заявку на этот этап не перенести.</div>
+        ${needRev ? `<div style="margin-top:10px;font-size:12.5px;font-weight:600;">Сумма выручки из КП</div><input id="kpp-rev" type="number" min="1" placeholder="Сумма, ₽" style="width:100%;box-sizing:border-box;margin-top:4px;">` : ''}
+        ${needMonth ? `<div style="margin-top:10px;font-size:12.5px;font-weight:600;">Месяц мероприятия</div><select id="kpp-month" style="width:100%;box-sizing:border-box;margin-top:4px;"><option value="">— выберите месяц —</option>${leadYmOptions(cur).map(ym=>`<option value="${ym}" ${ym===cur?'selected':''}>${leadMonthLabel(ym)}</option>`).join('')}</select>` : ''}
+        <div style="display:flex;gap:8px;margin-top:14px;"><button type="button" class="btn btn-ghost" id="kpp-no" style="flex:1;">Отмена</button><button type="button" class="btn btn-primary" id="kpp-ok" style="flex:1;">Перенести</button></div></div>`;
+      const done = v=>{ w.remove(); resolve(v); };
+      document.body.appendChild(w);
+      w.querySelector('#kpp-no').onclick = ()=> done(false);
+      w.onclick = (e)=>{ if(e.target === w) done(false); };
+      w.querySelector('#kpp-ok').onclick = ()=>{
+        const r = w.querySelector('#kpp-rev'), m = w.querySelector('#kpp-month'); let bad = false;
+        const amt = r ? Math.round(Number(r.value)) : 0;
+        if(r && !(amt > 0)){ r.style.borderColor = 'var(--danger)'; bad = true; }
+        if(m && !m.value){ m.style.borderColor = 'var(--danger)'; bad = true; }
+        if(bad) return;
+        done({ revenue: r ? amt : null, ym: m ? m.value : '' });
+      };
+      const f = w.querySelector('#kpp-rev') || w.querySelector('#kpp-month'); if(f) f.focus();
+    });
+  }
+  function leadsKpNoMonth(){ return (state.leads||[]).filter(l=> !l.sold && leadStatus(l) === 'kp' && !leadHasMonth(l)); }
+  // полоска над воронкой + окно, где месяц можно проставить сразу всем
+  function renderKpNoMonthStrip(){
+    const L = leadsKpNoMonth(); if(!L.length) return '';
+    return `<div id="kpnm-strip" style="background:#FBE9E4;border:1px solid #E0A090;border-radius:12px;padding:8px 12px;margin:0 0 10px;font-size:13px;cursor:pointer;color:#8A2E1E;">⚠ <b>КП без месяца мероприятия: ${L.length}</b> — не попадают в прогноз месяца. Нажмите, чтобы проставить месяц →</div>`;
+  }
+  function openKpNoMonthPopup(){
+    const old = document.getElementById('kpnm-pop'); if(old) old.remove();
+    const L = leadsKpNoMonth();
+    const w = document.createElement('div'); w.id = 'kpnm-pop';
+    w.style.cssText = 'position:fixed;inset:0;background:rgba(23,21,18,.45);z-index:400;display:flex;align-items:flex-start;justify-content:center;overflow-y:auto;padding:24px 10px;';
+    const opts = leadYmOptions('');
+    w.innerHTML = `<div style="background:var(--white);max-width:640px;width:100%;border-radius:14px;padding:16px 18px;box-shadow:0 10px 40px rgba(0,0,0,.25);">
+      <div style="display:flex;justify-content:space-between;align-items:center;"><div style="font-size:17px;font-weight:700;">📅 КП без месяца мероприятия</div><button type="button" data-kx style="border:none;background:none;font-size:22px;cursor:pointer;">×</button></div>
+      <div style="font-size:12.5px;color:var(--ink-soft);margin:4px 0 10px;">Выберите месяц у каждой заявки — сохранится сразу. Если клиент ещё не определился — уточните у него.</div>
+      ${L.map(l=> `<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;border-top:1px solid var(--line);padding:7px 0;font-size:13px;">
+        <div style="flex:1;min-width:200px;"><a href="#" data-kopen="${escapeHtml(l.id)}"><b>${escapeHtml(l.contact || 'без контакта')}</b></a> <span style="color:var(--ink-soft);">· ${escapeHtml(l.product||'')}${Number(l.revenue) ? ' · ' + escapeHtml(formatMoney(Number(l.revenue))) : ''} · ${escapeHtml(l.owner||'—')}</span></div>
+        <select data-kym="${escapeHtml(l.id)}" style="padding:5px 8px;border:1px solid var(--line-strong);border-radius:7px;font:inherit;font-size:13px;"><option value="">— месяц —</option>${opts.map(ym=> `<option value="${ym}">${leadMonthLabel(ym)}</option>`).join('')}</select>
+      </div>`).join('') || '<div style="padding:12px 0;color:var(--ink-soft);">Все КП с месяцем ✓</div>'}
+      <div style="text-align:right;margin-top:10px;"><button type="button" class="btn btn-primary" data-kx>Готово</button></div></div>`;
+    document.body.appendChild(w);
+    w.querySelectorAll('[data-kx]').forEach(b=> b.onclick = ()=>{ w.remove(); render(); });
+    w.querySelectorAll('[data-kopen]').forEach(a=> a.onclick = (e)=>{ e.preventDefault(); const l = state.leads.find(x=> x.id === a.dataset.kopen); if(!l) return; w.remove(); requireUnlock(()=>{ state.modal = {type:'lead', isNew:false, lead:{...l}}; render(); }); });
+    w.querySelectorAll('[data-kym]').forEach(sel=> sel.onchange = async ()=>{ const l = state.leads.find(x=> x.id === sel.dataset.kym); if(!l || !sel.value) return;
+      l.eventYm = sel.value; l.eventMonth = leadMonthName(sel.value); await saveLeads(); sel.closest('div').style.opacity = '.45'; showToast('Месяц сохранён: ' + leadMonthLabel(sel.value)); });
+  }
+  if(!window.__kpnmBound){ window.__kpnmBound = true; document.addEventListener('click', (ev)=>{ const el = ev.target && ev.target.closest ? ev.target.closest('#kpnm-strip') : null; if(el){ ev.preventDefault(); openKpNoMonthPopup(); } }); }
   function fcLeadMonth(l){
     if(l.eventDate) return l.eventDate.slice(0,7);
+    if(l.eventYm) return l.eventYm;
     const i = LEAD_MONTH_OPTIONS.indexOf(l.eventMonth || ''); if(i < 1) return '';
     const anchor = l.requestDate || (l.createdAt ? isoLocalDate(l.createdAt) : '') || todayStr();
     let y = Number(anchor.slice(0,4)); if(i < Number(anchor.slice(5,7))) y++;
@@ -21259,7 +21964,11 @@
           <div id="crm-lead-block">${crmLeadBlockHtml(crmLeadState(lead))}</div>
           <div class="field">
             <label>Дата мероприятия <span style="font-weight:400;color:var(--ink-soft);">— необязательно</span></label>
-            <input type="date" id="l-evdate" value="${escapeHtml(lead.eventDate||'')}">
+            <input type="date" id="l-evdate" value="${escapeHtml(lead.eventDate||'')}" onchange="(function(v){ const s=document.getElementById('l-evmonth'); if(s && v){ const ym=v.slice(0,7); if(![...s.options].some(o=>o.value===ym)){ const o=document.createElement('option'); o.value=ym; o.textContent=ym; s.appendChild(o);} s.value=ym; } })(this.value)">
+          </div>
+          <div class="field">
+            <label>Месяц мероприятия <span style="font-weight:400;color:var(--ink-soft);">— обязательно с этапа «КП отправлено»; если выбрана дата, ставится сам</span></label>
+            ${(()=>{ const cur = fcLeadMonth(lead); return `<select id="l-evmonth"><option value="">— не знаем пока —</option>${leadYmOptions(cur).map(ym=>`<option value="${ym}" ${ym===cur?'selected':''}>${leadMonthLabel(ym)}</option>`).join('')}</select>`; })()}
             ${(!lead.eventDate && lead.eventMonth && lead.eventMonth !== LEAD_MONTH_OPTIONS[0]) ? `<div style="font-size:12px;color:var(--ink-soft);margin-top:4px;">Раньше был указан месяц: <b>${escapeHtml(lead.eventMonth)}</b> — если дату не выбирать, он сохранится.</div>` : ''}
           </div>
           <div class="field">
@@ -21697,6 +22406,14 @@
         if(firstInvalid && firstInvalid.scrollIntoView) firstInvalid.scrollIntoView({block:'center', behavior:'smooth'});
         return;
       }
+      // «КП отправлено» — месяц мероприятия обязателен: по нему КП попадают в прогноз нужного месяца
+      const evMonthYm = evDateVal ? evDateVal.slice(0,7) : ((overlay.querySelector('#l-evmonth')||{}).value || '');
+      if(!soldVal && statusSel === 'kp' && !evMonthYm){
+        markInvalid('l-evmonth');
+        showGapWarningBanner('Этап «КП отправлено» — выберите месяц мероприятия (или дату).');
+        if(firstInvalid && firstInvalid.scrollIntoView) firstInvalid.scrollIntoView({block:'center', behavior:'smooth'});
+        return;
+      }
       // «КП отправлено» — сумма КП обязательна: по ней считается прогноз выручки и средний чек менеджера
       if(!soldVal && statusSel === 'kp' && !(Number(revenueRaw) > 0)){
         markInvalid('l-revenue');
@@ -21734,7 +22451,8 @@
         phone: lc0.phone,
         socialUrl: lc0.res.url || '',
         eventDate: evDateVal,
-        eventMonth: evDateVal ? (MONTHS[parseDate(evDateVal).getMonth()].charAt(0).toUpperCase()+MONTHS[parseDate(evDateVal).getMonth()].slice(1)) : ((state.modal.lead.eventDate ? LEAD_MONTH_OPTIONS[0] : (state.modal.lead.eventMonth || LEAD_MONTH_OPTIONS[0]))),
+        eventMonth: evMonthYm ? leadMonthName(evMonthYm) : LEAD_MONTH_OPTIONS[0],
+        eventYm: evMonthYm,
         source: sourceVal,
         product: productVal,
         location: locationVal,
@@ -26721,8 +27439,12 @@
     // тип возврата определяет весь дальнейший алгоритм заполнения формы:
     // "мероприятие" — обязательно выбрать и мероприятие, и конкретного человека в нём;
     // "сертификат" — обязательно выбрать сертификат, источник всегда "Точка", и сразу нужны реквизиты для перевода
-    const linkType = refund.linkType === 'cert' ? 'cert' : 'event';
+    // «Без мероприятия» — возврат записывается просто текстом (за что возвращаем), без привязки к мероприятию в приложении.
+    // Внутри это тот же «ручной» режим (manualLabel), поэтому старые записи продолжают работать как раньше.
+    // Новый возврат по умолчанию — без привязки.
+    const linkType = refund.linkType === 'cert' ? 'cert' : ((refund.manualLabel || (isNew && !refund.eventId)) ? 'text' : 'event');
     const isEventType = linkType === 'event';
+    const isTextType = linkType === 'text';
     const isCertType = linkType === 'cert';
     const isTochka = isCertType ? true : (refund.source === 'Точка');
     return `
@@ -26765,8 +27487,11 @@
           <div class="field">
             <label>Что возвращаем</label>
             <div class="status-select-wrap">
+              <div class="dishes-opt ${isTextType?'active':''}" data-refundtype="text">
+                <span class="dot" style="background:var(--status-purple)"></span>Без мероприятия — написать текстом
+              </div>
               <div class="dishes-opt ${isEventType?'active':''}" data-refundtype="event">
-                <span class="dot" style="background:var(--status-blue)"></span>Мероприятие
+                <span class="dot" style="background:var(--status-blue)"></span>Мероприятие из приложения
               </div>
               <div class="dishes-opt ${isCertType?'active':''}" data-refundtype="cert">
                 <span class="dot" style="background:var(--status-purple)"></span>Сертификат
@@ -26774,8 +27499,8 @@
             </div>
             <input type="hidden" id="r-type" value="${linkType}">
           </div>
-          <div id="refund-event-block" style="display:${isEventType?'block':'none'};">
-            <div class="field">
+          <div id="refund-event-block" style="display:${(isEventType||isTextType)?'block':'none'};">
+            <div class="field" id="refund-mode-field" style="display:none;">
               <label>Какое мероприятие</label>
               <div class="status-select-wrap">
                 <div class="dishes-opt ${!refund.manualLabel?'active':''}" data-refundmode="app">
@@ -26785,16 +27510,16 @@
                   <span class="dot" style="background:var(--status-purple)"></span>Нет в приложении — вписать вручную
                 </div>
               </div>
-              <input type="hidden" id="r-mode" value="${refund.manualLabel?'manual':'app'}">
+              <input type="hidden" id="r-mode" value="${isTextType?'manual':'app'}">
             </div>
-            <div id="refund-event-manual" style="display:${refund.manualLabel?'block':'none'};">
+            <div id="refund-event-manual" style="display:${isTextType?'block':'none'};">
               <div class="field">
-                <label>Подпись (что за мероприятие)</label>
-                <input type="text" id="r-manual-label" value="${escapeHtml(refund.manualLabel||'')}" placeholder="Например: ДР Иванова, 12.09, Мастерская">
+                <label>За что возврат</label>
+                <input type="text" id="r-manual-label" value="${escapeHtml(refund.manualLabel||'')}" placeholder="Например: ДР Иванова 12.09, Мастерская — отменили, вернули предоплату">
                 <div style="font-size:11.5px;color:var(--ink-soft);margin-top:6px;">Мероприятия нет в приложении — выручка ничего не вычитает автоматически, возврат просто записывается в список с этой подписью.</div>
               </div>
             </div>
-            <div id="refund-event-app" style="display:${refund.manualLabel?'none':'block'};">
+            <div id="refund-event-app" style="display:${isTextType?'none':'block'};">
             <div class="field">
               <label>Мероприятие</label>
               <input type="text" id="r-event-search" placeholder="Начните вводить дату, название или пространство…" list="r-event-options" value="${escapeHtml(refund.eventId ? (eventSelectOptions().find(o=>o.id===refund.eventId)?.label || '') : '')}">
@@ -26946,10 +27671,17 @@
       opt.onclick = ()=>{
         overlay.querySelectorAll('[data-refundtype]').forEach(o=>o.classList.remove('active'));
         opt.classList.add('active');
-        refundTypeHidden.value = opt.dataset.refundtype;
-        const isEvent = opt.dataset.refundtype === 'event';
+        const t = opt.dataset.refundtype;
+        refundTypeHidden.value = t;
+        const isEvent = t === 'event' || t === 'text';
         if(refundEventBlock) refundEventBlock.style.display = isEvent ? 'block' : 'none';
         if(refundCertBlock) refundCertBlock.style.display = isEvent ? 'none' : 'block';
+        if(isEvent){
+          const manual = t === 'text';
+          overlay.querySelector('#r-mode').value = manual ? 'manual' : 'app';
+          overlay.querySelector('#refund-event-manual').style.display = manual ? 'block' : 'none';
+          overlay.querySelector('#refund-event-app').style.display = manual ? 'none' : 'block';
+        }
         updateTochkaFieldVisibility();
       };
     });
@@ -27049,7 +27781,7 @@
       const paymentDateVal = overlay.querySelector('#r-payment-date').value;
       const reasonVal = overlay.querySelector('#r-reason').value.trim();
       const statusVal = overlay.querySelector('#r-status').value || 'in_progress';
-      const typeVal = overlay.querySelector('#r-type').value === 'cert' ? 'cert' : 'event';
+      const typeVal = overlay.querySelector('#r-type').value === 'cert' ? 'cert' : 'event'; // 'text' = мероприятие вручную (без привязки)
       // возврат по сертификату всегда идёт через "Точку" — выбор источника для него не показывается,
       // а реквизиты обязательны в любом случае
       const source = typeVal === 'cert' ? 'Точка' : overlay.querySelector('#r-source').value;
@@ -27082,7 +27814,8 @@
       let eventMissing = false, guestMissing = false;
       let linkedGuestIdForCheck = '';
       if(manualMode){
-        // подпись не обязательна: после возврата запись клиента удаляется в приложении и YCLIENTS
+        // без мероприятия: обязательно написать, за что возврат
+        if(!manualLabelVal){ eventMissing = true; markInvalid('r-manual-label'); }
       } else if(typeVal === 'event'){
         // привязка к мероприятию не обязательна (запись клиента после возврата удаляется)
         linkedGuestIdForCheck = refundGuestSelect.value || '';
@@ -27139,7 +27872,7 @@
 
       if(!requestDateVal || amountRaw==='' || Number(amountRaw)<0 || !paymentDateVal || !reasonVal || tochkaMissing || refundExceedsReceived || refundExceedsCertRemaining || eventMissing || guestMissing || certMissing){
         showGapWarningBanner(eventMissing
-          ? (manualMode ? 'Впишите подпись: что за мероприятие.' : 'Выберите мероприятие, за которое оформляется возврат.')
+          ? (manualMode ? 'Напишите, за что возврат.' : 'Выберите мероприятие, за которое оформляется возврат.')
           : guestMissing
           ? 'Выберите, кому из гостей возвращаем.'
           : certMissing
@@ -27417,6 +28150,8 @@
           state.view = targetView;
           if(targetCertView) state.certView = targetCertView;
           if(item.dataset.alertPreptab) state.prepTab = item.dataset.alertPreptab;
+          if(item.dataset.alertMview){ state.marketingView = item.dataset.alertMview; state.srTab = 'open'; }
+          if(item.dataset.alertPttab) state.ptTab = item.dataset.alertPttab;
           render();
         };
         requireViewAccess(targetView, go);
@@ -27753,8 +28488,9 @@
 
     if(state.modal.type === 'day'){ attachDayModalEvents(overlay, state.modal.date); }
     else if(state.modal.type === 'event'){
-      if(state.currentRole === 'hostess' || state.currentRole === 'smm'){ lockdownEventModalForViewing(overlay); }
-      else { attachEventModalEvents(overlay); }
+      if(state.currentRole === 'smm'){ lockdownEventModalForViewing(overlay); }
+      else { attachEventModalEvents(overlay); if(state.currentRole === 'hostess') adminEventModalTweaks(overlay); }
+      try{ evHistoryAttach(overlay); }catch(e){ console.warn('evHistoryAttach', e); }
     }
     else if(state.modal.type === 'code'){ attachCodeModalEvents(overlay); }
     else if(state.modal.type === 'role-login'){ attachRoleLoginModalEvents(overlay); }
@@ -33332,6 +34068,16 @@
     </div>`;
   }
   // строка «План выручки» над воронкой — менеджеры видят план сразу после входа в свой профиль
+  // остаток до плана выручки месяца — тот же расчёт, что в строке «📊 План выручки»
+  function revenuePlanLeft(ym){
+    const plan = (state.monthlyPlans && state.monthlyPlans[ym]) || {};
+    const [Y, M] = ym.split('-').map(Number); const dim = new Date(Y, M, 0).getDate();
+    const totalPlan = Number(plan.revenue) || PD_CATS.reduce((a,c)=> a + (Number(pdPlanRub(plan, c))||0), 0);
+    if(!totalPlan) return null;
+    const pd = pdCompute(ym, ym + '-' + String(dim).padStart(2,'0'));
+    const have = Object.values(pd).reduce((a,r)=> a + r.factRub + r.bookRub, 0);
+    return { totalPlan, have, left: Math.max(0, totalPlan - have), pct: Math.round(have / totalPlan * 100) };
+  }
   function renderRevenuePlanStrip(ym){
     const plan = (state.monthlyPlans && state.monthlyPlans[ym]) || {};
     const [Y, M] = ym.split('-').map(Number); const dim = new Date(Y, M, 0).getDate();
@@ -40065,6 +40811,18 @@
     const out = [];
     if(list === 'admin'){
       out.push(...aclAutoPrepTasks(ds));
+      // ✉️ написать клиентам по завтрашним частным мероприятиям (до 18:00) — ссылки на диалоги и скрипт в задаче
+      try{
+        prepTargets(addDaysIso(ds, 1), addDaysIso(ds, 1)).forEach(e=>{
+          const st = prepState(e); const todo = st === 'todo';
+          if(!todo && !(state.adminChecklistMarks||[]).some(m=> m.id === 'auto|cmsg|' + e.id)) return;
+          const cl = prepClient(e);
+          out.push({ id:'auto|cmsg|' + e.id, ds, block:'prep', event:e, kind:'cmsg',
+            text: 'Написать клиенту по завтрашнему мероприятию: ' + ttl(e) + ' ' + when(e) + (cl.name ? ' · ' + cl.name : ''),
+            hint: 'Скопируйте текст, откройте диалог и отправьте. Потом нажмите «✓ Написала» — пункт закроется сам',
+            time: aclHM(PREP_DEADLINE_HOUR * 60), autoDoneNow: !todo, via:'клиенту написали' });
+        });
+      }catch(err){}
       aclDayEvents(ds).forEach(e=>{
         // 1) оплата: остаток к оплате и гости без оплаты
         if(roleCanSeeGuestBalances(state.currentRole)){
@@ -40093,6 +40851,19 @@
       });
     }
     if(list === 'senior'){
+      // ✅ чек-лист мастеров: оценить к выплате (16-го за 1–15, 2-го за 16–конец)
+      try{
+        mchkMissingFor(ds).forEach(x=>{
+          out.push({ id:'auto|mchk|' + x.ym + '|' + x.half, ds, block:'scontrol', kind:'mchk', ym: x.ym,
+            text: 'Оценить чек-лист мастеров за ' + mchkLabel(x) + ': ' + x.names.join(', '),
+            hint: 'Аналитика → Зарплата → «Мастера на пакетах» → кнопки в колонке «Чек-лист». Без оценки премия за эту половину — 0 ₽',
+            time: x.half === 'h1' ? '20:00' : '20:00', autoDoneNow: false, via:'оценки внесены' });
+        });
+        // закрываем пункт, когда всех оценили
+        (state.adminChecklistMarks||[]).filter(m=> /^auto\|mchk\|/.test(m.id)).forEach(m=>{ const [, , ym, h] = m.id.split('|'); if(out.some(o=> o.id === m.id)) return;
+          const cfg = masterPkgMonthCfg(ym); const left = Object.keys(cfg).filter(n=> MASTER_PACKAGES[cfg[n].pkg] && masterChecklistScore(ym, n, h) === null);
+          if(!left.length && (ds.slice(0,7) === ym || ds <= addDaysIso(ymLastDay(ym), 5))) out.push({ id: m.id, ds, block:'scontrol', kind:'mchk', ym, text:'Оценить чек-лист мастеров за ' + mchkLabel({ ym, half:h }), autoDoneNow: true, via:'оценки внесены' }); });
+      }catch(err){}
       // 2) мероприятие без ведущего / открытый слот — на сегодня и 3 дня вперёд
       const until = addDaysIso(ds, 3);
       (state.events||[]).filter(e=> e && e.date && e.date >= ds && e.date <= until && e.status !== 'cancelled').forEach(e=>{
@@ -40116,17 +40887,14 @@
       });
     }
     if(list === 'manager'){
-      // 8) частник через 1–2 дня (и сегодня), а деталей от клиента нет
+      // 8) КП без месяца мероприятия — проставить (иначе заявка не попадает в прогноз месяца)
       try{
-        prepTargets(ds, addDaysIso(ds, 2)).forEach(e=>{
-          const st = prepState(e); const open = prepOpen(e);
-          if(!open && !(state.adminChecklistMarks||[]).some(m=> m.id === 'auto|prep|' + e.id)) return;
-          const stTxt = { todo:'ещё не написали', sent:'написали, ждём ответ', noanswer:'клиент молчит' }[st] || '';
-          out.push({ id:'auto|prep|' + e.id, ds, block:'mauto', event:e, kind:'prep',
-            text: 'Написать клиенту и внести детали: ' + ttl(e) + ' ' + when(e) + (stTxt ? ' — ' + stTxt : ''),
-            hint: 'Меню, возраст, гости, пожелания — раздел «Подготовка». Пункт закроется сам, когда детали внесут',
-            time: e.date === addDaysIso(ds, 1) ? aclHM(PREP_DEADLINE_HOUR * 60) : (e.date === ds ? (e.time ? aclHM(Math.max(0, aclMin(e.time) - 180)) : '12:00') : ''),
-            autoDoneNow: !open, via:'детали внесены', goView:'prep' });
+        const was = new Set((state.adminChecklistMarks||[]).map(m=> m.id));
+        (state.leads||[]).filter(l=> !l.sold && leadStatus(l) === 'kp').forEach(l=>{
+          const has = leadHasMonth(l); if(has && !was.has('auto|kpmonth|' + l.id)) return;
+          out.push({ id:'auto|kpmonth|' + l.id, ds, block:'mauto', kind:'kpmonth', leadId: l.id,
+            text: 'Указать месяц мероприятия в КП: ' + (l.contact || 'заявка') + (l.owner ? ' · ' + l.owner : ''),
+            hint: 'Без месяца КП не попадает в прогноз. Пункт закроется сам, когда месяц будет указан', time:'12:00', autoDoneNow: has, via:'месяц указан' });
         });
       }catch(err){}
       // 9) «Кино и вино» в ближайшие 3 дня без фильма
@@ -40254,6 +41022,19 @@
   }
   function aclExtraHtml(t){
     if(t.kind === 'print') return `<div class="acl-form-row"><button class="btn btn-ghost acl-mini" data-acl-goview="print">🖨 Открыть «На печать»</button>${t.event ? `<span class="acl-sub">мероприятие ${escapeHtml(t.event.date.slice(8,10) + '.' + t.event.date.slice(5,7))}</span>` : ''}</div>`;
+    if(t.kind === 'kpmonth' && t.leadId) return `<div class="acl-form-row"><button class="btn btn-ghost acl-mini" data-acl-openlead="${escapeHtml(t.leadId)}">📈 Открыть заявку</button><button class="btn btn-ghost acl-mini" data-acl-kpnm="1">📅 Все КП без месяца</button></div>`;
+    if(t.kind === 'mchk') return `<div class="acl-form-row"><button class="btn btn-ghost acl-mini" data-acl-gomchk="${escapeHtml(t.ym)}">✅ Открыть оценку мастеров</button></div>`;
+    if(t.kind === 'cmsg' && t.event){
+      const cl = prepClient(t.event);
+      return `<div class="acl-form-row" style="flex-wrap:wrap;gap:6px;">
+        <button class="btn btn-primary acl-mini" data-acl-copymsg="${escapeHtml(t.event.id)}">📋 Скопировать текст</button>
+        ${cl.chats.map(c=> `<a class="btn btn-ghost acl-mini" href="${escapeHtml(c.url)}" target="_blank" rel="noopener" style="text-decoration:none;">💬 Диалог в ${escapeHtml(c.label)}</a>`).join('')}
+        ${cl.phone ? `<a class="btn btn-ghost acl-mini" href="tel:${escapeHtml(cl.phone.replace(/[^\d+]/g,''))}" style="text-decoration:none;">📞 ${escapeHtml(cl.phone)}</a>` : ''}
+        ${cl.chats.length || cl.phone ? '' : `<span class="acl-sub">${cl.lead ? 'В заявке нет ссылки на диалог — найдите клиента вручную' : 'К мероприятию не привязана заявка — контакт в карточке мероприятия'}</span>`}
+        ${prepState(t.event) === 'todo' ? `<button class="btn btn-ghost acl-mini" data-acl-msgsent="${escapeHtml(t.event.id)}">✓ Написала</button>` : ''}
+        <button class="btn btn-ghost acl-mini" data-acl-openev="${escapeHtml(t.event.id)}">📅 Мероприятие</button>
+      </div>`;
+    }
     if(t.kind === 'prep') return `<div class="acl-form-row"><button class="btn btn-ghost acl-mini" data-acl-goview="prep">✉️ Открыть «Подготовка»</button>${t.event ? `<button class="btn btn-ghost acl-mini" data-acl-openev="${escapeHtml(t.event.id)}">📅 Мероприятие</button>` : ''}</div>`;
     if(['host','report','setfilm'].includes(t.kind)) return t.event ? `<div class="acl-form-row"><button class="btn btn-ghost acl-mini" data-acl-openev="${escapeHtml(t.event.id)}">📅 Открыть мероприятие</button></div>` : '';
     if(t.kind === 'film') return t.event ? `<div class="acl-form-row"><button class="btn btn-ghost acl-mini" data-acl-openev="${escapeHtml(t.event.id)}">📅 Открыть мероприятие</button></div>` : '';
@@ -40424,6 +41205,11 @@
     if($('#acl-next')) $('#acl-next').onclick = ()=> go(addDaysIso(state.aclDate, 1));
     if($('#acl-today')) $('#acl-today').onclick = ()=> go(todayStr());
     $$('[data-acl-goview]').forEach(b=> b.onclick = ()=>{ state.view = b.dataset.aclGoview; render(); window.scrollTo(0,0); });
+    $$('[data-acl-openlead]').forEach(b=> b.onclick = ()=>{ const l = (state.leads||[]).find(x=> x.id === b.dataset.aclOpenlead); if(l) requireUnlock(()=>{ state.modal = {type:'lead', isNew:false, lead:{...l}}; render(); }); });
+    $$('[data-acl-kpnm]').forEach(b=> b.onclick = ()=> openKpNoMonthPopup());
+    $$('[data-acl-gomchk]').forEach(b=> b.onclick = ()=> mchkGo(b.dataset.aclGomchk));
+    $$('[data-acl-copymsg]').forEach(b=> b.onclick = async ()=>{ await prepLoadTpl(); const e = (state.events||[]).find(x=> x.id === b.dataset.aclCopymsg); if(!e) return; await copyTextSafe(prepBuildLetter(e)); showToast('Текст скопирован — вставьте в диалог с клиентом'); });
+    $$('[data-acl-msgsent]').forEach(b=> b.onclick = ()=> openPrepLetter(b.dataset.aclMsgsent)); // окно письма: там же отметить, куда написали
     $$('[data-acl-openev]').forEach(b=> b.onclick = ()=>{ const ev = (state.events||[]).find(x=> x.id === b.dataset.aclOpenev); if(ev) requireUnlock(()=>{ state.modal = { type:'event', event:{ ...ev }, isNew:false, keepAll:true }; render(); }); });
     $$('[data-acl-list]').forEach(b=> b.onclick = ()=>{ state.aclList = b.dataset.aclList; state.aclForm = null; render(); });
     $$('[data-acl-tab]').forEach(b=> b.onclick = ()=>{ state.aclTab = b.dataset.aclTab; state.aclForm = null; render(); });
@@ -41942,7 +42728,7 @@
               <div class="left">
                 <div class="time"><span class="chip-dot" style="background:${statusColor(e.status)};display:inline-block;margin-right:6px;"></span>${eventStartLabel(e)}${e.duration?' · '+formatDuration((Number(e.duration)||0) + (state.currentRole==='master' ? 0 : (Number(e.rentalBefore)||0) + (Number(e.rentalAfter)||0))):''} ${guestBadgeHtml(e, 'md')}</div>
                 ${state.currentRole==='master' ? '' : eventTimingLineHtml(e)}
-                <div class="title">${openSlot?'🙋 ':''}${escapeHtml(e.title)}</div>
+                <div class="title">${openSlot?'🙋 ':''}${escapeHtml(e.title)}${srBadgeHtml(e)}</div>
                 ${isAll ? `<div class="host" style="display:flex;align-items:center;gap:6px;">${spaceBadge(getSpace(e.spaceId),'sm')}${escapeHtml(getSpace(e.spaceId).name)} · ${escapeHtml(allHostNamesDisplay(e))}${e.product?' · '+escapeHtml(e.product):''}${showsDishesAndRental(e.status)&&e.dishes?' · 🍽 '+(e.dishes==='needed'?'нужна посуда':'без посуды'):''}${rentalSuffix(e)}${legalSuffix(e)}</div>` : `<div class="host">${escapeHtml(allHostNamesDisplay(e))}${e.product?' · '+escapeHtml(e.product):''}${showsDishesAndRental(e.status)&&e.dishes?' · 🍽 '+(e.dishes==='needed'?'нужна посуда':'без посуды'):''}${rentalSuffix(e)}${legalSuffix(e)}</div>`}
                 ${openSlot ? `<div class="notes" style="color:var(--status-cyan);">🙋 ${available.length ? 'Свободны: '+escapeHtml(available.join(', ')) : 'Пока никто не откликнулся'}</div>` : ''}
                 ${eventFormatText(e) ? `<div class="notes notes-full" style="color:#7E4E1E;font-weight:600;">🎨 ${escapeHtml(eventFormatText(e))}</div>` : (eventFormatRequired(e) && state.currentRole !== 'master' ? '<div class="notes" style="color:var(--danger);">🎨 формат не указан</div>' : '')}
@@ -43031,6 +43817,45 @@
     overlay._qpRedraw = ()=>{ try{ drawBox(); refreshHostessFront(); }catch(_){} };
   }
 
+  // Администратор (смена) теперь меняет в карточке всё: время, оплаты, гостей, заметки и т.д.
+  // Как и раньше, он не видит зарплату мастеров и себестоимость (поля просто скрыты — значения сохраняются как были)
+  // и не удаляет мероприятия. Каждое изменение пишется в «🕓 Изменения» и в историю самой карточки — с именем того, кто менял.
+  function adminEventModalTweaks(overlay){
+    const hideField = (sel)=>{ const el = overlay.querySelector(sel); const f = el && el.closest('.field'); if(f) f.style.display = 'none'; };
+    hideField('#f-master-pay'); hideField('#materials-items-list');
+    const ahl = overlay.querySelector('#additional-hosts-list');
+    if(ahl){
+      ahl.querySelectorAll('.ah-pay').forEach(i=> i.style.display = 'none');
+      const f = ahl.closest('.field');
+      if(f){ const lb = f.querySelector('label'); if(lb) lb.textContent = 'Дополнительные ведущие'; }
+    }
+    const del = overlay.querySelector('#btn-del'); if(del) del.style.display = 'none';
+    const actionsEl = overlay.querySelector('.modal-actions');
+    if(actionsEl && !overlay.querySelector('#adm-edit-note')){
+      const n = document.createElement('div'); n.id = 'adm-edit-note';
+      n.style.cssText = 'font-size:11.5px;color:var(--ink-soft);width:100%;text-align:center;margin-top:4px;';
+      n.textContent = '✎ Изменения сохраняются с вашим именем — их видно в «🕓 Изменения» и в истории карточки';
+      actionsEl.insertAdjacentElement('afterend', n);
+    }
+  }
+  // «🕓 История изменений» внизу карточки мероприятия: кто, когда и что поменял (последние 40 правок)
+  function evHistoryAttach(overlay){
+    if(state.currentRole === 'master') return;
+    const ev = (state.modal && state.modal.event) || {};
+    const log = Array.isArray(ev.editLog) ? ev.editLog.slice().reverse() : [];
+    if(!log.length || !ev.id) return;
+    const body = overlay.querySelector('.modal-body'); if(!body || overlay.querySelector('#ev-history')) return;
+    const box = document.createElement('details'); box.id = 'ev-history';
+    box.style.cssText = 'margin-top:14px;border:1px solid var(--line-strong);border-radius:var(--radius);padding:8px 12px;background:var(--paper-2);';
+    const fmt = (ts)=>{ try{ return new Date(ts).toLocaleString('ru-RU',{day:'numeric',month:'short',hour:'2-digit',minute:'2-digit'}); }catch(e){ return ''; } };
+    box.innerHTML = `<summary style="cursor:pointer;font-weight:600;font-size:13px;">🕓 История изменений (${log.length})</summary>
+      <div style="margin-top:6px;display:flex;flex-direction:column;gap:6px;">${log.map(x=>`
+        <div style="font-size:12px;line-height:1.4;border-top:1px dashed var(--line);padding-top:5px;">
+          <div><b>${escapeHtml(x.who||'—')}</b>${x.roleLabel && x.roleLabel !== x.who ? ` <span style="color:var(--ink-soft);">(${escapeHtml(x.roleLabel)})</span>` : ''} · <span style="color:var(--ink-soft);font-family:var(--font-mono);">${escapeHtml(fmt(x.ts))}</span></div>
+          <div>${escapeHtml(x.diff||'')}</div>
+        </div>`).join('')}</div>`;
+    body.appendChild(box);
+  }
   function lockdownEventModalForViewing(overlay){
     // администратору остаток оплаты и заметки — в самое начало карточки (как и старшему администратору)
     (function(){
@@ -45062,7 +45887,7 @@
       const scheduleWithoutGuests = productVal === 'Мастер-класс' && (parseInt(guestsRaw)||0) === 0 && guestListForSave.length === 0;
       // у маркетинговых мероприятий выручка и материалы необязательны
       const marketingOptional = statusVal === 'marketing';
-      const materialsMissing = cleanedMaterialsItems.length === 0 && !scheduleWithoutGuests && !marketingOptional;
+      const materialsMissing = cleanedMaterialsItems.length === 0 && !scheduleWithoutGuests && !marketingOptional && state.currentRole !== 'hostess'; // администратор себестоимость не видит — и не обязан её заполнять
       const rentalBeforeVal = showsDishesAndRental(statusVal) ? (parseInt(rentalBeforeRaw) || 0) : 0;
       if(timeVal) timeVal = ftMinToTime(timeToMinutes(timeVal) + rentalBeforeVal);
       const rentalAfterVal = showsDishesAndRental(statusVal) ? (parseInt(rentalAfterRaw) || 0) : 0;
@@ -45356,9 +46181,22 @@
       { const prevEv = idx >= 0 ? (overlay._feedOrig || state.events[idx]) : null; const diff = feedEventDiff(prevEv, updated);
         const who2 = updated.status === 'tentative' || updated.status === 'offsite' ? (updated.companyName || (updated.guestName && updated.guestName !== '-' ? updated.guestName : '')) : (updated.host || '');
         const stl = ({tentative:'Частник', offsite:'Выезд', marketing:'Маркетинг', slot:'Слот', cancelled:'Отменено'})[updated.status] || 'Расписание';
+        try{
+          const entry = { ts: new Date().toISOString(), who: feedWho(), role: state.currentRole, roleLabel: ROLE_LABELS[state.currentRole] || state.currentRole || '', diff: idx >= 0 ? (diff || 'сохранено без изменений в ключевых полях') : 'мероприятие создано' };
+          const prevLog = (prevEv && Array.isArray(prevEv.editLog)) ? prevEv.editLog : ((idx >= 0 && Array.isArray(state.events[idx].editLog)) ? state.events[idx].editLog : []);
+          updated.editLog = (idx >= 0 && !diff) ? prevLog : prevLog.concat([entry]).slice(-40);
+        }catch(e){}
         recordAction(idx >= 0 ? 'Мероприятие изменено' : 'Мероприятие создано', idx >= 0 ? (diff || 'без изменений в ключевых полях') : `${stl} · ${getSpace(updated.spaceId).name}${updated.guests ? ' · ' + updated.guests + ' гост.' : ''}`,
           { cat: 'event', obj: `${stl.toUpperCase()} · ${lgDateDots(updated.date)} ${updated.time||''} · ${updated.title||'без названия'}${who2 ? ' · ' + who2 : ''}`, verb: idx >= 0 ? 'изменил(а)' : 'создал(а)' }); }
       if(idx >= 0) state.events[idx] = keepExtraFields(updated, state.events[idx]); else state.events.push(updated);
+      try{
+        const srFlag = overlay.querySelector('#sr-new-flag');
+        if(idx < 0 && srFlag && srFlag.checked && !srForEvent(updated.id)){
+          const nt = overlay.querySelector('#sr-new-note');
+          state.shootRequests = [...(state.shootRequests||[]), { id: uid(), eventId: updated.id, note: nt ? nt.value.trim() : '', by: srWho(), byRole: state.currentRole, at: new Date().toISOString(), status: 'new' }];
+          saveShootRequests().then(()=>{ try{ recordAction('Нужна съёмка', `${updated.title||'Мероприятие'} · ${formatDateText(updated.date)}`, { silent: true }); }catch(e){} }).catch(()=>{});
+        }
+      }catch(e){ console.warn('shoot flag', e); }
       if(!state.modal.keepAll) state.activeSpaceId = updated.spaceId;
 
       // списание/восстановление остатков материалов — по разнице количества между старой и новой версией мероприятия
